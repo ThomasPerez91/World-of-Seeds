@@ -17,6 +17,7 @@ from app.auth.security import (
     verify_password,
 )
 from app.core.config import Settings
+from app.files import WorkspaceAlreadyExistsError, WorkspaceError, WorkspaceManager
 from app.models import LoginThrottle, User, UserSession
 
 
@@ -162,30 +163,43 @@ async def change_credentials(
     username_input: str,
     new_password: str,
     settings: Settings,
+    workspace_manager: WorkspaceManager,
 ) -> SessionTokens:
-    if not verify_password(current_password, user.password_hash):
+    locked_user = await db.scalar(
+        select(User)
+        .where(User.id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked_user is None or not verify_password(current_password, locked_user.password_hash):
         raise AuthenticationFailedError
 
     username = normalize_username(username_input)
     existing_user = await db.scalar(
-        select(User).where(User.username == username, User.id != user.id)
+        select(User).where(User.username == username, User.id != locked_user.id)
     )
     if existing_user is not None:
         raise UsernameUnavailableError
 
     now = datetime.now(UTC)
-    user.username = username
-    user.password_hash = hash_password(new_password)
-    user.must_change_credentials = False
-    user.updated_at = now
+    old_username = locked_user.username
+    with workspace_manager.rename_for_transaction(old_username, username):
+        locked_user.username = username
+        locked_user.password_hash = hash_password(new_password)
+        locked_user.must_change_credentials = False
+        locked_user.updated_at = now
 
-    await db.execute(
-        update(UserSession)
-        .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
-        .values(revoked_at=now)
-    )
-    tokens = issue_session(db, user=user, settings=settings, now=now)
-    await db.commit()
+        await db.execute(
+            update(UserSession)
+            .where(UserSession.user_id == locked_user.id, UserSession.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+        tokens = issue_session(db, user=locked_user, settings=settings, now=now)
+        try:
+            await db.commit()
+        except BaseException:
+            await db.rollback()
+            raise
     return tokens
 
 
@@ -198,28 +212,36 @@ async def create_temporary_user(
     db: AsyncSession,
     *,
     expires_in_days: int,
+    workspace_manager: WorkspaceManager,
 ) -> tuple[User, str]:
-    username: str | None = None
     for _ in range(10):
-        candidate = generate_temporary_username()
-        exists = await db.scalar(select(User.id).where(User.username == candidate))
-        if exists is None:
-            username = candidate
-            break
-    if username is None:
-        raise RuntimeError("Unable to generate a unique temporary username")
+        username = generate_temporary_username()
+        exists = await db.scalar(select(User.id).where(User.username == username))
+        if exists is not None:
+            continue
 
-    temporary_password = generate_temporary_password()
-    user = User(
-        username=username,
-        password_hash=hash_password(temporary_password),
-        must_change_credentials=True,
-        expires_at=datetime.now(UTC) + timedelta(days=expires_in_days),
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user, temporary_password
+        temporary_password = generate_temporary_password()
+        user = User(
+            username=username,
+            password_hash=hash_password(temporary_password),
+            must_change_credentials=True,
+            expires_at=datetime.now(UTC) + timedelta(days=expires_in_days),
+        )
+        try:
+            with workspace_manager.provision_for_transaction(username):
+                db.add(user)
+                try:
+                    await db.commit()
+                except BaseException:
+                    await db.rollback()
+                    raise
+        except WorkspaceAlreadyExistsError:
+            continue
+
+        await db.refresh(user)
+        return user, temporary_password
+
+    raise WorkspaceError("Unable to generate a unique temporary user workspace")
 
 
 async def purge_expired_sessions(db: AsyncSession) -> int:

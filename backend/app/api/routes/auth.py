@@ -19,6 +19,8 @@ from app.auth.service import (
     revoke_session,
 )
 from app.core.config import CSRF_COOKIE_NAME, Settings
+from app.files import WorkspaceError
+from app.files.dependencies import WorkspaceManagerDependency
 from app.schemas.auth import AuthResponse, ChangeCredentialsRequest, LoginRequest, UserResponse
 
 router = APIRouter()
@@ -107,6 +109,7 @@ async def update_credentials(
     response: Response,
     db: DbSession,
     settings: AppSettings,
+    workspace_manager: WorkspaceManagerDependency,
     context: Annotated[AuthContext, Depends(require_csrf)],
 ) -> AuthResponse:
     try:
@@ -117,6 +120,7 @@ async def update_credentials(
             username_input=payload.username,
             new_password=payload.new_password,
             settings=settings,
+            workspace_manager=workspace_manager,
         )
     except AuthenticationFailedError as exc:
         raise HTTPException(
@@ -125,6 +129,11 @@ async def update_credentials(
         ) from exc
     except (UsernameUnavailableError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except WorkspaceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User workspace is unavailable",
+        ) from exc
 
     set_auth_cookies(response, tokens, settings)
     return AuthResponse(user=UserResponse.model_validate(context.user))
