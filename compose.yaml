@@ -11,6 +11,8 @@ services:
     environment:
       WOS_ENVIRONMENT: ${WOS_ENVIRONMENT:-production}
       WOS_LOG_LEVEL: ${WOS_LOG_LEVEL:-INFO}
+      WOS_COOKIE_SECURE: ${WOS_COOKIE_SECURE:-false}
+      WOS_ALLOWED_HOSTS: '${WOS_ALLOWED_HOSTS:-["127.0.0.1","localhost"]}'
       WOS_DATA_ROOT: /data
       WOS_POSTGRES_HOST: postgres
       WOS_POSTGRES_PORT: 5432

@@ -3,11 +3,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.database import engine
+from app.core.http_security import SecurityHeadersMiddleware
 
 
 @asynccontextmanager
@@ -29,6 +31,11 @@ def create_app() -> FastAPI:
         openapi_url=openapi_url,
         lifespan=lifespan,
     )
+    application.add_middleware(
+        SecurityHeadersMiddleware,
+        enable_hsts=settings.cookie_secure,
+    )
+    application.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     application.include_router(api_router, prefix="/api/v1")
 
     if settings.static_root.is_dir():

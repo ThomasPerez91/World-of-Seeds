@@ -1,0 +1,116 @@
+export interface User {
+  id: string;
+  username: string;
+  is_admin: boolean;
+  is_active: boolean;
+  must_change_credentials: boolean;
+  expires_at: string | null;
+}
+
+interface AuthResponse {
+  user: User;
+}
+
+export interface TemporaryCredentials {
+  user: User;
+  temporary_password: string;
+}
+
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+function readCookie(name: string): string | null {
+  const prefix = `${name}=`;
+  const value = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix));
+  return value === undefined ? null : decodeURIComponent(value.slice(prefix.length));
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const method = init.method?.toUpperCase() ?? "GET";
+  const headers = new Headers(init.headers);
+  headers.set("Accept", "application/json");
+  if (init.body !== undefined) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    const csrfToken = readCookie("wos_csrf");
+    if (csrfToken !== null) {
+      headers.set("X-CSRF-Token", csrfToken);
+    }
+  }
+
+  const response = await fetch(`/api/v1${path}`, {
+    ...init,
+    headers,
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    let message = "Une erreur est survenue.";
+    try {
+      const body = (await response.json()) as { detail?: string };
+      message = body.detail ?? message;
+    } catch {
+      // Keep the generic message for non-JSON failures.
+    }
+    throw new ApiError(response.status, message);
+  }
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  return (await response.json()) as T;
+}
+
+export const api = {
+  async login(username: string, password: string): Promise<User> {
+    const response = await request<AuthResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    return response.user;
+  },
+
+  async me(): Promise<User> {
+    const response = await request<AuthResponse>("/auth/me");
+    return response.user;
+  },
+
+  logout(): Promise<void> {
+    return request<void>("/auth/logout", { method: "POST" });
+  },
+
+  async changeCredentials(
+    currentPassword: string,
+    username: string,
+    newPassword: string,
+  ): Promise<User> {
+    const response = await request<AuthResponse>("/auth/credentials", {
+      method: "PATCH",
+      body: JSON.stringify({
+        current_password: currentPassword,
+        username,
+        new_password: newPassword,
+      }),
+    });
+    return response.user;
+  },
+
+  listUsers(): Promise<User[]> {
+    return request<User[]>("/admin/users");
+  },
+
+  createTemporaryUser(expiresInDays: number): Promise<TemporaryCredentials> {
+    return request<TemporaryCredentials>("/admin/users/temporary", {
+      method: "POST",
+      body: JSON.stringify({ expires_in_days: expiresInDays }),
+    });
+  },
+};
