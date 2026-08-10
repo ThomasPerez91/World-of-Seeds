@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
@@ -105,6 +106,7 @@ async def test_failed_logins_are_generic_and_throttled(
 async def test_admin_generates_one_time_credentials_and_user_changes_them(
     client: AsyncClient,
     db_session: AsyncSession,
+    data_root: Path,
 ) -> None:
     admin = await create_user(
         db_session,
@@ -124,6 +126,8 @@ async def test_admin_generates_one_time_credentials_and_user_changes_them(
     assert temporary["user"]["username"].startswith("guest-")
     assert temporary["user"]["must_change_credentials"] is True
     assert len(temporary["temporary_password"]) >= 12
+    temporary_workspace = data_root / "users" / temporary["user"]["username"]
+    assert {entry.name for entry in temporary_workspace.iterdir()} == {"downloads", "watch"}
 
     temporary_user = await db_session.scalar(
         select(User).where(User.username == temporary["user"]["username"])
@@ -151,6 +155,9 @@ async def test_admin_generates_one_time_credentials_and_user_changes_them(
     assert changed.status_code == 200
     assert changed.json()["user"]["username"] == "invitee"
     assert changed.json()["user"]["must_change_credentials"] is False
+    assert not temporary_workspace.exists()
+    assert (data_root / "users" / "invitee" / "downloads").is_dir()
+    assert (data_root / "users" / "invitee" / "watch").is_dir()
 
     active_sessions = (
         await db_session.scalars(

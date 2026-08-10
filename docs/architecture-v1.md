@@ -55,7 +55,7 @@ Les dossiers vides ne sont pas créés artificiellement ; ils apparaîtront avec
 
 ## Organisation des données de la seedbox
 
-L'organisation cible sera :
+L'organisation cible est :
 
 ```text
 /data/
@@ -71,7 +71,9 @@ L'organisation cible sera :
         └── <trash-entry-uuid>/
 ```
 
-Chaque compte conserve un UUID immuable en base, même si son nom change. Le nom de connexion est volontairement limité à une forme sûre (`a-z`, `0-9`, `_`, `-`) et correspond au nom du dossier. Un changement de nom verrouillera le compte, vérifiera les collisions, renommera le dossier sur le même système de fichiers avec une opération atomique, puis mettra la base à jour. Un mécanisme de compensation remettra le dossier à son ancien nom si la transaction SQL échoue.
+Chaque compte conserve un UUID immuable en base, même si son nom change. Le nom de connexion est volontairement limité à une forme sûre (`a-z`, `0-9`, `_`, `-`) et correspond au nom du dossier. La création du compte et celle du dossier forment une seule opération métier : un échec SQL retire uniquement le dossier nouvellement créé et encore vide. Un changement de nom verrouille la ligne utilisateur, vérifie les collisions, renomme le dossier sur le même système de fichiers avec une opération atomique, puis met la base à jour. Un mécanisme de compensation remet le dossier à son ancien nom si la transaction SQL échoue.
+
+Les opérations de racine utilisent des descripteurs de répertoire, les variantes `*at` des appels système et `O_NOFOLLOW`. Les chemins historiques à la racine restent intacts. La stratégie de coexistence et la migration qBittorrent différée sont détaillées dans [`storage-migration.md`](storage-migration.md).
 
 La corbeille est indexée par UUID utilisateur afin qu'un renommage de compte ne casse pas ses éléments supprimés. La base stockera le chemin relatif d'origine, la date de suppression et le propriétaire.
 
@@ -90,7 +92,7 @@ La corbeille est indexée par UUID utilisateur afin qu'un renommage de compte ne
 - réponses de connexion génériques et limitation des tentatives ;
 - documentation OpenAPI désactivée en production.
 
-Commande prévue après application des migrations :
+Commande à exécuter après application des migrations :
 
 ```bash
 docker compose exec app python -m app.cli create-admin --username admin
@@ -104,7 +106,7 @@ La page de connexion sera la seule vue accessible anonymement. Cela limite l'exp
 
 Toutes les API utilisent des chemins relatifs à une racine déjà autorisée. La chaîne `../../etc/passwd`, un chemin absolu, un octet nul ou un composant `..` est rejeté avant tout accès.
 
-Une simple comparaison de chaînes ou un unique `resolve()` n'est pas suffisant face aux changements concurrents. Le service de fichiers ouvrira chaque composant depuis un descripteur de la racine avec les primitives Linux `openat` et `O_NOFOLLOW`. Les liens symboliques seront affichés comme bloqués et ne pourront pas être suivis, téléchargés ou parcourus. Les mutations travailleront à partir des descripteurs des dossiers parents.
+Une simple comparaison de chaînes ou un unique `resolve()` n'est pas suffisant face aux changements concurrents. Le gestionnaire des racines utilisateurs ouvre déjà ses composants depuis un descripteur de la racine avec les primitives Linux `*at` et `O_NOFOLLOW`. La navigation généralisera cette règle à chaque composant demandé. Les liens symboliques seront affichés comme bloqués et ne pourront pas être suivis, téléchargés ou parcourus. Les mutations travailleront à partir des descripteurs des dossiers parents.
 
 Les opérations prévues sont :
 

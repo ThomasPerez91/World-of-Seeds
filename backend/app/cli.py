@@ -5,7 +5,9 @@ import getpass
 from sqlalchemy import select
 
 from app.auth.security import hash_password, normalize_username
+from app.core.config import get_settings
 from app.core.database import session_factory
+from app.files import WorkspaceError, WorkspaceManager
 from app.models import User
 
 
@@ -20,15 +22,26 @@ async def create_admin(username_input: str) -> None:
         existing = await db.scalar(select(User).where(User.username == username))
         if existing is not None:
             raise SystemExit("Ce nom d’utilisateur existe déjà.")
-        db.add(
-            User(
-                username=username,
-                password_hash=hash_password(password),
-                is_admin=True,
-                must_change_credentials=False,
-            )
-        )
-        await db.commit()
+        workspace_manager = WorkspaceManager(get_settings().data_root)
+        try:
+            with workspace_manager.provision_for_transaction(username):
+                db.add(
+                    User(
+                        username=username,
+                        password_hash=hash_password(password),
+                        is_admin=True,
+                        must_change_credentials=False,
+                    )
+                )
+                try:
+                    await db.commit()
+                except BaseException:
+                    await db.rollback()
+                    raise
+        except WorkspaceError as exc:
+            raise SystemExit(
+                "Impossible de créer l’espace de stockage de l’administrateur."
+            ) from exc
     print(f"Administrateur {username!r} créé.")
 
 
