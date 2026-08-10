@@ -90,6 +90,14 @@ La corbeille est indexée par UUID utilisateur afin qu'un renommage de compte ne
 - réponses de connexion génériques et limitation des tentatives ;
 - documentation OpenAPI désactivée en production.
 
+Commande prévue après application des migrations :
+
+```bash
+docker compose exec app python -m app.cli create-admin --username admin
+```
+
+Le mot de passe est saisi sans écho dans le terminal. Il ne transite pas par les variables d'environnement ou les logs Docker.
+
 La page de connexion sera la seule vue accessible anonymement. Cela limite l'exposition fonctionnelle, mais le caractère privé repose réellement sur la restriction réseau et les contrôles serveur, pas sur le fait de cacher du JavaScript au navigateur.
 
 ## Accès sûr aux fichiers

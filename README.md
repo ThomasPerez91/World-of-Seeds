@@ -40,7 +40,11 @@ Le déploiement ne doit pas être lancé avant d'avoir configuré `.env` et pré
 ```bash
 cp .env.example .env
 docker compose config
-docker compose up --build -d
+docker compose build
+docker compose up -d postgres
+docker compose run --rm app alembic -c backend/alembic.ini upgrade head
+docker compose up -d app
+docker compose exec app python -m app.cli create-admin --username admin
 ```
 
 L'application écoute uniquement sur `127.0.0.1:18081`. Depuis un Mac :
@@ -50,5 +54,7 @@ ssh -N -L 18081:127.0.0.1:18081 ovh
 ```
 
 Puis ouvrir <http://127.0.0.1:18081>.
+
+Le mot de passe administrateur est demandé interactivement et n'est ni placé dans `.env`, ni écrit dans les logs. Pour l'accès initial par tunnel HTTP, `WOS_COOKIE_SECURE=false`. Cette valeur devra devenir `true` en même temps que l'ajout de HTTPS.
 
 La conception détaillée et le découpage des prochaines PR sont documentés dans [`docs/architecture-v1.md`](docs/architecture-v1.md).
