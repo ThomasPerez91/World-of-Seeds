@@ -304,9 +304,21 @@ button:disabled {
 }
 
 .account-menu {
+  position: relative;
   gap: 1rem;
   color: #aebbb4;
   font-size: 0.86rem;
+}
+
+.logout-error {
+  position: absolute;
+  top: calc(100% + 0.6rem);
+  right: 0;
+  width: max-content;
+  max-width: min(22rem, 80vw);
+  margin: 0;
+  color: #e7a19a;
+  font-size: 0.75rem;
 }
 
 .secondary-button,

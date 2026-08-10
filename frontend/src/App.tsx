@@ -282,7 +282,22 @@ function AdminPanel() {
   );
 }
 
-function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
+function Dashboard({ user, onLogout }: { user: User; onLogout: () => Promise<void> }) {
+  const [logoutError, setLogoutError] = useState("");
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    setLogoutError("");
+    try {
+      await onLogout();
+    } catch {
+      setLogoutError("La déconnexion a échoué. Ta session est toujours active.");
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -292,9 +307,16 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
         </div>
         <div className="account-menu">
           <span>{user.username}</span>
-          <button className="secondary-button" onClick={onLogout}>
-            Déconnexion
+          <button
+            className="secondary-button"
+            onClick={() => void handleLogout()}
+            disabled={loggingOut}
+          >
+            {loggingOut ? "Déconnexion…" : "Déconnexion"}
           </button>
+          <p className="logout-error" role="alert">
+            {logoutError}
+          </p>
         </div>
       </header>
       <div className="dashboard-content">
@@ -320,11 +342,8 @@ export function App() {
   }, []);
 
   async function logout() {
-    try {
-      await api.logout();
-    } finally {
-      setAuth({ status: "anonymous" });
-    }
+    await api.logout();
+    setAuth({ status: "anonymous" });
   }
 
   if (auth.status === "loading") {

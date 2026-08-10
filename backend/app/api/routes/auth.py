@@ -18,7 +18,7 @@ from app.auth.service import (
     change_credentials,
     revoke_session,
 )
-from app.core.config import Settings
+from app.core.config import CSRF_COOKIE_NAME, Settings
 from app.schemas.auth import AuthResponse, ChangeCredentialsRequest, LoginRequest, UserResponse
 
 router = APIRouter()
@@ -36,7 +36,7 @@ def set_auth_cookies(response: Response, tokens: SessionTokens, settings: Settin
         max_age=max_age,
     )
     response.set_cookie(
-        key=settings.csrf_cookie_name,
+        key=CSRF_COOKIE_NAME,
         value=tokens.csrf_token,
         httponly=False,
         secure=settings.cookie_secure,
@@ -48,7 +48,7 @@ def set_auth_cookies(response: Response, tokens: SessionTokens, settings: Settin
 
 def clear_auth_cookies(response: Response, settings: Settings) -> None:
     response.delete_cookie(settings.session_cookie_name, path="/")
-    response.delete_cookie(settings.csrf_cookie_name, path="/")
+    response.delete_cookie(CSRF_COOKIE_NAME, path="/")
 
 
 @router.post("/login", response_model=AuthResponse)

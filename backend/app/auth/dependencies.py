@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.security import hash_token, tokens_match
 from app.auth.service import ensure_utc, user_can_login
-from app.core.config import Settings, get_settings
+from app.core.config import CSRF_COOKIE_NAME, Settings, get_settings
 from app.core.database import get_db_session
 from app.models import User, UserSession
 
@@ -63,9 +63,8 @@ async def require_current_credentials(
 async def require_csrf(
     request: Request,
     context: Annotated[AuthContext, Depends(get_auth_context)],
-    settings: AppSettings,
 ) -> AuthContext:
-    cookie_token = request.cookies.get(settings.csrf_cookie_name)
+    cookie_token = request.cookies.get(CSRF_COOKIE_NAME)
     header_token = request.headers.get("X-CSRF-Token")
     if (
         cookie_token is None

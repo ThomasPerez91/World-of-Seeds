@@ -6,6 +6,8 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
+CSRF_COOKIE_NAME = "wos_csrf"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -21,7 +23,6 @@ class Settings(BaseSettings):
     allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost", "test"])
     cookie_secure: bool = False
     session_cookie_name: str = "wos_session"
-    csrf_cookie_name: str = "wos_csrf"
     session_ttl_hours: int = 12
     auth_attempt_window_minutes: int = 15
     auth_lock_minutes: int = 15
