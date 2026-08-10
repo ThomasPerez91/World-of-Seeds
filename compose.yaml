@@ -1,0 +1,73 @@
+name: world-of-seeds
+
+services:
+  app:
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      WOS_ENVIRONMENT: ${WOS_ENVIRONMENT:-production}
+      WOS_LOG_LEVEL: ${WOS_LOG_LEVEL:-INFO}
+      WOS_DATA_ROOT: /data
+      WOS_POSTGRES_HOST: postgres
+      WOS_POSTGRES_PORT: 5432
+      WOS_POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      WOS_POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      WOS_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:18081:8000"
+    volumes:
+      - type: bind
+        source: ${SEEDBOX_HOST_PATH:-/srv/seedbox}
+        target: /data
+    networks:
+      - backend
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/live', timeout=2)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  backend:
+    internal: true
+
+volumes:
+  postgres_data:
