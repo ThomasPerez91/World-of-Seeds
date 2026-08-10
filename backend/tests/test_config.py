@@ -5,7 +5,7 @@ from app.core.config import Settings
 
 
 def test_database_url_handles_reserved_password_characters() -> None:
-    settings = Settings(postgres_password=SecretStr("p@ss:/#word"))
+    settings = Settings(database_url=None, postgres_password=SecretStr("p@ss:/#word"))
 
     url = make_url(settings.sqlalchemy_database_url)
 
