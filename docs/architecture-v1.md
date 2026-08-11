@@ -154,6 +154,26 @@ Le serveur n'appelle jamais `read()` sans limite sur un fichier. Le fichier est 
 
 Les requêtes avec une plage `bytes` unique et valide reçoivent `206 Partial Content`; une plage invalide, multiple ou impossible reçoit `416 Range Not Satisfiable`. `If-Range` compare l'ETag ou la date de modification avant une reprise. Les plages fermées, ouvertes, suffixées et invalides, les fichiers vides, les interruptions et un fichier sparse de 40 Gio sont couverts par les tests. Les plages multiples ne sont pas nécessaires à la reprise et exigeraient une réponse multipart plus complexe ; elles sont donc explicitement refusées en V1.
 
+## Interface responsive et accessible
+
+L’interface conserve les actions essentielles sur écran étroit sans masquer la date de
+modification. Les cibles tactiles critiques atteignent 44 px sur mobile, les noms longs
+peuvent revenir à la ligne sans casser le tableau de bord, et les feuilles de confirmation
+respectent les zones sûres des appareils mobiles. Une variante `forced-colors` et la
+préférence `prefers-reduced-motion` sont prises en charge.
+
+Un lien d’évitement mène directement au contenu du tableau de bord. Les listes, tableaux,
+groupes d’actions, dates et états de chargement portent une sémantique explicite. Les
+dialogues enferment le focus, se ferment avec Échap, rendent le focus au déclencheur et
+désactivent toutes les sorties pendant une mutation. L’ordre visuel reste identique à
+l’ordre clavier. Une panne backend au chargement est distinguée d’une session anonyme afin
+de ne pas présenter à tort le formulaire de connexion.
+
+Vitest, Testing Library et axe couvrent les parcours du dialogue, du gestionnaire de
+fichiers, de la corbeille et de l’indisponibilité initiale. Le contraste, qui nécessite un
+moteur de rendu réel, reste contrôlé directement dans la palette CSS ; toutes les autres
+règles structurelles axe sont exécutées en CI.
+
 ## Isolation Docker
 
 Le service applicatif est configuré avec :

@@ -7,17 +7,23 @@
     "build": "npm run check && vite build",
     "check": "tsc --noEmit -p tsconfig.app.json --pretty false && tsc --noEmit -p tsconfig.node.json --pretty false",
     "dev": "vite --host 127.0.0.1",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run"
   },
   "dependencies": {
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.3",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "6.0.5",
+    "axe-core": "4.13.0",
+    "jsdom": "29.1.1",
     "typescript": "7.0.2",
-    "vite": "8.2.1"
+    "vite": "8.2.1",
+    "vitest": "4.1.10"
   }
 }

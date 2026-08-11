@@ -7,6 +7,7 @@ import { TrashBrowser } from "./features/files/TrashBrowser";
 type AuthState =
   | { status: "loading" }
   | { status: "anonymous" }
+  | { status: "unavailable" }
   | { status: "authenticated"; user: User };
 
 function clearFilePathFromUrl() {
@@ -41,9 +42,12 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
       onLogin(user);
     } catch (caught) {
       setError(
-        caught instanceof ApiError && caught.status === 429
-          ? "Trop de tentatives. Réessaie dans quelques minutes."
-          : "Identifiants incorrects ou compte indisponible.",
+        caught instanceof ApiError
+          ? {
+              401: "Identifiants incorrects ou compte indisponible.",
+              429: "Trop de tentatives. Réessaie dans quelques minutes.",
+            }[caught.status] ?? "Le service est temporairement indisponible."
+          : "Le service est temporairement indisponible.",
       );
     } finally {
       setSubmitting(false);
@@ -73,7 +77,14 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
 
           <form onSubmit={handleSubmit}>
             <label htmlFor="username">Nom d’utilisateur</label>
-            <input id="username" name="username" autoComplete="username" required />
+            <input
+              id="username"
+              name="username"
+              autoComplete="username"
+              aria-describedby="login-error"
+              aria-invalid={error !== ""}
+              required
+            />
 
             <label htmlFor="password">Mot de passe</label>
             <input
@@ -81,13 +92,15 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
               name="password"
               type="password"
               autoComplete="current-password"
+              aria-describedby="login-error"
+              aria-invalid={error !== ""}
               required
             />
 
             <button type="submit" disabled={submitting}>
               {submitting ? "Connexion…" : "Se connecter"}
             </button>
-            <p className="form-message error-message" role="alert">
+            <p id="login-error" className="form-message error-message" role="alert">
               {error}
             </p>
           </form>
@@ -119,7 +132,14 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
       );
       onChanged(updatedUser);
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "Impossible de modifier le compte.");
+      setError(
+        caught instanceof ApiError
+          ? {
+              401: "Le mot de passe temporaire est incorrect.",
+              409: "Ce nom d’utilisateur est indisponible ou l’espace ne peut pas être renommé.",
+            }[caught.status] ?? "Impossible de modifier le compte pour le moment."
+          : "Impossible de modifier le compte pour le moment.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -143,6 +163,8 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
             name="current-password"
             type="password"
             autoComplete="current-password"
+            aria-describedby="credential-error"
+            aria-invalid={error !== ""}
             required
           />
           <label htmlFor="new-username">Nouveau nom d’utilisateur</label>
@@ -152,9 +174,13 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
             defaultValue={user.username}
             pattern="[a-z0-9][a-z0-9_-]{2,31}"
             autoComplete="username"
+            aria-describedby="new-username-hint credential-error"
+            aria-invalid={error !== ""}
             required
           />
-          <p className="field-hint">3–32 caractères : lettres minuscules, chiffres, _ ou -.</p>
+          <p id="new-username-hint" className="field-hint">
+            3–32 caractères : lettres minuscules, chiffres, _ ou -.
+          </p>
           <label htmlFor="new-password">Nouveau mot de passe</label>
           <input
             id="new-password"
@@ -162,6 +188,8 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
             type="password"
             minLength={12}
             autoComplete="new-password"
+            aria-describedby="credential-error"
+            aria-invalid={error !== ""}
             required
           />
           <label htmlFor="password-confirmation">Confirmer le mot de passe</label>
@@ -171,12 +199,14 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
             type="password"
             minLength={12}
             autoComplete="new-password"
+            aria-describedby="credential-error"
+            aria-invalid={error !== ""}
             required
           />
           <button type="submit" disabled={submitting}>
             {submitting ? "Enregistrement…" : "Enregistrer mes identifiants"}
           </button>
-          <p className="form-message error-message" role="alert">
+          <p id="credential-error" className="form-message error-message" role="alert">
             {error}
           </p>
         </form>
@@ -255,7 +285,12 @@ function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
             <option value={14}>14 jours</option>
             <option value={30}>30 jours</option>
           </select>
-          <button className="compact-button" onClick={generateUser} disabled={generating}>
+          <button
+            type="button"
+            className="compact-button"
+            onClick={generateUser}
+            disabled={generating}
+          >
             {generating ? "Génération…" : "Générer un utilisateur"}
           </button>
         </div>
@@ -268,6 +303,7 @@ function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
             <span>Utilisateur</span>
             <code>{credentials.user.username}</code>
             <button
+              type="button"
               className="text-button"
               onClick={() => void copy(credentials.user.username)}
             >
@@ -278,6 +314,7 @@ function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
             <span>Mot de passe</span>
             <code>{credentials.temporary_password}</code>
             <button
+              type="button"
               className="text-button"
               onClick={() => void copy(credentials.temporary_password)}
             >
@@ -355,6 +392,9 @@ function Dashboard({
 
   return (
     <main className="app-shell">
+      <a className="skip-link" href="#dashboard-content">
+        Aller au contenu principal
+      </a>
       <header className="app-header">
         <div className="wordmark">
           <BrandMark />
@@ -363,6 +403,7 @@ function Dashboard({
         <div className="account-menu">
           <span>{user.username}</span>
           <button
+            type="button"
             className="secondary-button"
             onClick={() => void handleLogout()}
             disabled={loggingOut}
@@ -374,7 +415,7 @@ function Dashboard({
           </p>
         </div>
       </header>
-      <div className="dashboard-content">
+      <div id="dashboard-content" className="dashboard-content" tabIndex={-1}>
         <div className="dashboard-heading">
           <p className="eyebrow">Tableau de bord</p>
           <h1 className="dashboard-title">Bonjour, {user.username}</h1>
@@ -395,6 +436,26 @@ function Dashboard({
   );
 }
 
+function UnavailableScreen({ onRetry }: { onRetry: () => void }) {
+  return (
+    <main className="centered-page">
+      <section className="credential-card" aria-labelledby="unavailable-title">
+        <BrandMark />
+        <p className="eyebrow">Service indisponible</p>
+        <h1 id="unavailable-title" className="compact-title">
+          Connexion impossible
+        </h1>
+        <p className="form-intro">
+          Le serveur ou la base de données ne répond pas. Aucun identifiant n’a été refusé.
+        </p>
+        <button type="button" onClick={onRetry}>
+          Réessayer
+        </button>
+      </section>
+    </main>
+  );
+}
+
 export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
   const handleSessionExpired = useCallback(() => {
@@ -402,12 +463,23 @@ export function App() {
     setAuth({ status: "anonymous" });
   }, []);
 
-  useEffect(() => {
+  const loadSession = useCallback(() => {
+    setAuth({ status: "loading" });
     void api
       .me()
       .then((user) => setAuth({ status: "authenticated", user }))
-      .catch(handleSessionExpired);
+      .catch((caught: unknown) => {
+        if (caught instanceof ApiError && caught.status === 401) {
+          handleSessionExpired();
+          return;
+        }
+        setAuth({ status: "unavailable" });
+      });
   }, [handleSessionExpired]);
+
+  useEffect(() => {
+    loadSession();
+  }, [loadSession]);
 
   async function logout() {
     await api.logout();
@@ -416,7 +488,14 @@ export function App() {
   }
 
   if (auth.status === "loading") {
-    return <main className="loading-page">Ouverture de l’espace privé…</main>;
+    return (
+      <main className="loading-page" aria-live="polite" aria-busy="true">
+        Ouverture de l’espace privé…
+      </main>
+    );
+  }
+  if (auth.status === "unavailable") {
+    return <UnavailableScreen onRetry={loadSession} />;
   }
   if (auth.status === "anonymous") {
     return <LoginScreen onLogin={(user) => setAuth({ status: "authenticated", user })} />;

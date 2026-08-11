@@ -115,7 +115,8 @@ function TrashActionDialog({
           ? `« ${entry.name} » sera replacé dans « ${entry.original_path} ».`
           : `« ${entry.name} » et tout son contenu seront irrécupérables.`
       }
-      onClose={submitting ? () => undefined : onClose}
+      onClose={onClose}
+      closeDisabled={submitting}
     >
       <div className="confirmation-content">
         {!restoring && (
@@ -206,7 +207,11 @@ export function TrashBrowser({
   }
 
   return (
-    <section className="trash-browser" aria-labelledby="trash-title">
+    <section
+      className="trash-browser"
+      aria-labelledby="trash-title"
+      aria-busy={loading}
+    >
       <header className="trash-header">
         <div>
           <p className="eyebrow">Récupération</p>
@@ -230,7 +235,11 @@ export function TrashBrowser({
       )}
 
       {loading && (
-        <div className="trash-loading" aria-label="Chargement de la corbeille">
+        <div
+          className="trash-loading"
+          role="status"
+          aria-label="Chargement de la corbeille"
+        >
           <span />
           <span />
         </div>
@@ -258,19 +267,25 @@ export function TrashBrowser({
       )}
 
       {!loading && listing !== null && listing.entries.length > 0 && (
-        <div className="trash-list">
+        <ul className="trash-list">
           {listing.entries.map((entry) => (
-            <article className="trash-row" key={entry.id}>
+            <li className="trash-row" key={entry.id}>
               <TrashIcon kind={entry.kind} />
               <div className="trash-copy">
-                <strong>{entry.name}</strong>
-                <code>{entry.original_path}</code>
+                <h3 title={entry.name}>{entry.name}</h3>
+                <code title={entry.original_path}>{entry.original_path}</code>
                 <span>
                   {entry.kind === "directory" ? "Dossier" : formatBytes(entry.size)} · supprimé le{" "}
-                  {deletedAtFormatter.format(new Date(entry.deleted_at))}
+                  <time dateTime={entry.deleted_at}>
+                    {deletedAtFormatter.format(new Date(entry.deleted_at))}
+                  </time>
                 </span>
               </div>
-              <div className="trash-actions">
+              <div
+                className="trash-actions"
+                role="group"
+                aria-label={`Actions pour ${entry.name}`}
+              >
                 <button
                   type="button"
                   className="secondary-button"
@@ -287,9 +302,9 @@ export function TrashBrowser({
                   Supprimer définitivement
                 </button>
               </div>
-            </article>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
 
       {!loading && listing?.truncated === true && (

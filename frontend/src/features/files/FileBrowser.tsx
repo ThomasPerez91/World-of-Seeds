@@ -92,7 +92,7 @@ function FileIcon({ kind, mediaType }: { kind: FileEntryKind; mediaType: string 
 
 function LoadingRows() {
   return (
-    <div className="browser-loading" aria-label="Chargement du dossier">
+    <div className="browser-loading" role="status" aria-label="Chargement du dossier">
       {[0, 1, 2].map((row) => (
         <div className="loading-row" key={row}>
           <span />
@@ -177,7 +177,11 @@ export function FileBrowser({
       : Math.min((listing.storage.used / listing.storage.total) * 100, 100);
 
   return (
-    <section className="file-browser" aria-labelledby="file-browser-title">
+    <section
+      className="file-browser"
+      aria-labelledby="file-browser-title"
+      aria-busy={loading}
+    >
       <header className="browser-header">
         <div>
           <p className="eyebrow">Espace personnel</p>
@@ -185,7 +189,7 @@ export function FileBrowser({
           <p className="browser-subtitle">Ton espace privé sur la seedbox.</p>
         </div>
         {listing !== null && (
-          <div className="storage-card" aria-label="Utilisation du stockage">
+          <div className="storage-card" role="group" aria-label="Utilisation du stockage">
             <div className="storage-copy">
               <span>{formatBytes(listing.storage.used)} utilisés</span>
               <strong>{formatBytes(listing.storage.available)} disponibles</strong>
@@ -265,13 +269,16 @@ export function FileBrowser({
       {!loading && listing !== null && listing.entries.length > 0 && (
         <div className="file-table-wrap">
           <table className="file-table">
+            <caption className="sr-only">
+              Contenu du dossier {listing.path === "" ? "Mes fichiers" : listing.path}
+            </caption>
             <thead>
               <tr>
-                <th>Nom</th>
-                <th>Type</th>
-                <th>Taille</th>
-                <th>Modification</th>
-                <th>
+                <th scope="col">Nom</th>
+                <th scope="col">Type</th>
+                <th scope="col">Taille</th>
+                <th scope="col">Modification</th>
+                <th scope="col">
                   <span className="sr-only">Action</span>
                 </th>
               </tr>
@@ -283,7 +290,7 @@ export function FileBrowser({
                     <span className={`file-icon ${entry.kind}`}>
                       <FileIcon kind={entry.kind} mediaType={entry.media_type} />
                     </span>
-                    <span className="file-name-copy">
+                    <span className="file-name-copy" title={entry.name}>
                       {entry.kind === "directory" && !entry.blocked ? (
                         <button type="button" onClick={() => navigate(entry.path)}>
                           {entry.name}
@@ -294,13 +301,27 @@ export function FileBrowser({
                       <span className="mobile-file-meta">
                         {typeLabel(entry)} · {formatBytes(entry.size)}
                       </span>
+                      <time
+                        className="mobile-file-date"
+                        dateTime={entry.modified_at}
+                      >
+                        Modifié le {dateFormatter.format(new Date(entry.modified_at))}
+                      </time>
                     </span>
                   </td>
                   <td>{typeLabel(entry)}</td>
                   <td>{formatBytes(entry.size)}</td>
-                  <td>{dateFormatter.format(new Date(entry.modified_at))}</td>
+                  <td>
+                    <time dateTime={entry.modified_at}>
+                      {dateFormatter.format(new Date(entry.modified_at))}
+                    </time>
+                  </td>
                   <td className="file-action-cell">
-                    <div className="file-actions">
+                    <div
+                      className="file-actions"
+                      role="group"
+                      aria-label={`Actions pour ${entry.name}`}
+                    >
                       {entry.kind === "directory" && !entry.blocked ? (
                         <button
                           type="button"

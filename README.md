@@ -20,8 +20,8 @@ Les capacités fonctionnelles principales de la V1 sont en place :
 - montage hôte limité à `/srv/seedbox:/data` ;
 - contrôles de qualité automatisés.
 
-La prochaine étape porte sur la finition responsive, l’accessibilité et les tests
-d’interface. Le déploiement restera manuel jusqu’à la validation commune de la V1.
+La V1 applicative est complète. Le déploiement restera manuel jusqu’à la validation
+commune des permissions OVH, de la migration du stockage et des paramètres qBittorrent.
 
 ## Démarrage local sans Docker
 
@@ -38,6 +38,8 @@ Frontend :
 ```bash
 cd frontend
 npm ci
+npm run check
+npm run test
 npm run dev
 ```
 
