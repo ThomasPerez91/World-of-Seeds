@@ -53,6 +53,20 @@ export interface FileMutation {
   kind: "directory" | "file";
 }
 
+export interface TrashEntry {
+  id: string;
+  original_path: string;
+  name: string;
+  kind: "directory" | "file";
+  size: number | null;
+  deleted_at: string;
+}
+
+export interface TrashListing {
+  entries: TrashEntry[];
+  truncated: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -179,6 +193,29 @@ export const api = {
         path,
         destination_directory: destinationDirectory,
       }),
+    });
+  },
+
+  trashFile(path: string): Promise<TrashEntry> {
+    return request<TrashEntry>("/trash", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    });
+  },
+
+  listTrash(signal?: AbortSignal): Promise<TrashListing> {
+    return request<TrashListing>("/trash", { signal });
+  },
+
+  restoreTrash(entryId: string): Promise<FileMutation> {
+    return request<FileMutation>(`/trash/${encodeURIComponent(entryId)}/restore`, {
+      method: "POST",
+    });
+  },
+
+  purgeTrash(entryId: string): Promise<void> {
+    return request<void>(`/trash/${encodeURIComponent(entryId)}`, {
+      method: "DELETE",
     });
   },
 };

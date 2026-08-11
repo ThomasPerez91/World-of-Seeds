@@ -1,4 +1,5 @@
 from app.models.auth import LoginThrottle, User, UserSession
 from app.models.base import Base
+from app.models.trash import TrashEntry
 
-__all__ = ["Base", "LoginThrottle", "User", "UserSession"]
+__all__ = ["Base", "LoginThrottle", "TrashEntry", "User", "UserSession"]
