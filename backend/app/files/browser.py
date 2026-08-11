@@ -108,7 +108,7 @@ class SandboxedFileBrowser:
         relative_path = RelativePath.parse(raw_path)
         with self._workspace_manager.open_workspace(username) as workspace_fd:
             storage = self._storage_usage(workspace_fd)
-            with self._open_directory(workspace_fd, relative_path) as directory_fd:
+            with open_sandboxed_directory(workspace_fd, relative_path) as directory_fd:
                 entries, truncated = self._list_entries(directory_fd, relative_path)
         return DirectorySnapshot(
             path=relative_path.value,
@@ -116,39 +116,6 @@ class SandboxedFileBrowser:
             storage=storage,
             truncated=truncated,
         )
-
-    @staticmethod
-    @contextmanager
-    def _open_directory(workspace_fd: int, relative_path: RelativePath) -> Iterator[int]:
-        current_fd = os.dup(workspace_fd)
-        try:
-            for component in relative_path.components:
-                try:
-                    component_stat = os.stat(
-                        component,
-                        dir_fd=current_fd,
-                        follow_symlinks=False,
-                    )
-                except FileNotFoundError as exc:
-                    raise BrowserPathNotFoundError("Directory does not exist") from exc
-                if stat.S_ISLNK(component_stat.st_mode):
-                    raise BrowserPathBlockedError("Symbolic links cannot be opened")
-                if not stat.S_ISDIR(component_stat.st_mode):
-                    raise BrowserPathNotDirectoryError("Path is not a directory")
-
-                try:
-                    next_fd = os.open(component, DIRECTORY_OPEN_FLAGS, dir_fd=current_fd)
-                except FileNotFoundError as exc:
-                    raise BrowserPathNotFoundError("Directory does not exist") from exc
-                except NotADirectoryError as exc:
-                    raise BrowserPathBlockedError("Directory changed while opening") from exc
-                except OSError as exc:
-                    raise BrowserPathBlockedError("Directory cannot be opened safely") from exc
-                os.close(current_fd)
-                current_fd = next_fd
-            yield current_fd
-        finally:
-            os.close(current_fd)
 
     @staticmethod
     def _list_entries(
@@ -199,6 +166,44 @@ class SandboxedFileBrowser:
         free = filesystem.f_bfree * block_size
         available = filesystem.f_bavail * block_size
         return StorageUsage(total=total, used=max(total - free, 0), available=available)
+
+
+@contextmanager
+def open_sandboxed_directory(
+    workspace_fd: int,
+    relative_path: RelativePath,
+) -> Iterator[int]:
+    """Open a directory path without ever resolving a symbolic link."""
+
+    current_fd = os.dup(workspace_fd)
+    try:
+        for component in relative_path.components:
+            try:
+                component_stat = os.stat(
+                    component,
+                    dir_fd=current_fd,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError as exc:
+                raise BrowserPathNotFoundError("Directory does not exist") from exc
+            if stat.S_ISLNK(component_stat.st_mode):
+                raise BrowserPathBlockedError("Symbolic links cannot be opened")
+            if not stat.S_ISDIR(component_stat.st_mode):
+                raise BrowserPathNotDirectoryError("Path is not a directory")
+
+            try:
+                next_fd = os.open(component, DIRECTORY_OPEN_FLAGS, dir_fd=current_fd)
+            except FileNotFoundError as exc:
+                raise BrowserPathNotFoundError("Directory does not exist") from exc
+            except NotADirectoryError as exc:
+                raise BrowserPathBlockedError("Directory changed while opening") from exc
+            except OSError as exc:
+                raise BrowserPathBlockedError("Directory cannot be opened safely") from exc
+            os.close(current_fd)
+            current_fd = next_fd
+        yield current_fd
+    finally:
+        os.close(current_fd)
 
 
 def entry_kind(mode: int) -> FileEntryKind:

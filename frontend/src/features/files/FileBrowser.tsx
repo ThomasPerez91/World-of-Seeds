@@ -268,7 +268,19 @@ export function FileBrowser() {
                     ) : entry.blocked ? (
                       <span className="blocked-badge">Bloqué</span>
                     ) : (
-                      <span className="future-badge">Bientôt</span>
+                      <a
+                        className="download-link"
+                        href={api.fileDownloadUrl(entry.path)}
+                        download={entry.name}
+                        aria-label={`Télécharger ${entry.name}`}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M12 3v12" />
+                          <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+                          <path d="M5 20h14" />
+                        </svg>
+                        <span className="download-label">Télécharger</span>
+                      </a>
                     )}
                   </td>
                 </tr>

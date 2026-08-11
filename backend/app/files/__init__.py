@@ -8,6 +8,11 @@ from app.files.browser import (
     InvalidRelativePathError,
     SandboxedFileBrowser,
 )
+from app.files.downloads import (
+    DownloadPathNotFileError,
+    RangeNotSatisfiableError,
+    SandboxedFileDownloader,
+)
 from app.files.workspaces import (
     WorkspaceAlreadyExistsError,
     WorkspaceCompensationError,
@@ -21,9 +26,12 @@ __all__ = [
     "BrowserPathBlockedError",
     "BrowserPathNotDirectoryError",
     "BrowserPathNotFoundError",
+    "DownloadPathNotFileError",
     "FileBrowserError",
     "InvalidRelativePathError",
+    "RangeNotSatisfiableError",
     "SandboxedFileBrowser",
+    "SandboxedFileDownloader",
     "WorkspaceAlreadyExistsError",
     "WorkspaceCompensationError",
     "WorkspaceError",

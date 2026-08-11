@@ -120,9 +120,9 @@ Les opérations prévues sont :
 
 ## Téléchargements volumineux
 
-Le serveur n'appelle jamais `read()` sans limite sur un fichier. Le fichier est ouvert après validation, puis envoyé en flux. La réponse fournit `Content-Length`, `Last-Modified`, `ETag` et `Accept-Ranges: bytes`.
+Le serveur n'appelle jamais `read()` sans limite sur un fichier. Le fichier est ouvert depuis le descripteur de son dossier parent avec `O_NOFOLLOW`, puis envoyé par blocs d'au plus 1 Mio depuis un thread de travail. Le descripteur reste attaché au même fichier jusqu'à la fin du transfert et est fermé même si le client interrompt la connexion. La réponse fournit `Content-Length`, `Last-Modified`, `ETag` et `Accept-Ranges: bytes`.
 
-Les requêtes `Range` valides reçoivent `206 Partial Content`; une plage invalide reçoit `416 Range Not Satisfiable`. Cela permet aux navigateurs et gestionnaires de téléchargement de reprendre un transfert interrompu. Les tests couvriront les plages fermées, ouvertes, suffixées, invalides et les fichiers de taille nulle.
+Les requêtes avec une plage `bytes` unique et valide reçoivent `206 Partial Content`; une plage invalide, multiple ou impossible reçoit `416 Range Not Satisfiable`. `If-Range` compare l'ETag ou la date de modification avant une reprise. Les plages fermées, ouvertes, suffixées et invalides, les fichiers vides, les interruptions et un fichier sparse de 40 Gio sont couverts par les tests. Les plages multiples ne sont pas nécessaires à la reprise et exigeraient une réponse multipart plus complexe ; elles sont donc explicitement refusées en V1.
 
 ## Isolation Docker
 
