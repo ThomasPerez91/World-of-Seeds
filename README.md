@@ -4,7 +4,7 @@ Interface web privée de gestion de seedbox, conçue pour être déployée en Do
 
 ## État du projet
 
-Les trois premières étapes de la V1 sont en place :
+Les quatre premières étapes de la V1 sont en place :
 
 - API FastAPI typée ;
 - interface React/Vite TypeScript ;
@@ -12,11 +12,12 @@ Les trois premières étapes de la V1 sont en place :
 - authentification par session et comptes temporaires administrés ;
 - espaces `/data/users/<username>/{downloads,watch}` créés avec chaque compte ;
 - renommage coordonné du compte et de son dossier avec compensation en cas d'échec SQL ;
+- navigation sécurisée avec métadonnées, fil d'Ariane et espace disque ;
 - image Docker unique pour l'API et le frontend ;
 - montage hôte limité à `/srv/seedbox:/data` ;
 - contrôles de qualité automatisés.
 
-La navigation, les mutations, la corbeille et le téléchargement avec reprise sont ajoutés par petites pull requests indépendantes.
+Les mutations, la corbeille et le téléchargement avec reprise sont ajoutés par petites pull requests indépendantes.
 
 ## Démarrage local sans Docker
 

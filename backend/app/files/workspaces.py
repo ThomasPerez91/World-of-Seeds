@@ -120,18 +120,23 @@ class WorkspaceManager:
                     os.close(workspace_fd)
 
     def assert_ready(self, username: str) -> None:
+        with self.open_workspace(username) as workspace_fd:
+            for directory in WORKSPACE_DIRECTORIES:
+                try:
+                    child_fd = os.open(directory, DIRECTORY_OPEN_FLAGS, dir_fd=workspace_fd)
+                except OSError as exc:
+                    raise WorkspaceUnsafeEntryError(
+                        "A required workspace directory is unavailable"
+                    ) from exc
+                os.close(child_fd)
+
+    @contextmanager
+    def open_workspace(self, username: str) -> Iterator[int]:
         safe_name = self._validate_name(username)
         with self._users_directory(create=False) as users_fd:
             workspace_fd = self._open_workspace(users_fd, safe_name)
             try:
-                for directory in WORKSPACE_DIRECTORIES:
-                    try:
-                        child_fd = os.open(directory, DIRECTORY_OPEN_FLAGS, dir_fd=workspace_fd)
-                    except OSError as exc:
-                        raise WorkspaceUnsafeEntryError(
-                            "A required workspace directory is unavailable"
-                        ) from exc
-                    os.close(child_fd)
+                yield workspace_fd
             finally:
                 os.close(workspace_fd)
 
