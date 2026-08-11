@@ -72,6 +72,7 @@ function RenameDialog({
       title="Renommer l’élément"
       description="Le changement est immédiat et n’écrase jamais un élément existant."
       onClose={onClose}
+      closeDisabled={submitting}
     >
       <form className="mutation-form" onSubmit={(event) => void submit(event)}>
         <label htmlFor="mutation-name">Nouveau nom</label>
@@ -90,7 +91,12 @@ function RenameDialog({
           {error}
         </p>
         <div className="dialog-actions">
-          <button type="button" className="secondary-button" onClick={onClose}>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onClose}
+            disabled={submitting}
+          >
             Annuler
           </button>
           <button type="submit" disabled={submitting || name === entry.name || name.length === 0}>
@@ -166,6 +172,7 @@ function MoveDialog({
       title="Déplacer l’élément"
       description={`Choisis le nouveau dossier de « ${entry.name} ».`}
       onClose={onClose}
+      closeDisabled={submitting}
     >
       <div className="destination-picker">
         <nav className="picker-breadcrumbs" aria-label="Dossier de destination">
@@ -236,7 +243,12 @@ function MoveDialog({
           {mutationError}
         </p>
         <div className="dialog-actions">
-          <button type="button" className="secondary-button" onClick={onClose}>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onClose}
+            disabled={submitting}
+          >
             Annuler
           </button>
           <button
@@ -299,7 +311,8 @@ function TrashDialog({
     <FileDialog
       title="Placer dans la corbeille"
       description={`« ${entry.name} » pourra être restauré à son emplacement actuel.`}
-      onClose={submitting ? () => undefined : onClose}
+      onClose={onClose}
+      closeDisabled={submitting}
     >
       <div className="confirmation-content">
         <p className="mutation-warning">

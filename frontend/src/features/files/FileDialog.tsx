@@ -1,13 +1,24 @@
 import { type ReactNode, useEffect, useId, useRef } from "react";
 
+const FOCUSABLE_SELECTOR = [
+  "button:not(:disabled)",
+  "input:not(:disabled)",
+  "select:not(:disabled)",
+  "textarea:not(:disabled)",
+  "[href]",
+  "[tabindex]:not([tabindex='-1'])",
+].join(", ");
+
 export function FileDialog({
   children,
+  closeDisabled = false,
   description,
   eyebrow = "Gestion du fichier",
   onClose,
   title,
 }: {
   children: ReactNode;
+  closeDisabled?: boolean;
   description: string;
   eyebrow?: string;
   onClose: () => void;
@@ -17,7 +28,9 @@ export function FileDialog({
   const descriptionId = useId();
   const dialogRef = useRef<HTMLElement>(null);
   const onCloseRef = useRef(onClose);
+  const closeDisabledRef = useRef(closeDisabled);
   onCloseRef.current = onClose;
+  closeDisabledRef.current = closeDisabled;
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -29,14 +42,15 @@ export function FileDialog({
 
     const handleKeyboard = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        onCloseRef.current();
+        if (!closeDisabledRef.current) {
+          event.preventDefault();
+          onCloseRef.current();
+        }
         return;
       }
       if (event.key !== "Tab" || dialogRef.current === null) return;
       const focusable = Array.from(
-        dialogRef.current.querySelectorAll<HTMLElement>(
-          "button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex='-1'])",
-        ),
+        dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
       );
       if (focusable.length === 0) return;
       const first = focusable[0];
@@ -61,7 +75,7 @@ export function FileDialog({
     <div
       className="dialog-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (!closeDisabled && event.target === event.currentTarget) onClose();
       }}
     >
       <section
@@ -69,6 +83,7 @@ export function FileDialog({
         className="mutation-dialog"
         role="dialog"
         aria-modal="true"
+        aria-busy={closeDisabled}
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
       >
@@ -78,7 +93,13 @@ export function FileDialog({
             <h3 id={titleId}>{title}</h3>
             <p id={descriptionId}>{description}</p>
           </div>
-          <button type="button" className="dialog-close" onClick={onClose} aria-label="Fermer">
+          <button
+            type="button"
+            className="dialog-close"
+            onClick={onClose}
+            aria-label="Fermer"
+            disabled={closeDisabled}
+          >
             ×
           </button>
         </header>
