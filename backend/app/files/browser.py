@@ -70,6 +70,7 @@ def is_safe_component(component: str) -> bool:
         and "\0" not in component
         and "/" not in component
         and "\\" not in component
+        and not any(ord(character) < 32 or ord(character) == 127 for character in component)
         and len(component.encode("utf-8")) <= MAX_COMPONENT_BYTES
     )
 

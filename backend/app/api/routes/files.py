@@ -1,14 +1,24 @@
-from typing import Annotated
+from typing import Annotated, Never
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
-from app.auth.dependencies import AuthContext, require_current_credentials
+from app.auth.dependencies import (
+    AuthContext,
+    require_current_credentials,
+    require_current_credentials_csrf,
+)
 from app.files import (
     BrowserPathBlockedError,
     BrowserPathNotDirectoryError,
     BrowserPathNotFoundError,
     DownloadPathNotFileError,
+    FileMutationError,
     InvalidRelativePathError,
+    MutationCollisionError,
+    MutationCompensationError,
+    MutationInvalidTargetError,
+    MutationProtectedPathError,
+    MutationUnsupportedTypeError,
     RangeNotSatisfiableError,
     WorkspaceError,
 )
@@ -20,14 +30,114 @@ from app.files.downloads import (
     if_range_matches,
     parse_range_header,
 )
+from app.files.mutation_dependencies import FileMutatorDependency
 from app.schemas.files import (
     BreadcrumbResponse,
     DirectoryListingResponse,
     FileEntryResponse,
+    FileMutationResponse,
+    MoveFileRequest,
+    RenameFileRequest,
     StorageUsageResponse,
 )
 
 router = APIRouter()
+
+
+def _raise_mutation_error(exc: Exception) -> Never:
+    if isinstance(exc, InvalidRelativePathError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid relative path",
+        ) from exc
+    if isinstance(exc, BrowserPathNotFoundError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File or destination not found",
+        ) from exc
+    if isinstance(
+        exc,
+        (BrowserPathNotDirectoryError, MutationInvalidTargetError, MutationUnsupportedTypeError),
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file operation",
+        ) from exc
+    if isinstance(exc, (BrowserPathBlockedError, MutationProtectedPathError)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Path is blocked",
+        ) from exc
+    if isinstance(exc, MutationCollisionError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Destination already exists",
+        ) from exc
+    if isinstance(exc, MutationCompensationError):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="File operation could not be verified",
+        ) from exc
+    if isinstance(exc, (FileMutationError, WorkspaceError)):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="File operation is unavailable",
+        ) from exc
+    raise exc
+
+
+@router.patch("/rename", response_model=FileMutationResponse)
+def rename_file(
+    payload: RenameFileRequest,
+    mutator: FileMutatorDependency,
+    context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
+) -> FileMutationResponse:
+    try:
+        result = mutator.rename(context.user.username, payload.path, payload.name)
+    except (
+        InvalidRelativePathError,
+        BrowserPathNotFoundError,
+        BrowserPathNotDirectoryError,
+        BrowserPathBlockedError,
+        MutationInvalidTargetError,
+        MutationUnsupportedTypeError,
+        MutationProtectedPathError,
+        MutationCollisionError,
+        MutationCompensationError,
+        FileMutationError,
+        WorkspaceError,
+    ) as exc:
+        _raise_mutation_error(exc)
+    return FileMutationResponse.model_validate(result)
+
+
+@router.post("/move", response_model=FileMutationResponse)
+def move_file(
+    payload: MoveFileRequest,
+    mutator: FileMutatorDependency,
+    context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
+) -> FileMutationResponse:
+    try:
+        result = mutator.move(
+            context.user.username,
+            payload.path,
+            payload.destination_directory,
+        )
+    except (
+        InvalidRelativePathError,
+        BrowserPathNotFoundError,
+        BrowserPathNotDirectoryError,
+        BrowserPathBlockedError,
+        MutationInvalidTargetError,
+        MutationUnsupportedTypeError,
+        MutationProtectedPathError,
+        MutationCollisionError,
+        MutationCompensationError,
+        FileMutationError,
+        WorkspaceError,
+    ) as exc:
+        _raise_mutation_error(exc)
+    return FileMutationResponse.model_validate(result)
 
 
 @router.get("/download", response_model=None, operation_id="download_file")

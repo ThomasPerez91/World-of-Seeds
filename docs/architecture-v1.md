@@ -106,7 +106,7 @@ La page de connexion sera la seule vue accessible anonymement. Cela limite l'exp
 
 Toutes les API utilisent des chemins relatifs à une racine déjà autorisée. La chaîne `../../etc/passwd`, un chemin absolu, un octet nul ou un composant `..` est rejeté avant tout accès.
 
-Une simple comparaison de chaînes ou un unique `resolve()` n'est pas suffisant face aux changements concurrents. Le gestionnaire ouvre chaque composant demandé depuis un descripteur de la racine avec les primitives Linux `*at` et `O_NOFOLLOW`. Les liens symboliques sont affichés comme bloqués et ne peuvent pas être suivis ou parcourus. Les mutations travailleront à partir des descripteurs des dossiers parents.
+Une simple comparaison de chaînes ou un unique `resolve()` n'est pas suffisant face aux changements concurrents. Le gestionnaire ouvre chaque composant demandé depuis un descripteur de la racine avec les primitives Linux `*at` et `O_NOFOLLOW`. Les liens symboliques sont affichés comme bloqués et ne peuvent pas être suivis, parcourus, renommés ou déplacés. Les mutations travaillent à partir des descripteurs des dossiers parents.
 
 La liste expose le nom, le type, la taille des fichiers, la date de modification et le type MIME estimé. La taille d'un dossier n'est pas calculée récursivement : cette opération serait coûteuse et pourrait ralentir le serveur sur plusieurs dizaines de gigaoctets. L'utilisation affichée correspond au système de fichiers qui porte `/data`. Une réponse est plafonnée à 5 000 éléments afin qu'un dossier anormalement volumineux ne sature pas la mémoire de l'application.
 
@@ -117,6 +117,20 @@ Les opérations prévues sont :
 - mise à la corbeille par renommage atomique ;
 - restauration avec détection de collision ;
 - suppression définitive sans jamais suivre de lien symbolique.
+
+Le renommage et le déplacement utilisent `renameat2(RENAME_NOREPLACE)` entre les
+descripteurs des dossiers source et destination. Ils sont donc instantanés même pour un
+fichier de plusieurs dizaines de gigaoctets, à condition que les deux dossiers soient sur
+le même système de fichiers, et ne remplacent jamais une destination existante. L'identité
+de l'élément est contrôlée après l'appel atomique ; une substitution concurrente est remise
+à sa place sans suivre son éventuelle cible. Les racines obligatoires `downloads` et `watch`
+ne peuvent pas être renommées ou déplacées, et un dossier ne peut pas être déplacé dans
+lui-même ou l'un de ses descendants.
+
+Les routes `PATCH /api/v1/files/rename` et `POST /api/v1/files/move` exigent une session
+valide, des identifiants définitifs et le jeton CSRF associé. L'interface demande une
+confirmation, signale les collisions et rappelle qu'une mutation manuelle peut désynchroniser
+un torrent encore suivi par qBittorrent.
 
 ## Téléchargements volumineux
 
@@ -147,9 +161,10 @@ Le service applicatif est configuré avec :
 3. **Racines utilisateurs** : création/renommage contrôlé des dossiers et migration préparatoire.
 4. **Navigation** : liste, fil d'Ariane, espace disque et règles anti-traversal.
 5. **Téléchargement robuste** : flux, HTTP Range, reprise et tests de charge ciblés.
-6. **Mutations** : déplacer et renommer avec confirmations UI.
-7. **Corbeille** : suppression récupérable, restauration et purge définitive.
-8. **Responsive et accessibilité** : finition desktop/mobile, clavier, focus et lecteurs d'écran.
-9. **Déploiement** : image GHCR, secrets, migration et GitHub Action de déploiement validée ensemble.
+6. **Audit de durcissement** : courses critiques, streaming, CSP, sessions et build reproductible.
+7. **Mutations** : déplacer et renommer avec confirmations UI.
+8. **Corbeille** : suppression récupérable, restauration et purge définitive.
+9. **Responsive et accessibilité** : finition desktop/mobile, clavier, focus et lecteurs d'écran.
+10. **Déploiement** : image GHCR, secrets, migration et GitHub Action de déploiement validée ensemble.
 
 L'intégration qBittorrent reste hors V1, mais son futur client vivra derrière une interface dans `backend/app/integrations/qbittorrent`.
