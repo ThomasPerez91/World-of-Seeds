@@ -153,4 +153,9 @@ export const api = {
     const query = search.size === 0 ? "" : `?${search.toString()}`;
     return request<DirectoryListing>(`/files${query}`, { signal });
   },
+
+  fileDownloadUrl(path: string): string {
+    const search = new URLSearchParams({ path });
+    return `/api/v1/files/download?${search.toString()}`;
+  },
 };
