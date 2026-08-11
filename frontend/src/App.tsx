@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 
 import { api, ApiError, type TemporaryCredentials, type User } from "./api/client";
+import { FileBrowser } from "./features/files/FileBrowser";
 
 type AuthState =
   | { status: "loading" }
@@ -320,11 +321,11 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => Promise<voi
         </div>
       </header>
       <div className="dashboard-content">
-        <section className="welcome-card">
+        <div className="dashboard-heading">
           <p className="eyebrow">Tableau de bord</p>
           <h1 className="dashboard-title">Bonjour, {user.username}</h1>
-          <p>La navigation dans les fichiers sera ajoutée dans la prochaine étape.</p>
-        </section>
+        </div>
+        <FileBrowser />
         {user.is_admin && <AdminPanel />}
       </div>
     </main>

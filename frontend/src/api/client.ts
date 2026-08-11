@@ -16,6 +16,37 @@ export interface TemporaryCredentials {
   temporary_password: string;
 }
 
+export type FileEntryKind = "directory" | "file" | "symlink" | "other";
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  kind: FileEntryKind;
+  size: number | null;
+  modified_at: string;
+  media_type: string | null;
+  blocked: boolean;
+}
+
+export interface StorageUsage {
+  total: number;
+  used: number;
+  available: number;
+}
+
+export interface Breadcrumb {
+  label: string;
+  path: string;
+}
+
+export interface DirectoryListing {
+  path: string;
+  breadcrumbs: Breadcrumb[];
+  entries: FileEntry[];
+  storage: StorageUsage;
+  truncated: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -112,5 +143,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ expires_in_days: expiresInDays }),
     });
+  },
+
+  listFiles(path: string, signal?: AbortSignal): Promise<DirectoryListing> {
+    const search = new URLSearchParams();
+    if (path !== "") {
+      search.set("path", path);
+    }
+    const query = search.size === 0 ? "" : `?${search.toString()}`;
+    return request<DirectoryListing>(`/files${query}`, { signal });
   },
 };

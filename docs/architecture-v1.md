@@ -106,7 +106,9 @@ La page de connexion sera la seule vue accessible anonymement. Cela limite l'exp
 
 Toutes les API utilisent des chemins relatifs à une racine déjà autorisée. La chaîne `../../etc/passwd`, un chemin absolu, un octet nul ou un composant `..` est rejeté avant tout accès.
 
-Une simple comparaison de chaînes ou un unique `resolve()` n'est pas suffisant face aux changements concurrents. Le gestionnaire des racines utilisateurs ouvre déjà ses composants depuis un descripteur de la racine avec les primitives Linux `*at` et `O_NOFOLLOW`. La navigation généralisera cette règle à chaque composant demandé. Les liens symboliques seront affichés comme bloqués et ne pourront pas être suivis, téléchargés ou parcourus. Les mutations travailleront à partir des descripteurs des dossiers parents.
+Une simple comparaison de chaînes ou un unique `resolve()` n'est pas suffisant face aux changements concurrents. Le gestionnaire ouvre chaque composant demandé depuis un descripteur de la racine avec les primitives Linux `*at` et `O_NOFOLLOW`. Les liens symboliques sont affichés comme bloqués et ne peuvent pas être suivis ou parcourus. Les mutations travailleront à partir des descripteurs des dossiers parents.
+
+La liste expose le nom, le type, la taille des fichiers, la date de modification et le type MIME estimé. La taille d'un dossier n'est pas calculée récursivement : cette opération serait coûteuse et pourrait ralentir le serveur sur plusieurs dizaines de gigaoctets. L'utilisation affichée correspond au système de fichiers qui porte `/data`. Une réponse est plafonnée à 5 000 éléments afin qu'un dossier anormalement volumineux ne sature pas la mémoire de l'application.
 
 Les opérations prévues sont :
 
