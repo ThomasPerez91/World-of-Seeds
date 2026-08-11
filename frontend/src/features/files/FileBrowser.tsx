@@ -107,7 +107,15 @@ function isProtectedRootEntry(entry: FileEntry): boolean {
   return !entry.path.includes("/") && ["downloads", "watch"].includes(entry.name);
 }
 
-export function FileBrowser({ onSessionExpired }: { onSessionExpired: () => void }) {
+export function FileBrowser({
+  onFilesChanged,
+  onSessionExpired,
+  revision,
+}: {
+  onFilesChanged: () => void;
+  onSessionExpired: () => void;
+  revision: number;
+}) {
   const [path, setPath] = useState(initialPath);
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(true);
@@ -145,7 +153,7 @@ export function FileBrowser({ onSessionExpired }: { onSessionExpired: () => void
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [onSessionExpired, path, reloadKey]);
+  }, [onSessionExpired, path, reloadKey, revision]);
 
   function navigate(nextPath: string) {
     const url = new URL(window.location.href);
@@ -160,6 +168,7 @@ export function FileBrowser({ onSessionExpired }: { onSessionExpired: () => void
     setMutation(null);
     setNotice(message);
     setReloadKey((value) => value + 1);
+    onFilesChanged();
   }
 
   const storagePercent =
@@ -343,6 +352,20 @@ export function FileBrowser({ onSessionExpired }: { onSessionExpired: () => void
                               <path d="m13 13 2-2 2 2M15 11v5" />
                             </svg>
                             <span>Déplacer</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="file-mutation-button destructive-file-action"
+                            onClick={() => setMutation({ action: "trash", entry })}
+                            aria-label={`Placer ${entry.name} dans la corbeille`}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="M4.5 7h15" />
+                              <path d="m9 7 .7-2h4.6l.7 2" />
+                              <path d="m6.5 7 .8 13h9.4l.8-13" />
+                              <path d="M10 11v5M14 11v5" />
+                            </svg>
+                            <span>Corbeille</span>
                           </button>
                         </>
                       )}

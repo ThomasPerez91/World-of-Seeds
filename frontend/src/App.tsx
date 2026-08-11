@@ -2,6 +2,7 @@ import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import { api, ApiError, type TemporaryCredentials, type User } from "./api/client";
 import { FileBrowser } from "./features/files/FileBrowser";
+import { TrashBrowser } from "./features/files/TrashBrowser";
 
 type AuthState =
   | { status: "loading" }
@@ -331,6 +332,10 @@ function Dashboard({
 }) {
   const [logoutError, setLogoutError] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
+  const [filesRevision, setFilesRevision] = useState(0);
+  const handleFilesChanged = useCallback(() => {
+    setFilesRevision((value) => value + 1);
+  }, []);
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -374,7 +379,16 @@ function Dashboard({
           <p className="eyebrow">Tableau de bord</p>
           <h1 className="dashboard-title">Bonjour, {user.username}</h1>
         </div>
-        <FileBrowser onSessionExpired={onSessionExpired} />
+        <FileBrowser
+          onFilesChanged={handleFilesChanged}
+          onSessionExpired={onSessionExpired}
+          revision={filesRevision}
+        />
+        <TrashBrowser
+          onFilesChanged={handleFilesChanged}
+          onSessionExpired={onSessionExpired}
+          revision={filesRevision}
+        />
         {user.is_admin && <AdminPanel onSessionExpired={onSessionExpired} />}
       </div>
     </main>

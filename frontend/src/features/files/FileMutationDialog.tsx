@@ -1,8 +1,9 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 
 import { api, ApiError, type DirectoryListing, type FileEntry } from "../../api/client";
+import { FileDialog } from "./FileDialog";
 
-export type FileMutationAction = "move" | "rename";
+export type FileMutationAction = "move" | "rename" | "trash";
 
 interface FileMutationDialogProps {
   action: FileMutationAction;
@@ -38,90 +39,6 @@ function listingErrorMessage(error: unknown): string {
   );
 }
 
-function DialogFrame({
-  children,
-  description,
-  onClose,
-  title,
-}: {
-  children: React.ReactNode;
-  description: string;
-  onClose: () => void;
-  title: string;
-}) {
-  const titleId = useId();
-  const descriptionId = useId();
-  const dialogRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    document.body.classList.add("dialog-open");
-    const initialFocus =
-      dialogRef.current?.querySelector<HTMLElement>("[data-initial-focus]") ??
-      dialogRef.current?.querySelector<HTMLElement>("button, input");
-    initialFocus?.focus();
-
-    const handleKeyboard = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab" || dialogRef.current === null) return;
-      const focusable = Array.from(
-        dialogRef.current.querySelectorAll<HTMLElement>(
-          "button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex='-1'])",
-        ),
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", handleKeyboard);
-    return () => {
-      document.body.classList.remove("dialog-open");
-      document.removeEventListener("keydown", handleKeyboard);
-      if (previouslyFocused?.isConnected === true) previouslyFocused.focus();
-    };
-  }, [onClose]);
-
-  return (
-    <div
-      className="dialog-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section
-        ref={dialogRef}
-        className="mutation-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-      >
-        <header className="dialog-header">
-          <div>
-            <p className="eyebrow">Gestion du fichier</p>
-            <h3 id={titleId}>{title}</h3>
-            <p id={descriptionId}>{description}</p>
-          </div>
-          <button type="button" className="dialog-close" onClick={onClose} aria-label="Fermer">
-            ×
-          </button>
-        </header>
-        {children}
-      </section>
-    </div>
-  );
-}
-
 function RenameDialog({
   entry,
   onClose,
@@ -151,7 +68,7 @@ function RenameDialog({
   }
 
   return (
-    <DialogFrame
+    <FileDialog
       title="Renommer l’élément"
       description="Le changement est immédiat et n’écrase jamais un élément existant."
       onClose={onClose}
@@ -181,7 +98,7 @@ function RenameDialog({
           </button>
         </div>
       </form>
-    </DialogFrame>
+    </FileDialog>
   );
 }
 
@@ -245,7 +162,7 @@ function MoveDialog({
   }
 
   return (
-    <DialogFrame
+    <FileDialog
       title="Déplacer l’élément"
       description={`Choisis le nouveau dossier de « ${entry.name} ».`}
       onClose={onClose}
@@ -337,13 +254,90 @@ function MoveDialog({
           </button>
         </div>
       </div>
-    </DialogFrame>
+    </FileDialog>
+  );
+}
+
+function TrashDialog({
+  entry,
+  onClose,
+  onCompleted,
+  onSessionExpired,
+}: Omit<FileMutationDialogProps, "action" | "currentDirectory">) {
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function moveToTrash() {
+    setSubmitting(true);
+    setError("");
+    try {
+      await api.trashFile(entry.path);
+      onCompleted(`« ${entry.name} » a été placé dans la corbeille.`);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setError(
+        caught instanceof ApiError
+          ? {
+              400: "Ce chemin n’est pas valide.",
+              403: "Cet élément est protégé ou bloqué.",
+              404: "L’élément n’existe plus.",
+              409: "L’intégrité de cet élément n’a pas pu être confirmée.",
+              500: "L’opération n’a pas pu être annulée en toute sécurité.",
+              503: "La corbeille est temporairement indisponible.",
+            }[caught.status] ?? "L’élément n’a pas pu être placé dans la corbeille."
+          : "L’élément n’a pas pu être placé dans la corbeille.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <FileDialog
+      title="Placer dans la corbeille"
+      description={`« ${entry.name} » pourra être restauré à son emplacement actuel.`}
+      onClose={submitting ? () => undefined : onClose}
+    >
+      <div className="confirmation-content">
+        <p className="mutation-warning">
+          Un torrent encore actif dans qBittorrent peut passer en erreur après cette opération.
+        </p>
+        <p className="form-message error-message" role="alert">
+          {error}
+        </p>
+        <div className="dialog-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onClose}
+            disabled={submitting}
+            data-initial-focus
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            className="danger-button"
+            onClick={() => void moveToTrash()}
+            disabled={submitting}
+          >
+            {submitting ? "Déplacement…" : "Placer dans la corbeille"}
+          </button>
+        </div>
+      </div>
+    </FileDialog>
   );
 }
 
 export function FileMutationDialog(props: FileMutationDialogProps) {
   if (props.action === "rename") {
     return <RenameDialog {...props} />;
+  }
+  if (props.action === "trash") {
+    return <TrashDialog {...props} />;
   }
   return <MoveDialog {...props} />;
 }

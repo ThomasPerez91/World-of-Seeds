@@ -75,7 +75,7 @@ Chaque compte conserve un UUID immuable en base, même si son nom change. Le nom
 
 Les opérations de racine utilisent des descripteurs de répertoire, les variantes `*at` des appels système et `O_NOFOLLOW`. Les chemins historiques à la racine restent intacts. La stratégie de coexistence et la migration qBittorrent différée sont détaillées dans [`storage-migration.md`](storage-migration.md).
 
-La corbeille est indexée par UUID utilisateur afin qu'un renommage de compte ne casse pas ses éléments supprimés. La base stockera le chemin relatif d'origine, la date de suppression et le propriétaire.
+La corbeille est indexée par UUID utilisateur afin qu'un renommage de compte ne casse pas ses éléments supprimés. La base stocke le chemin relatif d'origine, la date de suppression, l'identité filesystem et le propriétaire. Sur disque, chaque élément porte un UUID aléatoire indépendant de son nom d'origine.
 
 > La migration des actuels `/srv/seedbox/downloads` et `/srv/seedbox/watch` ne doit pas être lancée tant que qBittorrent utilise ces chemins. Déplacer un fichier encore seedé sans prévenir qBittorrent le mettrait en erreur. Une procédure contrôlée sera réalisée avec le déploiement.
 
@@ -131,6 +131,22 @@ Les routes `PATCH /api/v1/files/rename` et `POST /api/v1/files/move` exigent une
 valide, des identifiants définitifs et le jeton CSRF associé. L'interface demande une
 confirmation, signale les collisions et rappelle qu'une mutation manuelle peut désynchroniser
 un torrent encore suivi par qBittorrent.
+
+La mise en corbeille utilise elle aussi `renameat2(RENAME_NOREPLACE)` : déplacer un fichier
+de plusieurs dizaines de gigaoctets ne le copie pas et ne le charge pas en mémoire. La
+métadonnée PostgreSQL et le déplacement filesystem sont coordonnés par compensation. Si
+l’écriture SQL échoue, l’élément reprend sa place d’origine ; si la suppression SQL d’une
+restauration échoue, il retourne dans la corbeille. Les valeurs nécessaires à ces retours
+arrière sont copiées avant tout rollback afin de ne jamais dépendre d’un objet ORM expiré.
+
+La restauration refuse d’écraser une destination et continue de fonctionner après un
+renommage du compte. La purge récursive ne suit aucun lien symbolique, contrôle l’identité
+du dossier à chaque niveau, refuse de franchir une frontière de système de fichiers et
+plafonne la profondeur. Elle supprime d’abord le contenu puis la métadonnée ; une panne SQL
+après la suppression produit donc une entrée fantôme qu’un nouvel appel peut nettoyer sans
+danger. Les routes `GET/POST /api/v1/trash`, `POST /api/v1/trash/{id}/restore` et
+`DELETE /api/v1/trash/{id}` sont isolées par utilisateur, et toutes les mutations exigent
+le jeton CSRF de la session.
 
 ## Téléchargements volumineux
 

@@ -4,7 +4,7 @@ Interface web privée de gestion de seedbox, conçue pour être déployée en Do
 
 ## État du projet
 
-Les six premières capacités fonctionnelles de la V1 sont en place :
+Les capacités fonctionnelles principales de la V1 sont en place :
 
 - API FastAPI typée ;
 - interface React/Vite TypeScript ;
@@ -15,12 +15,13 @@ Les six premières capacités fonctionnelles de la V1 sont en place :
 - navigation sécurisée avec métadonnées, fil d'Ariane et espace disque ;
 - téléchargement en flux avec HTTP Range, reprise, ETag et Last-Modified ;
 - renommage et déplacement atomiques sans écrasement, avec confirmations dans l’interface ;
+- corbeille privée par utilisateur, restauration avec détection de collision et purge définitive ;
 - image Docker unique pour l'API et le frontend ;
 - montage hôte limité à `/srv/seedbox:/data` ;
 - contrôles de qualité automatisés.
 
-La corbeille, la restauration et la purge définitive restent isolées dans la prochaine
-pull request.
+La prochaine étape porte sur la finition responsive, l’accessibilité et les tests
+d’interface. Le déploiement restera manuel jusqu’à la validation commune de la V1.
 
 ## Démarrage local sans Docker
 
