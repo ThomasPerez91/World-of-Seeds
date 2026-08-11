@@ -1,12 +1,13 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, StringConstraints, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
 CSRF_COOKIE_NAME = "wos_csrf"
+AllowedHost = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=253)]
 
 
 class Settings(BaseSettings):
@@ -19,22 +20,42 @@ class Settings(BaseSettings):
 
     app_name: str = "World of Seeds"
     environment: Literal["development", "test", "production"] = "development"
-    log_level: str = "INFO"
-    allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost", "test"])
+    allowed_hosts: list[AllowedHost] = Field(
+        default_factory=lambda: ["127.0.0.1", "localhost", "test"],
+        min_length=1,
+    )
     cookie_secure: bool = False
-    session_cookie_name: str = "wos_session"
-    session_ttl_hours: int = 12
-    auth_attempt_window_minutes: int = 15
-    auth_lock_minutes: int = 15
-    auth_max_attempts: int = 5
+    session_cookie_name: str = Field(
+        default="wos_session",
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
+    session_ttl_hours: int = Field(default=12, ge=1, le=720)
+    auth_attempt_window_minutes: int = Field(default=15, ge=1, le=1440)
+    auth_lock_minutes: int = Field(default=15, ge=1, le=1440)
+    auth_max_attempts: int = Field(default=5, ge=1, le=100)
     database_url: str | None = Field(default=None, repr=False)
-    postgres_host: str = "localhost"
-    postgres_port: int = 5432
-    postgres_db: str = "world_of_seeds"
-    postgres_user: str = "world_of_seeds"
+    postgres_host: str = Field(default="localhost", min_length=1)
+    postgres_port: int = Field(default=5432, ge=1, le=65535)
+    postgres_db: str = Field(default="world_of_seeds", min_length=1)
+    postgres_user: str = Field(default="world_of_seeds", min_length=1)
     postgres_password: SecretStr = Field(default=SecretStr("world_of_seeds"), repr=False)
     data_root: Path = Path("/data")
     static_root: Path = Path("/app/static")
+
+    @field_validator("data_root", "static_root")
+    @classmethod
+    def require_absolute_container_path(cls, value: Path) -> Path:
+        if not value.is_absolute():
+            raise ValueError("Container paths must be absolute")
+        return value
+
+    @model_validator(mode="after")
+    def require_production_data_mount(self) -> Self:
+        if self.environment == "production" and self.data_root != Path("/data"):
+            raise ValueError("Production data root must be /data")
+        return self
 
     @property
     def expose_api_docs(self) -> bool:

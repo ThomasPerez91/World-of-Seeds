@@ -38,6 +38,19 @@ npm ci
 npm run dev
 ```
 
+Après une modification des dépendances Python, le verrou destiné à l'image Docker se
+régénère depuis `uv.lock` :
+
+```bash
+cd backend
+uv lock
+uv export --frozen --no-dev --no-emit-project --no-header \
+  --format requirements.txt --output-file requirements.lock
+```
+
+La CI refuse une divergence entre ces deux fichiers. L'image installe uniquement les
+versions et empreintes cryptographiques ainsi exportées.
+
 ## Déploiement Docker
 
 Le déploiement ne doit pas être lancé avant d'avoir configuré `.env` et préparé les permissions de `/srv/seedbox` :

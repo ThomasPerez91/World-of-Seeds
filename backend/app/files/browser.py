@@ -124,34 +124,40 @@ class SandboxedFileBrowser:
     ) -> tuple[list[FileEntry], bool]:
         entries: list[FileEntry] = []
         truncated = False
-        with os.scandir(directory_fd) as iterator:
-            for entry in iterator:
-                if len(entries) >= MAX_DIRECTORY_ENTRIES:
-                    truncated = True
-                    break
-                try:
-                    entry_stat = entry.stat(follow_symlinks=False)
-                except FileNotFoundError:
-                    continue
-                kind = entry_kind(entry_stat.st_mode)
-                safe_name = is_safe_component(entry.name)
-                blocked = not safe_name or kind in {FileEntryKind.SYMLINK, FileEntryKind.OTHER}
-                item_path = "/".join((*relative_path.components, entry.name))
-                entries.append(
-                    FileEntry(
-                        name=entry.name,
-                        path=item_path,
-                        kind=kind,
-                        size=entry_stat.st_size if kind is FileEntryKind.FILE else None,
-                        modified_at=datetime.fromtimestamp(entry_stat.st_mtime, tz=UTC),
-                        media_type=(
-                            mimetypes.guess_type(entry.name)[0]
-                            if kind is FileEntryKind.FILE
-                            else None
-                        ),
-                        blocked=blocked,
+        try:
+            with os.scandir(directory_fd) as iterator:
+                for entry in iterator:
+                    if len(entries) >= MAX_DIRECTORY_ENTRIES:
+                        truncated = True
+                        break
+                    try:
+                        entry_stat = entry.stat(follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                    kind = entry_kind(entry_stat.st_mode)
+                    safe_name = is_safe_component(entry.name)
+                    blocked = not safe_name or kind in {
+                        FileEntryKind.SYMLINK,
+                        FileEntryKind.OTHER,
+                    }
+                    item_path = "/".join((*relative_path.components, entry.name))
+                    entries.append(
+                        FileEntry(
+                            name=entry.name,
+                            path=item_path,
+                            kind=kind,
+                            size=entry_stat.st_size if kind is FileEntryKind.FILE else None,
+                            modified_at=datetime.fromtimestamp(entry_stat.st_mtime, tz=UTC),
+                            media_type=(
+                                mimetypes.guess_type(entry.name)[0]
+                                if kind is FileEntryKind.FILE
+                                else None
+                            ),
+                            blocked=blocked,
+                        )
                     )
-                )
+        except OSError as exc:
+            raise BrowserPathBlockedError("Directory cannot be listed safely") from exc
 
         entries.sort(
             key=lambda item: (entry_sort_order(item.kind), item.name.casefold(), item.name)
@@ -160,7 +166,10 @@ class SandboxedFileBrowser:
 
     @staticmethod
     def _storage_usage(workspace_fd: int) -> StorageUsage:
-        filesystem = os.fstatvfs(workspace_fd)
+        try:
+            filesystem = os.fstatvfs(workspace_fd)
+        except OSError as exc:
+            raise BrowserPathBlockedError("Storage usage is unavailable") from exc
         block_size = filesystem.f_frsize or filesystem.f_bsize
         total = filesystem.f_blocks * block_size
         free = filesystem.f_bfree * block_size
@@ -186,6 +195,8 @@ def open_sandboxed_directory(
                 )
             except FileNotFoundError as exc:
                 raise BrowserPathNotFoundError("Directory does not exist") from exc
+            except OSError as exc:
+                raise BrowserPathBlockedError("Directory cannot be inspected safely") from exc
             if stat.S_ISLNK(component_stat.st_mode):
                 raise BrowserPathBlockedError("Symbolic links cannot be opened")
             if not stat.S_ISDIR(component_stat.st_mode):

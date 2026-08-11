@@ -4,12 +4,14 @@ import mimetypes
 import os
 import stat
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
 from urllib.parse import quote
 
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import StreamingResponse
+from starlette.types import Receive, Scope, Send
 
 from app.files.browser import (
     BrowserPathBlockedError,
@@ -43,7 +45,7 @@ class ByteRange:
         return self.end - self.start + 1
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class OpenedDownload:
     file_descriptor: int
     name: str
@@ -51,8 +53,12 @@ class OpenedDownload:
     modified_at: datetime
     media_type: str
     etag: str
+    _closed: bool = field(default=False, init=False, repr=False)
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         os.close(self.file_descriptor)
 
     @property
@@ -94,6 +100,8 @@ class SandboxedFileDownloader:
             entry_stat = os.stat(file_name, dir_fd=parent_fd, follow_symlinks=False)
         except FileNotFoundError as exc:
             raise BrowserPathNotFoundError("File does not exist") from exc
+        except OSError as exc:
+            raise BrowserPathBlockedError("File cannot be inspected safely") from exc
         if stat.S_ISLNK(entry_stat.st_mode):
             raise BrowserPathBlockedError("Symbolic links cannot be downloaded")
         if not stat.S_ISREG(entry_stat.st_mode):
@@ -209,3 +217,34 @@ async def stream_download(
             remaining -= len(chunk)
     finally:
         download.close()
+
+
+class DownloadStreamingResponse(StreamingResponse):
+    """Close the file even if sending headers fails before iteration starts."""
+
+    def __init__(
+        self,
+        download: OpenedDownload,
+        *,
+        start: int,
+        length: int,
+        status_code: int,
+        headers: dict[str, str],
+    ) -> None:
+        self._download = download
+        super().__init__(
+            stream_download(download, start=start, length=length),
+            status_code=status_code,
+            headers=headers,
+        )
+
+    async def __call__(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self._download.close()

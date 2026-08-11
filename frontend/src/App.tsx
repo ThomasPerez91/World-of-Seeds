@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import { api, ApiError, type TemporaryCredentials, type User } from "./api/client";
 import { FileBrowser } from "./features/files/FileBrowser";
@@ -7,6 +7,12 @@ type AuthState =
   | { status: "loading" }
   | { status: "anonymous" }
   | { status: "authenticated"; user: User };
+
+function clearFilePathFromUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("path");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
 
 function BrandMark() {
   return (
@@ -178,7 +184,7 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
   );
 }
 
-function AdminPanel() {
+function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
   const [users, setUsers] = useState<User[]>([]);
   const [credentials, setCredentials] = useState<TemporaryCredentials | null>(null);
   const [expiresInDays, setExpiresInDays] = useState(7);
@@ -186,8 +192,17 @@ function AdminPanel() {
   const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
-    void api.listUsers().then(setUsers).catch(() => setError("Impossible de charger les comptes."));
-  }, []);
+    void api
+      .listUsers()
+      .then(setUsers)
+      .catch((caught: unknown) => {
+        if (caught instanceof ApiError && caught.status === 401) {
+          onSessionExpired();
+          return;
+        }
+        setError("Impossible de charger les comptes.");
+      });
+  }, [onSessionExpired]);
 
   async function generateUser() {
     setGenerating(true);
@@ -197,7 +212,11 @@ function AdminPanel() {
       const generated = await api.createTemporaryUser(expiresInDays);
       setCredentials(generated);
       setUsers((current) => [generated.user, ...current]);
-    } catch {
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
       setError("Impossible de générer le compte temporaire.");
     } finally {
       setGenerating(false);
@@ -205,7 +224,14 @@ function AdminPanel() {
   }
 
   async function copy(value: string) {
-    await navigator.clipboard.writeText(value);
+    try {
+      if (navigator.clipboard === undefined) {
+        throw new Error("Clipboard API unavailable");
+      }
+      await navigator.clipboard.writeText(value);
+    } catch {
+      setError("Copie automatique indisponible. Sélectionne la valeur manuellement.");
+    }
   }
 
   return (
@@ -240,14 +266,20 @@ function AdminPanel() {
           <div className="credential-row">
             <span>Utilisateur</span>
             <code>{credentials.user.username}</code>
-            <button className="text-button" onClick={() => copy(credentials.user.username)}>
+            <button
+              className="text-button"
+              onClick={() => void copy(credentials.user.username)}
+            >
               Copier
             </button>
           </div>
           <div className="credential-row">
             <span>Mot de passe</span>
             <code>{credentials.temporary_password}</code>
-            <button className="text-button" onClick={() => copy(credentials.temporary_password)}>
+            <button
+              className="text-button"
+              onClick={() => void copy(credentials.temporary_password)}
+            >
               Copier
             </button>
           </div>
@@ -258,32 +290,45 @@ function AdminPanel() {
         {error}
       </p>
       <div className="user-list">
-        {users.map((account) => (
-          <div className="user-row" key={account.id}>
-            <div className="avatar" aria-hidden="true">
-              {account.username.slice(0, 1).toUpperCase()}
-            </div>
-            <div>
-              <strong>{account.username}</strong>
-              <span>
-                {account.is_admin
-                  ? "Administrateur"
-                  : account.must_change_credentials
-                    ? "Invitation en attente"
-                    : "Utilisateur actif"}
+        {users.map((account) => {
+          const expired =
+            account.expires_at !== null && new Date(account.expires_at).getTime() <= Date.now();
+          const available = account.is_active && !expired;
+          return (
+            <div className="user-row" key={account.id}>
+              <div className="avatar" aria-hidden="true">
+                {account.username.slice(0, 1).toUpperCase()}
+              </div>
+              <div>
+                <strong>{account.username}</strong>
+                <span>
+                  {account.is_admin
+                    ? "Administrateur"
+                    : account.must_change_credentials
+                      ? "Invitation en attente"
+                      : "Utilisateur actif"}
+                </span>
+              </div>
+              <span className={available ? "status-pill" : "status-pill inactive"}>
+                {expired ? "Expiré" : account.is_active ? "Actif" : "Désactivé"}
               </span>
             </div>
-            <span className={account.is_active ? "status-pill" : "status-pill inactive"}>
-              {account.is_active ? "Actif" : "Désactivé"}
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
 }
 
-function Dashboard({ user, onLogout }: { user: User; onLogout: () => Promise<void> }) {
+function Dashboard({
+  user,
+  onLogout,
+  onSessionExpired,
+}: {
+  user: User;
+  onLogout: () => Promise<void>;
+  onSessionExpired: () => void;
+}) {
   const [logoutError, setLogoutError] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -292,7 +337,11 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => Promise<voi
     setLogoutError("");
     try {
       await onLogout();
-    } catch {
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
       setLogoutError("La déconnexion a échoué. Ta session est toujours active.");
     } finally {
       setLoggingOut(false);
@@ -325,8 +374,8 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => Promise<voi
           <p className="eyebrow">Tableau de bord</p>
           <h1 className="dashboard-title">Bonjour, {user.username}</h1>
         </div>
-        <FileBrowser />
-        {user.is_admin && <AdminPanel />}
+        <FileBrowser onSessionExpired={onSessionExpired} />
+        {user.is_admin && <AdminPanel onSessionExpired={onSessionExpired} />}
       </div>
     </main>
   );
@@ -334,16 +383,21 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => Promise<voi
 
 export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
+  const handleSessionExpired = useCallback(() => {
+    clearFilePathFromUrl();
+    setAuth({ status: "anonymous" });
+  }, []);
 
   useEffect(() => {
     void api
       .me()
       .then((user) => setAuth({ status: "authenticated", user }))
-      .catch(() => setAuth({ status: "anonymous" }));
-  }, []);
+      .catch(handleSessionExpired);
+  }, [handleSessionExpired]);
 
   async function logout() {
     await api.logout();
+    clearFilePathFromUrl();
     setAuth({ status: "anonymous" });
   }
 
@@ -361,5 +415,11 @@ export function App() {
       />
     );
   }
-  return <Dashboard user={auth.user} onLogout={logout} />;
+  return (
+    <Dashboard
+      user={auth.user}
+      onLogout={logout}
+      onSessionExpired={handleSessionExpired}
+    />
+  );
 }

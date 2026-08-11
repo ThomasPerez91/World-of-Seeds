@@ -1,7 +1,9 @@
+import os
 from pathlib import Path
 
 import pytest
 
+import app.files.workspaces as workspace_module
 from app.files import (
     WorkspaceAlreadyExistsError,
     WorkspaceCompensationError,
@@ -133,6 +135,36 @@ def test_rename_is_compensated_when_the_database_operation_fails(tmp_path: Path)
 
     assert marker.read_bytes() == b"content"
     assert not (data_root / "users" / "thomas").exists()
+
+
+def test_rename_never_replaces_a_concurrent_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, data_root = make_manager(tmp_path)
+    manager.create("temporary")
+    original_rename = workspace_module._rename_without_replacement
+
+    def create_destination_then_rename(
+        source: str,
+        destination: str,
+        *,
+        directory_fd: int,
+    ) -> None:
+        os.mkdir(destination, dir_fd=directory_fd)
+        original_rename(source, destination, directory_fd=directory_fd)
+
+    monkeypatch.setattr(
+        workspace_module,
+        "_rename_without_replacement",
+        create_destination_then_rename,
+    )
+
+    with pytest.raises(WorkspaceAlreadyExistsError):
+        manager.rename("temporary", "thomas")
+
+    assert (data_root / "users" / "temporary" / "downloads").is_dir()
+    assert list((data_root / "users" / "thomas").iterdir()) == []
 
 
 def test_compensation_never_deletes_a_non_empty_workspace(tmp_path: Path) -> None:

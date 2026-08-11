@@ -184,3 +184,15 @@ async def test_security_headers_are_applied(client: AsyncClient) -> None:
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-robots-tag"] == "noindex, nofollow, noarchive"
+
+
+@pytest.mark.asyncio
+async def test_security_headers_are_applied_to_rejected_hosts(client: AsyncClient) -> None:
+    response = await client.get(
+        "/api/v1/health/live",
+        headers={"Host": "unexpected.example"},
+    )
+
+    assert response.status_code == 400
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-robots-tag"] == "noindex, nofollow, noarchive"
