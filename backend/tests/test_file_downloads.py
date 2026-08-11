@@ -4,10 +4,17 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import ClientDisconnect
+from starlette.types import Message, Scope
 
 from app.auth.security import hash_password
 from app.files import WorkspaceManager
-from app.files.downloads import DOWNLOAD_CHUNK_SIZE, SandboxedFileDownloader, stream_download
+from app.files.downloads import (
+    DOWNLOAD_CHUNK_SIZE,
+    DownloadStreamingResponse,
+    SandboxedFileDownloader,
+    stream_download,
+)
 from app.models import User
 
 
@@ -271,6 +278,51 @@ async def test_interrupted_stream_closes_its_descriptor(data_root: Path) -> None
 
 
 @pytest.mark.asyncio
+async def test_disconnect_before_response_start_closes_its_descriptor(data_root: Path) -> None:
+    WorkspaceManager(data_root).create("thomas")
+    (user_downloads(data_root) / "interrupted.bin").write_bytes(b"content")
+    download = SandboxedFileDownloader(WorkspaceManager(data_root)).open(
+        "thomas",
+        "downloads/interrupted.bin",
+    )
+    file_descriptor = download.file_descriptor
+    response = DownloadStreamingResponse(
+        download,
+        start=0,
+        length=download.size,
+        status_code=200,
+        headers={"Content-Length": str(download.size)},
+    )
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/v1/files/download",
+        "raw_path": b"/api/v1/files/download",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [],
+        "client": ("127.0.0.1", 12345),
+        "server": ("127.0.0.1", 8000),
+    }
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def disconnect(_: Message) -> None:
+        raise OSError("client disconnected before response start")
+
+    with pytest.raises(ClientDisconnect):
+        await response(scope, receive, disconnect)
+
+    download.close()
+    with pytest.raises(OSError):
+        os.fstat(file_descriptor)
+
+
+@pytest.mark.asyncio
 async def test_sparse_multi_gigabyte_file_can_be_resumed_without_full_read(
     client: AsyncClient,
     db_session: AsyncSession,
@@ -330,6 +382,39 @@ async def test_download_rejects_traversal_symlinks_directories_and_other_users(
     assert directory.status_code == 400
     assert "secret" not in traversal.text
     assert "outside-secret" not in symlink.text
+
+
+@pytest.mark.asyncio
+async def test_download_reports_metadata_permission_errors_as_blocked(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await create_workspace_user(db_session, data_root)
+    (user_downloads(data_root) / "movie.mkv").write_bytes(b"video")
+    await login(client)
+    original_stat = os.stat
+
+    def deny_movie_metadata(
+        path: str,
+        *,
+        dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> os.stat_result:
+        if path == "movie.mkv":
+            raise PermissionError("metadata denied")
+        return original_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(os, "stat", deny_movie_metadata)
+
+    response = await client.get(
+        "/api/v1/files/download",
+        params={"path": "downloads/movie.mkv"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Path is blocked"
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,6 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from fastapi.responses import StreamingResponse
 
 from app.auth.dependencies import AuthContext, require_current_credentials
 from app.files import (
@@ -15,7 +14,12 @@ from app.files import (
 )
 from app.files.browser_dependencies import FileBrowserDependency
 from app.files.download_dependencies import FileDownloaderDependency
-from app.files.downloads import ByteRange, if_range_matches, parse_range_header, stream_download
+from app.files.downloads import (
+    ByteRange,
+    DownloadStreamingResponse,
+    if_range_matches,
+    parse_range_header,
+)
 from app.schemas.files import (
     BreadcrumbResponse,
     DirectoryListingResponse,
@@ -107,8 +111,10 @@ async def download_file(
         download.close()
         return Response(status_code=response_status, headers=response_headers)
 
-    return StreamingResponse(
-        stream_download(download, start=start, length=length),
+    return DownloadStreamingResponse(
+        download,
+        start=start,
+        length=length,
         status_code=response_status,
         headers=response_headers,
     )

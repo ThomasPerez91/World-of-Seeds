@@ -71,7 +71,7 @@ L'organisation cible est :
         └── <trash-entry-uuid>/
 ```
 
-Chaque compte conserve un UUID immuable en base, même si son nom change. Le nom de connexion est volontairement limité à une forme sûre (`a-z`, `0-9`, `_`, `-`) et correspond au nom du dossier. La création du compte et celle du dossier forment une seule opération métier : un échec SQL retire uniquement le dossier nouvellement créé et encore vide. Un changement de nom verrouille la ligne utilisateur, vérifie les collisions, renomme le dossier sur le même système de fichiers avec une opération atomique, puis met la base à jour. Un mécanisme de compensation remet le dossier à son ancien nom si la transaction SQL échoue.
+Chaque compte conserve un UUID immuable en base, même si son nom change. Le nom de connexion est volontairement limité à une forme sûre (`a-z`, `0-9`, `_`, `-`) et correspond au nom du dossier. La création du compte et celle du dossier forment une seule opération métier : un échec SQL retire uniquement le dossier nouvellement créé et encore vide. Un changement de nom verrouille la ligne utilisateur, vérifie les collisions, puis utilise sous Linux `renameat2(RENAME_NOREPLACE)` : une destination apparue entre la vérification et le renommage n'est jamais écrasée. L'opération échoue de manière sûre si cette primitive atomique n'est pas disponible. La base est ensuite mise à jour et un mécanisme de compensation remet le dossier à son ancien nom si la transaction SQL échoue.
 
 Les opérations de racine utilisent des descripteurs de répertoire, les variantes `*at` des appels système et `O_NOFOLLOW`. Les chemins historiques à la racine restent intacts. La stratégie de coexistence et la migration qBittorrent différée sont détaillées dans [`storage-migration.md`](storage-migration.md).
 
@@ -120,7 +120,7 @@ Les opérations prévues sont :
 
 ## Téléchargements volumineux
 
-Le serveur n'appelle jamais `read()` sans limite sur un fichier. Le fichier est ouvert depuis le descripteur de son dossier parent avec `O_NOFOLLOW`, puis envoyé par blocs d'au plus 1 Mio depuis un thread de travail. Le descripteur reste attaché au même fichier jusqu'à la fin du transfert et est fermé même si le client interrompt la connexion. La réponse fournit `Content-Length`, `Last-Modified`, `ETag` et `Accept-Ranges: bytes`.
+Le serveur n'appelle jamais `read()` sans limite sur un fichier. Le fichier est ouvert depuis le descripteur de son dossier parent avec `O_NOFOLLOW`, puis envoyé par blocs d'au plus 1 Mio depuis un thread de travail. Le descripteur reste attaché au même fichier jusqu'à la fin du transfert et est fermé même si le client interrompt la connexion, y compris si l'envoi échoue avant le premier en-tête ou le premier bloc. La réponse fournit `Content-Length`, `Last-Modified`, `ETag` et `Accept-Ranges: bytes`.
 
 Les requêtes avec une plage `bytes` unique et valide reçoivent `206 Partial Content`; une plage invalide, multiple ou impossible reçoit `416 Range Not Satisfiable`. `If-Range` compare l'ETag ou la date de modification avant une reprise. Les plages fermées, ouvertes, suffixées et invalides, les fichiers vides, les interruptions et un fichier sparse de 40 Gio sont couverts par les tests. Les plages multiples ne sont pas nécessaires à la reprise et exigeraient une réponse multipart plus complexe ; elles sont donc explicitement refusées en V1.
 
@@ -135,6 +135,8 @@ Le service applicatif est configuré avec :
 - toutes les capabilities Linux supprimées ;
 - `no-new-privileges` ;
 - limite de processus ;
+- contrôle de santé fondé sur la disponibilité réelle de PostgreSQL ;
+- en-tête d'identification Uvicorn désactivé ;
 - aucun port PostgreSQL publié ;
 - aucun socket Docker monté.
 

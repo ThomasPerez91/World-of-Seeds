@@ -41,6 +41,11 @@ jobs:
           enable-cache: true
           working-directory: backend
       - run: uv sync --frozen --dev
+      - name: Verify Docker dependency export
+        run: |
+          uv export --frozen --no-dev --no-emit-project --no-header \
+            --format requirements.txt --output-file /tmp/requirements.lock
+          diff --unified requirements.lock /tmp/requirements.lock
       - run: uv run alembic -c alembic.ini upgrade head
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -62,3 +67,11 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
+
+  container:
+    name: Container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build production image
+        run: docker build --tag world-of-seeds:ci .

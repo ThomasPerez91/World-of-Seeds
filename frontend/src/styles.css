@@ -431,16 +431,28 @@ button:disabled {
 }
 
 .storage-track {
+  display: block;
   overflow: hidden;
+  width: 100%;
   height: 0.36rem;
   margin: 0.75rem 0 0.55rem;
+  border: 0;
   border-radius: 999px;
+  appearance: none;
   background: #26372f;
 }
 
-.storage-track span {
-  display: block;
-  height: 100%;
+.storage-track::-webkit-progress-bar {
+  border-radius: inherit;
+  background: #26372f;
+}
+
+.storage-track::-webkit-progress-value {
+  border-radius: inherit;
+  background: linear-gradient(90deg, #86bd7d, #c1dfaf);
+}
+
+.storage-track::-moz-progress-bar {
   border-radius: inherit;
   background: linear-gradient(90deg, #86bd7d, #c1dfaf);
 }
@@ -832,6 +844,11 @@ select {
   background: #0d1814;
 }
 
+select:focus-visible {
+  border-color: #8fbd82;
+  box-shadow: 0 0 0 0.22rem rgb(143 189 130 / 14%);
+}
+
 .compact-button {
   padding: 0.8rem 1rem;
 }
@@ -1094,6 +1111,8 @@ select {
   *::before,
   *::after {
     scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }

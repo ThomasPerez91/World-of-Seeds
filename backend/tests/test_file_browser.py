@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -5,8 +6,8 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.security import hash_password
-from app.files import WorkspaceManager
-from app.files.browser import InvalidRelativePathError, RelativePath
+from app.files import BrowserPathBlockedError, WorkspaceManager
+from app.files.browser import InvalidRelativePathError, RelativePath, SandboxedFileBrowser
 from app.models import User
 
 
@@ -205,3 +206,19 @@ async def test_navigation_requires_current_credentials(
 def test_relative_path_parser_rejects_ambiguous_components(raw_path: str) -> None:
     with pytest.raises(InvalidRelativePathError):
         RelativePath.parse(raw_path)
+
+
+def test_storage_metadata_errors_are_reported_as_blocked_paths(
+    data_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = WorkspaceManager(data_root)
+    manager.create("thomas")
+
+    def unavailable_storage(_: int) -> os.statvfs_result:
+        raise PermissionError("storage metadata denied")
+
+    monkeypatch.setattr(os, "fstatvfs", unavailable_storage)
+
+    with pytest.raises(BrowserPathBlockedError):
+        SandboxedFileBrowser(manager).list_directory("thomas", "")

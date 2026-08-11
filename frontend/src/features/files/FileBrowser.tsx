@@ -99,7 +99,7 @@ function LoadingRows() {
   );
 }
 
-export function FileBrowser() {
+export function FileBrowser({ onSessionExpired }: { onSessionExpired: () => void }) {
   const [path, setPath] = useState(initialPath);
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(true);
@@ -121,6 +121,10 @@ export function FileBrowser() {
       .then(setListing)
       .catch((caught: unknown) => {
         if (caught instanceof DOMException && caught.name === "AbortError") return;
+        if (caught instanceof ApiError && caught.status === 401) {
+          onSessionExpired();
+          return;
+        }
         setListing(null);
         setError(listingErrorMessage(caught));
       })
@@ -128,7 +132,7 @@ export function FileBrowser() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [path, reloadKey]);
+  }, [onSessionExpired, path, reloadKey]);
 
   function navigate(nextPath: string) {
     const url = new URL(window.location.href);
@@ -157,9 +161,14 @@ export function FileBrowser() {
               <span>{formatBytes(listing.storage.used)} utilisés</span>
               <strong>{formatBytes(listing.storage.available)} disponibles</strong>
             </div>
-            <div className="storage-track" aria-hidden="true">
-              <span style={{ width: `${storagePercent}%` }} />
-            </div>
+            <progress
+              className="storage-track"
+              max={100}
+              value={storagePercent}
+              aria-label={`${storagePercent.toFixed(0)} % du stockage utilisé`}
+            >
+              {storagePercent.toFixed(0)} %
+            </progress>
             <span className="storage-total">Capacité totale : {formatBytes(listing.storage.total)}</span>
           </div>
         )}

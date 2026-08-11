@@ -31,11 +31,11 @@ def create_app() -> FastAPI:
         openapi_url=openapi_url,
         lifespan=lifespan,
     )
+    application.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     application.add_middleware(
         SecurityHeadersMiddleware,
         enable_hsts=settings.cookie_secure,
     )
-    application.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     application.include_router(api_router, prefix="/api/v1")
 
     if settings.static_root.is_dir():

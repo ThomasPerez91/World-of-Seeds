@@ -1,4 +1,7 @@
-from pydantic import SecretStr
+from pathlib import Path
+
+import pytest
+from pydantic import SecretStr, ValidationError
 from sqlalchemy import make_url
 
 from app.core.config import Settings
@@ -17,3 +20,27 @@ def test_cookie_is_not_secure_for_the_initial_ssh_tunnel() -> None:
     settings = Settings()
 
     assert settings.cookie_secure is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("session_ttl_hours", 0),
+        ("auth_attempt_window_minutes", 0),
+        ("auth_lock_minutes", -1),
+        ("auth_max_attempts", 0),
+        ("postgres_port", 65_536),
+        ("allowed_hosts", []),
+        ("allowed_hosts", [""]),
+        ("session_cookie_name", "invalid cookie"),
+        ("data_root", "relative/data"),
+    ],
+)
+def test_critical_runtime_settings_reject_unsafe_values(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate({field: value})
+
+
+def test_production_data_root_is_fixed_to_the_container_mount() -> None:
+    with pytest.raises(ValidationError):
+        Settings(environment="production", data_root=Path("/tmp/data"))
