@@ -76,6 +76,17 @@ async def require_csrf(
     return context
 
 
+async def require_current_credentials_csrf(
+    context: Annotated[AuthContext, Depends(require_csrf)],
+) -> AuthContext:
+    if context.user.must_change_credentials:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Credential change required",
+        )
+    return context
+
+
 async def require_admin_csrf(
     context: Annotated[AuthContext, Depends(require_csrf)],
 ) -> AuthContext:

@@ -1,18 +1,15 @@
-import ctypes
-import errno
 import os
 import stat
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Protocol, cast
 
 from app.auth.security import normalize_username
+from app.files.atomic import AtomicRenameUnavailableError, rename_without_replacement
 
 WORKSPACE_DIRECTORIES = ("downloads", "watch")
 DIRECTORY_MODE = 0o750
 DIRECTORY_OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-RENAME_NOREPLACE = 1
 
 
 class WorkspaceError(RuntimeError):
@@ -35,17 +32,6 @@ class WorkspaceCompensationError(WorkspaceError):
     pass
 
 
-class _RenameAt2(Protocol):
-    def __call__(
-        self,
-        old_directory: ctypes.c_int,
-        old_name: ctypes.c_char_p,
-        new_directory: ctypes.c_int,
-        new_name: ctypes.c_char_p,
-        flags: ctypes.c_uint,
-    ) -> int: ...
-
-
 def _rename_without_replacement(
     source: str,
     destination: str,
@@ -58,26 +44,15 @@ def _rename_without_replacement(
     is safer than emulating it with a check followed by ``os.rename``.
     """
 
-    libc = ctypes.CDLL(None, use_errno=True)
     try:
-        rename_at2 = cast(_RenameAt2, libc.renameat2)
-    except AttributeError as exc:
+        rename_without_replacement(
+            source,
+            destination,
+            source_directory_fd=directory_fd,
+            destination_directory_fd=directory_fd,
+        )
+    except AtomicRenameUnavailableError as exc:
         raise WorkspaceError("Atomic workspace rename is unavailable") from exc
-
-    result = rename_at2(
-        ctypes.c_int(directory_fd),
-        ctypes.c_char_p(os.fsencode(source)),
-        ctypes.c_int(directory_fd),
-        ctypes.c_char_p(os.fsencode(destination)),
-        ctypes.c_uint(RENAME_NOREPLACE),
-    )
-    if result == 0:
-        return
-
-    error_number = ctypes.get_errno()
-    if error_number == errno.EEXIST:
-        raise FileExistsError(error_number, os.strerror(error_number), destination)
-    raise OSError(error_number, os.strerror(error_number), destination)
 
 
 class WorkspaceManager:

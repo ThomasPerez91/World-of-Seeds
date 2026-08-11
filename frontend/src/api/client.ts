@@ -47,6 +47,12 @@ export interface DirectoryListing {
   truncated: boolean;
 }
 
+export interface FileMutation {
+  path: string;
+  name: string;
+  kind: "directory" | "file";
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -157,5 +163,22 @@ export const api = {
   fileDownloadUrl(path: string): string {
     const search = new URLSearchParams({ path });
     return `/api/v1/files/download?${search.toString()}`;
+  },
+
+  renameFile(path: string, name: string): Promise<FileMutation> {
+    return request<FileMutation>("/files/rename", {
+      method: "PATCH",
+      body: JSON.stringify({ path, name }),
+    });
+  },
+
+  moveFile(path: string, destinationDirectory: string): Promise<FileMutation> {
+    return request<FileMutation>("/files/move", {
+      method: "POST",
+      body: JSON.stringify({
+        path,
+        destination_directory: destinationDirectory,
+      }),
+    });
   },
 };

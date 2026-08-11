@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FileEntryResponse(BaseModel):
@@ -35,3 +35,25 @@ class DirectoryListingResponse(BaseModel):
     entries: list[FileEntryResponse]
     storage: StorageUsageResponse
     truncated: bool
+
+
+class RenameFileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(max_length=4096)
+    name: str = Field(min_length=1, max_length=255)
+
+
+class MoveFileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(max_length=4096)
+    destination_directory: str = Field(max_length=4096)
+
+
+class FileMutationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    path: str
+    name: str
+    kind: Literal["directory", "file"]

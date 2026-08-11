@@ -7,6 +7,10 @@ import {
   type FileEntry,
   type FileEntryKind,
 } from "../../api/client";
+import {
+  FileMutationDialog,
+  type FileMutationAction,
+} from "./FileMutationDialog";
 
 const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
   dateStyle: "medium",
@@ -99,12 +103,21 @@ function LoadingRows() {
   );
 }
 
+function isProtectedRootEntry(entry: FileEntry): boolean {
+  return !entry.path.includes("/") && ["downloads", "watch"].includes(entry.name);
+}
+
 export function FileBrowser({ onSessionExpired }: { onSessionExpired: () => void }) {
   const [path, setPath] = useState(initialPath);
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [notice, setNotice] = useState("");
+  const [mutation, setMutation] = useState<{
+    action: FileMutationAction;
+    entry: FileEntry;
+  } | null>(null);
 
   useEffect(() => {
     const handleBack = () => setPath(initialPath());
@@ -140,6 +153,13 @@ export function FileBrowser({ onSessionExpired }: { onSessionExpired: () => void
     else url.searchParams.set("path", nextPath);
     window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
     setPath(nextPath);
+    setNotice("");
+  }
+
+  function completeMutation(message: string) {
+    setMutation(null);
+    setNotice(message);
+    setReloadKey((value) => value + 1);
   }
 
   const storagePercent =
@@ -200,6 +220,12 @@ export function FileBrowser({ onSessionExpired }: { onSessionExpired: () => void
           Actualiser
         </button>
       </div>
+
+      {notice !== "" && (
+        <p className="operation-notice" role="status">
+          {notice}
+        </p>
+      )}
 
       {loading && <LoadingRows />}
 
@@ -265,32 +291,62 @@ export function FileBrowser({ onSessionExpired }: { onSessionExpired: () => void
                   <td>{formatBytes(entry.size)}</td>
                   <td>{dateFormatter.format(new Date(entry.modified_at))}</td>
                   <td className="file-action-cell">
-                    {entry.kind === "directory" && !entry.blocked ? (
-                      <button
-                        type="button"
-                        className="open-folder-button"
-                        onClick={() => navigate(entry.path)}
-                        aria-label={`Ouvrir ${entry.name}`}
-                      >
-                        <span aria-hidden="true">›</span>
-                      </button>
-                    ) : entry.blocked ? (
-                      <span className="blocked-badge">Bloqué</span>
-                    ) : (
-                      <a
-                        className="download-link"
-                        href={api.fileDownloadUrl(entry.path)}
-                        download={entry.name}
-                        aria-label={`Télécharger ${entry.name}`}
-                      >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <path d="M12 3v12" />
-                          <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
-                          <path d="M5 20h14" />
-                        </svg>
-                        <span className="download-label">Télécharger</span>
-                      </a>
-                    )}
+                    <div className="file-actions">
+                      {entry.kind === "directory" && !entry.blocked ? (
+                        <button
+                          type="button"
+                          className="open-folder-button"
+                          onClick={() => navigate(entry.path)}
+                          aria-label={`Ouvrir ${entry.name}`}
+                        >
+                          <span aria-hidden="true">›</span>
+                        </button>
+                      ) : entry.blocked ? (
+                        <span className="blocked-badge">Bloqué</span>
+                      ) : (
+                        <a
+                          className="download-link"
+                          href={api.fileDownloadUrl(entry.path)}
+                          download={entry.name}
+                          aria-label={`Télécharger ${entry.name}`}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M12 3v12" />
+                            <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+                            <path d="M5 20h14" />
+                          </svg>
+                          <span className="download-label">Télécharger</span>
+                        </a>
+                      )}
+                      {!entry.blocked && !isProtectedRootEntry(entry) && (
+                        <>
+                          <button
+                            type="button"
+                            className="file-mutation-button"
+                            onClick={() => setMutation({ action: "rename", entry })}
+                            aria-label={`Renommer ${entry.name}`}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="m4 16-.8 4 4-.8L18.5 7.9l-3.2-3.2L4 16Z" />
+                              <path d="m13.8 6.2 3.2 3.2" />
+                            </svg>
+                            <span>Renommer</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="file-mutation-button"
+                            onClick={() => setMutation({ action: "move", entry })}
+                            aria-label={`Déplacer ${entry.name}`}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="M3.5 7.5h6l1.7 2h10.3v8.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2V7.5Z" />
+                              <path d="m13 13 2-2 2 2M15 11v5" />
+                            </svg>
+                            <span>Déplacer</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -303,6 +359,16 @@ export function FileBrowser({ onSessionExpired }: { onSessionExpired: () => void
         <p className="truncated-notice" role="status">
           Ce dossier contient plus de 5 000 éléments. Seuls les premiers sont affichés.
         </p>
+      )}
+      {mutation !== null && (
+        <FileMutationDialog
+          action={mutation.action}
+          currentDirectory={listing?.path ?? path}
+          entry={mutation.entry}
+          onClose={() => setMutation(null)}
+          onCompleted={completeMutation}
+          onSessionExpired={onSessionExpired}
+        />
       )}
     </section>
   );

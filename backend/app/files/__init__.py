@@ -13,6 +13,15 @@ from app.files.downloads import (
     RangeNotSatisfiableError,
     SandboxedFileDownloader,
 )
+from app.files.mutations import (
+    FileMutationError,
+    MutationCollisionError,
+    MutationCompensationError,
+    MutationInvalidTargetError,
+    MutationProtectedPathError,
+    MutationUnsupportedTypeError,
+    SandboxedFileMutator,
+)
 from app.files.workspaces import (
     WorkspaceAlreadyExistsError,
     WorkspaceCompensationError,
@@ -28,10 +37,17 @@ __all__ = [
     "BrowserPathNotFoundError",
     "DownloadPathNotFileError",
     "FileBrowserError",
+    "FileMutationError",
     "InvalidRelativePathError",
+    "MutationCollisionError",
+    "MutationCompensationError",
+    "MutationInvalidTargetError",
+    "MutationProtectedPathError",
+    "MutationUnsupportedTypeError",
     "RangeNotSatisfiableError",
     "SandboxedFileBrowser",
     "SandboxedFileDownloader",
+    "SandboxedFileMutator",
     "WorkspaceAlreadyExistsError",
     "WorkspaceCompensationError",
     "WorkspaceError",
