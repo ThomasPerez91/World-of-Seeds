@@ -16,6 +16,7 @@ export function AdminUsersPage({
   const [users, setUsers] = useState<User[]>([]);
   const [credentials, setCredentials] = useState<GeneratedCredentials | null>(null);
   const [pendingDeletion, setPendingDeletion] = useState<User | null>(null);
+  const [deletionError, setDeletionError] = useState("");
   const [error, setError] = useState("");
   const [generating, setGenerating] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
@@ -74,7 +75,7 @@ export function AdminUsersPage({
   async function confirmDeletion() {
     if (pendingDeletion === null) return;
     setUpdatingUserId(pendingDeletion.id);
-    setError("");
+    setDeletionError("");
     try {
       await api.deleteUser(pendingDeletion.id);
       setUsers((current) => current.filter((candidate) => candidate.id !== pendingDeletion.id));
@@ -84,7 +85,7 @@ export function AdminUsersPage({
         onSessionExpired();
         return;
       }
-      setError("Impossible de supprimer l’accès de cet utilisateur.");
+      setDeletionError("Impossible de supprimer l’accès de cet utilisateur.");
     } finally {
       setUpdatingUserId(null);
     }
@@ -193,7 +194,10 @@ export function AdminUsersPage({
                       className="danger-outline-button compact-button"
                       aria-label={`Supprimer l’accès de ${account.username}`}
                       disabled={updatingUserId === account.id}
-                      onClick={() => setPendingDeletion(account)}
+                      onClick={() => {
+                        setDeletionError("");
+                        setPendingDeletion(account);
+                      }}
                     >
                       Supprimer l’accès
                     </button>
@@ -208,18 +212,27 @@ export function AdminUsersPage({
             eyebrow="Administration"
             title={`Supprimer l’accès de ${pendingDeletion.username} ?`}
             description="Le compte sera désactivé, ses sessions fermées et son dossier sera conservé."
-            onClose={() => setPendingDeletion(null)}
+            onClose={() => {
+              setDeletionError("");
+              setPendingDeletion(null);
+            }}
             closeDisabled={updatingUserId === pendingDeletion.id}
           >
             <div className="confirmation-content">
               <p className="permanent-delete-warning">
                 Les fichiers ne seront pas supprimés, mais cet utilisateur ne pourra plus se connecter.
               </p>
+              <p className="form-message error-message" role="alert">
+                {deletionError}
+              </p>
               <div className="dialog-actions">
                 <button
                   type="button"
                   className="secondary-button"
-                  onClick={() => setPendingDeletion(null)}
+                  onClick={() => {
+                    setDeletionError("");
+                    setPendingDeletion(null);
+                  }}
                   disabled={updatingUserId === pendingDeletion.id}
                   data-initial-focus
                 >
