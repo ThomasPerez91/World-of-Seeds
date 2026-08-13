@@ -74,5 +74,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Build production image
-        run: docker build --tag world-of-seeds:ci .
+      - name: Build production image through Compose
+        run: |
+          cp .env.example .env
+          mkdir -p "$RUNNER_TEMP/seedbox"
+          SEEDBOX_HOST_PATH="$RUNNER_TEMP/seedbox" docker compose build app
+      - name: Smoke-check Uvicorn configuration
+        run: >-
+          SEEDBOX_HOST_PATH="$RUNNER_TEMP/seedbox"
+          docker compose run --rm --no-deps app uvicorn --version
