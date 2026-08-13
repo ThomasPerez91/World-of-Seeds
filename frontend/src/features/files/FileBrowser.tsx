@@ -272,6 +272,13 @@ export function FileBrowser({
             <caption className="sr-only">
               Contenu du dossier {listing.path === "" ? "Mes fichiers" : listing.path}
             </caption>
+            <colgroup>
+              <col className="file-name-column" />
+              <col className="file-type-column" />
+              <col className="file-size-column" />
+              <col className="file-date-column" />
+              <col className="file-actions-column" />
+            </colgroup>
             <thead>
               <tr>
                 <th scope="col">Nom</th>
@@ -287,27 +294,29 @@ export function FileBrowser({
               {listing.entries.map((entry) => (
                 <tr className={entry.blocked ? "blocked-row" : undefined} key={entry.name}>
                   <td className="file-name-cell">
-                    <span className={`file-icon ${entry.kind}`}>
-                      <FileIcon kind={entry.kind} mediaType={entry.media_type} />
-                    </span>
-                    <span className="file-name-copy" title={entry.name}>
-                      {entry.kind === "directory" && !entry.blocked ? (
-                        <button type="button" onClick={() => navigate(entry.path)}>
-                          {entry.name}
-                        </button>
-                      ) : (
-                        <strong>{entry.name}</strong>
-                      )}
-                      <span className="mobile-file-meta">
-                        {typeLabel(entry)} · {formatBytes(entry.size)}
+                    <div className="file-name-content">
+                      <span className={`file-icon ${entry.kind}`}>
+                        <FileIcon kind={entry.kind} mediaType={entry.media_type} />
                       </span>
-                      <time
-                        className="mobile-file-date"
-                        dateTime={entry.modified_at}
-                      >
-                        Modifié le {dateFormatter.format(new Date(entry.modified_at))}
-                      </time>
-                    </span>
+                      <span className="file-name-copy" title={entry.name}>
+                        {entry.kind === "directory" && !entry.blocked ? (
+                          <button type="button" onClick={() => navigate(entry.path)}>
+                            {entry.name}
+                          </button>
+                        ) : (
+                          <strong>{entry.name}</strong>
+                        )}
+                        <span className="mobile-file-meta">
+                          {typeLabel(entry)} · {formatBytes(entry.size)}
+                        </span>
+                        <time
+                          className="mobile-file-date"
+                          dateTime={entry.modified_at}
+                        >
+                          Modifié le {dateFormatter.format(new Date(entry.modified_at))}
+                        </time>
+                      </span>
+                    </div>
                   </td>
                   <td>{typeLabel(entry)}</td>
                   <td>{formatBytes(entry.size)}</td>
@@ -328,6 +337,7 @@ export function FileBrowser({
                           className="open-folder-button"
                           onClick={() => navigate(entry.path)}
                           aria-label={`Ouvrir ${entry.name}`}
+                          title="Ouvrir"
                         >
                           <span aria-hidden="true">›</span>
                         </button>
@@ -339,6 +349,7 @@ export function FileBrowser({
                           href={api.fileDownloadUrl(entry.path)}
                           download={entry.name}
                           aria-label={`Télécharger ${entry.name}`}
+                          title="Télécharger"
                         >
                           <svg viewBox="0 0 24 24" aria-hidden="true">
                             <path d="M12 3v12" />
@@ -355,6 +366,7 @@ export function FileBrowser({
                             className="file-mutation-button"
                             onClick={() => setMutation({ action: "rename", entry })}
                             aria-label={`Renommer ${entry.name}`}
+                            title="Renommer"
                           >
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                               <path d="m4 16-.8 4 4-.8L18.5 7.9l-3.2-3.2L4 16Z" />
@@ -367,6 +379,7 @@ export function FileBrowser({
                             className="file-mutation-button"
                             onClick={() => setMutation({ action: "move", entry })}
                             aria-label={`Déplacer ${entry.name}`}
+                            title="Déplacer"
                           >
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                               <path d="M3.5 7.5h6l1.7 2h10.3v8.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2V7.5Z" />
@@ -379,6 +392,7 @@ export function FileBrowser({
                             className="file-mutation-button destructive-file-action"
                             onClick={() => setMutation({ action: "trash", entry })}
                             aria-label={`Placer ${entry.name} dans la corbeille`}
+                            title="Placer dans la corbeille"
                           >
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                               <path d="M4.5 7h15" />

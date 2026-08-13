@@ -1,4 +1,10 @@
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { api, ApiError, type TemporaryCredentials, type User } from "./api/client";
 import { FileBrowser } from "./features/files/FileBrowser";
@@ -358,21 +364,40 @@ function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
   );
 }
 
-function Dashboard({
+function AccountMenu({
   user,
+  onOpenSettings,
   onLogout,
   onSessionExpired,
 }: {
   user: User;
+  onOpenSettings: () => void;
   onLogout: () => Promise<void>;
   onSessionExpired: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   const [logoutError, setLogoutError] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
-  const [filesRevision, setFilesRevision] = useState(0);
-  const handleFilesChanged = useCallback(() => {
-    setFilesRevision((value) => value + 1);
-  }, []);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -391,6 +416,201 @@ function Dashboard({
   }
 
   return (
+    <div className="account-menu" ref={containerRef}>
+      <div className="account-identity">
+        <span className="account-avatar" aria-hidden="true">
+          {user.username.slice(0, 1).toUpperCase()}
+        </span>
+        <strong>{user.username}</strong>
+      </div>
+      <button
+        type="button"
+        className="account-settings-trigger"
+        aria-label="Ouvrir le menu du compte"
+        aria-expanded={open}
+        aria-controls="account-dropdown"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" />
+          <path d="M19.4 13.5c.1-.5.1-1 0-1.5l2-1.6-2-3.4-2.5 1a8 8 0 0 0-1.3-.8L15.2 4h-4l-.4 3.2c-.5.2-.9.5-1.3.8L7 7 5 10.4 7 12c-.1.5-.1 1 0 1.5l-2 1.6 2 3.4 2.5-1c.4.3.8.6 1.3.8l.4 3.2h4l.4-3.2c.5-.2.9-.5 1.3-.8l2.5 1 2-3.4-2-1.6Z" />
+        </svg>
+      </button>
+      {open && (
+        <div id="account-dropdown" className="account-dropdown">
+          <button
+            type="button"
+            className="account-dropdown-item"
+            onClick={() => {
+              setOpen(false);
+              onOpenSettings();
+            }}
+          >
+            Paramètres du compte
+          </button>
+          <div className="account-dropdown-separator" />
+          <button
+            type="button"
+            className="account-dropdown-item logout-item"
+            onClick={() => void handleLogout()}
+            disabled={loggingOut}
+          >
+            {loggingOut ? "Déconnexion…" : "Déconnexion"}
+          </button>
+          {logoutError !== "" && (
+            <p className="logout-error" role="alert">
+              {logoutError}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AccountSettingsPage({
+  user,
+  onBack,
+  onChanged,
+  onSessionExpired,
+}: {
+  user: User;
+  onBack: () => void;
+  onChanged: (user: User) => void;
+  onSessionExpired: () => void;
+}) {
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const newPassword = String(form.get("new-password"));
+    if (newPassword !== String(form.get("password-confirmation"))) {
+      setError("Les deux nouveaux mots de passe ne correspondent pas.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    setNotice("");
+    try {
+      const updated = await api.changeCredentials(
+        String(form.get("current-password")),
+        String(form.get("username")),
+        newPassword,
+      );
+      onChanged(updated);
+      setNotice("Tes identifiants ont été mis à jour.");
+      formElement.reset();
+    } catch (caught) {
+      if (
+        caught instanceof ApiError &&
+        caught.status === 401 &&
+        caught.message === "Not authenticated"
+      ) {
+        onSessionExpired();
+        return;
+      }
+      if (caught instanceof ApiError && caught.status === 401) {
+        setError("Le mot de passe actuel est incorrect.");
+      } else if (caught instanceof ApiError && caught.status === 409) {
+        setError("Ce nom d’utilisateur est indisponible.");
+      } else {
+        setError("Impossible de modifier le compte pour le moment.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="settings-page" aria-labelledby="account-settings-title">
+      <button type="button" className="back-button" onClick={onBack}>
+        <span aria-hidden="true">←</span> Retour aux fichiers
+      </button>
+      <div className="settings-card">
+        <p className="eyebrow">Compte</p>
+        <h1 id="account-settings-title">Paramètres du compte</h1>
+        <p className="settings-intro">
+          Le changement du nom d’utilisateur renomme également ton espace de stockage.
+        </p>
+        <form onSubmit={(event) => void submit(event)}>
+          <label htmlFor="settings-current-password">Mot de passe actuel</label>
+          <input
+            id="settings-current-password"
+            name="current-password"
+            type="password"
+            autoComplete="current-password"
+            required
+          />
+          <label htmlFor="settings-username">Nom d’utilisateur</label>
+          <input
+            id="settings-username"
+            name="username"
+            defaultValue={user.username}
+            pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}"
+            autoComplete="username"
+            required
+          />
+          <p className="field-hint">
+            3–32 caractères : lettres, chiffres, tiret ou tiret bas.
+          </p>
+          <label htmlFor="settings-new-password">Nouveau mot de passe</label>
+          <input
+            id="settings-new-password"
+            name="new-password"
+            type="password"
+            minLength={12}
+            autoComplete="new-password"
+            required
+          />
+          <label htmlFor="settings-password-confirmation">Confirmer le mot de passe</label>
+          <input
+            id="settings-password-confirmation"
+            name="password-confirmation"
+            type="password"
+            minLength={12}
+            autoComplete="new-password"
+            required
+          />
+          <p className="form-message error-message" role="alert">
+            {error}
+          </p>
+          {notice !== "" && (
+            <p className="settings-notice" role="status">
+              {notice}
+            </p>
+          )}
+          <button type="submit" disabled={submitting}>
+            {submitting ? "Enregistrement…" : "Enregistrer les modifications"}
+          </button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
+function Dashboard({
+  user,
+  onUserChanged,
+  onLogout,
+  onSessionExpired,
+}: {
+  user: User;
+  onUserChanged: (user: User) => void;
+  onLogout: () => Promise<void>;
+  onSessionExpired: () => void;
+}) {
+  const [view, setView] = useState<"files" | "settings">("files");
+  const [filesRevision, setFilesRevision] = useState(0);
+  const handleFilesChanged = useCallback(() => {
+    setFilesRevision((value) => value + 1);
+  }, []);
+
+  return (
     <main className="app-shell">
       <a className="skip-link" href="#dashboard-content">
         Aller au contenu principal
@@ -400,37 +620,36 @@ function Dashboard({
           <BrandMark />
           <span>World of Seeds</span>
         </div>
-        <div className="account-menu">
-          <span>{user.username}</span>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void handleLogout()}
-            disabled={loggingOut}
-          >
-            {loggingOut ? "Déconnexion…" : "Déconnexion"}
-          </button>
-          <p className="logout-error" role="alert">
-            {logoutError}
-          </p>
-        </div>
+        <AccountMenu
+          user={user}
+          onOpenSettings={() => setView("settings")}
+          onLogout={onLogout}
+          onSessionExpired={onSessionExpired}
+        />
       </header>
       <div id="dashboard-content" className="dashboard-content" tabIndex={-1}>
-        <div className="dashboard-heading">
-          <p className="eyebrow">Tableau de bord</p>
-          <h1 className="dashboard-title">Bonjour, {user.username}</h1>
-        </div>
-        <FileBrowser
-          onFilesChanged={handleFilesChanged}
-          onSessionExpired={onSessionExpired}
-          revision={filesRevision}
-        />
-        <TrashBrowser
-          onFilesChanged={handleFilesChanged}
-          onSessionExpired={onSessionExpired}
-          revision={filesRevision}
-        />
-        {user.is_admin && <AdminPanel onSessionExpired={onSessionExpired} />}
+        {view === "settings" ? (
+          <AccountSettingsPage
+            user={user}
+            onBack={() => setView("files")}
+            onChanged={onUserChanged}
+            onSessionExpired={onSessionExpired}
+          />
+        ) : (
+          <>
+            <FileBrowser
+              onFilesChanged={handleFilesChanged}
+              onSessionExpired={onSessionExpired}
+              revision={filesRevision}
+            />
+            <TrashBrowser
+              onFilesChanged={handleFilesChanged}
+              onSessionExpired={onSessionExpired}
+              revision={filesRevision}
+            />
+            {user.is_admin && <AdminPanel onSessionExpired={onSessionExpired} />}
+          </>
+        )}
       </div>
     </main>
   );
@@ -511,6 +730,7 @@ export function App() {
   return (
     <Dashboard
       user={auth.user}
+      onUserChanged={(user) => setAuth({ status: "authenticated", user })}
       onLogout={logout}
       onSessionExpired={handleSessionExpired}
     />
