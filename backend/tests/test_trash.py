@@ -46,7 +46,7 @@ def csrf_header(client: AsyncClient) -> dict[str, str]:
 
 
 def workspace(data_root: Path, username: str = "thomas") -> Path:
-    return data_root / "users" / username
+    return data_root / username
 
 
 @pytest.mark.asyncio

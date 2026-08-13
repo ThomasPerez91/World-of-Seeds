@@ -1,12 +1,13 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.security import (
     DUMMY_PASSWORD_HASH,
+    canonical_username,
     generate_temporary_password,
     generate_temporary_username,
     generate_token,
@@ -98,8 +99,10 @@ async def authenticate(
     now = datetime.now(UTC)
     try:
         username = normalize_username(username_input)
+        username_key = canonical_username(username)
     except ValueError:
-        username = username_input.strip().lower()[:32]
+        username = username_input.strip()[:32]
+        username_key = username.lower()
 
     key = throttle_key(client_ip, username)
     throttle = await db.scalar(
@@ -113,7 +116,7 @@ async def authenticate(
         verify_password(password, DUMMY_PASSWORD_HASH)
         raise AuthenticationLockedError
 
-    user = await db.scalar(select(User).where(User.username == username))
+    user = await db.scalar(select(User).where(func.lower(User.username) == username_key))
     encoded_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
     password_matches = verify_password(password, encoded_hash)
 
@@ -176,30 +179,36 @@ async def change_credentials(
 
     username = normalize_username(username_input)
     existing_user = await db.scalar(
-        select(User).where(User.username == username, User.id != locked_user.id)
+        select(User).where(
+            func.lower(User.username) == canonical_username(username),
+            User.id != locked_user.id,
+        )
     )
     if existing_user is not None:
         raise UsernameUnavailableError
 
     now = datetime.now(UTC)
     old_username = locked_user.username
-    with workspace_manager.rename_for_transaction(old_username, username):
-        locked_user.username = username
-        locked_user.password_hash = hash_password(new_password)
-        locked_user.must_change_credentials = False
-        locked_user.updated_at = now
+    try:
+        with workspace_manager.rename_for_transaction(old_username, username):
+            locked_user.username = username
+            locked_user.password_hash = hash_password(new_password)
+            locked_user.must_change_credentials = False
+            locked_user.updated_at = now
 
-        await db.execute(
-            update(UserSession)
-            .where(UserSession.user_id == locked_user.id, UserSession.revoked_at.is_(None))
-            .values(revoked_at=now)
-        )
-        tokens = issue_session(db, user=locked_user, settings=settings, now=now)
-        try:
-            await db.commit()
-        except BaseException:
-            await db.rollback()
-            raise
+            await db.execute(
+                update(UserSession)
+                .where(UserSession.user_id == locked_user.id, UserSession.revoked_at.is_(None))
+                .values(revoked_at=now)
+            )
+            tokens = issue_session(db, user=locked_user, settings=settings, now=now)
+            try:
+                await db.commit()
+            except BaseException:
+                await db.rollback()
+                raise
+    except IntegrityError as exc:
+        raise UsernameUnavailableError from exc
     return tokens
 
 

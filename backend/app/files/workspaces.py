@@ -1,13 +1,14 @@
 import os
 import stat
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from pathlib import Path
 
 from app.auth.security import normalize_username
 from app.files.atomic import AtomicRenameUnavailableError, rename_without_replacement
 
 WORKSPACE_DIRECTORIES = ("downloads", "watch")
+LEGACY_USERS_DIRECTORY = "users"
 DIRECTORY_MODE = 0o750
 DIRECTORY_OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 
@@ -36,9 +37,10 @@ def _rename_without_replacement(
     source: str,
     destination: str,
     *,
-    directory_fd: int,
+    source_directory_fd: int,
+    destination_directory_fd: int,
 ) -> None:
-    """Atomically rename a workspace without replacing a concurrent destination.
+    """Atomically rename without replacing an existing destination.
 
     The production target is Linux. Failing closed when ``renameat2`` is unavailable
     is safer than emulating it with a check followed by ``os.rename``.
@@ -48,19 +50,15 @@ def _rename_without_replacement(
         rename_without_replacement(
             source,
             destination,
-            source_directory_fd=directory_fd,
-            destination_directory_fd=directory_fd,
+            source_directory_fd=source_directory_fd,
+            destination_directory_fd=destination_directory_fd,
         )
     except AtomicRenameUnavailableError as exc:
         raise WorkspaceError("Atomic workspace rename is unavailable") from exc
 
 
 class WorkspaceManager:
-    """Manage user directories without following symlinks.
-
-    All mutable names are single validated path components. Directory descriptors and
-    ``*at`` syscalls keep operations anchored below the configured data root.
-    """
+    """Manage direct ``/data/<username>`` workspaces without following symlinks."""
 
     def __init__(self, data_root: Path) -> None:
         self._data_root = data_root
@@ -76,44 +74,57 @@ class WorkspaceManager:
         return username
 
     @contextmanager
-    def _users_directory(self, *, create: bool) -> Iterator[int]:
+    def _data_directory(self) -> Iterator[int]:
         try:
             data_fd = os.open(self._data_root, DIRECTORY_OPEN_FLAGS)
         except OSError as exc:
             raise WorkspaceUnsafeEntryError("The configured data root is unavailable") from exc
-
         try:
-            if create:
-                with suppress(FileExistsError):
-                    os.mkdir("users", mode=DIRECTORY_MODE, dir_fd=data_fd)
-            try:
-                users_fd = os.open("users", DIRECTORY_OPEN_FLAGS, dir_fd=data_fd)
-            except FileNotFoundError as exc:
-                raise WorkspaceMissingError("The users directory does not exist") from exc
-            except OSError as exc:
-                raise WorkspaceUnsafeEntryError("The users entry is not a safe directory") from exc
+            yield data_fd
         finally:
             os.close(data_fd)
 
+    @staticmethod
+    def _open_directory(parent_fd: int, name: str, *, missing_message: str) -> int:
         try:
-            yield users_fd
-        finally:
-            os.close(users_fd)
+            return os.open(name, DIRECTORY_OPEN_FLAGS, dir_fd=parent_fd)
+        except FileNotFoundError as exc:
+            raise WorkspaceMissingError(missing_message) from exc
+        except OSError as exc:
+            raise WorkspaceUnsafeEntryError("The workspace entry is not a safe directory") from exc
 
     @staticmethod
-    def _open_workspace(users_fd: int, username: str) -> int:
+    def _inspect_directory(
+        parent_fd: int,
+        name: str,
+        *,
+        missing_message: str,
+    ) -> os.stat_result:
         try:
-            return os.open(username, DIRECTORY_OPEN_FLAGS, dir_fd=users_fd)
+            result = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
         except FileNotFoundError as exc:
-            raise WorkspaceMissingError("The user workspace does not exist") from exc
+            raise WorkspaceMissingError(missing_message) from exc
         except OSError as exc:
-            raise WorkspaceUnsafeEntryError("The workspace is not a safe directory") from exc
+            raise WorkspaceUnsafeEntryError("The workspace cannot be inspected safely") from exc
+        if not stat.S_ISDIR(result.st_mode):
+            raise WorkspaceUnsafeEntryError("The workspace entry is not a directory")
+        return result
+
+    @classmethod
+    def _assert_ready_fd(cls, workspace_fd: int) -> None:
+        for directory in WORKSPACE_DIRECTORIES:
+            child_fd = cls._open_directory(
+                workspace_fd,
+                directory,
+                missing_message="A required workspace directory is missing",
+            )
+            os.close(child_fd)
 
     def create(self, username: str) -> None:
         safe_name = self._validate_name(username)
-        with self._users_directory(create=True) as users_fd:
+        with self._data_directory() as data_fd:
             try:
-                os.mkdir(safe_name, mode=DIRECTORY_MODE, dir_fd=users_fd)
+                os.mkdir(safe_name, mode=DIRECTORY_MODE, dir_fd=data_fd)
             except FileExistsError as exc:
                 raise WorkspaceAlreadyExistsError("The user workspace already exists") from exc
             except OSError as exc:
@@ -122,7 +133,11 @@ class WorkspaceManager:
             workspace_fd: int | None = None
             created_children: list[str] = []
             try:
-                workspace_fd = self._open_workspace(users_fd, safe_name)
+                workspace_fd = self._open_directory(
+                    data_fd,
+                    safe_name,
+                    missing_message="The newly created workspace is missing",
+                )
                 for directory in WORKSPACE_DIRECTORIES:
                     os.mkdir(directory, mode=DIRECTORY_MODE, dir_fd=workspace_fd)
                     created_children.append(directory)
@@ -131,7 +146,7 @@ class WorkspaceManager:
                     if workspace_fd is not None:
                         for directory in reversed(created_children):
                             os.rmdir(directory, dir_fd=workspace_fd)
-                    os.rmdir(safe_name, dir_fd=users_fd)
+                    os.rmdir(safe_name, dir_fd=data_fd)
                 except OSError as cleanup_error:
                     raise WorkspaceCompensationError(
                         "Unable to clean an incomplete workspace"
@@ -145,20 +160,17 @@ class WorkspaceManager:
 
     def assert_ready(self, username: str) -> None:
         with self.open_workspace(username) as workspace_fd:
-            for directory in WORKSPACE_DIRECTORIES:
-                try:
-                    child_fd = os.open(directory, DIRECTORY_OPEN_FLAGS, dir_fd=workspace_fd)
-                except OSError as exc:
-                    raise WorkspaceUnsafeEntryError(
-                        "A required workspace directory is unavailable"
-                    ) from exc
-                os.close(child_fd)
+            self._assert_ready_fd(workspace_fd)
 
     @contextmanager
     def open_workspace(self, username: str) -> Iterator[int]:
         safe_name = self._validate_name(username)
-        with self._users_directory(create=False) as users_fd:
-            workspace_fd = self._open_workspace(users_fd, safe_name)
+        with self._data_directory() as data_fd:
+            workspace_fd = self._open_directory(
+                data_fd,
+                safe_name,
+                missing_message="The user workspace does not exist",
+            )
             try:
                 yield workspace_fd
             finally:
@@ -166,15 +178,23 @@ class WorkspaceManager:
 
     def remove_empty(self, username: str) -> None:
         safe_name = self._validate_name(username)
-        with self._users_directory(create=False) as users_fd:
-            workspace_fd = self._open_workspace(users_fd, safe_name)
+        with self._data_directory() as data_fd:
+            workspace_fd = self._open_directory(
+                data_fd,
+                safe_name,
+                missing_message="The user workspace does not exist",
+            )
             try:
                 entries = set(os.listdir(workspace_fd))
                 if entries != set(WORKSPACE_DIRECTORIES):
                     raise WorkspaceCompensationError("The workspace contains unexpected entries")
 
                 for directory in WORKSPACE_DIRECTORIES:
-                    child_fd = self._open_child_directory(workspace_fd, directory)
+                    child_fd = self._open_directory(
+                        workspace_fd,
+                        directory,
+                        missing_message="A required workspace directory is missing",
+                    )
                     try:
                         if os.listdir(child_fd):
                             raise WorkspaceCompensationError("A workspace directory is not empty")
@@ -186,16 +206,9 @@ class WorkspaceManager:
             finally:
                 os.close(workspace_fd)
             try:
-                os.rmdir(safe_name, dir_fd=users_fd)
+                os.rmdir(safe_name, dir_fd=data_fd)
             except OSError as exc:
                 raise WorkspaceCompensationError("Unable to remove the workspace") from exc
-
-    @staticmethod
-    def _open_child_directory(workspace_fd: int, name: str) -> int:
-        try:
-            return os.open(name, DIRECTORY_OPEN_FLAGS, dir_fd=workspace_fd)
-        except OSError as exc:
-            raise WorkspaceUnsafeEntryError("A workspace child is not a safe directory") from exc
 
     def rename(self, old_username: str, new_username: str) -> None:
         old_name = self._validate_name(old_username)
@@ -204,16 +217,14 @@ class WorkspaceManager:
             self.assert_ready(old_name)
             return
 
-        with self._users_directory(create=False) as users_fd:
+        with self._data_directory() as data_fd:
+            source = self._inspect_directory(
+                data_fd,
+                old_name,
+                missing_message="The source workspace does not exist",
+            )
             try:
-                source = os.stat(old_name, dir_fd=users_fd, follow_symlinks=False)
-            except FileNotFoundError as exc:
-                raise WorkspaceMissingError("The source workspace does not exist") from exc
-            if not stat.S_ISDIR(source.st_mode):
-                raise WorkspaceUnsafeEntryError("The source workspace is not a directory")
-
-            try:
-                os.stat(new_name, dir_fd=users_fd, follow_symlinks=False)
+                os.stat(new_name, dir_fd=data_fd, follow_symlinks=False)
             except FileNotFoundError:
                 pass
             else:
@@ -223,7 +234,8 @@ class WorkspaceManager:
                 _rename_without_replacement(
                     old_name,
                     new_name,
-                    directory_fd=users_fd,
+                    source_directory_fd=data_fd,
+                    destination_directory_fd=data_fd,
                 )
             except FileExistsError as exc:
                 raise WorkspaceAlreadyExistsError(
@@ -233,23 +245,147 @@ class WorkspaceManager:
                 raise WorkspaceError("Unable to rename the user workspace") from exc
 
             try:
-                destination = os.stat(new_name, dir_fd=users_fd, follow_symlinks=False)
-            except OSError as exc:
-                self._rollback_rename(users_fd, new_name, old_name)
+                destination = self._inspect_directory(
+                    data_fd,
+                    new_name,
+                    missing_message="The renamed workspace is missing",
+                )
+            except WorkspaceError as exc:
+                self._rollback_rename(data_fd, new_name, data_fd, old_name)
                 raise WorkspaceUnsafeEntryError("The renamed workspace cannot be verified") from exc
 
-            if (
-                not stat.S_ISDIR(destination.st_mode)
-                or destination.st_dev != source.st_dev
-                or destination.st_ino != source.st_ino
-            ):
-                self._rollback_rename(users_fd, new_name, old_name)
+            if destination.st_dev != source.st_dev or destination.st_ino != source.st_ino:
+                self._rollback_rename(data_fd, new_name, data_fd, old_name)
                 raise WorkspaceUnsafeEntryError("The workspace changed during rename")
 
+    def migrate_legacy(self, username: str) -> bool:
+        """Move ``/data/users/<username>`` to ``/data/<username>`` exactly once."""
+
+        safe_name = self._validate_name(username)
+        with self._data_directory() as data_fd:
+            try:
+                self._inspect_directory(
+                    data_fd,
+                    safe_name,
+                    missing_message="The direct workspace does not exist",
+                )
+                direct_exists = True
+            except WorkspaceMissingError:
+                direct_exists = False
+
+            try:
+                legacy_users_fd = self._open_directory(
+                    data_fd,
+                    LEGACY_USERS_DIRECTORY,
+                    missing_message="The legacy users directory does not exist",
+                )
+            except WorkspaceMissingError:
+                if not direct_exists:
+                    raise WorkspaceMissingError("No workspace exists for this user") from None
+                self.assert_ready(safe_name)
+                return False
+
+            try:
+                try:
+                    legacy_stat = self._inspect_directory(
+                        legacy_users_fd,
+                        safe_name,
+                        missing_message="The legacy workspace does not exist",
+                    )
+                    legacy_exists = True
+                except WorkspaceMissingError:
+                    legacy_stat = None
+                    legacy_exists = False
+
+                if direct_exists and legacy_exists:
+                    raise WorkspaceAlreadyExistsError(
+                        "Both direct and legacy workspaces exist for this user"
+                    )
+                if direct_exists:
+                    self.assert_ready(safe_name)
+                    return False
+                if not legacy_exists or legacy_stat is None:
+                    raise WorkspaceMissingError("No workspace exists for this user")
+
+                legacy_workspace_fd = self._open_directory(
+                    legacy_users_fd,
+                    safe_name,
+                    missing_message="The legacy workspace does not exist",
+                )
+                try:
+                    self._assert_ready_fd(legacy_workspace_fd)
+                finally:
+                    os.close(legacy_workspace_fd)
+
+                try:
+                    _rename_without_replacement(
+                        safe_name,
+                        safe_name,
+                        source_directory_fd=legacy_users_fd,
+                        destination_directory_fd=data_fd,
+                    )
+                except FileExistsError as exc:
+                    raise WorkspaceAlreadyExistsError(
+                        "The direct workspace appeared during migration"
+                    ) from exc
+                except OSError as exc:
+                    raise WorkspaceError("Unable to migrate the legacy workspace") from exc
+
+                try:
+                    migrated = self._inspect_directory(
+                        data_fd,
+                        safe_name,
+                        missing_message="The migrated workspace is missing",
+                    )
+                except WorkspaceError as exc:
+                    self._rollback_rename(data_fd, safe_name, legacy_users_fd, safe_name)
+                    raise WorkspaceUnsafeEntryError(
+                        "The migrated workspace cannot be verified"
+                    ) from exc
+                if migrated.st_dev != legacy_stat.st_dev or migrated.st_ino != legacy_stat.st_ino:
+                    self._rollback_rename(data_fd, safe_name, legacy_users_fd, safe_name)
+                    raise WorkspaceUnsafeEntryError("The workspace changed during migration")
+                return True
+            finally:
+                os.close(legacy_users_fd)
+
+    def remove_legacy_root_if_empty(self) -> bool:
+        """Remove only an empty, real ``/data/users`` directory."""
+
+        with self._data_directory() as data_fd:
+            try:
+                users_fd = self._open_directory(
+                    data_fd,
+                    LEGACY_USERS_DIRECTORY,
+                    missing_message="The legacy users directory does not exist",
+                )
+            except WorkspaceMissingError:
+                return False
+            try:
+                if os.listdir(users_fd):
+                    return False
+            finally:
+                os.close(users_fd)
+            try:
+                os.rmdir(LEGACY_USERS_DIRECTORY, dir_fd=data_fd)
+            except OSError as exc:
+                raise WorkspaceError("Unable to remove the empty legacy directory") from exc
+            return True
+
     @staticmethod
-    def _rollback_rename(users_fd: int, source: str, destination: str) -> None:
+    def _rollback_rename(
+        source_directory_fd: int,
+        source: str,
+        destination_directory_fd: int,
+        destination: str,
+    ) -> None:
         try:
-            _rename_without_replacement(source, destination, directory_fd=users_fd)
+            _rename_without_replacement(
+                source,
+                destination,
+                source_directory_fd=source_directory_fd,
+                destination_directory_fd=destination_directory_fd,
+            )
         except (OSError, WorkspaceError) as exc:
             raise WorkspaceCompensationError("Unable to roll back workspace rename") from exc
 

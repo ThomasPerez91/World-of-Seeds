@@ -46,7 +46,7 @@ async def test_user_lists_root_and_nested_directory_metadata(
     data_root: Path,
 ) -> None:
     await create_workspace_user(db_session, data_root)
-    downloads = data_root / "users" / "thomas" / "downloads"
+    downloads = data_root / "thomas" / "downloads"
     folder = downloads / "Movies"
     folder.mkdir()
     movie = downloads / "movie.mkv"
@@ -96,7 +96,7 @@ async def test_symlink_is_visible_but_cannot_be_opened(
     tmp_path: Path,
 ) -> None:
     await create_workspace_user(db_session, data_root)
-    downloads = data_root / "users" / "thomas" / "downloads"
+    downloads = data_root / "thomas" / "downloads"
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "secret.txt").write_text("secret", encoding="utf-8")
@@ -150,7 +150,7 @@ async def test_navigation_cannot_cross_into_another_user_workspace(
 ) -> None:
     await create_workspace_user(db_session, data_root, username="thomas")
     WorkspaceManager(data_root).create("other")
-    secret = data_root / "users" / "other" / "downloads" / "secret.txt"
+    secret = data_root / "other" / "downloads" / "secret.txt"
     secret.write_text("secret", encoding="utf-8")
     await login(client, "thomas", "correct-horse-battery")
 
@@ -167,7 +167,7 @@ async def test_missing_and_regular_file_paths_are_not_listed_as_directories(
     data_root: Path,
 ) -> None:
     await create_workspace_user(db_session, data_root)
-    downloads = data_root / "users" / "thomas" / "downloads"
+    downloads = data_root / "thomas" / "downloads"
     (downloads / "movie.mkv").write_bytes(b"video")
     await login(client, "thomas", "correct-horse-battery")
 
