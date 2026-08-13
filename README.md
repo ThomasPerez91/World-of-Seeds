@@ -16,6 +16,7 @@ Les capacités fonctionnelles principales de la V1 sont en place :
 - téléchargement en flux avec HTTP Range, reprise, ETag et Last-Modified ;
 - renommage et déplacement atomiques sans écrasement, avec confirmations dans l’interface ;
 - corbeille privée par utilisateur, restauration avec détection de collision et purge définitive ;
+- pages d’administration dédiées aux utilisateurs, au stockage global et au nettoyage des corbeilles ;
 - image Docker unique pour l'API et le frontend ;
 - montage hôte limité à `/srv/seedbox:/data` ;
 - contrôles de qualité automatisés.

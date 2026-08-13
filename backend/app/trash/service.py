@@ -3,7 +3,7 @@ import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
@@ -12,6 +12,8 @@ from app.models import TrashEntry, User
 from app.trash.filesystem import TrashFilesystem, TrashFilesystemEntry, TrashStorageMissingError
 
 MAX_TRASH_ENTRIES = 1000
+MAX_ADMIN_TRASH_ENTRIES = 5000
+MAX_ADMIN_PURGE_BATCH = 1000
 
 
 class TrashServiceError(RuntimeError):
@@ -40,6 +42,18 @@ class TrashListing:
     truncated: bool
 
 
+@dataclass(frozen=True, slots=True)
+class AdminTrashEntry:
+    entry: TrashEntry
+    username: str
+
+
+@dataclass(frozen=True, slots=True)
+class AdminTrashListing:
+    entries: list[AdminTrashEntry]
+    truncated: bool
+
+
 class TrashService:
     def __init__(self, db: AsyncSession, filesystem: TrashFilesystem) -> None:
         self._db = db
@@ -59,6 +73,23 @@ class TrashService:
         return TrashListing(
             entries=records[:MAX_TRASH_ENTRIES],
             truncated=len(records) > MAX_TRASH_ENTRIES,
+        )
+
+    async def list_all_entries(self) -> AdminTrashListing:
+        rows = (
+            await self._db.execute(
+                select(TrashEntry, User.username)
+                .join(User, User.id == TrashEntry.user_id)
+                .order_by(TrashEntry.deleted_at.desc(), TrashEntry.id.desc())
+                .limit(MAX_ADMIN_TRASH_ENTRIES + 1)
+            )
+        ).all()
+        return AdminTrashListing(
+            entries=[
+                AdminTrashEntry(entry=entry, username=username)
+                for entry, username in rows[:MAX_ADMIN_TRASH_ENTRIES]
+            ],
+            truncated=len(rows) > MAX_ADMIN_TRASH_ENTRIES,
         )
 
     async def move_to_trash(self, user: User, raw_path: str) -> TrashEntry:
@@ -151,9 +182,40 @@ class TrashService:
 
     async def purge(self, user_id: uuid.UUID, entry_id: uuid.UUID) -> None:
         record = await self._locked_entry(user_id, entry_id)
+        await self._purge_record(record)
+
+    async def purge_any(self, entry_id: uuid.UUID) -> None:
+        record = await self._db.scalar(
+            select(TrashEntry).where(TrashEntry.id == entry_id).with_for_update()
+        )
+        if record is None:
+            raise TrashEntryNotFoundError("Trash entry not found")
+        await self._purge_record(record)
+
+    async def purge_batch(self) -> tuple[int, int]:
+        entry_ids = list(
+            (
+                await self._db.scalars(
+                    select(TrashEntry.id)
+                    .order_by(TrashEntry.deleted_at.asc(), TrashEntry.id.asc())
+                    .limit(MAX_ADMIN_PURGE_BATCH)
+                )
+            ).all()
+        )
+        purged = 0
+        for entry_id in entry_ids:
+            try:
+                await self.purge_any(entry_id)
+            except TrashEntryNotFoundError:
+                continue
+            purged += 1
+        remaining = await self._db.scalar(select(func.count()).select_from(TrashEntry))
+        return purged, int(remaining or 0)
+
+    async def _purge_record(self, record: TrashEntry) -> None:
         filesystem_entry = self._filesystem_entry(record)
         with suppress(TrashStorageMissingError):
-            await run_in_threadpool(self._filesystem.purge, user_id, filesystem_entry)
+            await run_in_threadpool(self._filesystem.purge, record.user_id, filesystem_entry)
         await self._db.delete(record)
         try:
             await self._db.commit()
