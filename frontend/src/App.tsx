@@ -6,7 +6,11 @@ import {
   useState,
 } from "react";
 
-import { api, ApiError, type GeneratedCredentials, type User } from "./api/client";
+import { api, ApiError, type User } from "./api/client";
+import { type AdminView } from "./features/admin/AdminPageShell";
+import { AdminStoragePage } from "./features/admin/AdminStoragePage";
+import { AdminTrashPage } from "./features/admin/AdminTrashPage";
+import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { FileBrowser } from "./features/files/FileBrowser";
 import { TrashBrowser } from "./features/files/TrashBrowser";
 
@@ -221,221 +225,15 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
   );
 }
 
-function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
-  const [users, setUsers] = useState<User[]>([]);
-  const [credentials, setCredentials] = useState<GeneratedCredentials | null>(null);
-  const [pendingDeletion, setPendingDeletion] = useState<User | null>(null);
-  const [error, setError] = useState("");
-  const [generating, setGenerating] = useState(false);
-  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
-
-  useEffect(() => {
-    void api
-      .listUsers()
-      .then(setUsers)
-      .catch((caught: unknown) => {
-        if (caught instanceof ApiError && caught.status === 401) {
-          onSessionExpired();
-          return;
-        }
-        setError("Impossible de charger les comptes.");
-      });
-  }, [onSessionExpired]);
-
-  async function generateUser() {
-    setGenerating(true);
-    setError("");
-    setCredentials(null);
-    try {
-      const generated = await api.createUser();
-      setCredentials(generated);
-      setUsers((current) => [generated.user, ...current]);
-    } catch (caught) {
-      if (caught instanceof ApiError && caught.status === 401) {
-        onSessionExpired();
-        return;
-      }
-      setError("Impossible de générer le compte.");
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  async function setActive(account: User, isActive: boolean) {
-    setUpdatingUserId(account.id);
-    setError("");
-    try {
-      const updated = await api.setUserActive(account.id, isActive);
-      setUsers((current) =>
-        current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
-      );
-    } catch (caught) {
-      if (caught instanceof ApiError && caught.status === 401) {
-        onSessionExpired();
-        return;
-      }
-      setError("Impossible de modifier l’accès de cet utilisateur.");
-    } finally {
-      setUpdatingUserId(null);
-    }
-  }
-
-  async function confirmDeletion() {
-    if (pendingDeletion === null) return;
-    setUpdatingUserId(pendingDeletion.id);
-    setError("");
-    try {
-      await api.deleteUser(pendingDeletion.id);
-      setUsers((current) => current.filter((candidate) => candidate.id !== pendingDeletion.id));
-      setPendingDeletion(null);
-    } catch (caught) {
-      if (caught instanceof ApiError && caught.status === 401) {
-        onSessionExpired();
-        return;
-      }
-      setError("Impossible de supprimer l’accès de cet utilisateur.");
-    } finally {
-      setUpdatingUserId(null);
-    }
-  }
-
-  async function copy(value: string) {
-    try {
-      if (navigator.clipboard === undefined) {
-        throw new Error("Clipboard API unavailable");
-      }
-      await navigator.clipboard.writeText(value);
-    } catch {
-      setError("Copie automatique indisponible. Sélectionne la valeur manuellement.");
-    }
-  }
-
-  return (
-    <section className="admin-section" aria-labelledby="admin-title">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Administration</p>
-          <h2 id="admin-title">Comptes utilisateurs</h2>
-        </div>
-        <div className="generator-controls">
-          <button
-            type="button"
-            className="compact-button"
-            onClick={generateUser}
-            disabled={generating}
-          >
-            {generating ? "Génération…" : "Générer un utilisateur"}
-          </button>
-        </div>
-      </div>
-
-      {credentials !== null && (
-        <div className="credential-reveal" role="status">
-          <strong>À transmettre maintenant — le mot de passe ne sera plus affiché.</strong>
-          <div className="credential-row">
-            <span>Utilisateur</span>
-            <code>{credentials.user.username}</code>
-            <button
-              type="button"
-              className="text-button"
-              onClick={() => void copy(credentials.user.username)}
-            >
-              Copier
-            </button>
-          </div>
-          <div className="credential-row">
-            <span>Mot de passe</span>
-            <code>{credentials.initial_password}</code>
-            <button
-              type="button"
-              className="text-button"
-              onClick={() => void copy(credentials.initial_password)}
-            >
-              Copier
-            </button>
-          </div>
-        </div>
-      )}
-
-      <p className="form-message error-message" role="alert">
-        {error}
-      </p>
-      <div className="user-list">
-        {users.map((account) => (
-            <div className="user-row" key={account.id}>
-              <div className="avatar" aria-hidden="true">
-                {account.username.slice(0, 1).toUpperCase()}
-              </div>
-              <div>
-                <strong>{account.username}</strong>
-                <span>
-                  {account.is_admin
-                    ? "Administrateur"
-                    : account.must_change_credentials
-                      ? "Invitation en attente"
-                      : "Utilisateur actif"}
-                </span>
-              </div>
-              <div className="user-row-actions">
-                <span className={account.is_active ? "status-pill" : "status-pill inactive"}>
-                  {account.is_active ? "Actif" : "Suspendu"}
-                </span>
-                {!account.is_admin && (
-                  <>
-                    <button
-                      type="button"
-                      className="secondary-button compact-button"
-                      disabled={updatingUserId === account.id}
-                      onClick={() => void setActive(account, !account.is_active)}
-                    >
-                      {account.is_active ? "Suspendre" : "Réactiver"}
-                    </button>
-                    <button
-                      type="button"
-                      className="danger-outline-button compact-button"
-                      disabled={updatingUserId === account.id}
-                      onClick={() => setPendingDeletion(account)}
-                    >
-                      Supprimer l’accès
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
-      </div>
-      {pendingDeletion !== null && (
-        <section className="admin-confirmation" aria-labelledby="delete-user-title">
-          <div>
-            <strong id="delete-user-title">Supprimer l’accès de {pendingDeletion.username} ?</strong>
-            <p>Le compte sera désactivé, ses sessions fermées et son dossier sera conservé.</p>
-          </div>
-          <div className="dialog-actions">
-            <button type="button" className="secondary-button" onClick={() => setPendingDeletion(null)}>
-              Annuler
-            </button>
-            <button
-              type="button"
-              className="danger-button"
-              disabled={updatingUserId === pendingDeletion.id}
-              onClick={() => void confirmDeletion()}
-            >
-              {updatingUserId === pendingDeletion.id ? "Suppression…" : "Confirmer la suppression"}
-            </button>
-          </div>
-        </section>
-      )}
-    </section>
-  );
-}
-
 function AccountMenu({
   user,
+  onOpenAdmin,
   onOpenSettings,
   onLogout,
   onSessionExpired,
 }: {
   user: User;
+  onOpenAdmin: () => void;
   onOpenSettings: () => void;
   onLogout: () => Promise<void>;
   onSessionExpired: () => void;
@@ -503,6 +301,18 @@ function AccountMenu({
       </button>
       {open && (
         <div id="account-dropdown" className="account-dropdown">
+          {user.is_admin && (
+            <button
+              type="button"
+              className="account-dropdown-item"
+              onClick={() => {
+                setOpen(false);
+                onOpenAdmin();
+              }}
+            >
+              Administration
+            </button>
+          )}
           <button
             type="button"
             className="account-dropdown-item"
@@ -672,7 +482,7 @@ function Dashboard({
   onLogout: () => Promise<void>;
   onSessionExpired: () => void;
 }) {
-  const [view, setView] = useState<"files" | "settings">("files");
+  const [view, setView] = useState<"files" | "settings" | AdminView>("files");
   const [filesRevision, setFilesRevision] = useState(0);
   const handleFilesChanged = useCallback(() => {
     setFilesRevision((value) => value + 1);
@@ -690,6 +500,7 @@ function Dashboard({
         </div>
         <AccountMenu
           user={user}
+          onOpenAdmin={() => setView("admin-users")}
           onOpenSettings={() => setView("settings")}
           onLogout={onLogout}
           onSessionExpired={onSessionExpired}
@@ -701,6 +512,24 @@ function Dashboard({
             user={user}
             onBack={() => setView("files")}
             onChanged={onUserChanged}
+            onSessionExpired={onSessionExpired}
+          />
+        ) : view === "admin-users" && user.is_admin ? (
+          <AdminUsersPage
+            onBack={() => setView("files")}
+            onNavigate={setView}
+            onSessionExpired={onSessionExpired}
+          />
+        ) : view === "admin-storage" && user.is_admin ? (
+          <AdminStoragePage
+            onBack={() => setView("files")}
+            onNavigate={setView}
+            onSessionExpired={onSessionExpired}
+          />
+        ) : view === "admin-trash" && user.is_admin ? (
+          <AdminTrashPage
+            onBack={() => setView("files")}
+            onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : (
@@ -715,7 +544,6 @@ function Dashboard({
               onSessionExpired={onSessionExpired}
               revision={filesRevision}
             />
-            {user.is_admin && <AdminPanel onSessionExpired={onSessionExpired} />}
           </>
         )}
       </div>

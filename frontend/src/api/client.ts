@@ -66,6 +66,28 @@ export interface TrashListing {
   truncated: boolean;
 }
 
+export interface AdminStorageOverview extends StorageUsage {
+  active_users: number;
+  suspended_users: number;
+  trash_entries: number;
+  known_trash_bytes: number;
+}
+
+export interface AdminTrashEntry extends TrashEntry {
+  user_id: string;
+  username: string;
+}
+
+export interface AdminTrashListing {
+  entries: AdminTrashEntry[];
+  truncated: boolean;
+}
+
+export interface AdminTrashPurgeResult {
+  purged: number;
+  remaining: number;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -172,6 +194,26 @@ export const api = {
 
   deleteUser(userId: string): Promise<void> {
     return request<void>(`/admin/users/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  getAdminStorage(): Promise<AdminStorageOverview> {
+    return request<AdminStorageOverview>("/admin/storage");
+  },
+
+  listAdminTrash(signal?: AbortSignal): Promise<AdminTrashListing> {
+    return request<AdminTrashListing>("/admin/trash", { signal });
+  },
+
+  purgeAdminTrash(entryId: string): Promise<void> {
+    return request<void>(`/admin/trash/${encodeURIComponent(entryId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  purgeAllAdminTrash(): Promise<AdminTrashPurgeResult> {
+    return request<AdminTrashPurgeResult>("/admin/trash", {
       method: "DELETE",
     });
   },

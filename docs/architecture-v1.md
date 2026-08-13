@@ -8,7 +8,7 @@ World of Seeds est une application privée, accessible d'abord par tunnel SSH. L
 /srv/seedbox  ->  /data
 ```
 
-Il ne monte ni la racine du serveur, ni `/var/run/docker.sock`, ni la configuration qBittorrent. Un utilisateur standard ne verra que sa propre racine logique. L'administrateur disposera d'une vue dédiée et explicite pour changer d'utilisateur.
+Il ne monte ni la racine du serveur, ni `/var/run/docker.sock`, ni la configuration qBittorrent. Chaque utilisateur, administrateur compris, ne parcourt que sa propre racine logique. Les pages d’administration exposent uniquement des agrégats, la gestion des comptes et les métadonnées nécessaires au nettoyage des corbeilles ; elles ne permettent pas de parcourir arbitrairement le dossier d’un autre compte.
 
 L'authentification protège les données et les API. Elle ne remplace pas la restriction réseau : lors d'une future exposition HTTPS, l'ordre des défenses sera pare-feu ou liste d'adresses autorisées, TLS, authentification, limitation des tentatives, puis autorisations applicatives.
 
@@ -102,6 +102,14 @@ docker compose exec app python -m app.cli create-admin --username admin
 Le mot de passe est saisi sans écho dans le terminal. Il ne transite pas par les variables d'environnement ou les logs Docker.
 
 La page de connexion sera la seule vue accessible anonymement. Cela limite l'exposition fonctionnelle, mais le caractère privé repose réellement sur la restriction réseau et les contrôles serveur, pas sur le fait de cacher du JavaScript au navigateur.
+
+L’administration est organisée en trois pages accessibles depuis le menu du compte :
+
+- **Utilisateurs** : génération des identifiants initiaux, suspension, réactivation et suppression logique d’un accès ;
+- **Stockage** : capacité globale issue de `fstatvfs`, comptes actifs ou suspendus et volume connu des fichiers en corbeille ;
+- **Corbeilles** : liste globale et suppression définitive individuelle ou par lot.
+
+La page Stockage ne parcourt jamais récursivement les espaces utilisateurs. Le volume des dossiers en corbeille reste donc volontairement inconnu. Un nettoyage global traite au maximum 1 000 éléments par requête, puis indique le nombre restant afin d’éviter une requête sans limite sur un serveur réel.
 
 ## Accès sûr aux fichiers
 

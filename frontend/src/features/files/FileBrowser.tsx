@@ -7,6 +7,7 @@ import {
   type FileEntry,
   type FileEntryKind,
 } from "../../api/client";
+import { formatBytes } from "../../utils/format";
 import {
   FileMutationDialog,
   type FileMutationAction,
@@ -19,21 +20,6 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 
 function initialPath(): string {
   return new URLSearchParams(window.location.search).get("path") ?? "";
-}
-
-function formatBytes(value: number | null): string {
-  if (value === null) {
-    return "—";
-  }
-  if (value === 0) {
-    return "0 o";
-  }
-  const units = ["o", "Ko", "Mo", "Go", "To", "Po"];
-  const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
-  const amount = value / 1024 ** exponent;
-  return `${new Intl.NumberFormat("fr-FR", {
-    maximumFractionDigits: amount >= 10 || exponent === 0 ? 0 : 1,
-  }).format(amount)} ${units[exponent]}`;
 }
 
 function typeLabel(entry: FileEntry): string {

@@ -1,23 +1,13 @@
 import { useEffect, useState } from "react";
 
 import { api, ApiError, type TrashEntry, type TrashListing } from "../../api/client";
+import { formatBytes } from "../../utils/format";
 import { FileDialog } from "./FileDialog";
 
 const deletedAtFormatter = new Intl.DateTimeFormat("fr-FR", {
   dateStyle: "medium",
   timeStyle: "short",
 });
-
-function formatBytes(value: number | null): string {
-  if (value === null) return "Taille du dossier non calculée";
-  if (value === 0) return "0 o";
-  const units = ["o", "Ko", "Mo", "Go", "To", "Po"];
-  const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
-  const amount = value / 1024 ** exponent;
-  return `${new Intl.NumberFormat("fr-FR", {
-    maximumFractionDigits: amount >= 10 || exponent === 0 ? 0 : 1,
-  }).format(amount)} ${units[exponent]}`;
-}
 
 function trashListingError(error: unknown): string {
   if (error instanceof ApiError && error.status === 503) {
@@ -275,7 +265,10 @@ export function TrashBrowser({
                 <h3 title={entry.name}>{entry.name}</h3>
                 <code title={entry.original_path}>{entry.original_path}</code>
                 <span>
-                  {entry.kind === "directory" ? "Dossier" : formatBytes(entry.size)} · supprimé le{" "}
+                  {entry.kind === "directory"
+                    ? formatBytes(entry.size, "Taille du dossier non calculée")
+                    : formatBytes(entry.size)}{" "}
+                  · supprimé le{" "}
                   <time dateTime={entry.deleted_at}>
                     {deletedAtFormatter.format(new Date(entry.deleted_at))}
                   </time>
