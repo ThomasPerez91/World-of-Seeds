@@ -10,7 +10,7 @@ services:
         condition: service_healthy
     environment:
       WOS_ENVIRONMENT: ${WOS_ENVIRONMENT:-production}
-      UVICORN_LOG_LEVEL: ${WOS_LOG_LEVEL:-INFO}
+      UVICORN_LOG_LEVEL: ${WOS_LOG_LEVEL:-info}
       WOS_COOKIE_SECURE: ${WOS_COOKIE_SECURE:-false}
       WOS_ALLOWED_HOSTS: '${WOS_ALLOWED_HOSTS:-["127.0.0.1","localhost"]}'
       WOS_DATA_ROOT: /data
