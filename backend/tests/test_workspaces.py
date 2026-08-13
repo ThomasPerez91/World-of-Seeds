@@ -18,7 +18,9 @@ def make_manager(tmp_path: Path) -> tuple[WorkspaceManager, Path]:
     return WorkspaceManager(data_root), data_root
 
 
-def test_workspace_is_created_and_renamed_without_touching_legacy_paths(tmp_path: Path) -> None:
+def test_workspace_is_created_directly_and_renamed_without_touching_qbittorrent_paths(
+    tmp_path: Path,
+) -> None:
     manager, data_root = make_manager(tmp_path)
     (data_root / "downloads").mkdir()
     (data_root / "watch").mkdir()
@@ -28,15 +30,15 @@ def test_workspace_is_created_and_renamed_without_touching_legacy_paths(tmp_path
     manager.create("guest-123abc")
     manager.rename("guest-123abc", "thomas")
 
-    workspace = data_root / "users" / "thomas"
+    workspace = data_root / "thomas"
     assert {entry.name for entry in workspace.iterdir()} == {"downloads", "watch"}
     assert legacy_marker.read_bytes() == b"legacy"
-    assert not (data_root / "users" / "guest-123abc").exists()
+    assert not (data_root / "guest-123abc").exists()
 
 
 @pytest.mark.parametrize(
     "username",
-    ["../../etc/passwd", "/tmp/outside", "alice/bob", "..", ".", "Alice", "bad\0name"],
+    ["../../etc/passwd", "/tmp/outside", "alice/bob", "..", ".", "bad name", "bad\0name"],
 )
 def test_workspace_names_are_single_normalized_components(tmp_path: Path, username: str) -> None:
     manager, data_root = make_manager(tmp_path)
@@ -47,14 +49,18 @@ def test_workspace_names_are_single_normalized_components(tmp_path: Path, userna
     assert list(data_root.iterdir()) == []
 
 
-def test_users_symlink_is_never_followed(tmp_path: Path) -> None:
+def test_workspace_symlink_is_never_adopted_or_renamed(tmp_path: Path) -> None:
     manager, data_root = make_manager(tmp_path)
     outside = tmp_path / "outside"
     outside.mkdir()
-    (data_root / "users").symlink_to(outside, target_is_directory=True)
+    (data_root / "thomas").symlink_to(outside, target_is_directory=True)
 
-    with pytest.raises(WorkspaceUnsafeEntryError):
+    with pytest.raises(WorkspaceAlreadyExistsError):
         manager.create("thomas")
+    with pytest.raises(WorkspaceUnsafeEntryError):
+        manager.assert_ready("thomas")
+    with pytest.raises(WorkspaceUnsafeEntryError):
+        manager.rename("thomas", "renamed")
 
     assert list(outside.iterdir()) == []
 
@@ -72,29 +78,10 @@ def test_configured_data_root_symlink_is_rejected(tmp_path: Path) -> None:
     assert list(real_data_root.iterdir()) == []
 
 
-def test_workspace_symlink_is_never_adopted_or_renamed(tmp_path: Path) -> None:
-    manager, data_root = make_manager(tmp_path)
-    users = data_root / "users"
-    users.mkdir()
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (users / "thomas").symlink_to(outside, target_is_directory=True)
-
-    with pytest.raises(WorkspaceAlreadyExistsError):
-        manager.create("thomas")
-    with pytest.raises(WorkspaceUnsafeEntryError):
-        manager.assert_ready("thomas")
-    with pytest.raises(WorkspaceUnsafeEntryError):
-        manager.rename("thomas", "renamed")
-
-    assert (users / "thomas").is_symlink()
-    assert list(outside.iterdir()) == []
-
-
 def test_workspace_child_symlink_is_never_followed(tmp_path: Path) -> None:
     manager, data_root = make_manager(tmp_path)
     manager.create("thomas")
-    downloads = data_root / "users" / "thomas" / "downloads"
+    downloads = data_root / "thomas" / "downloads"
     downloads.rmdir()
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -118,13 +105,13 @@ def test_provision_is_removed_when_the_database_operation_fails(tmp_path: Path) 
     ):
         raise RuntimeError("database failed")
 
-    assert not (data_root / "users" / "thomas").exists()
+    assert not (data_root / "thomas").exists()
 
 
 def test_rename_is_compensated_when_the_database_operation_fails(tmp_path: Path) -> None:
     manager, data_root = make_manager(tmp_path)
     manager.create("temporary")
-    marker = data_root / "users" / "temporary" / "downloads" / "video.mkv"
+    marker = data_root / "temporary" / "downloads" / "video.mkv"
     marker.write_bytes(b"content")
 
     with (
@@ -134,7 +121,7 @@ def test_rename_is_compensated_when_the_database_operation_fails(tmp_path: Path)
         raise RuntimeError("database failed")
 
     assert marker.read_bytes() == b"content"
-    assert not (data_root / "users" / "thomas").exists()
+    assert not (data_root / "thomas").exists()
 
 
 def test_rename_never_replaces_a_concurrent_destination(
@@ -149,10 +136,16 @@ def test_rename_never_replaces_a_concurrent_destination(
         source: str,
         destination: str,
         *,
-        directory_fd: int,
+        source_directory_fd: int,
+        destination_directory_fd: int,
     ) -> None:
-        os.mkdir(destination, dir_fd=directory_fd)
-        original_rename(source, destination, directory_fd=directory_fd)
+        os.mkdir(destination, dir_fd=destination_directory_fd)
+        original_rename(
+            source,
+            destination,
+            source_directory_fd=source_directory_fd,
+            destination_directory_fd=destination_directory_fd,
+        )
 
     monkeypatch.setattr(
         workspace_module,
@@ -163,17 +156,59 @@ def test_rename_never_replaces_a_concurrent_destination(
     with pytest.raises(WorkspaceAlreadyExistsError):
         manager.rename("temporary", "thomas")
 
-    assert (data_root / "users" / "temporary" / "downloads").is_dir()
-    assert list((data_root / "users" / "thomas").iterdir()) == []
+    assert (data_root / "temporary" / "downloads").is_dir()
+    assert list((data_root / "thomas").iterdir()) == []
 
 
 def test_compensation_never_deletes_a_non_empty_workspace(tmp_path: Path) -> None:
     manager, data_root = make_manager(tmp_path)
     manager.create("thomas")
-    marker = data_root / "users" / "thomas" / "downloads" / "video.mkv"
+    marker = data_root / "thomas" / "downloads" / "video.mkv"
     marker.write_bytes(b"content")
 
     with pytest.raises(WorkspaceCompensationError):
         manager.remove_empty("thomas")
 
     assert marker.read_bytes() == b"content"
+
+
+def test_uppercase_username_is_preserved_in_workspace_name(tmp_path: Path) -> None:
+    manager, data_root = make_manager(tmp_path)
+
+    manager.create("Shadowsun")
+
+    assert (data_root / "Shadowsun" / "downloads").is_dir()
+    assert not (data_root / "shadowsun").exists()
+
+
+def test_legacy_workspace_migration_is_atomic_idempotent_and_preserves_data(
+    tmp_path: Path,
+) -> None:
+    manager, data_root = make_manager(tmp_path)
+    legacy = data_root / "users" / "admin"
+    (legacy / "downloads").mkdir(parents=True)
+    (legacy / "watch").mkdir()
+    marker = legacy / "downloads" / "video.mkv"
+    marker.write_bytes(b"content")
+
+    assert manager.migrate_legacy("admin") is True
+    assert (data_root / "admin" / "downloads" / "video.mkv").read_bytes() == b"content"
+    assert not legacy.exists()
+    assert manager.migrate_legacy("admin") is False
+    assert manager.remove_legacy_root_if_empty() is True
+    assert not (data_root / "users").exists()
+
+
+def test_legacy_migration_refuses_ambiguous_or_unsafe_states(tmp_path: Path) -> None:
+    manager, data_root = make_manager(tmp_path)
+    manager.create("admin")
+    legacy = data_root / "users" / "admin"
+    (legacy / "downloads").mkdir(parents=True)
+    (legacy / "watch").mkdir()
+
+    with pytest.raises(WorkspaceAlreadyExistsError):
+        manager.migrate_legacy("admin")
+
+    assert (data_root / "admin" / "downloads").is_dir()
+    assert (legacy / "downloads").is_dir()
+    assert manager.remove_legacy_root_if_empty() is False

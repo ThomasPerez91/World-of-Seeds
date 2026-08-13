@@ -1,55 +1,68 @@
-# Préparation de la migration du stockage
+# Migration des espaces utilisateurs
 
-## État de coexistence
+## Organisation cible
 
-Tant que la migration qBittorrent n'a pas été réalisée, les deux organisations restent
-volontairement côte à côte sur l'hôte :
+Les espaces World of Seeds sont placés directement sous la racine montée :
 
 ```text
 /srv/seedbox/
-├── downloads/                  # chemin qBittorrent historique, non déplacé
-├── watch/                      # chemin qBittorrent historique, non déplacé
-└── users/
-    ├── admin/
-    │   ├── downloads/
-    │   └── watch/
-    └── <username>/
-        ├── downloads/
-        └── watch/
+├── downloads/                  # chemin qBittorrent historique, inchangé
+├── watch/                      # chemin qBittorrent historique, inchangé
+├── admin/
+│   ├── downloads/
+│   └── watch/
+├── <username>/
+│   ├── downloads/
+│   └── watch/
+└── .trash/
 ```
 
-World of Seeds crée uniquement les nouvelles racines sous `users/`. Il ne lit, ne déplace
-et ne supprime rien dans les chemins historiques pendant cette étape.
+Le navigateur d’un utilisateur est ancré dans `/data/<username>`. La présence des
+répertoires qBittorrent historiques à côté de cet espace ne les rend donc pas accessibles.
+
+## Migration depuis l’ancienne organisation
+
+Les installations ayant déjà créé `/srv/seedbox/users/<username>` doivent exécuter,
+avec PostgreSQL démarré et la nouvelle image construite :
+
+```bash
+docker compose run --rm app python -m app.cli migrate-workspaces
+```
+
+La commande charge la liste des comptes depuis PostgreSQL puis traite chaque espace :
+
+1. validation du nom comme composant unique ;
+2. ouverture de `/data`, `/data/users` et du workspace avec `O_NOFOLLOW` ;
+3. contrôle de la présence de `downloads` et `watch` ;
+4. refus si `/data/<username>` existe déjà ;
+5. renommage atomique sans écrasement vers `/data/<username>` ;
+6. vérification du périphérique et de l’inode après déplacement ;
+7. suppression de `/data/users` seulement s’il est réellement vide.
+
+La commande peut être rejouée : un espace déjà migré et valide est simplement signalé.
+Si l’ancien et le nouveau chemin existent simultanément, elle s’arrête sans choisir ni
+supprimer l’un des deux.
 
 ## Invariants applicatifs
 
-- le nom du dossier est le nom de connexion normalisé ;
-- un dossier contient initialement uniquement `downloads` et `watch` ;
+- le nom du dossier correspond exactement au nom de connexion ;
+- l’unicité des noms est vérifiée en base sans tenir compte de la casse ;
+- un dossier contient initialement `downloads` et `watch` ;
 - les composants sont ouverts depuis des descripteurs de répertoire avec `O_NOFOLLOW` ;
 - un lien symbolique ne peut jamais être adopté comme espace utilisateur ;
-- une collision avec un fichier, un dossier ou un lien existant bloque la création ;
-- si l'insertion SQL échoue, seul le nouvel espace encore vide peut être retiré ;
+- une collision avec un fichier, un dossier ou un lien bloque la création ou le renommage ;
+- si l’insertion SQL échoue, seul le nouvel espace encore vide peut être retiré ;
 - si le changement de nom SQL échoue, le dossier reprend son ancien nom ;
 - aucune compensation ne supprime un dossier contenant des données.
 
-## Migration qBittorrent différée
+## Données qBittorrent historiques
 
-Le déplacement des téléchargements existants sera fait pendant le déploiement accompagné,
-après l'intégration qBittorrent. La procédure devra :
-
-1. inventorier les torrents et leurs chemins de contenu réels ;
-2. choisir explicitement le compte propriétaire de chaque contenu ;
-3. demander à qBittorrent de déplacer les données vers la nouvelle destination ;
-4. attendre la fin du déplacement et forcer une nouvelle vérification si nécessaire ;
-5. confirmer que les torrents seedent encore avant de traiter le suivant ;
-6. conserver les répertoires historiques tant qu'ils ne sont pas vérifiés vides.
-
-Un simple `mv /srv/seedbox/downloads ...` est exclu : qBittorrent conserverait ses anciens
-chemins et les torrents passeraient en erreur.
+La commande ne touche jamais à `/srv/seedbox/downloads` ou `/srv/seedbox/watch`. Leur
+migration sera réalisée plus tard avec l’API qBittorrent afin de préserver les chemins de
+contenu et le seeding. Un simple déplacement manuel de ces données reste exclu.
 
 ## Permissions à vérifier au déploiement
 
-Le couple `APP_UID:APP_GID` du conteneur doit pouvoir créer et renommer des entrées sous
-`/srv/seedbox/users`, sans recevoir d'accès supplémentaire au reste du serveur. Les droits
-seront inspectés avant le premier démarrage ; aucune modification récursive des permissions
-de `/srv/seedbox` ne sera faite sans inventaire et sauvegarde.
+Le couple `APP_UID:APP_GID` doit pouvoir créer et renommer des entrées directement sous
+`/srv/seedbox`, sans accès au reste du serveur. Aucun `chown -R` ou `chmod -R` ne doit être
+appliqué sans inventaire préalable des permissions et des données existantes.

@@ -5,7 +5,7 @@ import secrets
 
 from pwdlib import PasswordHash
 
-USERNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{2,31}$")
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$")
 MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_LENGTH = 256
 
@@ -18,12 +18,18 @@ class CredentialValidationError(ValueError):
 
 
 def normalize_username(value: str) -> str:
-    username = value.strip().lower()
+    username = value.strip()
     if USERNAME_PATTERN.fullmatch(username) is None:
         raise CredentialValidationError(
-            "Le nom doit contenir 3 à 32 caractères parmi a-z, 0-9, _ et -."
+            "Le nom doit contenir 3 à 32 caractères parmi A-Z, a-z, 0-9, _ et -."
         )
     return username
+
+
+def canonical_username(value: str) -> str:
+    """Return the case-insensitive identity used for lookup and uniqueness."""
+
+    return normalize_username(value).lower()
 
 
 def validate_password(value: str) -> str:
@@ -56,7 +62,7 @@ def tokens_match(left: str, right: str) -> bool:
 
 
 def throttle_key(client_ip: str, username: str) -> str:
-    return hash_token(f"{client_ip}\0{username}")
+    return hash_token(f"{client_ip}\0{username.lower()}")
 
 
 def generate_temporary_username() -> str:

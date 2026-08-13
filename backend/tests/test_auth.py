@@ -126,7 +126,7 @@ async def test_admin_generates_one_time_credentials_and_user_changes_them(
     assert temporary["user"]["username"].startswith("guest-")
     assert temporary["user"]["must_change_credentials"] is True
     assert len(temporary["temporary_password"]) >= 12
-    temporary_workspace = data_root / "users" / temporary["user"]["username"]
+    temporary_workspace = data_root / temporary["user"]["username"]
     assert {entry.name for entry in temporary_workspace.iterdir()} == {"downloads", "watch"}
 
     temporary_user = await db_session.scalar(
@@ -143,21 +143,33 @@ async def test_admin_generates_one_time_credentials_and_user_changes_them(
     forbidden = await client.get("/api/v1/admin/users")
     assert forbidden.status_code == 403
 
+    case_insensitive_collision = await client.patch(
+        "/api/v1/auth/credentials",
+        json={
+            "current_password": temporary["temporary_password"],
+            "username": "ADMIN",
+            "new_password": "invitee-password-long",
+        },
+        headers=csrf_header(client),
+    )
+    assert case_insensitive_collision.status_code == 409
+    assert temporary_workspace.is_dir()
+
     changed = await client.patch(
         "/api/v1/auth/credentials",
         json={
             "current_password": temporary["temporary_password"],
-            "username": "invitee",
+            "username": "Shadowsun",
             "new_password": "invitee-password-long",
         },
         headers=csrf_header(client),
     )
     assert changed.status_code == 200
-    assert changed.json()["user"]["username"] == "invitee"
+    assert changed.json()["user"]["username"] == "Shadowsun"
     assert changed.json()["user"]["must_change_credentials"] is False
     assert not temporary_workspace.exists()
-    assert (data_root / "users" / "invitee" / "downloads").is_dir()
-    assert (data_root / "users" / "invitee" / "watch").is_dir()
+    assert (data_root / "Shadowsun" / "downloads").is_dir()
+    assert (data_root / "Shadowsun" / "watch").is_dir()
 
     active_sessions = (
         await db_session.scalars(
@@ -170,10 +182,13 @@ async def test_admin_generates_one_time_credentials_and_user_changes_them(
     assert len(active_sessions) == 1
 
     client.cookies.clear()
+    await login(client, "shadowsun", "invitee-password-long")
+
+    client.cookies.clear()
     await login(client, admin.username, "admin-password-long")
     users = await client.get("/api/v1/admin/users")
     assert users.status_code == 200
-    assert {user["username"] for user in users.json()} == {"admin", "invitee"}
+    assert {user["username"] for user in users.json()} == {"admin", "Shadowsun"}
 
 
 @pytest.mark.asyncio

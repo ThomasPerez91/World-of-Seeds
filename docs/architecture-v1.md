@@ -59,19 +59,18 @@ L'organisation cible est :
 
 ```text
 /data/
-├── users/
-│   ├── admin/
-│   │   ├── downloads/
-│   │   └── watch/
-│   └── utilisateur/
-│       ├── downloads/
-│       └── watch/
+├── admin/
+│   ├── downloads/
+│   └── watch/
+├── utilisateur/
+│   ├── downloads/
+│   └── watch/
 └── .trash/
     └── <user-uuid>/
         └── <trash-entry-uuid>/
 ```
 
-Chaque compte conserve un UUID immuable en base, même si son nom change. Le nom de connexion est volontairement limité à une forme sûre (`a-z`, `0-9`, `_`, `-`) et correspond au nom du dossier. La création du compte et celle du dossier forment une seule opération métier : un échec SQL retire uniquement le dossier nouvellement créé et encore vide. Un changement de nom verrouille la ligne utilisateur, vérifie les collisions, puis utilise sous Linux `renameat2(RENAME_NOREPLACE)` : une destination apparue entre la vérification et le renommage n'est jamais écrasée. L'opération échoue de manière sûre si cette primitive atomique n'est pas disponible. La base est ensuite mise à jour et un mécanisme de compensation remet le dossier à son ancien nom si la transaction SQL échoue.
+Chaque compte conserve un UUID immuable en base, même si son nom change. Le nom de connexion est volontairement limité à une forme sûre (`A-Z`, `a-z`, `0-9`, `_`, `-`) et correspond exactement au nom du dossier. L'unicité est insensible à la casse : `Shadowsun` et `shadowsun` représentent le même identifiant. La création du compte et celle du dossier forment une seule opération métier : un échec SQL retire uniquement le dossier nouvellement créé et encore vide. Un changement de nom verrouille la ligne utilisateur, vérifie les collisions en base et sur disque, puis utilise sous Linux `renameat2(RENAME_NOREPLACE)` : une destination apparue entre la vérification et le renommage n'est jamais écrasée. L'opération échoue de manière sûre si cette primitive atomique n'est pas disponible. La base est ensuite mise à jour et un mécanisme de compensation remet le dossier à son ancien nom si la transaction SQL échoue.
 
 Les opérations de racine utilisent des descripteurs de répertoire, les variantes `*at` des appels système et `O_NOFOLLOW`. Les chemins historiques à la racine restent intacts. La stratégie de coexistence et la migration qBittorrent différée sont détaillées dans [`storage-migration.md`](storage-migration.md).
 

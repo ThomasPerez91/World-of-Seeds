@@ -46,7 +46,7 @@ async def login(client: AsyncClient, username: str = "thomas") -> None:
 
 
 def user_downloads(data_root: Path, username: str = "thomas") -> Path:
-    return data_root / "users" / username / "downloads"
+    return data_root / username / "downloads"
 
 
 @pytest.mark.asyncio

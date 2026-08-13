@@ -178,14 +178,14 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
             id="new-username"
             name="username"
             defaultValue={user.username}
-            pattern="[a-z0-9][a-z0-9_-]{2,31}"
+            pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}"
             autoComplete="username"
             aria-describedby="new-username-hint credential-error"
             aria-invalid={error !== ""}
             required
           />
           <p id="new-username-hint" className="field-hint">
-            3–32 caractères : lettres minuscules, chiffres, _ ou -.
+            3–32 caractères : lettres, chiffres, _ ou -.
           </p>
           <label htmlFor="new-password">Nouveau mot de passe</label>
           <input
@@ -482,6 +482,7 @@ function AccountSettingsPage({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [username, setUsername] = useState(user.username);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -505,6 +506,7 @@ function AccountSettingsPage({
       onChanged(updated);
       setNotice("Tes identifiants ont été mis à jour.");
       formElement.reset();
+      setUsername(updated.username);
     } catch (caught) {
       if (
         caught instanceof ApiError &&
@@ -550,7 +552,8 @@ function AccountSettingsPage({
           <input
             id="settings-username"
             name="username"
-            defaultValue={user.username}
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
             pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}"
             autoComplete="username"
             required
