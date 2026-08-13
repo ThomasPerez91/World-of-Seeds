@@ -74,12 +74,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Build production image through Compose
+      - name: Build and start production stack
         run: |
           cp .env.example .env
           mkdir -p "$RUNNER_TEMP/seedbox"
-          SEEDBOX_HOST_PATH="$RUNNER_TEMP/seedbox" docker compose build app
-      - name: Smoke-check Uvicorn configuration
-        run: >-
-          SEEDBOX_HOST_PATH="$RUNNER_TEMP/seedbox"
-          docker compose run --rm --no-deps app uvicorn --version
+          SEEDBOX_HOST_PATH="$RUNNER_TEMP/seedbox" docker compose up \
+            --detach --build --wait --wait-timeout 120
+      - name: Verify host-only application port
+        run: |
+          curl --fail --silent --show-error \
+            http://127.0.0.1:18081/api/v1/health/live
+          test "$(docker compose port app 8000)" = "127.0.0.1:18081"
+      - name: Verify PostgreSQL is not published
+        run: |
+          if docker compose port postgres 5432 >/tmp/postgres-port 2>/dev/null; then
+            echo "PostgreSQL must not publish a host port."
+            cat /tmp/postgres-port
+            exit 1
+          fi
+      - name: Stop production stack
+        if: always()
+        run: docker compose down --volumes
