@@ -9,7 +9,7 @@ Les capacités fonctionnelles principales de la V1 sont en place :
 - API FastAPI typée ;
 - interface React/Vite TypeScript ;
 - PostgreSQL non exposé sur l'hôte ;
-- authentification par session et comptes temporaires administrés ;
+- authentification par session et comptes administrés sans expiration ;
 - espaces `/data/<username>/{downloads,watch}` créés avec chaque compte ;
 - renommage coordonné du compte et de son dossier avec compensation en cas d'échec SQL ;
 - navigation sécurisée avec métadonnées, fil d'Ariane et espace disque ;

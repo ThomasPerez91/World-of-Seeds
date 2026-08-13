@@ -19,7 +19,7 @@ L'authentification protège les données et les API. Elle ne remplace pas la res
 | API | FastAPI | Typage Python, validation Pydantic, API asynchrone et tests simples. |
 | Frontend | React + Vite + TypeScript | Interface riche sans coût inutile de SSR ou de serveur Next.js. |
 | Données | PostgreSQL + SQLAlchemy 2 + Alembic | Comptes, sessions révocables, audit et métadonnées de corbeille. |
-| Authentification | Session opaque en cookie | Révocation immédiate et meilleure adaptation aux comptes temporaires qu'un JWT autonome. |
+| Authentification | Session opaque en cookie | Révocation immédiate lors d’une suspension ou suppression d’accès, contrairement à un JWT autonome. |
 | Mot de passe | Argon2id | Hash lent recommandé ; aucun mot de passe n'est stocké ou journalisé en clair. |
 | Production | Une image applicative | FastAPI sert l'API et les fichiers React compilés sur une même origine. |
 | Proxy | Aucun en V1 privée | Le port est lié à `127.0.0.1`. Nginx et TLS seront ajoutés avant toute exposition publique. |
@@ -82,10 +82,12 @@ La corbeille est indexée par UUID utilisateur afin qu'un renommage de compte ne
 
 - aucune route d'inscription publique ;
 - création initiale de l'administrateur par commande interactive dans le conteneur ;
-- création d'un compte temporaire uniquement depuis l'administration ;
+- création d'un compte uniquement depuis l'administration ;
 - identifiants aléatoires affichés une seule fois ;
 - changement obligatoire du nom et du mot de passe à la première connexion ;
-- date d'expiration, désactivation et révocation de toutes les sessions ;
+- comptes permanents sans durée de validité ;
+- suspension réversible et révocation immédiate de toutes les sessions ;
+- suppression logique de l’accès sans suppression automatique du dossier utilisateur ;
 - cookie de session `HttpOnly`, `SameSite=Strict`, `Secure` dès HTTPS ;
 - jeton CSRF pour chaque requête qui modifie des données ;
 - réponses de connexion génériques et limitation des tentatives ;
@@ -192,7 +194,7 @@ Le service applicatif est configuré avec :
 ## Découpage prévu des PR
 
 1. **Fondations** : documentation, squelette exécutable, Docker et CI.
-2. **Authentification** : migrations, admin initial, sessions, CSRF, comptes temporaires et page de connexion.
+2. **Authentification** : migrations, admin initial, sessions, CSRF, comptes administrés et page de connexion.
 3. **Racines utilisateurs** : création/renommage contrôlé des dossiers et migration préparatoire.
 4. **Navigation** : liste, fil d'Ariane, espace disque et règles anti-traversal.
 5. **Téléchargement robuste** : flux, HTTP Range, reprise et tests de charge ciblés.

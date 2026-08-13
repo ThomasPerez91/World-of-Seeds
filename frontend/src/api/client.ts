@@ -4,16 +4,15 @@ export interface User {
   is_admin: boolean;
   is_active: boolean;
   must_change_credentials: boolean;
-  expires_at: string | null;
 }
 
 interface AuthResponse {
   user: User;
 }
 
-export interface TemporaryCredentials {
+export interface GeneratedCredentials {
   user: User;
-  temporary_password: string;
+  initial_password: string;
 }
 
 export type FileEntryKind = "directory" | "file" | "symlink" | "other";
@@ -158,10 +157,22 @@ export const api = {
     return request<User[]>("/admin/users");
   },
 
-  createTemporaryUser(expiresInDays: number): Promise<TemporaryCredentials> {
-    return request<TemporaryCredentials>("/admin/users/temporary", {
+  createUser(): Promise<GeneratedCredentials> {
+    return request<GeneratedCredentials>("/admin/users", {
       method: "POST",
-      body: JSON.stringify({ expires_in_days: expiresInDays }),
+    });
+  },
+
+  setUserActive(userId: string, isActive: boolean): Promise<User> {
+    return request<User>(`/admin/users/${encodeURIComponent(userId)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_active: isActive }),
+    });
+  },
+
+  deleteUser(userId: string): Promise<void> {
+    return request<void>(`/admin/users/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
     });
   },
 

@@ -1527,6 +1527,49 @@ select:focus-visible {
   font-size: 0.75rem;
 }
 
+.user-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.user-row-actions button {
+  width: auto;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.danger-outline-button {
+  border-color: rgb(220 126 115 / 35%);
+  color: #eab0a8;
+  background: transparent;
+}
+
+.danger-outline-button:hover {
+  border-color: rgb(220 126 115 / 60%);
+  background: rgb(193 89 78 / 8%);
+}
+
+.admin-confirmation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid rgb(220 126 115 / 24%);
+  border-radius: 0.9rem;
+  background: rgb(193 89 78 / 8%);
+}
+
+.admin-confirmation p {
+  max-width: 48rem;
+  margin: 0.25rem 0 0;
+  color: #b9c3bd;
+  font-size: 0.8rem;
+}
+
 .avatar {
   display: grid;
   width: 2.4rem;
@@ -1595,6 +1638,21 @@ select:focus-visible {
 
   .generator-controls {
     display: grid;
+  }
+
+  .user-row {
+    grid-template-columns: auto 1fr;
+  }
+
+  .user-row-actions {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .admin-confirmation {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .credential-row {
