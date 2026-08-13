@@ -71,6 +71,11 @@ describe("FileBrowser", () => {
     const trashButton = await screen.findByRole("button", {
       name: "Placer movie.mkv dans la corbeille",
     });
+    const fileNameCell = screen.getByText("movie.mkv").closest("td");
+    expect(fileNameCell?.classList.contains("file-name-cell")).toBe(true);
+    expect(fileNameCell?.firstElementChild?.classList.contains("file-name-content")).toBe(
+      true,
+    );
     expect(screen.getByRole("table").querySelector("caption")?.textContent).toContain(
       "downloads",
     );

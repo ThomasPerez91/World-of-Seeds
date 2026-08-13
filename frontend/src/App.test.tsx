@@ -67,14 +67,23 @@ describe("App", () => {
     );
 
     const view = render(<App />);
-    await screen.findByRole("heading", { name: "Bonjour, thomas" });
+    await screen.findByRole("heading", { name: "Mes fichiers" });
     const skipLink = screen.getByRole("link", { name: "Aller au contenu principal" });
     expect(skipLink.getAttribute("href")).toBe("#dashboard-content");
     expect(document.querySelector("#dashboard-content")?.getAttribute("tabindex")).toBe("-1");
+    expect(screen.queryByText("Bonjour, thomas")).toBeNull();
+    expect(document.querySelector(".account-avatar")?.textContent).toBe("T");
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
     await screen.findByText("Ce dossier est vide");
     await screen.findByText("La corbeille est vide");
     await screen.findByRole("heading", { name: "Accès temporaires" });
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
+    await user.click(screen.getByRole("button", { name: "Paramètres du compte" }));
+    await screen.findByRole("heading", { name: "Paramètres du compte" });
+    expect(screen.getByLabelText("Nom d’utilisateur")).toHaveProperty("value", "thomas");
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 });
