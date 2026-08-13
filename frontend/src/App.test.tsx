@@ -104,6 +104,7 @@ describe("App", () => {
       is_active: true,
       must_change_credentials: true,
     };
+    let deleteAttempts = 0;
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const url = String(input);
@@ -128,6 +129,10 @@ describe("App", () => {
           return response({ ...guest, is_active: false }, 200);
         }
         if (url.endsWith(`/${guest.id}`) && init?.method === "DELETE") {
+          deleteAttempts += 1;
+          if (deleteAttempts === 1) {
+            return response({ detail: "Database unavailable" }, 503);
+          }
           return new Response(null, { status: 204 });
         }
         throw new Error(`Requête inattendue : ${init?.method ?? "GET"} ${url}`);
@@ -148,6 +153,9 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "Supprimer l’accès de guest-a1b2c3" }));
     await screen.findByText("Le compte sera désactivé, ses sessions fermées et son dossier sera conservé.");
+    await user.click(screen.getByRole("button", { name: "Confirmer la suppression" }));
+    await screen.findByText("Impossible de supprimer l’accès de cet utilisateur.");
+    expect(screen.getByRole("dialog")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Confirmer la suppression" }));
     expect(screen.queryByText("guest-a1b2c3")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });

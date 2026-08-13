@@ -2,9 +2,10 @@ import argparse
 import asyncio
 import getpass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
-from app.auth.security import hash_password, normalize_username
+from app.auth.security import canonical_username, hash_password, normalize_username
 from app.core.config import get_settings
 from app.core.database import session_factory
 from app.files import WorkspaceError, WorkspaceManager
@@ -19,7 +20,9 @@ async def create_admin(username_input: str) -> None:
         raise SystemExit("Les mots de passe ne correspondent pas.")
 
     async with session_factory() as db:
-        existing = await db.scalar(select(User).where(User.username == username))
+        existing = await db.scalar(
+            select(User).where(func.lower(User.username) == canonical_username(username))
+        )
         if existing is not None:
             raise SystemExit("Ce nom d’utilisateur existe déjà.")
         workspace_manager = WorkspaceManager(get_settings().data_root)
@@ -38,6 +41,8 @@ async def create_admin(username_input: str) -> None:
                 except BaseException:
                     await db.rollback()
                     raise
+        except IntegrityError as exc:
+            raise SystemExit("Ce nom d’utilisateur existe déjà.") from exc
         except WorkspaceError as exc:
             raise SystemExit(
                 "Impossible de créer l’espace de stockage de l’administrateur."
