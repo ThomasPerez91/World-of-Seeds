@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -8,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.security import (
     DUMMY_PASSWORD_HASH,
     canonical_username,
-    generate_temporary_password,
-    generate_temporary_username,
+    generate_initial_password,
+    generate_initial_username,
     generate_token,
     hash_password,
     hash_token,
@@ -34,6 +35,14 @@ class UsernameUnavailableError(Exception):
     pass
 
 
+class ManagedUserNotFoundError(Exception):
+    pass
+
+
+class ProtectedUserError(Exception):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class SessionTokens:
     session_token: str
@@ -48,7 +57,8 @@ def ensure_utc(value: datetime) -> datetime:
 
 
 def user_can_login(user: User, now: datetime) -> bool:
-    return user.is_active and (user.expires_at is None or ensure_utc(user.expires_at) > now)
+    del now
+    return user.is_active and user.deleted_at is None
 
 
 async def _register_failure(
@@ -217,24 +227,24 @@ async def revoke_session(db: AsyncSession, user_session: UserSession) -> None:
     await db.commit()
 
 
-async def create_temporary_user(
+async def create_managed_user(
     db: AsyncSession,
     *,
-    expires_in_days: int,
     workspace_manager: WorkspaceManager,
 ) -> tuple[User, str]:
     for _ in range(10):
-        username = generate_temporary_username()
-        exists = await db.scalar(select(User.id).where(User.username == username))
+        username = generate_initial_username()
+        exists = await db.scalar(
+            select(User.id).where(func.lower(User.username) == canonical_username(username))
+        )
         if exists is not None:
             continue
 
-        temporary_password = generate_temporary_password()
+        initial_password = generate_initial_password()
         user = User(
             username=username,
-            password_hash=hash_password(temporary_password),
+            password_hash=hash_password(initial_password),
             must_change_credentials=True,
-            expires_at=datetime.now(UTC) + timedelta(days=expires_in_days),
         )
         try:
             with workspace_manager.provision_for_transaction(username):
@@ -244,13 +254,58 @@ async def create_temporary_user(
                 except BaseException:
                     await db.rollback()
                     raise
-        except WorkspaceAlreadyExistsError:
+        except (IntegrityError, WorkspaceAlreadyExistsError):
             continue
 
         await db.refresh(user)
-        return user, temporary_password
+        return user, initial_password
 
-    raise WorkspaceError("Unable to generate a unique temporary user workspace")
+    raise WorkspaceError("Unable to generate a unique user workspace")
+
+
+async def set_managed_user_active(
+    db: AsyncSession,
+    *,
+    user_id: UUID,
+    is_active: bool,
+) -> User:
+    user = await db.scalar(select(User).where(User.id == user_id).with_for_update())
+    if user is None or user.deleted_at is not None:
+        raise ManagedUserNotFoundError
+    if user.is_admin:
+        raise ProtectedUserError
+
+    now = datetime.now(UTC)
+    user.is_active = is_active
+    user.updated_at = now
+    if not is_active:
+        await db.execute(
+            update(UserSession)
+            .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def delete_managed_user(db: AsyncSession, *, user_id: UUID) -> None:
+    user = await db.scalar(select(User).where(User.id == user_id).with_for_update())
+    if user is None or user.deleted_at is not None:
+        raise ManagedUserNotFoundError
+    if user.is_admin:
+        raise ProtectedUserError
+
+    now = datetime.now(UTC)
+    user.is_active = False
+    user.deleted_at = now
+    user.updated_at = now
+    await db.execute(
+        update(UserSession)
+        .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+    await db.commit()
 
 
 async def purge_expired_sessions(db: AsyncSession) -> int:

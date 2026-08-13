@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -21,7 +20,6 @@ class UserResponse(BaseModel):
     is_admin: bool
     is_active: bool
     must_change_credentials: bool
-    expires_at: datetime | None
 
 
 class AuthResponse(BaseModel):
@@ -34,10 +32,10 @@ class ChangeCredentialsRequest(BaseModel):
     new_password: Password
 
 
-class TemporaryUserRequest(BaseModel):
-    expires_in_days: int = Field(default=7, ge=1, le=30)
+class UserStatusRequest(BaseModel):
+    is_active: bool
 
 
-class TemporaryCredentialsResponse(BaseModel):
+class GeneratedCredentialsResponse(BaseModel):
     user: UserResponse
-    temporary_password: str
+    initial_password: str

@@ -1,5 +1,5 @@
-from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from httpx import AsyncClient
@@ -103,7 +103,7 @@ async def test_failed_logins_are_generic_and_throttled(
 
 
 @pytest.mark.asyncio
-async def test_admin_generates_one_time_credentials_and_user_changes_them(
+async def test_admin_generates_initial_credentials_and_user_changes_them(
     client: AsyncClient,
     db_session: AsyncSession,
     data_root: Path,
@@ -117,48 +117,46 @@ async def test_admin_generates_one_time_credentials_and_user_changes_them(
     await login(client, "admin", "admin-password-long")
 
     generated = await client.post(
-        "/api/v1/admin/users/temporary",
-        json={"expires_in_days": 3},
+        "/api/v1/admin/users",
         headers=csrf_header(client),
     )
     assert generated.status_code == 200
-    temporary = generated.json()
-    assert temporary["user"]["username"].startswith("guest-")
-    assert temporary["user"]["must_change_credentials"] is True
-    assert len(temporary["temporary_password"]) >= 12
-    temporary_workspace = data_root / temporary["user"]["username"]
-    assert {entry.name for entry in temporary_workspace.iterdir()} == {"downloads", "watch"}
+    initial = generated.json()
+    assert initial["user"]["username"].startswith("guest-")
+    assert initial["user"]["must_change_credentials"] is True
+    assert "expires_at" not in initial["user"]
+    assert len(initial["initial_password"]) >= 12
+    initial_workspace = data_root / initial["user"]["username"]
+    assert {entry.name for entry in initial_workspace.iterdir()} == {"downloads", "watch"}
 
-    temporary_user = await db_session.scalar(
-        select(User).where(User.username == temporary["user"]["username"])
+    generated_user = await db_session.scalar(
+        select(User).where(User.username == initial["user"]["username"])
     )
-    assert temporary_user is not None
-    assert temporary_user.password_hash.startswith("$argon2id$")
-    assert verify_password(temporary["temporary_password"], temporary_user.password_hash)
-    assert temporary_user.expires_at is not None
-    assert temporary_user.expires_at.replace(tzinfo=UTC) > datetime.now(UTC)
+    assert generated_user is not None
+    assert generated_user.password_hash.startswith("$argon2id$")
+    assert verify_password(initial["initial_password"], generated_user.password_hash)
 
     client.cookies.clear()
-    await login(client, temporary_user.username, temporary["temporary_password"])
+    await login(client, generated_user.username, initial["initial_password"])
     forbidden = await client.get("/api/v1/admin/users")
     assert forbidden.status_code == 403
 
     case_insensitive_collision = await client.patch(
         "/api/v1/auth/credentials",
         json={
-            "current_password": temporary["temporary_password"],
+            "current_password": initial["initial_password"],
             "username": "ADMIN",
             "new_password": "invitee-password-long",
         },
         headers=csrf_header(client),
     )
     assert case_insensitive_collision.status_code == 409
-    assert temporary_workspace.is_dir()
+    assert initial_workspace.is_dir()
 
     changed = await client.patch(
         "/api/v1/auth/credentials",
         json={
-            "current_password": temporary["temporary_password"],
+            "current_password": initial["initial_password"],
             "username": "Shadowsun",
             "new_password": "invitee-password-long",
         },
@@ -167,14 +165,14 @@ async def test_admin_generates_one_time_credentials_and_user_changes_them(
     assert changed.status_code == 200
     assert changed.json()["user"]["username"] == "Shadowsun"
     assert changed.json()["user"]["must_change_credentials"] is False
-    assert not temporary_workspace.exists()
+    assert not initial_workspace.exists()
     assert (data_root / "Shadowsun" / "downloads").is_dir()
     assert (data_root / "Shadowsun" / "watch").is_dir()
 
     active_sessions = (
         await db_session.scalars(
             select(UserSession).where(
-                UserSession.user_id == temporary_user.id,
+                UserSession.user_id == generated_user.id,
                 UserSession.revoked_at.is_(None),
             )
         )
@@ -189,6 +187,116 @@ async def test_admin_generates_one_time_credentials_and_user_changes_them(
     users = await client.get("/api/v1/admin/users")
     assert users.status_code == 200
     assert {user["username"] for user in users.json()} == {"admin", "Shadowsun"}
+
+
+@pytest.mark.asyncio
+async def test_admin_can_suspend_resume_and_delete_access_without_removing_files(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    await create_user(
+        db_session,
+        username="admin",
+        password="admin-password-long",
+        is_admin=True,
+    )
+    await login(client, "admin", "admin-password-long")
+    generated = await client.post("/api/v1/admin/users", headers=csrf_header(client))
+    assert generated.status_code == 200
+    credentials = generated.json()
+    user_id = UUID(credentials["user"]["id"])
+    username = credentials["user"]["username"]
+    password = credentials["initial_password"]
+    marker = data_root / username / "downloads" / "keep-me.mkv"
+    marker.write_bytes(b"content")
+
+    client.cookies.clear()
+    await login(client, username, password)
+    client.cookies.clear()
+    await login(client, "admin", "admin-password-long")
+
+    suspended = await client.patch(
+        f"/api/v1/admin/users/{user_id}/status",
+        json={"is_active": False},
+        headers=csrf_header(client),
+    )
+    assert suspended.status_code == 200
+    assert suspended.json()["is_active"] is False
+    active_session_count = len(
+        (
+            await db_session.scalars(
+                select(UserSession).where(
+                    UserSession.user_id == user_id,
+                    UserSession.revoked_at.is_(None),
+                )
+            )
+        ).all()
+    )
+    assert active_session_count == 0
+
+    client.cookies.clear()
+    rejected = await client.post(
+        "/api/v1/auth/login",
+        json={"username": username, "password": password},
+    )
+    assert rejected.status_code == 401
+
+    client.cookies.clear()
+    await login(client, "admin", "admin-password-long")
+    resumed = await client.patch(
+        f"/api/v1/admin/users/{user_id}/status",
+        json={"is_active": True},
+        headers=csrf_header(client),
+    )
+    assert resumed.status_code == 200
+    assert resumed.json()["is_active"] is True
+
+    deleted = await client.delete(
+        f"/api/v1/admin/users/{user_id}",
+        headers=csrf_header(client),
+    )
+    assert deleted.status_code == 204
+    assert marker.read_bytes() == b"content"
+
+    deleted_user = await db_session.get(User, user_id)
+    assert deleted_user is not None
+    assert deleted_user.is_active is False
+    assert deleted_user.deleted_at is not None
+    users = await client.get("/api/v1/admin/users")
+    assert users.status_code == 200
+    assert username not in {user["username"] for user in users.json()}
+
+
+@pytest.mark.asyncio
+async def test_admin_account_is_protected_from_status_and_delete_operations(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    admin = await create_user(
+        db_session,
+        username="admin",
+        password="admin-password-long",
+        is_admin=True,
+    )
+    await login(client, "admin", "admin-password-long")
+
+    suspended = await client.patch(
+        f"/api/v1/admin/users/{admin.id}/status",
+        json={"is_active": False},
+        headers=csrf_header(client),
+    )
+    assert suspended.status_code == 403
+
+    deleted = await client.delete(
+        f"/api/v1/admin/users/{admin.id}",
+        headers=csrf_header(client),
+    )
+    assert deleted.status_code == 403
+
+    await db_session.refresh(admin)
+    assert admin.is_active is True
+    assert admin.deleted_at is None
 
 
 @pytest.mark.asyncio

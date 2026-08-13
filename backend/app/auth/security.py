@@ -65,9 +65,9 @@ def throttle_key(client_ip: str, username: str) -> str:
     return hash_token(f"{client_ip}\0{username.lower()}")
 
 
-def generate_temporary_username() -> str:
+def generate_initial_username() -> str:
     return f"guest-{secrets.token_hex(3)}"
 
 
-def generate_temporary_password() -> str:
+def generate_initial_password() -> str:
     return secrets.token_urlsafe(18)

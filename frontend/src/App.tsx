@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 
-import { api, ApiError, type TemporaryCredentials, type User } from "./api/client";
+import { api, ApiError, type GeneratedCredentials, type User } from "./api/client";
 import { FileBrowser } from "./features/files/FileBrowser";
 import { TrashBrowser } from "./features/files/TrashBrowser";
 
@@ -141,7 +141,7 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
       setError(
         caught instanceof ApiError
           ? {
-              401: "Le mot de passe temporaire est incorrect.",
+              401: "Le mot de passe initial est incorrect.",
               409: "Ce nom d’utilisateur est indisponible ou l’espace ne peut pas être renommé.",
             }[caught.status] ?? "Impossible de modifier le compte pour le moment."
           : "Impossible de modifier le compte pour le moment.",
@@ -160,10 +160,10 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
           Personnalise ton accès
         </h1>
         <p className="form-intro">
-          Les identifiants temporaires ne seront plus valables après cette étape.
+          Remplace les identifiants générés par ceux que tu souhaites utiliser.
         </p>
         <form onSubmit={handleSubmit}>
-          <label htmlFor="current-password">Mot de passe temporaire</label>
+          <label htmlFor="current-password">Mot de passe initial</label>
           <input
             id="current-password"
             name="current-password"
@@ -223,10 +223,11 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
 
 function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
   const [users, setUsers] = useState<User[]>([]);
-  const [credentials, setCredentials] = useState<TemporaryCredentials | null>(null);
-  const [expiresInDays, setExpiresInDays] = useState(7);
+  const [credentials, setCredentials] = useState<GeneratedCredentials | null>(null);
+  const [pendingDeletion, setPendingDeletion] = useState<User | null>(null);
   const [error, setError] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
 
   useEffect(() => {
     void api
@@ -246,7 +247,7 @@ function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
     setError("");
     setCredentials(null);
     try {
-      const generated = await api.createTemporaryUser(expiresInDays);
+      const generated = await api.createUser();
       setCredentials(generated);
       setUsers((current) => [generated.user, ...current]);
     } catch (caught) {
@@ -254,9 +255,47 @@ function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
         onSessionExpired();
         return;
       }
-      setError("Impossible de générer le compte temporaire.");
+      setError("Impossible de générer le compte.");
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function setActive(account: User, isActive: boolean) {
+    setUpdatingUserId(account.id);
+    setError("");
+    try {
+      const updated = await api.setUserActive(account.id, isActive);
+      setUsers((current) =>
+        current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+      );
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setError("Impossible de modifier l’accès de cet utilisateur.");
+    } finally {
+      setUpdatingUserId(null);
+    }
+  }
+
+  async function confirmDeletion() {
+    if (pendingDeletion === null) return;
+    setUpdatingUserId(pendingDeletion.id);
+    setError("");
+    try {
+      await api.deleteUser(pendingDeletion.id);
+      setUsers((current) => current.filter((candidate) => candidate.id !== pendingDeletion.id));
+      setPendingDeletion(null);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setError("Impossible de supprimer l’accès de cet utilisateur.");
+    } finally {
+      setUpdatingUserId(null);
     }
   }
 
@@ -276,21 +315,9 @@ function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
       <div className="section-heading">
         <div>
           <p className="eyebrow">Administration</p>
-          <h2 id="admin-title">Accès temporaires</h2>
+          <h2 id="admin-title">Comptes utilisateurs</h2>
         </div>
         <div className="generator-controls">
-          <label htmlFor="expiry">Validité</label>
-          <select
-            id="expiry"
-            value={expiresInDays}
-            onChange={(event) => setExpiresInDays(Number(event.target.value))}
-          >
-            <option value={1}>1 jour</option>
-            <option value={3}>3 jours</option>
-            <option value={7}>7 jours</option>
-            <option value={14}>14 jours</option>
-            <option value={30}>30 jours</option>
-          </select>
           <button
             type="button"
             className="compact-button"
@@ -318,11 +345,11 @@ function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
           </div>
           <div className="credential-row">
             <span>Mot de passe</span>
-            <code>{credentials.temporary_password}</code>
+            <code>{credentials.initial_password}</code>
             <button
               type="button"
               className="text-button"
-              onClick={() => void copy(credentials.temporary_password)}
+              onClick={() => void copy(credentials.initial_password)}
             >
               Copier
             </button>
@@ -334,11 +361,7 @@ function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
         {error}
       </p>
       <div className="user-list">
-        {users.map((account) => {
-          const expired =
-            account.expires_at !== null && new Date(account.expires_at).getTime() <= Date.now();
-          const available = account.is_active && !expired;
-          return (
+        {users.map((account) => (
             <div className="user-row" key={account.id}>
               <div className="avatar" aria-hidden="true">
                 {account.username.slice(0, 1).toUpperCase()}
@@ -353,13 +376,55 @@ function AdminPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
                       : "Utilisateur actif"}
                 </span>
               </div>
-              <span className={available ? "status-pill" : "status-pill inactive"}>
-                {expired ? "Expiré" : account.is_active ? "Actif" : "Désactivé"}
-              </span>
+              <div className="user-row-actions">
+                <span className={account.is_active ? "status-pill" : "status-pill inactive"}>
+                  {account.is_active ? "Actif" : "Suspendu"}
+                </span>
+                {!account.is_admin && (
+                  <>
+                    <button
+                      type="button"
+                      className="secondary-button compact-button"
+                      disabled={updatingUserId === account.id}
+                      onClick={() => void setActive(account, !account.is_active)}
+                    >
+                      {account.is_active ? "Suspendre" : "Réactiver"}
+                    </button>
+                    <button
+                      type="button"
+                      className="danger-outline-button compact-button"
+                      disabled={updatingUserId === account.id}
+                      onClick={() => setPendingDeletion(account)}
+                    >
+                      Supprimer l’accès
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
-          );
-        })}
+          ))}
       </div>
+      {pendingDeletion !== null && (
+        <section className="admin-confirmation" aria-labelledby="delete-user-title">
+          <div>
+            <strong id="delete-user-title">Supprimer l’accès de {pendingDeletion.username} ?</strong>
+            <p>Le compte sera désactivé, ses sessions fermées et son dossier sera conservé.</p>
+          </div>
+          <div className="dialog-actions">
+            <button type="button" className="secondary-button" onClick={() => setPendingDeletion(null)}>
+              Annuler
+            </button>
+            <button
+              type="button"
+              className="danger-button"
+              disabled={updatingUserId === pendingDeletion.id}
+              onClick={() => void confirmDeletion()}
+            >
+              {updatingUserId === pendingDeletion.id ? "Suppression…" : "Confirmer la suppression"}
+            </button>
+          </div>
+        </section>
+      )}
     </section>
   );
 }
