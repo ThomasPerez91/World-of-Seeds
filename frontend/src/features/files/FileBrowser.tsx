@@ -86,7 +86,7 @@ function LoadingRows() {
 }
 
 function isProtectedRootEntry(entry: FileEntry): boolean {
-  return !entry.path.includes("/") && ["downloads", "watch"].includes(entry.name);
+  return !entry.path.includes("/") && entry.name === "downloads";
 }
 
 export function FileBrowser({

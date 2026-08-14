@@ -9,12 +9,10 @@ Les espaces World of Seeds sont placés directement sous la racine montée :
 ├── downloads/                  # chemin qBittorrent historique, inchangé
 ├── watch/                      # chemin qBittorrent historique, inchangé
 ├── admin/
-│   ├── downloads/
-│   └── watch/
+│   └── downloads/
 ├── <username>/
-│   ├── downloads/
-│   └── watch/
-└── .trash/
+│   └── downloads/
+└── .trash/                    # hors du navigateur, isolée par identifiant utilisateur
 ```
 
 Le navigateur d’un utilisateur est ancré dans `/data/<username>`. La présence des
@@ -33,11 +31,12 @@ La commande charge la liste des comptes depuis PostgreSQL puis traite chaque esp
 
 1. validation du nom comme composant unique ;
 2. ouverture de `/data`, `/data/users` et du workspace avec `O_NOFOLLOW` ;
-3. contrôle de la présence de `downloads` et `watch` ;
+3. contrôle de la présence de `downloads` ;
 4. refus si `/data/<username>` existe déjà ;
 5. renommage atomique sans écrasement vers `/data/<username>` ;
 6. vérification du périphérique et de l’inode après déplacement ;
-7. suppression de `/data/users` seulement s’il est réellement vide.
+7. suppression du `watch` propre à l'utilisateur uniquement s'il est réellement vide ;
+8. suppression de `/data/users` seulement s'il est réellement vide.
 
 La commande peut être rejouée : un espace déjà migré et valide est simplement signalé.
 Si l’ancien et le nouveau chemin existent simultanément, elle s’arrête sans choisir ni
@@ -47,13 +46,17 @@ supprimer l’un des deux.
 
 - le nom du dossier correspond exactement au nom de connexion ;
 - l’unicité des noms est vérifiée en base sans tenir compte de la casse ;
-- un dossier contient initialement `downloads` et `watch` ;
+- un dossier contient initialement `downloads`, conformément à
+  `backend/app/files/workspace_structure.json` ;
 - les composants sont ouverts depuis des descripteurs de répertoire avec `O_NOFOLLOW` ;
 - un lien symbolique ne peut jamais être adopté comme espace utilisateur ;
 - une collision avec un fichier, un dossier ou un lien bloque la création ou le renommage ;
 - si l’insertion SQL échoue, seul le nouvel espace encore vide peut être retiré ;
 - si le changement de nom SQL échoue, le dossier reprend son ancien nom ;
 - aucune compensation ne supprime un dossier contenant des données.
+- un ancien `watch` utilisateur non vide est conservé, mais n'est ni listé ni ouvrable
+  depuis l'API fichiers ;
+- la corbeille reste sous `/data/.trash/<user-id>` et n'est jamais un enfant du workspace.
 
 ## Données qBittorrent historiques
 

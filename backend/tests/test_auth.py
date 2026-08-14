@@ -127,7 +127,7 @@ async def test_admin_generates_initial_credentials_and_user_changes_them(
     assert "expires_at" not in initial["user"]
     assert len(initial["initial_password"]) >= 12
     initial_workspace = data_root / initial["user"]["username"]
-    assert {entry.name for entry in initial_workspace.iterdir()} == {"downloads", "watch"}
+    assert {entry.name for entry in initial_workspace.iterdir()} == {"downloads"}
 
     generated_user = await db_session.scalar(
         select(User).where(User.username == initial["user"]["username"])
@@ -174,7 +174,6 @@ async def test_admin_generates_initial_credentials_and_user_changes_them(
     assert changed.json()["user"]["must_change_credentials"] is False
     assert not initial_workspace.exists()
     assert (data_root / "Shadowsun" / "downloads").is_dir()
-    assert (data_root / "Shadowsun" / "watch").is_dir()
 
     active_sessions = (
         await db_session.scalars(
@@ -209,7 +208,6 @@ async def test_user_updates_username_then_password_in_separate_flows(
     )
     workspace = data_root / "thomas"
     (workspace / "downloads").mkdir(parents=True)
-    (workspace / "watch").mkdir()
     marker = workspace / "downloads" / "movie.mkv"
     marker.write_bytes(b"content")
     await login(client, "thomas", "current-password-long")
