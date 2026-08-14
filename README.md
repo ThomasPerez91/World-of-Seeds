@@ -21,8 +21,9 @@ Les capacités fonctionnelles principales de la V1 sont en place :
 - montage hôte limité à `/srv/seedbox:/data` ;
 - contrôles de qualité automatisés.
 
-La V1 applicative est complète. Le déploiement restera manuel jusqu’à la validation
-commune des permissions OVH, de la migration du stockage et des paramètres qBittorrent.
+La V1 applicative est complète. Un workflow de déploiement manuel construit une image
+immuable dans GHCR puis la déploie sur OVH par une identité SSH restreinte. La préparation
+initiale du serveur et des permissions reste volontairement accompagnée.
 
 ## Démarrage local sans Docker
 
@@ -97,3 +98,7 @@ La conception détaillée et le découpage des prochaines PR sont documentés da
 [`docs/architecture-v1.md`](docs/architecture-v1.md). La coexistence avec les chemins
 qBittorrent actuels est décrite dans
 [`docs/storage-migration.md`](docs/storage-migration.md).
+
+Le déploiement GitHub Actions et l'installation sécurisée de l'identité technique OVH
+sont détaillés pas à pas dans
+[`docs/deployment-ovh.md`](docs/deployment-ovh.md).

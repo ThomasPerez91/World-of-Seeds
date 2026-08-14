@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+fail() {
+  printf 'Commande de déploiement refusée.\n' >&2
+  exit 1
+}
+
+[[ -n "${SSH_ORIGINAL_COMMAND:-}" ]] || fail
+
+read -r COMMAND IMAGE_DIGEST REGISTRY_USER EXTRA <<<"${SSH_ORIGINAL_COMMAND}"
+[[ "${COMMAND}" == "deploy-world-of-seeds" ]] || fail
+[[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || fail
+[[ "${REGISTRY_USER}" =~ ^[A-Za-z0-9-]{1,39}$ ]] || fail
+[[ -z "${EXTRA:-}" ]] || fail
+
+exec sudo -n -- /usr/local/sbin/deploy-world-of-seeds \
+  "${IMAGE_DIGEST}" "${REGISTRY_USER}"

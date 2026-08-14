@@ -1,0 +1,114 @@
+name: Deploy to OVH
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: world-of-seeds-production
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build immutable image
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Check out the deployed revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish the image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/thomasperez91/world-of-seeds:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+  deploy:
+    name: Deploy immutable image
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Validate deployment configuration
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          SSH_HOST: ${{ vars.OVH_SSH_HOST }}
+          SSH_PORT: ${{ vars.OVH_SSH_PORT }}
+          SSH_USER: ${{ vars.OVH_SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.OVH_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.OVH_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ -n "$SSH_HOST" ]]
+          [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]]
+          (( SSH_PORT >= 1 && SSH_PORT <= 65535 ))
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [[ -n "$SSH_PRIVATE_KEY" ]]
+          [[ -n "$SSH_KNOWN_HOSTS" ]]
+
+      - name: Configure the restricted SSH identity
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.OVH_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.OVH_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" >"$HOME/.ssh/world-of-seeds-deploy"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" >"$HOME/.ssh/known_hosts"
+          chmod 600 \
+            "$HOME/.ssh/world-of-seeds-deploy" \
+            "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/world-of-seeds-deploy" >/dev/null
+
+      - name: Deploy on OVH
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          SSH_HOST: ${{ vars.OVH_SSH_HOST }}
+          SSH_PORT: ${{ vars.OVH_SSH_PORT }}
+          SSH_USER: ${{ vars.OVH_SSH_USER }}
+        run: |
+          set -Eeuo pipefail
+          printf '%s\n' "$GHCR_TOKEN" \
+            | ssh \
+                -i "$HOME/.ssh/world-of-seeds-deploy" \
+                -o BatchMode=yes \
+                -o IdentitiesOnly=yes \
+                -o StrictHostKeyChecking=yes \
+                -o "UserKnownHostsFile=$HOME/.ssh/known_hosts" \
+                -p "$SSH_PORT" \
+                "$SSH_USER@$SSH_HOST" \
+                "deploy-world-of-seeds $IMAGE_DIGEST $GITHUB_ACTOR"

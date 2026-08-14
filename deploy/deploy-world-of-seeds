@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly PROJECT_DIR="/opt/world-of-seeds"
+readonly COMPOSE_FILE="${PROJECT_DIR}/compose.production.yaml"
+readonly ENV_FILE="${PROJECT_DIR}/.env"
+readonly IMAGE_REPOSITORY="ghcr.io/thomasperez91/world-of-seeds"
+readonly STATE_FILE="${PROJECT_DIR}/.deployed-image"
+
+DOCKER_CONFIG_DIR=""
+STATE_TMP=""
+COMPOSE=()
+
+fail() {
+  printf 'Erreur: %s\n' "$*" >&2
+  exit 1
+}
+
+cleanup() {
+  if [[ -n "${STATE_TMP}" && -e "${STATE_TMP}" ]]; then
+    rm -f -- "${STATE_TMP}"
+  fi
+  if [[ -n "${DOCKER_CONFIG_DIR}" && -d "${DOCKER_CONFIG_DIR}" ]]; then
+    rm -rf -- "${DOCKER_CONFIG_DIR}"
+  fi
+}
+
+on_error() {
+  local status=$?
+  set +e
+  printf '\nLe déploiement a échoué (code %s). État des services :\n' "${status}" >&2
+  if ((${#COMPOSE[@]})); then
+    "${COMPOSE[@]}" ps >&2
+    "${COMPOSE[@]}" logs --no-color --tail 80 app >&2
+  fi
+  exit "${status}"
+}
+
+trap cleanup EXIT
+trap on_error ERR
+
+[[ ${EUID} -eq 0 ]] || fail "ce script doit être exécuté par root via sudo."
+[[ $# -eq 2 ]] || fail "usage: deploy-world-of-seeds <sha256:digest> <github-actor>"
+
+readonly IMAGE_DIGEST="$1"
+readonly REGISTRY_USER="$2"
+[[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "digest d'image invalide."
+[[ "${REGISTRY_USER}" =~ ^[A-Za-z0-9-]{1,39}$ ]] || fail "identifiant GitHub invalide."
+
+[[ -f "${COMPOSE_FILE}" ]] || fail "${COMPOSE_FILE} est absent."
+[[ -f "${ENV_FILE}" ]] || fail "${ENV_FILE} est absent."
+[[ $(stat -c '%U:%G' "${ENV_FILE}") == "root:root" ]] || fail "${ENV_FILE} doit appartenir à root:root."
+ENV_MODE=$(stat -c '%a' "${ENV_FILE}")
+[[ "${ENV_MODE}" == "600" || "${ENV_MODE}" == "400" ]] || fail "${ENV_FILE} doit être en mode 600 ou 400."
+
+for command in docker curl mktemp stat; do
+  command -v "${command}" >/dev/null || fail "commande requise absente: ${command}"
+done
+docker compose version >/dev/null
+
+IFS= read -r REGISTRY_TOKEN || fail "jeton GHCR absent sur l'entrée standard."
+[[ ${#REGISTRY_TOKEN} -ge 20 && ${#REGISTRY_TOKEN} -le 4096 ]] || fail "jeton GHCR invalide."
+
+DOCKER_CONFIG_DIR=$(mktemp -d /tmp/world-of-seeds-docker-config.XXXXXX)
+chmod 700 "${DOCKER_CONFIG_DIR}"
+export DOCKER_CONFIG="${DOCKER_CONFIG_DIR}"
+printf '%s' "${REGISTRY_TOKEN}" \
+  | docker login ghcr.io --username "${REGISTRY_USER}" --password-stdin >/dev/null
+unset REGISTRY_TOKEN
+
+export WOS_IMAGE="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
+COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+
+cd "${PROJECT_DIR}"
+"${COMPOSE[@]}" config --quiet
+"${COMPOSE[@]}" pull app
+"${COMPOSE[@]}" up --detach --wait --wait-timeout 120 postgres
+"${COMPOSE[@]}" run --rm --no-deps app \
+  alembic -c backend/alembic.ini upgrade head
+"${COMPOSE[@]}" run --rm --no-deps app \
+  python -m app.cli migrate-workspaces
+"${COMPOSE[@]}" up --detach --wait --wait-timeout 180 app
+
+[[ $("${COMPOSE[@]}" port app 8000) == "127.0.0.1:18081" ]] \
+  || fail "le port applicatif n'est pas limité à 127.0.0.1:18081."
+curl --fail --silent --show-error \
+  http://127.0.0.1:18081/api/v1/health/ready >/dev/null
+
+STATE_TMP=$(mktemp "${PROJECT_DIR}/.deployed-image.XXXXXX")
+chmod 600 "${STATE_TMP}"
+printf '%s\n' "${WOS_IMAGE}" >"${STATE_TMP}"
+mv -f -- "${STATE_TMP}" "${STATE_FILE}"
+STATE_TMP=""
+
+printf 'World of Seeds déployé avec succès : %s\n' "${WOS_IMAGE}"
