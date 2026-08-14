@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { api, ApiError, type TrashEntry, type TrashListing } from "../../api/client";
+import { FileIcon, FolderIcon } from "../../components/icons";
+import { Notice } from "../../components/Notice";
 import { formatBytes } from "../../utils/format";
 import { FileDialog } from "./FileDialog";
 
@@ -40,19 +42,7 @@ function trashActionError(error: unknown, action: "purge" | "restore"): string {
 function TrashIcon({ kind }: { kind: TrashEntry["kind"] }) {
   return (
     <span className={`trash-icon ${kind}`} aria-hidden="true">
-      <svg viewBox="0 0 24 24">
-        {kind === "directory" ? (
-          <>
-            <path d="M3.5 7.5h6l1.7 2h9.3v8.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2V7.5Z" />
-            <path d="M3.5 8V5.7a2.2 2.2 0 0 1 2.2-2.2h3.1l2 2.2h7.5a2.2 2.2 0 0 1 2.2 2.2v1.6" />
-          </>
-        ) : (
-          <>
-            <path d="M6 2.8h7l5 5V21H6V2.8Z" />
-            <path d="M13 2.8V8h5" />
-          </>
-        )}
-      </svg>
+      {kind === "directory" ? <FolderIcon /> : <FileIcon />}
     </span>
   );
 }
@@ -218,11 +208,7 @@ export function TrashBrowser({
         </button>
       </header>
 
-      {notice !== "" && (
-        <p className="operation-notice" role="status">
-          {notice}
-        </p>
-      )}
+      <Notice message={notice} onDismiss={() => setNotice("")} />
 
       {loading && (
         <div
