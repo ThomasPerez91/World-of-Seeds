@@ -51,7 +51,7 @@ async def create_admin(username_input: str) -> None:
 
 
 async def migrate_workspaces() -> None:
-    """Move every known legacy workspace directly below ``/data``."""
+    """Move legacy workspaces and reconcile their versioned directory structure."""
 
     workspace_manager = WorkspaceManager(get_settings().data_root)
     async with session_factory() as db:
@@ -59,6 +59,8 @@ async def migrate_workspaces() -> None:
 
     moved = 0
     already_ready = 0
+    retired_removed = 0
+    retired_retained = 0
     for user in users:
         try:
             if workspace_manager.migrate_legacy(user.username):
@@ -67,6 +69,13 @@ async def migrate_workspaces() -> None:
             else:
                 already_ready += 1
                 print(f"Espace {user.username!r} déjà prêt.")
+            cleanup = workspace_manager.cleanup_retired_directories(user.username)
+            retired_removed += len(cleanup.removed)
+            retired_retained += len(cleanup.retained)
+            for directory in cleanup.removed:
+                print(f"Ancien dossier {user.username!r}/{directory} vide supprimé.")
+            for directory in cleanup.retained:
+                print(f"Ancien dossier {user.username!r}/{directory} conservé car non vide.")
         except WorkspaceError as exc:
             raise SystemExit(f"Migration interrompue pour {user.username!r}: {exc}") from exc
 
@@ -74,6 +83,8 @@ async def migrate_workspaces() -> None:
     print(
         f"Migration terminée : {moved} déplacé(s), "
         f"{already_ready} déjà prêt(s), "
+        f"{retired_removed} ancien(s) dossier(s) vide(s) supprimé(s), "
+        f"{retired_retained} ancien(s) dossier(s) non vide(s) conservé(s), "
         f"ancien dossier supprimé : {'oui' if legacy_root_removed else 'non'}."
     )
 

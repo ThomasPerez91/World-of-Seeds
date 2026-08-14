@@ -1,13 +1,18 @@
+import errno
 import os
 import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from app.auth.security import normalize_username
 from app.files.atomic import AtomicRenameUnavailableError, rename_without_replacement
+from app.files.structure import WORKSPACE_STRUCTURE
 
-WORKSPACE_DIRECTORIES = ("downloads", "watch")
+WORKSPACE_DIRECTORIES = WORKSPACE_STRUCTURE.directories
+PROTECTED_WORKSPACE_DIRECTORIES = WORKSPACE_STRUCTURE.protected_directories
+RETIRED_WORKSPACE_DIRECTORIES = WORKSPACE_STRUCTURE.retired_directories
 LEGACY_USERS_DIRECTORY = "users"
 DIRECTORY_MODE = 0o750
 DIRECTORY_OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -31,6 +36,12 @@ class WorkspaceUnsafeEntryError(WorkspaceError):
 
 class WorkspaceCompensationError(WorkspaceError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class RetiredDirectoryCleanup:
+    removed: tuple[str, ...]
+    retained: tuple[str, ...]
 
 
 def _rename_without_replacement(
@@ -161,6 +172,63 @@ class WorkspaceManager:
     def assert_ready(self, username: str) -> None:
         with self.open_workspace(username) as workspace_fd:
             self._assert_ready_fd(workspace_fd)
+
+    def cleanup_retired_directories(self, username: str) -> RetiredDirectoryCleanup:
+        """Remove configured legacy directories only when they are empty and real."""
+
+        removed: list[str] = []
+        retained: list[str] = []
+        with self.open_workspace(username) as workspace_fd:
+            for directory in RETIRED_WORKSPACE_DIRECTORIES:
+                try:
+                    inspected = os.stat(directory, dir_fd=workspace_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                except OSError as exc:
+                    raise WorkspaceUnsafeEntryError(
+                        "A retired workspace directory cannot be inspected"
+                    ) from exc
+                if not stat.S_ISDIR(inspected.st_mode):
+                    raise WorkspaceUnsafeEntryError(
+                        "A retired workspace entry is not a safe directory"
+                    )
+
+                directory_fd = self._open_directory(
+                    workspace_fd,
+                    directory,
+                    missing_message="A retired workspace directory disappeared",
+                )
+                try:
+                    opened = os.fstat(directory_fd)
+                    if opened.st_dev != inspected.st_dev or opened.st_ino != inspected.st_ino:
+                        raise WorkspaceUnsafeEntryError(
+                            "A retired workspace directory changed during inspection"
+                        )
+                    if os.listdir(directory_fd):
+                        retained.append(directory)
+                        continue
+                finally:
+                    os.close(directory_fd)
+
+                try:
+                    current = os.stat(directory, dir_fd=workspace_fd, follow_symlinks=False)
+                    if current.st_dev != inspected.st_dev or current.st_ino != inspected.st_ino:
+                        raise WorkspaceUnsafeEntryError(
+                            "A retired workspace directory changed before removal"
+                        )
+                    os.rmdir(directory, dir_fd=workspace_fd)
+                except FileNotFoundError:
+                    continue
+                except OSError as exc:
+                    if exc.errno in {errno.ENOTEMPTY, errno.EEXIST}:
+                        retained.append(directory)
+                        continue
+                    raise WorkspaceError(
+                        "Unable to remove an empty retired workspace directory"
+                    ) from exc
+                removed.append(directory)
+
+        return RetiredDirectoryCleanup(removed=tuple(removed), retained=tuple(retained))
 
     @contextmanager
     def open_workspace(self, username: str) -> Iterator[int]:

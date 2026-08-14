@@ -10,7 +10,7 @@ Les capacités fonctionnelles principales de la V1 sont en place :
 - interface React/Vite TypeScript ;
 - PostgreSQL non exposé sur l'hôte ;
 - authentification par session et comptes administrés sans expiration ;
-- espaces `/data/<username>/{downloads,watch}` créés avec chaque compte ;
+- espaces `/data/<username>/downloads` créés depuis une structure JSON versionnée ;
 - renommage coordonné du compte et de son dossier avec compensation en cas d'échec SQL ;
 - navigation sécurisée avec métadonnées, fil d'Ariane et espace disque ;
 - téléchargement en flux avec HTTP Range, reprise, ETag et Last-Modified ;
@@ -84,7 +84,7 @@ Puis ouvrir <http://127.0.0.1:18081>.
 Le mot de passe administrateur est demandé interactivement et n'est ni placé dans `.env`, ni écrit dans les logs. Pour l'accès initial par tunnel HTTP, `WOS_COOKIE_SECURE=false`. Cette valeur devra devenir `true` en même temps que l'ajout de HTTPS.
 
 La commande de création de l'administrateur initialise aussi
-`/srv/seedbox/admin/{downloads,watch}`. `APP_UID` et `APP_GID` doivent donc
+`/srv/seedbox/admin/downloads`. `APP_UID` et `APP_GID` doivent donc
 correspondre à une identité ayant le droit de créer des dossiers sous `/srv/seedbox`.
 Il ne faut pas appliquer de `chown -R` ou de `chmod -R` à l'aveugle sur les données
 existantes ; les permissions seront vérifiées précisément pendant le déploiement accompagné.
@@ -92,7 +92,9 @@ existantes ; les permissions seront vérifiées précisément pendant le déploi
 La commande `migrate-workspaces` déplace de façon atomique les anciens espaces
 `/srv/seedbox/users/<username>` vers `/srv/seedbox/<username>`. Elle est idempotente,
 refuse toute collision et ne touche jamais aux répertoires qBittorrent historiques
-`/srv/seedbox/downloads` et `/srv/seedbox/watch`.
+`/srv/seedbox/downloads` et `/srv/seedbox/watch`. Elle retire uniquement les anciens
+`watch` propres aux utilisateurs lorsqu'ils sont vides ; un dossier non vide est conservé
+mais masqué par le navigateur.
 
 La conception détaillée et le découpage des prochaines PR sont documentés dans
 [`docs/architecture-v1.md`](docs/architecture-v1.md). La coexistence avec les chemins

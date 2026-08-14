@@ -10,12 +10,23 @@ from app.files import (
     WorkspaceManager,
     WorkspaceUnsafeEntryError,
 )
+from app.files.structure import WORKSPACE_STRUCTURE
+from app.trash.filesystem import TRASH_DIRECTORY
 
 
 def make_manager(tmp_path: Path) -> tuple[WorkspaceManager, Path]:
     data_root = tmp_path / "data"
     data_root.mkdir()
     return WorkspaceManager(data_root), data_root
+
+
+def test_versioned_workspace_structure_is_the_runtime_reference() -> None:
+    assert WORKSPACE_STRUCTURE.schema_version == 1
+    assert WORKSPACE_STRUCTURE.directories == ("downloads",)
+    assert WORKSPACE_STRUCTURE.protected_directories == ("downloads",)
+    assert WORKSPACE_STRUCTURE.retired_directories == ("watch",)
+    assert WORKSPACE_STRUCTURE.trash_directory == ".trash"
+    assert WORKSPACE_STRUCTURE.trash_directory == TRASH_DIRECTORY
 
 
 def test_workspace_is_created_directly_and_renamed_without_touching_qbittorrent_paths(
@@ -31,7 +42,7 @@ def test_workspace_is_created_directly_and_renamed_without_touching_qbittorrent_
     manager.rename("guest-123abc", "thomas")
 
     workspace = data_root / "thomas"
-    assert {entry.name for entry in workspace.iterdir()} == {"downloads", "watch"}
+    assert {entry.name for entry in workspace.iterdir()} == {"downloads"}
     assert legacy_marker.read_bytes() == b"legacy"
     assert not (data_root / "guest-123abc").exists()
 
@@ -195,6 +206,9 @@ def test_legacy_workspace_migration_is_atomic_idempotent_and_preserves_data(
     assert (data_root / "admin" / "downloads" / "video.mkv").read_bytes() == b"content"
     assert not legacy.exists()
     assert manager.migrate_legacy("admin") is False
+    cleanup = manager.cleanup_retired_directories("admin")
+    assert cleanup.removed == ("watch",)
+    assert cleanup.retained == ()
     assert manager.remove_legacy_root_if_empty() is True
     assert not (data_root / "users").exists()
 
@@ -212,3 +226,30 @@ def test_legacy_migration_refuses_ambiguous_or_unsafe_states(tmp_path: Path) -> 
     assert (data_root / "admin" / "downloads").is_dir()
     assert (legacy / "downloads").is_dir()
     assert manager.remove_legacy_root_if_empty() is False
+
+
+def test_retired_directory_cleanup_preserves_non_empty_data_and_rejects_symlinks(
+    tmp_path: Path,
+) -> None:
+    manager, data_root = make_manager(tmp_path)
+    manager.create("admin")
+    watch = data_root / "admin" / "watch"
+    watch.mkdir()
+    marker = watch / "keep.torrent"
+    marker.write_text("keep", encoding="utf-8")
+
+    cleanup = manager.cleanup_retired_directories("admin")
+
+    assert cleanup.removed == ()
+    assert cleanup.retained == ("watch",)
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+    marker.unlink()
+    watch.rmdir()
+    outside = tmp_path / "outside-watch"
+    outside.mkdir()
+    watch.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(WorkspaceUnsafeEntryError):
+        manager.cleanup_retired_directories("admin")
+    assert watch.is_symlink()

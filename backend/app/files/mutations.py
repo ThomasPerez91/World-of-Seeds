@@ -14,7 +14,11 @@ from app.files.browser import (
     is_safe_component,
     open_sandboxed_directory,
 )
-from app.files.workspaces import WORKSPACE_DIRECTORIES, WorkspaceManager
+from app.files.workspaces import (
+    PROTECTED_WORKSPACE_DIRECTORIES,
+    RETIRED_WORKSPACE_DIRECTORIES,
+    WorkspaceManager,
+)
 
 __all__ = ["rename_without_replacement"]
 
@@ -54,7 +58,9 @@ def validate_mutable_source_path(raw_path: str) -> RelativePath:
     source = RelativePath.parse(raw_path)
     if not source.components:
         raise MutationProtectedPathError("The workspace root cannot be changed")
-    if len(source.components) == 1 and source.components[0] in WORKSPACE_DIRECTORIES:
+    if source.components[0] in RETIRED_WORKSPACE_DIRECTORIES:
+        raise MutationProtectedPathError("Retired workspace directories are hidden")
+    if len(source.components) == 1 and source.components[0] in PROTECTED_WORKSPACE_DIRECTORIES:
         raise MutationProtectedPathError("Required workspace directories cannot be changed")
     return source
 

@@ -117,7 +117,14 @@ Toutes les API utilisent des chemins relatifs à une racine déjà autorisée. L
 
 Une simple comparaison de chaînes ou un unique `resolve()` n'est pas suffisant face aux changements concurrents. Le gestionnaire ouvre chaque composant demandé depuis un descripteur de la racine avec les primitives Linux `*at` et `O_NOFOLLOW`. Les liens symboliques sont affichés comme bloqués et ne peuvent pas être suivis, parcourus, renommés ou déplacés. Les mutations travaillent à partir des descripteurs des dossiers parents.
 
-La liste expose le nom, le type, la taille des fichiers, la date de modification et le type MIME estimé. La taille d'un dossier n'est pas calculée récursivement : cette opération serait coûteuse et pourrait ralentir le serveur sur plusieurs dizaines de gigaoctets. L'utilisation affichée correspond au système de fichiers qui porte `/data`. Une réponse est plafonnée à 5 000 éléments afin qu'un dossier anormalement volumineux ne sature pas la mémoire de l'application.
+La liste expose le nom, le type, la taille des fichiers et des dossiers, la date de
+modification et le type MIME estimé. La taille d'un dossier est calculée sans suivre les
+liens symboliques, avec un budget partagé de 50 000 entrées par réponse, une profondeur
+maximale de 128 et un cache mémoire de 30 secondes. Si une limite ou une frontière de
+système de fichiers est rencontrée, la taille reste inconnue plutôt que de lancer un scan
+non borné. L'utilisation affichée correspond au système de fichiers qui porte `/data`.
+Une réponse est plafonnée à 5 000 éléments afin qu'un dossier anormalement volumineux ne
+sature pas la mémoire de l'application.
 
 Les opérations prévues sont :
 
@@ -132,8 +139,8 @@ descripteurs des dossiers source et destination. Ils sont donc instantanés mêm
 fichier de plusieurs dizaines de gigaoctets, à condition que les deux dossiers soient sur
 le même système de fichiers, et ne remplacent jamais une destination existante. L'identité
 de l'élément est contrôlée après l'appel atomique ; une substitution concurrente est remise
-à sa place sans suivre son éventuelle cible. Les racines obligatoires `downloads` et `watch`
-ne peuvent pas être renommées ou déplacées, et un dossier ne peut pas être déplacé dans
+à sa place sans suivre son éventuelle cible. La racine obligatoire `downloads`
+ne peut pas être renommée ou déplacée, et un dossier ne peut pas être déplacé dans
 lui-même ou l'un de ses descendants.
 
 Les routes `PATCH /api/v1/files/rename` et `POST /api/v1/files/move` exigent une session

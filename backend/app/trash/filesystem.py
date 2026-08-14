@@ -18,9 +18,10 @@ from app.files.mutations import (
     relocate_verified,
     validate_mutable_source_path,
 )
+from app.files.structure import WORKSPACE_STRUCTURE
 from app.files.workspaces import DIRECTORY_OPEN_FLAGS, WorkspaceManager
 
-TRASH_DIRECTORY = ".trash"
+TRASH_DIRECTORY = WORKSPACE_STRUCTURE.trash_directory
 TRASH_DIRECTORY_MODE = 0o700
 MAX_PURGE_DEPTH = 512
 

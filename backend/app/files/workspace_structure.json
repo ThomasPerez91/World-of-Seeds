@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "workspace": {
+    "directories": [
+      {
+        "name": "downloads",
+        "visible": true,
+        "protected": true
+      }
+    ],
+    "retired_directories": [
+      {
+        "name": "watch",
+        "remove_if_empty": true
+      }
+    ]
+  },
+  "trash": {
+    "root": ".trash",
+    "scope": "user_id",
+    "visible_in_browser": false
+  }
+}
