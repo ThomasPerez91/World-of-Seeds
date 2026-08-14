@@ -295,8 +295,7 @@ button:disabled {
 }
 
 #dashboard-content:focus {
-  outline: 0.15rem solid rgb(174 213 156 / 55%);
-  outline-offset: -0.15rem;
+  outline: none;
 }
 
 .app-header {
@@ -321,9 +320,34 @@ button:disabled {
 }
 
 .wordmark {
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
   gap: 0.85rem;
+  border-radius: 0.8rem;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
   font-weight: 750;
   letter-spacing: -0.02em;
+}
+
+.wordmark:hover,
+.wordmark:active {
+  color: inherit;
+  background: transparent;
+  transform: none;
+}
+
+.version-badge {
+  padding: 0.22rem 0.42rem;
+  border: 1px solid rgb(174 213 156 / 14%);
+  border-radius: 999px;
+  color: #819087;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .wordmark .brand-mark {
@@ -343,17 +367,26 @@ button:disabled {
   font-size: 0.86rem;
 }
 
-.account-identity,
 .account-menu {
   display: flex;
   align-items: center;
 }
 
-.account-identity {
+.account-trigger {
+  display: flex;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0.3rem 0.4rem;
+  align-items: center;
   gap: 0.65rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: inherit;
+  background: transparent;
 }
 
-.account-identity strong {
+.account-trigger strong {
   overflow: hidden;
   max-width: min(15rem, 30vw);
   color: #dce5df;
@@ -375,33 +408,21 @@ button:disabled {
   font-weight: 800;
 }
 
-.account-settings-trigger {
-  display: grid;
-  width: 2.45rem;
-  height: 2.45rem;
-  margin: 0 0 0 0.35rem;
-  padding: 0;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: 50%;
-  color: #9caaa2;
-  background: transparent;
-}
-
-.account-settings-trigger:hover,
-.account-settings-trigger[aria-expanded="true"] {
+.account-trigger:hover,
+.account-trigger[aria-expanded="true"] {
   border-color: #304239;
   color: #dfe8e2;
   background: rgb(255 255 255 / 5%);
 }
 
-.account-settings-trigger svg {
-  width: 1.2rem;
-  fill: none;
-  stroke: currentcolor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.6;
+.account-trigger-icon {
+  width: 0.9rem;
+  height: 0.9rem;
+  transition: transform 160ms ease;
+}
+
+.account-trigger[aria-expanded="true"] .account-trigger-icon {
+  transform: rotate(180deg);
 }
 
 .account-dropdown {
@@ -1007,12 +1028,40 @@ button:disabled {
 }
 
 .operation-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   margin: 0;
   padding: 0.8rem clamp(1rem, 3vw, 1.5rem);
   border-bottom: 1px solid rgb(174 213 156 / 10%);
   color: #b9dda9;
   background: rgb(174 213 156 / 6%);
   font-size: 0.75rem;
+}
+
+.notice-dismiss {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgb(174 213 156 / 16%);
+  border-radius: 50%;
+  color: #b9cfaf;
+  background: transparent;
+}
+
+.notice-dismiss:hover {
+  color: #edf5e9;
+  background: rgb(174 213 156 / 8%);
+}
+
+.notice-dismiss svg {
+  width: 1rem;
+  height: 1rem;
 }
 
 .dialog-backdrop {
@@ -1073,6 +1122,11 @@ button:disabled {
   background: transparent;
   font-size: 1.4rem;
   font-weight: 400;
+}
+
+.dialog-close svg {
+  width: 1.4rem;
+  height: 1.4rem;
 }
 
 .mutation-form,
@@ -1199,7 +1253,9 @@ button:disabled {
   white-space: nowrap;
 }
 
-.destination-row > span:first-child {
+.destination-row > svg:first-child {
+  width: 1rem;
+  height: 1rem;
   color: #9bc68d;
 }
 
@@ -1916,7 +1972,7 @@ select:focus-visible {
     display: none;
   }
 
-  .account-identity strong {
+  .account-trigger strong {
     max-width: 8rem;
   }
 

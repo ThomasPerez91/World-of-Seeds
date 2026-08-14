@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api, ApiError, type AdminTrashEntry, type AdminTrashListing } from "../../api/client";
 import { formatBytes } from "../../utils/format";
+import { Notice } from "../../components/Notice";
 import { FileDialog } from "../files/FileDialog";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 
@@ -172,11 +173,7 @@ export function AdminTrashPage({
           </div>
         </div>
 
-        {notice !== "" && (
-          <p className="operation-notice" role="status">
-            {notice}
-          </p>
-        )}
+        <Notice message={notice} onDismiss={() => setNotice("")} />
         <p className="form-message error-message" role="alert">
           {error}
         </p>

@@ -13,6 +13,8 @@ import { AdminTrashPage } from "./features/admin/AdminTrashPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { FileBrowser } from "./features/files/FileBrowser";
 import { TrashBrowser } from "./features/files/TrashBrowser";
+import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
+import { APP_VERSION } from "./version";
 
 type AuthState =
   | { status: "loading" }
@@ -29,11 +31,7 @@ function clearFilePathFromUrl() {
 function BrandMark() {
   return (
     <div className="brand-mark" aria-hidden="true">
-      <svg viewBox="0 0 48 48" role="img">
-        <path d="M24 40V21" />
-        <path d="M24 27C14 27 9 20 9 10c10 0 15 7 15 17Z" />
-        <path d="M24 22c0-9 6-14 15-14 0 9-6 14-15 14Z" />
-      </svg>
+      <BrandIcon />
     </div>
   );
 }
@@ -280,24 +278,19 @@ function AccountMenu({
 
   return (
     <div className="account-menu" ref={containerRef}>
-      <div className="account-identity">
-        <span className="account-avatar" aria-hidden="true">
-          {user.username.slice(0, 1).toUpperCase()}
-        </span>
-        <strong>{user.username}</strong>
-      </div>
       <button
         type="button"
-        className="account-settings-trigger"
+        className="account-trigger"
         aria-label="Ouvrir le menu du compte"
         aria-expanded={open}
         aria-controls="account-dropdown"
         onClick={() => setOpen((current) => !current)}
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" />
-          <path d="M19.4 13.5c.1-.5.1-1 0-1.5l2-1.6-2-3.4-2.5 1a8 8 0 0 0-1.3-.8L15.2 4h-4l-.4 3.2c-.5.2-.9.5-1.3.8L7 7 5 10.4 7 12c-.1.5-.1 1 0 1.5l-2 1.6 2 3.4 2.5-1c.4.3.8.6 1.3.8l.4 3.2h4l.4-3.2c.5-.2.9-.5 1.3-.8l2.5 1 2-3.4-2-1.6Z" />
-        </svg>
+        <span className="account-avatar" aria-hidden="true">
+          {user.username.slice(0, 1).toUpperCase()}
+        </span>
+        <strong>{user.username}</strong>
+        <AccountMenuIcon className="account-trigger-icon" />
       </button>
       {open && (
         <div id="account-dropdown" className="account-dropdown">
@@ -406,7 +399,7 @@ function AccountSettingsPage({
   return (
     <section className="settings-page" aria-labelledby="account-settings-title">
       <button type="button" className="back-button" onClick={onBack}>
-        <span aria-hidden="true">←</span> Retour aux fichiers
+        <BackIcon /> Retour aux fichiers
       </button>
       <div className="settings-card">
         <p className="eyebrow">Compte</p>
@@ -484,9 +477,16 @@ function Dashboard({
 }) {
   const [view, setView] = useState<"files" | "settings" | AdminView>("files");
   const [filesRevision, setFilesRevision] = useState(0);
+  const [filesHomeKey, setFilesHomeKey] = useState(0);
   const handleFilesChanged = useCallback(() => {
     setFilesRevision((value) => value + 1);
   }, []);
+
+  function openFilesHome() {
+    clearFilePathFromUrl();
+    setView("files");
+    setFilesHomeKey((value) => value + 1);
+  }
 
   return (
     <main className="app-shell">
@@ -494,10 +494,16 @@ function Dashboard({
         Aller au contenu principal
       </a>
       <header className="app-header">
-        <div className="wordmark">
+        <button
+          type="button"
+          className="wordmark"
+          onClick={openFilesHome}
+          aria-label="Ouvrir Mes fichiers"
+        >
           <BrandMark />
           <span>World of Seeds</span>
-        </div>
+          <span className="version-badge">v{APP_VERSION}</span>
+        </button>
         <AccountMenu
           user={user}
           onOpenAdmin={() => setView("admin-users")}
@@ -510,31 +516,32 @@ function Dashboard({
         {view === "settings" ? (
           <AccountSettingsPage
             user={user}
-            onBack={() => setView("files")}
+            onBack={openFilesHome}
             onChanged={onUserChanged}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-users" && user.is_admin ? (
           <AdminUsersPage
-            onBack={() => setView("files")}
+            onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-storage" && user.is_admin ? (
           <AdminStoragePage
-            onBack={() => setView("files")}
+            onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-trash" && user.is_admin ? (
           <AdminTrashPage
-            onBack={() => setView("files")}
+            onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : (
           <>
             <FileBrowser
+              key={filesHomeKey}
               onFilesChanged={handleFilesChanged}
               onSessionExpired={onSessionExpired}
               revision={filesRevision}

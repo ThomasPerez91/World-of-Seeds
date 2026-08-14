@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { BackIcon } from "../../components/icons";
+
 export type AdminView = "admin-users" | "admin-storage" | "admin-trash";
 
 const navigation: { view: AdminView; label: string }[] = [
@@ -22,7 +24,7 @@ export function AdminPageShell({
   return (
     <section className="admin-page" aria-labelledby="administration-title">
       <button type="button" className="back-button" onClick={onBack}>
-        <span aria-hidden="true">←</span> Retour aux fichiers
+        <BackIcon /> Retour aux fichiers
       </button>
       <header className="admin-page-header">
         <div>

@@ -72,6 +72,8 @@ describe("App", () => {
     expect(document.querySelector("#dashboard-content")?.getAttribute("tabindex")).toBe("-1");
     expect(screen.queryByText("Bonjour, thomas")).toBeNull();
     expect(document.querySelector(".account-avatar")?.textContent).toBe("T");
+    expect(screen.getByText("v1.1.0-dev")).toBeDefined();
+    expect(document.querySelector(".account-settings-trigger")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
     await screen.findByText("Ce dossier est vide");
     await screen.findByText("La corbeille est vide");
@@ -81,6 +83,9 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Administration" }));
     await screen.findByRole("heading", { name: "Comptes utilisateurs" });
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+
+    await user.click(screen.getByRole("button", { name: "Ouvrir Mes fichiers" }));
+    await screen.findByRole("heading", { name: "Mes fichiers" });
 
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
     await user.click(screen.getByRole("button", { name: "Paramètres du compte" }));

@@ -1,5 +1,7 @@
 import { type ReactNode, useEffect, useId, useRef } from "react";
 
+import { CloseIcon } from "../../components/icons";
+
 const FOCUSABLE_SELECTOR = [
   "button:not(:disabled)",
   "input:not(:disabled)",
@@ -100,7 +102,7 @@ export function FileDialog({
             aria-label="Fermer"
             disabled={closeDisabled}
           >
-            ×
+            <CloseIcon />
           </button>
         </header>
         {children}
