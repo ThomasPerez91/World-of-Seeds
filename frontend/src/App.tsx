@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 
-import { api, ApiError, type User } from "./api/client";
+import { api, ApiError, type StorageUsage, type User } from "./api/client";
 import { type AdminView } from "./features/admin/AdminPageShell";
 import { AdminStoragePage } from "./features/admin/AdminStoragePage";
 import { AdminTrashPage } from "./features/admin/AdminTrashPage";
@@ -14,6 +14,7 @@ import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { FileBrowser } from "./features/files/FileBrowser";
 import { TrashBrowser } from "./features/files/TrashBrowser";
 import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
+import { formatBytes } from "./utils/format";
 import { APP_VERSION } from "./version";
 
 type AuthState =
@@ -33,6 +34,52 @@ function BrandMark() {
     <div className="brand-mark" aria-hidden="true">
       <BrandIcon />
     </div>
+  );
+}
+
+function ServiceHealth() {
+  const [health, setHealth] = useState<"healthy" | "unavailable">("healthy");
+  const [checking, setChecking] = useState(false);
+  const mounted = useRef(true);
+
+  const check = useCallback(async () => {
+    setChecking(true);
+    try {
+      await api.health();
+      if (mounted.current) setHealth("healthy");
+    } catch {
+      if (mounted.current) setHealth("unavailable");
+    } finally {
+      if (mounted.current) setChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    const interval = window.setInterval(() => void check(), 30_000);
+    return () => {
+      mounted.current = false;
+      window.clearInterval(interval);
+    };
+  }, [check]);
+
+  return (
+    <button
+      type="button"
+      className={`service-health ${health}`}
+      onClick={() => void check()}
+      disabled={checking}
+      aria-label="Vérifier l’état du service"
+    >
+      <span className="service-health-dot" aria-hidden="true" />
+      <span aria-live="polite">
+        {checking
+          ? "Vérification en cours…"
+          : health === "healthy"
+            ? "Tous les services fonctionnent normalement."
+            : "Le service est momentanément interrompu."}
+      </span>
+    </button>
   );
 }
 
@@ -71,10 +118,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
         <p className="brand-copy">
           Vos fichiers, vos téléchargements et votre espace seedbox dans une interface unique.
         </p>
-        <div className="privacy-note">
-          <span className="privacy-dot" aria-hidden="true" />
-          Accès restreint et connexion par tunnel privé
-        </div>
+        <ServiceHealth />
       </section>
 
       <section className="form-panel" aria-labelledby="login-title">
@@ -505,6 +549,90 @@ function AccountSettingsPage({
   );
 }
 
+function StorageCard({ storage }: { storage: StorageUsage | null }) {
+  if (storage === null) {
+    return <div className="storage-card storage-card-loading" aria-hidden="true" />;
+  }
+  const percent =
+    storage.total === 0 ? 0 : Math.min((storage.used / storage.total) * 100, 100);
+  return (
+    <div className="storage-card" role="group" aria-label="Utilisation du stockage">
+      <div className="storage-copy">
+        <span>{formatBytes(storage.used)} utilisés</span>
+        <strong>{formatBytes(storage.available)} disponibles</strong>
+      </div>
+      <progress
+        className="storage-track"
+        max={100}
+        value={percent}
+        aria-label={`${percent.toFixed(0)} % du stockage utilisé`}
+      >
+        {percent.toFixed(0)} %
+      </progress>
+      <span className="storage-total">Capacité totale : {formatBytes(storage.total)}</span>
+    </div>
+  );
+}
+
+function FilesWorkspace({
+  onFilesChanged,
+  onSessionExpired,
+  revision,
+}: {
+  onFilesChanged: () => void;
+  onSessionExpired: () => void;
+  revision: number;
+}) {
+  const [activeView, setActiveView] = useState<"files" | "trash">("files");
+  const [storage, setStorage] = useState<StorageUsage | null>(null);
+
+  return (
+    <section className="files-workspace" aria-labelledby="files-page-title">
+      <header className="files-page-header">
+        <div>
+          <p className="eyebrow">Espace personnel</p>
+          <h1 id="files-page-title">Mes fichiers</h1>
+        </div>
+        <StorageCard storage={storage} />
+      </header>
+      <div className="file-view-tabs" role="group" aria-label="Vues de l’espace personnel">
+        <button
+          type="button"
+          aria-pressed={activeView === "files"}
+          onClick={() => setActiveView("files")}
+        >
+          Mes fichiers
+        </button>
+        <button
+          type="button"
+          aria-pressed={activeView === "trash"}
+          onClick={() => setActiveView("trash")}
+        >
+          Corbeille
+        </button>
+      </div>
+      {activeView === "files" ? (
+        <div>
+          <FileBrowser
+            onFilesChanged={onFilesChanged}
+            onSessionExpired={onSessionExpired}
+            onStorageChanged={setStorage}
+            revision={revision}
+          />
+        </div>
+      ) : (
+        <div>
+          <TrashBrowser
+            onFilesChanged={onFilesChanged}
+            onSessionExpired={onSessionExpired}
+            revision={revision}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Dashboard({
   user,
   onUserChanged,
@@ -581,19 +709,12 @@ function Dashboard({
             onSessionExpired={onSessionExpired}
           />
         ) : (
-          <>
-            <FileBrowser
-              key={filesHomeKey}
-              onFilesChanged={handleFilesChanged}
-              onSessionExpired={onSessionExpired}
-              revision={filesRevision}
-            />
-            <TrashBrowser
-              onFilesChanged={handleFilesChanged}
-              onSessionExpired={onSessionExpired}
-              revision={filesRevision}
-            />
-          </>
+          <FilesWorkspace
+            key={filesHomeKey}
+            onFilesChanged={handleFilesChanged}
+            onSessionExpired={onSessionExpired}
+            revision={filesRevision}
+          />
         )}
       </div>
     </main>

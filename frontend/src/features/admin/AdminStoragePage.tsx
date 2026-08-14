@@ -59,7 +59,6 @@ export function AdminStoragePage({
           <div>
             <p className="eyebrow">Capacité</p>
             <h2 id="admin-storage-title">Stockage de la seedbox</h2>
-            <p className="section-intro">Vue globale du filesystem monté dans le conteneur.</p>
           </div>
           <button
             type="button"

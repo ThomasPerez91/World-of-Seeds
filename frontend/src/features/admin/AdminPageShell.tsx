@@ -27,11 +27,7 @@ export function AdminPageShell({
         <BackIcon /> Retour aux fichiers
       </button>
       <header className="admin-page-header">
-        <div>
-          <p className="eyebrow">Espace sécurisé</p>
-          <h1 id="administration-title">Administration</h1>
-          <p>Gère les accès et le stockage de la seedbox depuis un espace dédié.</p>
-        </div>
+        <h1 id="administration-title">Administration</h1>
         <nav className="admin-navigation" aria-label="Sections d’administration">
           {navigation.map((item) => (
             <button

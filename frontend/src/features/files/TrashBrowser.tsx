@@ -192,12 +192,9 @@ export function TrashBrowser({
       aria-labelledby="trash-title"
       aria-busy={loading}
     >
-      <header className="trash-header">
-        <div>
-          <p className="eyebrow">Récupération</p>
-          <h2 id="trash-title">Corbeille</h2>
-          <p>Les éléments restent isolés par compte jusqu’à leur suppression définitive.</p>
-        </div>
+      <h2 id="trash-title" className="sr-only">Corbeille</h2>
+      <div className="trash-toolbar">
+        <span>Éléments supprimés</span>
         <button
           type="button"
           className="refresh-button"
@@ -206,7 +203,7 @@ export function TrashBrowser({
         >
           Actualiser
         </button>
-      </header>
+      </div>
 
       <Notice message={notice} onDismiss={() => setNotice("")} />
 

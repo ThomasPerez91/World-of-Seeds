@@ -115,21 +115,54 @@ h1 {
   line-height: 1.65;
 }
 
-.privacy-note {
+.service-health {
   display: flex;
+  width: fit-content;
+  height: auto;
+  min-height: 2.75rem;
   align-items: center;
   gap: 0.7rem;
   margin-top: 3rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgb(117 199 139 / 18%);
+  border-radius: 999px;
   color: #87958e;
+  background: rgb(5 12 10 / 24%);
+  cursor: pointer;
   font-size: 0.82rem;
+  font-weight: 550;
 }
 
-.privacy-dot {
+.service-health:hover {
+  border-color: rgb(117 199 139 / 32%);
+  color: #afbbb4;
+  background: rgb(117 199 139 / 5%);
+}
+
+.service-health.unavailable {
+  border-color: rgb(211 115 105 / 24%);
+}
+
+.service-health-dot {
   width: 0.5rem;
   height: 0.5rem;
+  flex: 0 0 auto;
   border-radius: 50%;
   background: #75c78b;
   box-shadow: 0 0 0 0.3rem rgb(117 199 139 / 10%);
+  animation: health-pulse 2.2s ease-out infinite;
+}
+
+.service-health.unavailable .service-health-dot {
+  background: #d37369;
+  box-shadow: 0 0 0 0.3rem rgb(211 115 105 / 10%);
+  animation: none;
+}
+
+@keyframes health-pulse {
+  50% {
+    box-shadow: 0 0 0 0.55rem rgb(117 199 139 / 2%);
+  }
 }
 
 .form-panel {
@@ -506,6 +539,54 @@ button:disabled {
     #101d18;
 }
 
+.files-workspace {
+  display: grid;
+  gap: 1rem;
+}
+
+.files-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: clamp(0.75rem, 2vw, 1.25rem) clamp(0.2rem, 1vw, 0.75rem);
+}
+
+.files-page-header h1 {
+  max-width: none;
+  margin: 0;
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  line-height: 0.95;
+}
+
+.file-view-tabs {
+  display: flex;
+  width: fit-content;
+  gap: 0.35rem;
+  padding: 0.3rem;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 0.85rem;
+  background: rgb(5 12 10 / 40%);
+}
+
+.file-view-tabs button {
+  width: auto;
+  height: auto;
+  min-height: 2.75rem;
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.6rem;
+  color: #8f9c95;
+  background: transparent;
+  font-size: 0.76rem;
+}
+
+.file-view-tabs button:hover,
+.file-view-tabs button[aria-pressed="true"] {
+  color: #e2ebe5;
+  background: rgb(174 213 156 / 10%);
+}
+
 .file-browser {
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 8%);
@@ -514,35 +595,19 @@ button:disabled {
   box-shadow: 0 1.5rem 5rem rgb(0 0 0 / 12%);
 }
 
-.browser-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 2rem;
-  padding: clamp(1.4rem, 4vw, 2.5rem);
-  background:
-    radial-gradient(circle at 88% 0%, rgb(174 213 156 / 9%), transparent 24rem),
-    #101d18;
-}
-
-.browser-header h2 {
-  margin-bottom: 0.4rem;
-  font-size: clamp(1.7rem, 4vw, 2.5rem);
-  letter-spacing: -0.045em;
-}
-
-.browser-subtitle {
-  margin-bottom: 0;
-  color: #829088;
-  font-size: 0.88rem;
-}
-
 .storage-card {
   width: min(100%, 23rem);
   padding: 1rem 1.1rem;
   border: 1px solid rgb(174 213 156 / 13%);
   border-radius: 1rem;
   background: rgb(4 11 8 / 28%);
+}
+
+.storage-card-loading {
+  min-height: 5.85rem;
+  background: linear-gradient(90deg, #101d18, #172820, #101d18);
+  background-size: 200% 100%;
+  animation: loading-shimmer 1.3s infinite linear;
 }
 
 .storage-copy {
@@ -1338,35 +1403,27 @@ button:disabled {
 
 .trash-browser {
   overflow: hidden;
-  margin-top: 1.5rem;
   border: 1px solid rgb(255 255 255 / 8%);
   border-radius: 1.5rem;
   background: #101d18;
   box-shadow: 0 1.5rem 5rem rgb(0 0 0 / 10%);
 }
 
-.trash-header {
+.trash-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 2rem;
-  padding: clamp(1.4rem, 4vw, 2.5rem);
-  background:
-    radial-gradient(circle at 90% 0%, rgb(193 139 130 / 7%), transparent 22rem),
-    #101d18;
+  gap: 1rem;
+  min-height: 3.8rem;
+  padding: 0.7rem clamp(1rem, 3vw, 1.5rem);
+  border-bottom: 1px solid rgb(255 255 255 / 7%);
+  background: rgb(4 10 8 / 20%);
 }
 
-.trash-header h2 {
-  margin-bottom: 0.4rem;
-  font-size: clamp(1.7rem, 4vw, 2.5rem);
-  letter-spacing: -0.045em;
-}
-
-.trash-header p:last-child {
-  margin: 0;
+.trash-toolbar > span {
   color: #829088;
-  font-size: 0.82rem;
-  line-height: 1.5;
+  font-size: 0.74rem;
+  font-weight: 650;
 }
 
 .trash-list {
@@ -1504,35 +1561,29 @@ button:disabled {
 
 .admin-page-header {
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
-  gap: 2rem;
-  margin-top: 1.25rem;
-  padding: clamp(1.25rem, 4vw, 2.5rem);
-  border: 1px solid rgb(255 255 255 / 8%);
-  border-radius: 1.5rem;
-  background:
-    radial-gradient(circle at 92% 15%, rgb(174 213 156 / 9%), transparent 20rem),
-    #101d18;
+  gap: 1.25rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.2rem;
 }
 
 .admin-page-header h1 {
   max-width: none;
-  margin-bottom: 0.65rem;
-  font-size: clamp(2.35rem, 5vw, 4.5rem);
-  line-height: 0.95;
-}
-
-.admin-page-header p:last-child {
-  max-width: 42rem;
-  margin-bottom: 0;
-  color: #93a198;
+  margin: 0;
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  letter-spacing: -0.035em;
+  line-height: 1;
 }
 
 .admin-navigation {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem;
+  gap: 0.3rem;
+  padding: 0.28rem;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 0.8rem;
+  background: rgb(5 12 10 / 35%);
 }
 
 .admin-navigation button {
@@ -1541,14 +1592,14 @@ button:disabled {
   min-height: 2.75rem;
   margin: 0;
   padding: 0.7rem 0.9rem;
-  border: 1px solid #304239;
+  border: 0;
+  border-radius: 0.55rem;
   color: #aebbb3;
-  background: rgb(8 17 13 / 45%);
+  background: transparent;
 }
 
 .admin-navigation button:hover,
 .admin-navigation button[aria-current="page"] {
-  border-color: rgb(174 213 156 / 35%);
   color: #dff0d7;
   background: rgb(174 213 156 / 10%);
 }
@@ -1905,7 +1956,7 @@ select:focus-visible {
     font-size: clamp(3rem, 15vw, 5rem);
   }
 
-  .privacy-note {
+  .service-health {
     margin-top: 1.5rem;
   }
 
@@ -1966,20 +2017,10 @@ select:focus-visible {
     padding-top: 2rem;
   }
 
-  .browser-header {
+  .files-page-header {
     align-items: stretch;
     flex-direction: column;
     gap: 1.3rem;
-  }
-
-  .trash-header {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 1.2rem;
-  }
-
-  .trash-header .refresh-button {
-    align-self: flex-start;
   }
 
   .storage-card {
@@ -2010,11 +2051,12 @@ select:focus-visible {
   }
 
   .admin-page-header {
-    padding: 1.25rem;
+    align-items: stretch;
+    padding: 0.5rem 0;
   }
 
   .admin-page-header h1 {
-    font-size: 2.4rem;
+    font-size: 1.6rem;
   }
 
   .admin-navigation {

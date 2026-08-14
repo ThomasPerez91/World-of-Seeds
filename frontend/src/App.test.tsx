@@ -18,7 +18,8 @@ describe("App", () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(response({ detail: "Database unavailable" }, 503))
-      .mockResolvedValueOnce(response({ detail: "Not authenticated" }, 401));
+      .mockResolvedValueOnce(response({ detail: "Not authenticated" }, 401))
+      .mockResolvedValueOnce(response({ detail: "Database unavailable" }, 503));
     vi.stubGlobal("fetch", fetchMock);
 
     const view = render(<App />);
@@ -28,7 +29,10 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "Réessayer" }));
     await screen.findByRole("heading", { name: "Bienvenue" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Tous les services fonctionnent normalement.")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Vérifier l’état du service" }));
+    await screen.findByText("Le service est momentanément interrompu.");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
@@ -65,8 +69,10 @@ describe("App", () => {
       }),
     );
 
+    const user = userEvent.setup();
     const view = render(<App />);
-    await screen.findByRole("heading", { name: "Mes fichiers" });
+    const filesTitle = await screen.findByRole("heading", { name: "Mes fichiers" });
+    expect(filesTitle.closest(".file-browser")).toBeNull();
     const skipLink = screen.getByRole("link", { name: "Aller au contenu principal" });
     expect(skipLink.getAttribute("href")).toBe("#dashboard-content");
     expect(document.querySelector("#dashboard-content")?.getAttribute("tabindex")).toBe("-1");
@@ -76,12 +82,16 @@ describe("App", () => {
     expect(document.querySelector(".account-settings-trigger")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
     await screen.findByText("Ce dossier est vide");
+    expect(screen.queryByText("La corbeille est vide")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Corbeille" }));
     await screen.findByText("La corbeille est vide");
 
-    const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
     await user.click(screen.getByRole("button", { name: "Administration" }));
     await screen.findByRole("heading", { name: "Comptes utilisateurs" });
+    expect(
+      screen.queryByText("Gère les accès et le stockage de la seedbox depuis un espace dédié."),
+    ).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
     await user.click(screen.getByRole("button", { name: "Ouvrir Mes fichiers" }));
@@ -310,10 +320,14 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "Stockage" }));
     await screen.findByRole("heading", { name: "Stockage de la seedbox" });
+    expect(screen.queryByText("Vue globale du filesystem monté dans le conteneur.")).toBeNull();
     expect(screen.getByText("Comptes suspendus")).toBeDefined();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
     await user.click(screen.getByRole("button", { name: "Corbeilles" }));
+    expect(
+      screen.queryByText("Contrôle et purge les éléments de tous les comptes."),
+    ).toBeNull();
     await screen.findByText("un-fichier-avec-un-nom-tres-long.mkv");
     expect(screen.getByText("Shadowsun")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Vider toutes les corbeilles" }));

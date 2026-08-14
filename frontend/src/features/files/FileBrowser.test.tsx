@@ -64,6 +64,7 @@ describe("FileBrowser", () => {
       <FileBrowser
         onFilesChanged={onFilesChanged}
         onSessionExpired={vi.fn()}
+        onStorageChanged={vi.fn()}
         revision={0}
       />,
     );

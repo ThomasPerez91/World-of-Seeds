@@ -151,7 +151,6 @@ export function AdminTrashPage({
           <div>
             <p className="eyebrow">Nettoyage global</p>
             <h2 id="admin-trash-title">Corbeilles utilisateurs</h2>
-            <p className="section-intro">Contrôle et purge les éléments de tous les comptes.</p>
           </div>
           <div className="admin-trash-actions">
             <button
