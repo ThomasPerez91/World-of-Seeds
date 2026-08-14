@@ -222,6 +222,80 @@ async def change_credentials(
     return tokens
 
 
+async def change_username(
+    db: AsyncSession,
+    *,
+    user: User,
+    username_input: str,
+    workspace_manager: WorkspaceManager,
+) -> User:
+    locked_user = await db.scalar(
+        select(User)
+        .where(User.id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked_user is None:
+        raise AuthenticationFailedError
+
+    username = normalize_username(username_input)
+    existing_user = await db.scalar(
+        select(User).where(
+            func.lower(User.username) == canonical_username(username),
+            User.id != locked_user.id,
+        )
+    )
+    if existing_user is not None:
+        raise UsernameUnavailableError
+
+    old_username = locked_user.username
+    try:
+        with workspace_manager.rename_for_transaction(old_username, username):
+            locked_user.username = username
+            locked_user.updated_at = datetime.now(UTC)
+            try:
+                await db.commit()
+            except BaseException:
+                await db.rollback()
+                raise
+    except IntegrityError as exc:
+        raise UsernameUnavailableError from exc
+
+    await db.refresh(locked_user)
+    return locked_user
+
+
+async def change_password(
+    db: AsyncSession,
+    *,
+    user: User,
+    current_password: str,
+    new_password: str,
+) -> None:
+    locked_user = await db.scalar(
+        select(User)
+        .where(User.id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked_user is None or not verify_password(current_password, locked_user.password_hash):
+        raise AuthenticationFailedError
+
+    now = datetime.now(UTC)
+    locked_user.password_hash = hash_password(new_password)
+    locked_user.updated_at = now
+    await db.execute(
+        update(UserSession)
+        .where(UserSession.user_id == locked_user.id, UserSession.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+    try:
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
+
+
 async def revoke_session(db: AsyncSession, user_session: UserSession) -> None:
     user_session.revoked_at = datetime.now(UTC)
     await db.commit()

@@ -8,6 +8,7 @@ from app.auth.dependencies import (
     DbSession,
     get_auth_context,
     require_csrf,
+    require_current_credentials_csrf,
 )
 from app.auth.service import (
     AuthenticationFailedError,
@@ -16,12 +17,21 @@ from app.auth.service import (
     UsernameUnavailableError,
     authenticate,
     change_credentials,
+    change_password,
+    change_username,
     revoke_session,
 )
 from app.core.config import CSRF_COOKIE_NAME, Settings
 from app.files import WorkspaceError
 from app.files.dependencies import WorkspaceManagerDependency
-from app.schemas.auth import AuthResponse, ChangeCredentialsRequest, LoginRequest, UserResponse
+from app.schemas.auth import (
+    AuthResponse,
+    ChangeCredentialsRequest,
+    ChangePasswordRequest,
+    ChangeUsernameRequest,
+    LoginRequest,
+    UserResponse,
+)
 
 router = APIRouter()
 
@@ -137,3 +147,55 @@ async def update_credentials(
 
     set_auth_cookies(response, tokens, settings)
     return AuthResponse(user=UserResponse.model_validate(context.user))
+
+
+@router.patch("/username", response_model=AuthResponse)
+async def update_username(
+    payload: ChangeUsernameRequest,
+    db: DbSession,
+    workspace_manager: WorkspaceManagerDependency,
+    context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
+) -> AuthResponse:
+    try:
+        user = await change_username(
+            db,
+            user=context.user,
+            username_input=payload.username,
+            workspace_manager=workspace_manager,
+        )
+    except AuthenticationFailedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        ) from exc
+    except (UsernameUnavailableError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except WorkspaceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User workspace is unavailable",
+        ) from exc
+    return AuthResponse(user=UserResponse.model_validate(user))
+
+
+@router.patch("/password", status_code=status.HTTP_204_NO_CONTENT)
+async def update_password(
+    payload: ChangePasswordRequest,
+    response: Response,
+    db: DbSession,
+    settings: AppSettings,
+    context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
+) -> None:
+    try:
+        await change_password(
+            db,
+            user=context.user,
+            current_password=payload.current_password,
+            new_password=payload.new_password,
+        )
+    except AuthenticationFailedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid current password",
+        ) from exc
+    clear_auth_cookies(response, settings)

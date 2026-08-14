@@ -90,7 +90,10 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
     await user.click(screen.getByRole("button", { name: "Paramètres du compte" }));
     await screen.findByRole("heading", { name: "Paramètres du compte" });
-    expect(screen.getByLabelText("Nom d’utilisateur")).toHaveProperty("value", "thomas");
+    expect(screen.getByRole("textbox", { name: "Nom d’utilisateur" })).toHaveProperty(
+      "value",
+      "thomas",
+    );
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
@@ -164,6 +167,75 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Confirmer la suppression" }));
     expect(screen.queryByText("guest-a1b2c3")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
+  it("sépare le renommage du compte et le changement de mot de passe", async () => {
+    let currentUser = {
+      id: "bc68aa7c-d753-4db7-8698-acf8d09045a3",
+      username: "thomas",
+      is_admin: false,
+      is_active: true,
+      must_change_credentials: false,
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const url = String(input);
+        if (url === "/api/v1/auth/me") return response({ user: currentUser }, 200);
+        if (url.startsWith("/api/v1/files")) {
+          return response(
+            {
+              path: "",
+              breadcrumbs: [{ label: "Mes fichiers", path: "" }],
+              entries: [],
+              storage: { total: 1000, used: 0, available: 1000 },
+              truncated: false,
+            },
+            200,
+          );
+        }
+        if (url === "/api/v1/trash") return response({ entries: [], truncated: false }, 200);
+        if (url === "/api/v1/auth/username" && init?.method === "PATCH") {
+          currentUser = { ...currentUser, username: "Shadowsun" };
+          return response({ user: currentUser }, 200);
+        }
+        if (url === "/api/v1/auth/password" && init?.method === "PATCH") {
+          return new Response(null, { status: 204 });
+        }
+        throw new Error(`Requête inattendue : ${init?.method ?? "GET"} ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const view = render(<App />);
+    await screen.findByRole("heading", { name: "Mes fichiers" });
+    await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
+    await user.click(screen.getByRole("button", { name: "Paramètres du compte" }));
+
+    const usernameInput = screen.getByRole("textbox", { name: "Nom d’utilisateur" });
+    await user.clear(usernameInput);
+    await user.type(usernameInput, "Shadowsun");
+    await user.click(screen.getByRole("button", { name: "Mettre à jour le nom" }));
+    await screen.findByText("Ton nom d’utilisateur a été mis à jour.");
+    expect(screen.getByRole("button", { name: "Ouvrir le menu du compte" }).textContent).toContain(
+      "Shadowsun",
+    );
+
+    await user.type(screen.getByLabelText("Mot de passe actuel"), "current-password-long");
+    await user.type(screen.getByLabelText("Nouveau mot de passe"), "new-password-long");
+    await user.type(screen.getByLabelText("Confirmer le mot de passe"), "new-password-long");
+    await user.click(screen.getByRole("button", { name: "Modifier le mot de passe" }));
+
+    await screen.findByRole("heading", { name: "Bienvenue" });
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/auth/username",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/auth/password",
+      expect.objectContaining({ method: "PATCH" }),
+    );
   });
 
   it("affiche le stockage et nettoie les corbeilles depuis les pages admin", async () => {

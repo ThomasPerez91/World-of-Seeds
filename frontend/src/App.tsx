@@ -340,41 +340,61 @@ function AccountSettingsPage({
   user,
   onBack,
   onChanged,
+  onPasswordChanged,
   onSessionExpired,
 }: {
   user: User;
   onBack: () => void;
   onChanged: (user: User) => void;
+  onPasswordChanged: () => void;
   onSessionExpired: () => void;
 }) {
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [usernameError, setUsernameError] = useState("");
+  const [usernameNotice, setUsernameNotice] = useState("");
+  const [usernameSubmitting, setUsernameSubmitting] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const [username, setUsername] = useState(user.username);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submitUsername(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
+    setUsernameSubmitting(true);
+    setUsernameError("");
+    setUsernameNotice("");
+    try {
+      const updated = await api.changeUsername(username);
+      onChanged(updated);
+      setUsername(updated.username);
+      setUsernameNotice("Ton nom d’utilisateur a été mis à jour.");
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setUsernameError(
+        caught instanceof ApiError && caught.status === 409
+          ? "Ce nom d’utilisateur est indisponible ou ton espace ne peut pas être renommé."
+          : "Impossible de modifier le nom d’utilisateur pour le moment.",
+      );
+    } finally {
+      setUsernameSubmitting(false);
+    }
+  }
+
+  async function submitPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
     const newPassword = String(form.get("new-password"));
     if (newPassword !== String(form.get("password-confirmation"))) {
-      setError("Les deux nouveaux mots de passe ne correspondent pas.");
+      setPasswordError("Les deux nouveaux mots de passe ne correspondent pas.");
       return;
     }
 
-    setSubmitting(true);
-    setError("");
-    setNotice("");
+    setPasswordSubmitting(true);
+    setPasswordError("");
     try {
-      const updated = await api.changeCredentials(
-        String(form.get("current-password")),
-        String(form.get("username")),
-        newPassword,
-      );
-      onChanged(updated);
-      setNotice("Tes identifiants ont été mis à jour.");
-      formElement.reset();
-      setUsername(updated.username);
+      await api.changePassword(String(form.get("current-password")), newPassword);
+      onPasswordChanged();
     } catch (caught) {
       if (
         caught instanceof ApiError &&
@@ -384,15 +404,13 @@ function AccountSettingsPage({
         onSessionExpired();
         return;
       }
-      if (caught instanceof ApiError && caught.status === 401) {
-        setError("Le mot de passe actuel est incorrect.");
-      } else if (caught instanceof ApiError && caught.status === 409) {
-        setError("Ce nom d’utilisateur est indisponible.");
-      } else {
-        setError("Impossible de modifier le compte pour le moment.");
-      }
+      setPasswordError(
+        caught instanceof ApiError && caught.status === 401
+          ? "Le mot de passe actuel est incorrect."
+          : "Impossible de modifier le mot de passe pour le moment.",
+      );
     } finally {
-      setSubmitting(false);
+      setPasswordSubmitting(false);
     }
   }
 
@@ -401,64 +419,87 @@ function AccountSettingsPage({
       <button type="button" className="back-button" onClick={onBack}>
         <BackIcon /> Retour aux fichiers
       </button>
-      <div className="settings-card">
+      <div className="settings-header">
         <p className="eyebrow">Compte</p>
         <h1 id="account-settings-title">Paramètres du compte</h1>
         <p className="settings-intro">
-          Le changement du nom d’utilisateur renomme également ton espace de stockage.
+          Mets à jour ton identité et sécurise ton accès depuis deux formulaires indépendants.
         </p>
-        <form onSubmit={(event) => void submit(event)}>
-          <label htmlFor="settings-current-password">Mot de passe actuel</label>
-          <input
-            id="settings-current-password"
-            name="current-password"
-            type="password"
-            autoComplete="current-password"
-            required
-          />
-          <label htmlFor="settings-username">Nom d’utilisateur</label>
-          <input
-            id="settings-username"
-            name="username"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}"
-            autoComplete="username"
-            required
-          />
-          <p className="field-hint">
-            3–32 caractères : lettres, chiffres, tiret ou tiret bas.
+      </div>
+      <div className="settings-grid">
+        <section className="settings-card" aria-labelledby="username-settings-title">
+          <h2 id="username-settings-title">Nom d’utilisateur</h2>
+          <p className="settings-section-intro">
+            Le dossier personnel sera renommé en même temps, sans déplacer son contenu.
           </p>
-          <label htmlFor="settings-new-password">Nouveau mot de passe</label>
-          <input
-            id="settings-new-password"
-            name="new-password"
-            type="password"
-            minLength={12}
-            autoComplete="new-password"
-            required
-          />
-          <label htmlFor="settings-password-confirmation">Confirmer le mot de passe</label>
-          <input
-            id="settings-password-confirmation"
-            name="password-confirmation"
-            type="password"
-            minLength={12}
-            autoComplete="new-password"
-            required
-          />
-          <p className="form-message error-message" role="alert">
-            {error}
-          </p>
-          {notice !== "" && (
-            <p className="settings-notice" role="status">
-              {notice}
+          <form onSubmit={(event) => void submitUsername(event)}>
+            <label htmlFor="settings-username">Nom d’utilisateur</label>
+            <input
+              id="settings-username"
+              name="username"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}"
+              autoComplete="username"
+              required
+            />
+            <p className="field-hint">
+              3–32 caractères : lettres, chiffres, tiret ou tiret bas.
             </p>
-          )}
-          <button type="submit" disabled={submitting}>
-            {submitting ? "Enregistrement…" : "Enregistrer les modifications"}
-          </button>
-        </form>
+            <p className="form-message error-message" role="alert">
+              {usernameError}
+            </p>
+            {usernameNotice !== "" && (
+              <p className="settings-notice" role="status">
+                {usernameNotice}
+              </p>
+            )}
+            <button type="submit" disabled={usernameSubmitting || username === user.username}>
+              {usernameSubmitting ? "Enregistrement…" : "Mettre à jour le nom"}
+            </button>
+          </form>
+        </section>
+
+        <section className="settings-card" aria-labelledby="password-settings-title">
+          <h2 id="password-settings-title">Mot de passe</h2>
+          <p className="settings-section-intro">
+            Toutes tes sessions seront fermées après la modification.
+          </p>
+          <form onSubmit={(event) => void submitPassword(event)}>
+            <label htmlFor="settings-current-password">Mot de passe actuel</label>
+            <input
+              id="settings-current-password"
+              name="current-password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
+            <label htmlFor="settings-new-password">Nouveau mot de passe</label>
+            <input
+              id="settings-new-password"
+              name="new-password"
+              type="password"
+              minLength={12}
+              autoComplete="new-password"
+              required
+            />
+            <label htmlFor="settings-password-confirmation">Confirmer le mot de passe</label>
+            <input
+              id="settings-password-confirmation"
+              name="password-confirmation"
+              type="password"
+              minLength={12}
+              autoComplete="new-password"
+              required
+            />
+            <p className="form-message error-message" role="alert">
+              {passwordError}
+            </p>
+            <button type="submit" disabled={passwordSubmitting}>
+              {passwordSubmitting ? "Modification…" : "Modifier le mot de passe"}
+            </button>
+          </form>
+        </section>
       </div>
     </section>
   );
@@ -518,6 +559,7 @@ function Dashboard({
             user={user}
             onBack={openFilesHome}
             onChanged={onUserChanged}
+            onPasswordChanged={onSessionExpired}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-users" && user.is_admin ? (
