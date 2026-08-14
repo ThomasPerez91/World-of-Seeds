@@ -10,6 +10,12 @@ interface AuthResponse {
   user: User;
 }
 
+export interface HealthStatus {
+  status: "ok";
+  service: string;
+  version: string;
+}
+
 export interface GeneratedCredentials {
   user: User;
   initial_password: string;
@@ -142,6 +148,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  health(): Promise<HealthStatus> {
+    return request<HealthStatus>("/health/ready");
+  },
+
   async login(username: string, password: string): Promise<User> {
     const response = await request<AuthResponse>("/auth/login", {
       method: "POST",

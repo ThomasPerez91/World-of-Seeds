@@ -6,6 +6,7 @@ import {
   type DirectoryListing,
   type FileEntry,
   type FileEntryKind,
+  type StorageUsage,
 } from "../../api/client";
 import {
   DeleteIcon,
@@ -92,10 +93,12 @@ function isProtectedRootEntry(entry: FileEntry): boolean {
 export function FileBrowser({
   onFilesChanged,
   onSessionExpired,
+  onStorageChanged,
   revision,
 }: {
   onFilesChanged: () => void;
   onSessionExpired: () => void;
+  onStorageChanged: (storage: StorageUsage) => void;
   revision: number;
 }) {
   const [path, setPath] = useState(initialPath);
@@ -121,7 +124,10 @@ export function FileBrowser({
     setError("");
     void api
       .listFiles(path, controller.signal)
-      .then(setListing)
+      .then((result) => {
+        setListing(result);
+        onStorageChanged(result.storage);
+      })
       .catch((caught: unknown) => {
         if (caught instanceof DOMException && caught.name === "AbortError") return;
         if (caught instanceof ApiError && caught.status === 401) {
@@ -135,7 +141,7 @@ export function FileBrowser({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [onSessionExpired, path, reloadKey, revision]);
+  }, [onSessionExpired, onStorageChanged, path, reloadKey, revision]);
 
   function navigate(nextPath: string) {
     const url = new URL(window.location.href);
@@ -153,41 +159,13 @@ export function FileBrowser({
     onFilesChanged();
   }
 
-  const storagePercent =
-    listing === null || listing.storage.total === 0
-      ? 0
-      : Math.min((listing.storage.used / listing.storage.total) * 100, 100);
-
   return (
     <section
       className="file-browser"
       aria-labelledby="file-browser-title"
       aria-busy={loading}
     >
-      <header className="browser-header">
-        <div>
-          <p className="eyebrow">Espace personnel</p>
-          <h2 id="file-browser-title">Mes fichiers</h2>
-          <p className="browser-subtitle">Ton espace privé sur la seedbox.</p>
-        </div>
-        {listing !== null && (
-          <div className="storage-card" role="group" aria-label="Utilisation du stockage">
-            <div className="storage-copy">
-              <span>{formatBytes(listing.storage.used)} utilisés</span>
-              <strong>{formatBytes(listing.storage.available)} disponibles</strong>
-            </div>
-            <progress
-              className="storage-track"
-              max={100}
-              value={storagePercent}
-              aria-label={`${storagePercent.toFixed(0)} % du stockage utilisé`}
-            >
-              {storagePercent.toFixed(0)} %
-            </progress>
-            <span className="storage-total">Capacité totale : {formatBytes(listing.storage.total)}</span>
-          </div>
-        )}
-      </header>
+      <h2 id="file-browser-title" className="sr-only">Explorateur de fichiers</h2>
 
       <div className="browser-navigation">
         <nav className="breadcrumbs" aria-label="Fil d’Ariane">
