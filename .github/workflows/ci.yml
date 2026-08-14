@@ -74,6 +74,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Validate deployment artifacts
+        run: |
+          bash -n \
+            deploy/deploy-world-of-seeds \
+            deploy/world-of-seeds-deploy-command
+          cp .env.example .env
+          WOS_IMAGE="ghcr.io/thomasperez91/world-of-seeds@sha256:$(printf '0%.0s' {1..64})" \
+            docker compose --env-file .env \
+              -f deploy/compose.production.yaml config --quiet
+          if SSH_ORIGINAL_COMMAND='interactive-shell' \
+            deploy/world-of-seeds-deploy-command; then
+            echo "The restricted SSH command accepted an invalid command."
+            exit 1
+          fi
       - name: Build and start production stack
         run: |
           cp .env.example .env
