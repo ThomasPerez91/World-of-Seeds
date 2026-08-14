@@ -175,6 +175,24 @@ export const api = {
     return response.user;
   },
 
+  async changeUsername(username: string): Promise<User> {
+    const response = await request<AuthResponse>("/auth/username", {
+      method: "PATCH",
+      body: JSON.stringify({ username }),
+    });
+    return response.user;
+  },
+
+  changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    return request<void>("/auth/password", {
+      method: "PATCH",
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    });
+  },
+
   listUsers(): Promise<User[]> {
     return request<User[]>("/admin/users");
   },
