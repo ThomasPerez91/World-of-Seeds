@@ -10,7 +10,7 @@ async def test_liveness(client: AsyncClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "world-of-seeds",
-        "version": "1.1.0-dev",
+        "version": "1.1.0",
     }
 
 
@@ -22,7 +22,7 @@ async def test_readiness_checks_the_database(client: AsyncClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "world-of-seeds",
-        "version": "1.1.0-dev",
+        "version": "1.1.0",
     }
 
 

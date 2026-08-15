@@ -78,7 +78,7 @@ describe("App", () => {
     expect(document.querySelector("#dashboard-content")?.getAttribute("tabindex")).toBe("-1");
     expect(screen.queryByText("Bonjour, thomas")).toBeNull();
     expect(document.querySelector(".account-avatar")?.textContent).toBe("T");
-    expect(screen.getByText("v1.1.0-dev")).toBeDefined();
+    expect(screen.getAllByText("v1.1.0").length).toBeGreaterThan(0);
     expect(document.querySelector(".account-settings-trigger")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
     await screen.findByText("Ce dossier est vide");
@@ -105,6 +105,28 @@ describe("App", () => {
       "thomas",
     );
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
+  it("rend les informations légales accessibles avant la connexion", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(response({ detail: "Not authenticated" }, 401)),
+    );
+
+    const user = userEvent.setup();
+    const view = render(<App />);
+    await screen.findByRole("heading", { name: "Bienvenue" });
+
+    await user.click(screen.getByRole("button", { name: "Mentions légales" }));
+    await screen.findByRole("heading", { name: "Mentions légales et vie privée" });
+    expect(screen.getByText(/OVH SAS/)).toBeDefined();
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+
+    await user.click(screen.getByRole("button", { name: "Conditions d’utilisation" }));
+    await screen.findByRole("heading", { name: "Conditions d’utilisation" });
+
+    await user.click(screen.getByRole("button", { name: "Retour" }));
+    await screen.findByRole("heading", { name: "Bienvenue" });
   });
 
   it("permet à l’administrateur de suspendre puis supprimer un accès", async () => {

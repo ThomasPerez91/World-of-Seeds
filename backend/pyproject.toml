@@ -1,6 +1,6 @@
 [project]
 name = "world-of-seeds-backend"
-version = "1.1.0-dev"
+version = "1.1.0"
 description = "Private seedbox management API"
 requires-python = ">=3.12"
 dependencies = [

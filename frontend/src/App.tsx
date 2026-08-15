@@ -14,6 +14,11 @@ import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { FileBrowser } from "./features/files/FileBrowser";
 import { TrashBrowser } from "./features/files/TrashBrowser";
 import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
+import {
+  LegalLinks,
+  LegalPage,
+  type LegalDocument,
+} from "./components/LegalPage";
 import { formatBytes } from "./utils/format";
 import { APP_VERSION } from "./version";
 
@@ -83,7 +88,13 @@ function ServiceHealth() {
   );
 }
 
-function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
+function LoginScreen({
+  onLogin,
+  onOpenLegal,
+}: {
+  onLogin: (user: User) => void;
+  onOpenLegal: (document: LegalDocument) => void;
+}) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -116,7 +127,8 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
         <p className="eyebrow">Espace privé</p>
         <h1 id="brand-title">World of Seeds</h1>
         <p className="brand-copy">
-          Vos fichiers, vos téléchargements et votre espace seedbox dans une interface unique.
+          Un espace discret où chaque graine déposée trouve sa place, grandit puis rejoint ta
+          collection.
         </p>
         <ServiceHealth />
       </section>
@@ -157,12 +169,21 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
             </p>
           </form>
         </div>
+        <LegalLinks onOpen={onOpenLegal} />
       </section>
     </main>
   );
 }
 
-function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (user: User) => void }) {
+function CredentialChangeScreen({
+  user,
+  onChanged,
+  onOpenLegal,
+}: {
+  user: User;
+  onChanged: (user: User) => void;
+  onOpenLegal: (document: LegalDocument) => void;
+}) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -262,6 +283,7 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
             {error}
           </p>
         </form>
+        <LegalLinks onOpen={onOpenLegal} />
       </section>
     </main>
   );
@@ -637,11 +659,13 @@ function Dashboard({
   user,
   onUserChanged,
   onLogout,
+  onOpenLegal,
   onSessionExpired,
 }: {
   user: User;
   onUserChanged: (user: User) => void;
   onLogout: () => Promise<void>;
+  onOpenLegal: (document: LegalDocument) => void;
   onSessionExpired: () => void;
 }) {
   const [view, setView] = useState<"files" | "settings" | AdminView>("files");
@@ -717,6 +741,10 @@ function Dashboard({
           />
         )}
       </div>
+      <footer className="app-footer">
+        <span>World of Seeds · v{APP_VERSION}</span>
+        <LegalLinks onOpen={onOpenLegal} />
+      </footer>
     </main>
   );
 }
@@ -743,6 +771,7 @@ function UnavailableScreen({ onRetry }: { onRetry: () => void }) {
 
 export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
+  const [legalDocument, setLegalDocument] = useState<LegalDocument | null>(null);
   const handleSessionExpired = useCallback(() => {
     clearFilePathFromUrl();
     setAuth({ status: "anonymous" });
@@ -772,6 +801,16 @@ export function App() {
     setAuth({ status: "anonymous" });
   }
 
+  if (legalDocument !== null) {
+    return (
+      <LegalPage
+        document={legalDocument}
+        onBack={() => setLegalDocument(null)}
+        onOpen={setLegalDocument}
+      />
+    );
+  }
+
   if (auth.status === "loading") {
     return (
       <main className="loading-page" aria-live="polite" aria-busy="true">
@@ -783,13 +822,19 @@ export function App() {
     return <UnavailableScreen onRetry={loadSession} />;
   }
   if (auth.status === "anonymous") {
-    return <LoginScreen onLogin={(user) => setAuth({ status: "authenticated", user })} />;
+    return (
+      <LoginScreen
+        onLogin={(user) => setAuth({ status: "authenticated", user })}
+        onOpenLegal={setLegalDocument}
+      />
+    );
   }
   if (auth.user.must_change_credentials) {
     return (
       <CredentialChangeScreen
         user={auth.user}
         onChanged={(user) => setAuth({ status: "authenticated", user })}
+        onOpenLegal={setLegalDocument}
       />
     );
   }
@@ -798,6 +843,7 @@ export function App() {
       user={auth.user}
       onUserChanged={(user) => setAuth({ status: "authenticated", user })}
       onLogout={logout}
+      onOpenLegal={setLegalDocument}
       onSessionExpired={handleSessionExpired}
     />
   );

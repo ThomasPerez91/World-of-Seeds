@@ -2,7 +2,8 @@
 
 ## Modèle de sécurité
 
-Le workflow `Deploy to OVH` est lancé manuellement depuis la branche `master` :
+Le workflow `Deploy to OVH` est lancé automatiquement à la publication d'une release
+stable ciblant `master`. Un déclenchement manuel depuis `master` reste disponible en secours :
 
 1. GitHub Actions construit l'image de production ;
 2. l'image est publiée dans GHCR avec sa provenance et son SBOM ;
@@ -189,10 +190,14 @@ pbcopy < "$HOME/.ssh/world_of_seeds_deploy"
 pbcopy < /tmp/world-of-seeds-known-hosts
 ```
 
-## 7. Premier déploiement
+## 7. Déploiements
 
-Dans GitHub : **Actions → Deploy to OVH → Run workflow → master**. Le workflow refuse
-de déployer une autre branche et sérialise les déploiements de production.
+Une release stable publiée depuis `master` déclenche automatiquement le déploiement de
+son commit immuable. Les préreleases et les releases ciblant une autre branche sont ignorées.
+
+Pour un premier déploiement ou une relance manuelle : **Actions → Deploy to OVH → Run
+workflow → master**. Le workflow refuse de déployer une autre branche et sérialise les
+déploiements de production.
 
 Après succès, créer l'administrateur de manière interactive sur OVH :
 
