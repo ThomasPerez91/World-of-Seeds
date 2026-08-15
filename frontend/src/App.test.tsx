@@ -292,6 +292,8 @@ describe("App", () => {
       deleted_at: "2026-08-13T20:00:00Z",
     };
     let trashPurged = false;
+    let newgreedyTargetRatio = 1.6;
+    let newgreedyStatsPurged = false;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -332,6 +334,93 @@ describe("App", () => {
             200,
           );
         }
+        if (url === "/api/v1/admin/services/newgreedy/overview") {
+          return response(
+            {
+              torrents: newgreedyStatsPurged ? 0 : 3,
+              downloading: newgreedyStatsPurged ? 0 : 1,
+              seeding: newgreedyStatsPurged ? 0 : 2,
+              stalled: 0,
+              target_reached: newgreedyStatsPurged ? 0 : 1,
+              total_downloaded_bytes: newgreedyStatsPurged ? 0 : 4_294_967_296,
+              total_reported_uploaded_bytes: newgreedyStatsPurged ? 0 : 6_442_450_944,
+              total_fake_uploaded_bytes: newgreedyStatsPurged ? 0 : 5_368_709_120,
+            },
+            200,
+          );
+        }
+        if (
+          url === "/api/v1/admin/services/newgreedy/config" &&
+          init?.method === "PATCH"
+        ) {
+          const body = JSON.parse(String(init.body)) as {
+            changes: { "spoofing.target_ratio": number };
+          };
+          newgreedyTargetRatio = body.changes["spoofing.target_ratio"];
+          return response(
+            {
+              sections: [
+                {
+                  id: "spoofing",
+                  label: "Simulation",
+                  fields: [
+                    {
+                      id: "spoofing.target_ratio",
+                      key: "target_ratio",
+                      label: "Ratio cible",
+                      description: "Ratio upload/download visé.",
+                      input_type: "number",
+                      value: newgreedyTargetRatio,
+                      editable: true,
+                      requires_restart: true,
+                      minimum: 0,
+                      maximum: 20,
+                      options: [],
+                    },
+                  ],
+                },
+              ],
+              restart_required: true,
+            },
+            200,
+          );
+        }
+        if (url === "/api/v1/admin/services/newgreedy/config") {
+          return response(
+            {
+              sections: [
+                {
+                  id: "spoofing",
+                  label: "Simulation",
+                  fields: [
+                    {
+                      id: "spoofing.target_ratio",
+                      key: "target_ratio",
+                      label: "Ratio cible",
+                      description: "Ratio upload/download visé.",
+                      input_type: "number",
+                      value: newgreedyTargetRatio,
+                      editable: true,
+                      requires_restart: true,
+                      minimum: 0,
+                      maximum: 20,
+                      options: [],
+                    },
+                  ],
+                },
+              ],
+              restart_required: false,
+            },
+            200,
+          );
+        }
+        if (
+          url === "/api/v1/admin/services/newgreedy/stats" &&
+          init?.method === "DELETE"
+        ) {
+          newgreedyStatsPurged = true;
+          return response({ purged: 3, remaining: 0 }, 200);
+        }
         if (url === "/api/v1/admin/storage") {
           return response(
             {
@@ -369,6 +458,20 @@ describe("App", () => {
     expect(screen.getByRole("article", { name: "NewGreedy : Opérationnel" })).toBeDefined();
     expect(screen.getByRole("article", { name: "qBittorrent : Opérationnel" })).toBeDefined();
     expect(screen.getByText("v5.1.2")).toBeDefined();
+    await screen.findByText("4 Go");
+    await user.click(screen.getByText("Simulation"));
+    const ratioInput = screen.getByRole("spinbutton", { name: "Ratio cible" });
+    await user.clear(ratioInput);
+    await user.type(ratioInput, "2.2");
+    await user.click(screen.getByRole("button", { name: "Enregistrer les modifications" }));
+    await screen.findByText("Configuration enregistrée. Redémarre NewGreedy pour l’appliquer.");
+    expect(newgreedyTargetRatio).toBe(2.2);
+
+    await user.click(screen.getByRole("button", { name: "Remettre les stats à zéro" }));
+    await screen.findByRole("heading", { name: "Remettre les statistiques à zéro ?" });
+    await user.click(screen.getByRole("button", { name: "Confirmer" }));
+    await screen.findByText("3 statistiques supprimées.");
+    expect(newgreedyStatsPurged).toBe(true);
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
     await user.click(screen.getByRole("button", { name: "Stockage" }));

@@ -12,6 +12,7 @@ import {
   RefreshIcon,
 } from "../../components/icons";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
+import { NewGreedyControlPanel } from "./NewGreedyControlPanel";
 
 const statusCopy = {
   healthy: "Opérationnel",
@@ -172,6 +173,8 @@ export function AdminServicesPage({
             </p>
           </div>
         )}
+
+        <NewGreedyControlPanel onSessionExpired={onSessionExpired} />
       </section>
     </AdminPageShell>
   );

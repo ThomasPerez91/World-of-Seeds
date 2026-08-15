@@ -109,6 +109,49 @@ export interface AdminServicesHealth {
   qbittorrent: ExternalServiceHealth;
 }
 
+export type NewGreedyConfigValue = boolean | number | string;
+
+export interface NewGreedyConfigField {
+  id: string;
+  key: string;
+  label: string;
+  description: string;
+  input_type: "boolean" | "integer" | "number" | "text" | "select";
+  value: NewGreedyConfigValue;
+  editable: boolean;
+  requires_restart: boolean;
+  minimum: number | null;
+  maximum: number | null;
+  options: string[];
+}
+
+export interface NewGreedyConfigSection {
+  id: string;
+  label: string;
+  fields: NewGreedyConfigField[];
+}
+
+export interface NewGreedyConfig {
+  sections: NewGreedyConfigSection[];
+  restart_required: boolean;
+}
+
+export interface NewGreedyOverview {
+  torrents: number;
+  downloading: number;
+  seeding: number;
+  stalled: number;
+  target_reached: number;
+  total_downloaded_bytes: number;
+  total_reported_uploaded_bytes: number;
+  total_fake_uploaded_bytes: number;
+}
+
+export interface NewGreedyStatsReset {
+  purged: number;
+  remaining: number;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -247,6 +290,29 @@ export const api = {
 
   getAdminServicesHealth(): Promise<AdminServicesHealth> {
     return request<AdminServicesHealth>("/admin/services/health");
+  },
+
+  getNewGreedyConfig(): Promise<NewGreedyConfig> {
+    return request<NewGreedyConfig>("/admin/services/newgreedy/config");
+  },
+
+  updateNewGreedyConfig(
+    changes: Record<string, NewGreedyConfigValue>,
+  ): Promise<NewGreedyConfig> {
+    return request<NewGreedyConfig>("/admin/services/newgreedy/config", {
+      method: "PATCH",
+      body: JSON.stringify({ changes }),
+    });
+  },
+
+  getNewGreedyOverview(): Promise<NewGreedyOverview> {
+    return request<NewGreedyOverview>("/admin/services/newgreedy/overview");
+  },
+
+  resetNewGreedyStats(): Promise<NewGreedyStatsReset> {
+    return request<NewGreedyStatsReset>("/admin/services/newgreedy/stats", {
+      method: "DELETE",
+    });
   },
 
   listAdminTrash(signal?: AbortSignal): Promise<AdminTrashListing> {

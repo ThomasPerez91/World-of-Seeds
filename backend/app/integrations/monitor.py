@@ -6,10 +6,15 @@ import httpx
 
 from app import __version__
 from app.core.config import Settings
-from app.integrations.http import integration_timeout
+from app.integrations.http import IntegrationRequestError, integration_timeout
 from app.integrations.newgreedy import NewGreedyClient
 from app.integrations.qbittorrent import QBittorrentClient
-from app.integrations.types import ExternalServicesSnapshot, ServiceProbe
+from app.integrations.types import (
+    ExternalServicesSnapshot,
+    NewGreedyOverview,
+    NewGreedyStatsReset,
+    ServiceProbe,
+)
 
 
 class ExternalServicesMonitor:
@@ -46,6 +51,19 @@ class ExternalServicesMonitor:
             self._cached_at = monotonic()
             return result
 
+    async def newgreedy_overview(self) -> NewGreedyOverview:
+        base_url = self._require_newgreedy_url()
+        async with self._client() as http_client:
+            return await NewGreedyClient(http_client, base_url).overview()
+
+    async def reset_newgreedy_stats(self) -> NewGreedyStatsReset:
+        base_url = self._require_newgreedy_url()
+        async with self._client() as http_client:
+            result = await NewGreedyClient(http_client, base_url).reset_stats()
+        async with self._lock:
+            self._cached_snapshot = None
+        return result
+
     def _authentication_circuit_is_open(self) -> bool:
         return (
             self._cached_snapshot is not None
@@ -74,6 +92,11 @@ class ExternalServicesMonitor:
             return ServiceProbe(service="newgreedy", state="unconfigured")
         async with self._client() as client:
             return await NewGreedyClient(client, str(self._settings.newgreedy_url)).probe()
+
+    def _require_newgreedy_url(self) -> str:
+        if self._settings.newgreedy_url is None:
+            raise IntegrationRequestError("NewGreedy is not configured")
+        return str(self._settings.newgreedy_url)
 
     async def _probe_qbittorrent(self) -> ServiceProbe:
         password = self._settings.qbittorrent_password

@@ -129,6 +129,98 @@ async def test_services_health_is_detailed_and_admin_only(
 
 
 @pytest.mark.asyncio
+async def test_admin_controls_newgreedy_config_and_statistics(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    await create_user(
+        db_session,
+        username="admin",
+        password="admin-password-long",
+        is_admin=True,
+    )
+    control = data_root / ".wos-control" / "newgreedy"
+    control.mkdir(parents=True)
+    control.chmod(0o700)
+    config = control / "config.ini"
+    config.write_text(
+        """[proxy]
+listen_port = 3456
+tracker_timeout = 5
+[spoofing]
+upload_mode = ratio_based
+target_ratio = 1.6
+auto_stop_at_target = true
+[web]
+web_enabled = true
+web_host = 0.0.0.0
+web_port = 8080
+""",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/api/stats":
+            return httpx.Response(
+                200,
+                json={
+                    "deadbeef": {
+                        "cumul_rep_dl": 2_000,
+                        "cumul_rep_ul": 3_500,
+                        "cumul_real_ul": 500,
+                        "mode": "seed",
+                    }
+                },
+            )
+        if request.method == "DELETE" and request.url.path == "/api/stats/purge":
+            return httpx.Response(200, json={"purged": 1, "remaining": 0})
+        raise AssertionError(f"Unexpected integration request: {request.method} {request.url}")
+
+    app.state.external_services_monitor = ExternalServicesMonitor(
+        Settings.model_validate({"newgreedy_url": "http://newgreedy:8080"}),
+        transport=httpx.MockTransport(handler),
+    )
+    await login(client, "admin", "admin-password-long")
+
+    loaded = await client.get("/api/v1/admin/services/newgreedy/config")
+    assert loaded.status_code == 200
+    fields = {
+        field["id"]: field for section in loaded.json()["sections"] for field in section["fields"]
+    }
+    assert fields["proxy.listen_port"]["editable"] is False
+    assert fields["spoofing.target_ratio"]["value"] == 1.6
+
+    missing_csrf = await client.patch(
+        "/api/v1/admin/services/newgreedy/config",
+        json={"changes": {"spoofing.target_ratio": 2.1}},
+    )
+    assert missing_csrf.status_code == 403
+
+    updated = await client.patch(
+        "/api/v1/admin/services/newgreedy/config",
+        json={"changes": {"spoofing.target_ratio": 2.1}},
+        headers=csrf_header(client),
+    )
+    assert updated.status_code == 200
+    assert updated.json()["restart_required"] is True
+    assert "target_ratio = 2.1" in config.read_text(encoding="utf-8")
+
+    overview = await client.get("/api/v1/admin/services/newgreedy/overview")
+    assert overview.status_code == 200
+    assert overview.json()["torrents"] == 1
+    assert overview.json()["total_fake_uploaded_bytes"] == 3_000
+
+    reset = await client.delete(
+        "/api/v1/admin/services/newgreedy/stats",
+        headers=csrf_header(client),
+    )
+    assert reset.status_code == 200
+    assert reset.json() == {"purged": 1, "remaining": 0}
+
+
+@pytest.mark.asyncio
 async def test_storage_overview_is_global_and_admin_only(
     client: AsyncClient,
     db_session: AsyncSession,

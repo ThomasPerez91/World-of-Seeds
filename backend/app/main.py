@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.database import engine
 from app.core.http_security import SecurityHeadersMiddleware
 from app.integrations import ExternalServicesMonitor
+from app.integrations.newgreedy_config import NewGreedyConfigStore
 
 
 @asynccontextmanager
@@ -33,6 +34,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.state.external_services_monitor = ExternalServicesMonitor(settings)
+    application.state.newgreedy_config_store = NewGreedyConfigStore(
+        settings.data_root,
+        max_bytes=settings.newgreedy_config_max_bytes,
+    )
     application.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     application.add_middleware(
         SecurityHeadersMiddleware,
