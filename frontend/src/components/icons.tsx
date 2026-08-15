@@ -11,6 +11,7 @@ import {
   Pencil,
   Gauge,
   RefreshCw,
+  RotateCw,
   Save,
   Server,
   Settings2,
@@ -97,4 +98,8 @@ export function SettingsIcon(props: AppIconProps) {
 
 export function SaveIcon(props: AppIconProps) {
   return <Save {...decorative} {...props} />;
+}
+
+export function RestartIcon(props: AppIconProps) {
+  return <RotateCw {...decorative} {...props} />;
 }

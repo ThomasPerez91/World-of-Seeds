@@ -294,6 +294,7 @@ describe("App", () => {
     let trashPurged = false;
     let newgreedyTargetRatio = 1.6;
     let newgreedyStatsPurged = false;
+    let newgreedyRestartState = "idle";
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -391,6 +392,32 @@ describe("App", () => {
                   last_announce_at: "2026-08-15T14:00:00Z",
                 },
               ],
+            },
+            200,
+          );
+        }
+        if (
+          url === "/api/v1/admin/services/newgreedy/restart" &&
+          init?.method === "POST"
+        ) {
+          newgreedyRestartState = "pending";
+          return response(
+            {
+              state: "pending",
+              request_id: "f2daee75-5a88-4904-985c-f17e8f89e123",
+              updated_at: "2026-08-15T15:00:00Z",
+              message_code: "requested",
+            },
+            202,
+          );
+        }
+        if (url === "/api/v1/admin/services/newgreedy/restart") {
+          return response(
+            {
+              state: newgreedyRestartState,
+              request_id: null,
+              updated_at: null,
+              message_code: newgreedyRestartState === "idle" ? "idle" : "requested",
             },
             200,
           );
@@ -508,6 +535,12 @@ describe("App", () => {
     expect(screen.getByText("Téléchargement")).toBeDefined();
     expect(screen.getByText(/Actif · 4,9 Ko/)).toBeDefined();
     await screen.findByText("4 Go");
+    await screen.findByText("NewGreedy peut être redémarré depuis cette interface.");
+    await user.click(screen.getByRole("button", { name: "Redémarrer NewGreedy" }));
+    await screen.findByRole("heading", { name: "Redémarrer NewGreedy ?" });
+    await user.click(screen.getByRole("button", { name: "Confirmer le redémarrage" }));
+    await screen.findByText("Demande de redémarrage envoyée au serveur.");
+    expect(newgreedyRestartState).toBe("pending");
     await user.click(screen.getByText("Simulation"));
     const ratioInput = screen.getByRole("spinbutton", { name: "Ratio cible" });
     await user.clear(ratioInput);

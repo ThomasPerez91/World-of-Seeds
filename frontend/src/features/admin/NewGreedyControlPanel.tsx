@@ -7,13 +7,31 @@ import {
   type NewGreedyConfigField,
   type NewGreedyConfigValue,
   type NewGreedyOverview,
+  type NewGreedyRestartStatus,
 } from "../../api/client";
-import { DeleteIcon, SaveIcon, SettingsIcon } from "../../components/icons";
+import {
+  DeleteIcon,
+  RestartIcon,
+  SaveIcon,
+  SettingsIcon,
+} from "../../components/icons";
 import { Notice } from "../../components/Notice";
 import { formatBytes } from "../../utils/format";
 import { FileDialog } from "../files/FileDialog";
 
 type DraftValue = boolean | string;
+
+function restartStatusMessage(status: NewGreedyRestartStatus): string {
+  if (status.state === "pending") return "Demande en attente du serveur hôte.";
+  if (status.state === "restarting") return "Redémarrage de NewGreedy en cours…";
+  if (status.state === "healthy") return "Dernier redémarrage terminé avec succès.";
+  if (status.message_code === "cooldown") {
+    return "Redémarrage refusé : patiente une minute avant de réessayer.";
+  }
+  if (status.state === "failed") return "Le dernier redémarrage a échoué.";
+  if (status.state === "rejected") return "La demande de redémarrage a été refusée.";
+  return "NewGreedy peut être redémarré depuis cette interface.";
+}
 
 function initialDraft(config: NewGreedyConfig): Record<string, DraftValue> {
   return Object.fromEntries(
@@ -122,6 +140,11 @@ export function NewGreedyControlPanel({
   const [resetOpen, setResetOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetError, setResetError] = useState("");
+  const [restartStatus, setRestartStatus] = useState<NewGreedyRestartStatus | null>(null);
+  const [restartControlError, setRestartControlError] = useState("");
+  const [restartActionError, setRestartActionError] = useState("");
+  const [restartOpen, setRestartOpen] = useState(false);
+  const [requestingRestart, setRequestingRestart] = useState(false);
   const mounted = useRef(true);
 
   const handleUnauthorized = useCallback(
@@ -148,6 +171,19 @@ export function NewGreedyControlPanel({
     }
   }, [handleUnauthorized]);
 
+  const loadRestartStatus = useCallback(async () => {
+    try {
+      const result = await api.getNewGreedyRestartStatus();
+      if (mounted.current) {
+        setRestartStatus(result);
+        setRestartControlError("");
+      }
+    } catch (caught) {
+      if (!mounted.current || handleUnauthorized(caught)) return;
+      setRestartControlError("Le contrôle de redémarrage n’est pas disponible.");
+    }
+  }, [handleUnauthorized]);
+
   useEffect(() => {
     mounted.current = true;
     void (async () => {
@@ -168,12 +204,15 @@ export function NewGreedyControlPanel({
       }
     })();
     void loadOverview();
+    void loadRestartStatus();
     const interval = window.setInterval(() => void loadOverview(), 15_000);
+    const restartInterval = window.setInterval(() => void loadRestartStatus(), 2_000);
     return () => {
       mounted.current = false;
       window.clearInterval(interval);
+      window.clearInterval(restartInterval);
     };
-  }, [handleUnauthorized, loadOverview]);
+  }, [handleUnauthorized, loadOverview, loadRestartStatus]);
 
   const changes = useMemo(
     () => (config === null ? {} : changedValues(config, draft)),
@@ -227,6 +266,28 @@ export function NewGreedyControlPanel({
     }
   }
 
+  async function requestRestart() {
+    setRequestingRestart(true);
+    setRestartActionError("");
+    try {
+      const result = await api.restartNewGreedy();
+      setRestartStatus(result);
+      setRestartOpen(false);
+      setNotice("Demande de redémarrage envoyée au serveur.");
+    } catch (caught) {
+      if (handleUnauthorized(caught)) return;
+      if (caught instanceof ApiError && caught.status === 409) {
+        setRestartOpen(false);
+        await loadRestartStatus();
+        setNotice("Un redémarrage NewGreedy est déjà en cours.");
+      } else {
+        setRestartActionError("La demande de redémarrage n’a pas pu être envoyée.");
+      }
+    } finally {
+      setRequestingRestart(false);
+    }
+  }
+
   return (
     <div className="newgreedy-control">
       <div className="service-control-heading">
@@ -235,21 +296,53 @@ export function NewGreedyControlPanel({
           <h3>NewGreedy</h3>
           <p>Statistiques agrégées et paramètres autorisés.</p>
         </div>
-        <button
-          type="button"
-          className="danger-outline-button compact-button"
-          disabled={overview === null}
-          onClick={() => {
-            setResetError("");
-            setResetOpen(true);
-          }}
-        >
-          <DeleteIcon />
-          Remettre les stats à zéro
-        </button>
+        <div className="service-control-actions">
+          <button
+            type="button"
+            className="secondary-button compact-button"
+            disabled={
+              restartStatus === null ||
+              restartControlError !== "" ||
+              restartStatus.state === "pending" ||
+              restartStatus.state === "restarting"
+            }
+            onClick={() => {
+              setRestartActionError("");
+              setRestartOpen(true);
+            }}
+          >
+            <RestartIcon />
+            Redémarrer NewGreedy
+          </button>
+          <button
+            type="button"
+            className="danger-outline-button compact-button"
+            disabled={overview === null}
+            onClick={() => {
+              setResetError("");
+              setResetOpen(true);
+            }}
+          >
+            <DeleteIcon />
+            Remettre les stats à zéro
+          </button>
+        </div>
       </div>
 
       <Notice message={notice} onDismiss={() => setNotice("")} />
+      <div
+        className={`restart-live-status ${restartStatus?.state ?? "unavailable"}`}
+        role="status"
+        aria-live="polite"
+      >
+        <span aria-hidden="true" />
+        <p>
+          {restartControlError ||
+            (restartStatus === null
+              ? "Lecture du contrôle de redémarrage…"
+              : restartStatusMessage(restartStatus))}
+        </p>
+      </div>
       <p className="form-message error-message" role="alert">
         {overviewError}
       </p>
@@ -381,6 +474,44 @@ export function NewGreedyControlPanel({
                 disabled={resetting}
               >
                 {resetting ? "Remise à zéro…" : "Confirmer"}
+              </button>
+            </div>
+          </div>
+        </FileDialog>
+      )}
+
+      {restartOpen && (
+        <FileDialog
+          eyebrow="Administration"
+          title="Redémarrer NewGreedy ?"
+          description="Le proxy sera recréé avec la configuration enregistrée."
+          onClose={() => setRestartOpen(false)}
+          closeDisabled={requestingRestart}
+        >
+          <div className="confirmation-content">
+            <p className="permanent-delete-warning">
+              Les annonces torrent seront interrompues quelques secondes. qBittorrent ne sera pas
+              redémarré.
+            </p>
+            <p className="form-message error-message" role="alert">
+              {restartActionError}
+            </p>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setRestartOpen(false)}
+                disabled={requestingRestart}
+                data-initial-focus
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => void requestRestart()}
+                disabled={requestingRestart}
+              >
+                {requestingRestart ? "Demande en cours…" : "Confirmer le redémarrage"}
               </button>
             </div>
           </div>

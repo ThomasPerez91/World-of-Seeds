@@ -20,12 +20,18 @@ from app.files.dependencies import WorkspaceManagerDependency
 from app.integrations.dependencies import (
     ExternalServicesMonitorDependency,
     NewGreedyConfigStoreDependency,
+    NewGreedyRestartStoreDependency,
 )
 from app.integrations.http import IntegrationRequestError
 from app.integrations.newgreedy_config import (
     ConfigFieldValue,
     NewGreedyConfigError,
     NewGreedyConfigValidationError,
+)
+from app.integrations.newgreedy_restart import (
+    NewGreedyRestartError,
+    NewGreedyRestartPendingError,
+    NewGreedyRestartStatus,
 )
 from app.models import TrashEntry, User
 from app.schemas.admin import (
@@ -47,6 +53,7 @@ from app.schemas.integrations import (
     NewGreedyConfigSectionResponse,
     NewGreedyConfigUpdateRequest,
     NewGreedyOverviewResponse,
+    NewGreedyRestartStatusResponse,
     NewGreedyStatsResetResponse,
     NewGreedyTorrentListingResponse,
     NewGreedyTorrentResponse,
@@ -235,6 +242,60 @@ async def list_qbittorrent_torrents(
         torrents=[QBittorrentTorrentResponse.model_validate(torrent) for torrent in torrents],
         truncated=truncated,
     )
+
+
+def _restart_status_response(
+    restart_status: NewGreedyRestartStatus,
+) -> NewGreedyRestartStatusResponse:
+    return NewGreedyRestartStatusResponse(
+        state=restart_status.state,
+        request_id=restart_status.request_id,
+        updated_at=restart_status.updated_at,
+        message_code=restart_status.message_code,
+    )
+
+
+def _raise_newgreedy_restart_error(exc: NewGreedyRestartError) -> Never:
+    if isinstance(exc, NewGreedyRestartPendingError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A NewGreedy restart is already pending",
+        ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="NewGreedy restart control is unavailable",
+    ) from exc
+
+
+@router.get(
+    "/services/newgreedy/restart",
+    response_model=NewGreedyRestartStatusResponse,
+)
+async def get_newgreedy_restart_status(
+    store: NewGreedyRestartStoreDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> NewGreedyRestartStatusResponse:
+    try:
+        restart_status = await run_in_threadpool(store.status)
+    except NewGreedyRestartError as exc:
+        _raise_newgreedy_restart_error(exc)
+    return _restart_status_response(restart_status)
+
+
+@router.post(
+    "/services/newgreedy/restart",
+    response_model=NewGreedyRestartStatusResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def request_newgreedy_restart(
+    store: NewGreedyRestartStoreDependency,
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
+) -> NewGreedyRestartStatusResponse:
+    try:
+        restart_status = await run_in_threadpool(store.request, context.user.id)
+    except NewGreedyRestartError as exc:
+        _raise_newgreedy_restart_error(exc)
+    return _restart_status_response(restart_status)
 
 
 def _raise_admin_trash_error(exc: Exception) -> Never:

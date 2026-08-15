@@ -19,6 +19,10 @@ services:
       WOS_POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
       WOS_POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
       WOS_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      WOS_NEWGREEDY_URL: ${WOS_NEWGREEDY_URL:-http://newgreedy:8080}
+      WOS_QBITTORRENT_URL: ${WOS_QBITTORRENT_URL:-http://qbittorrent:8080}
+      WOS_QBITTORRENT_USERNAME: ${WOS_QBITTORRENT_USERNAME:?set WOS_QBITTORRENT_USERNAME}
+      WOS_QBITTORRENT_PASSWORD: ${WOS_QBITTORRENT_PASSWORD:?set WOS_QBITTORRENT_PASSWORD}
     ports:
       - "127.0.0.1:18081:8000"
     volumes:
@@ -28,6 +32,7 @@ services:
     networks:
       - ingress
       - backend
+      - torrent-internal
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
     read_only: true
     tmpfs:
@@ -72,6 +77,9 @@ networks:
   ingress:
   backend:
     internal: true
+  torrent-internal:
+    external: true
+    name: torrent-internal
 
 volumes:
   postgres_data:

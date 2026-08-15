@@ -190,6 +190,20 @@ export interface QBittorrentTorrentListing {
   truncated: boolean;
 }
 
+export interface NewGreedyRestartStatus {
+  state: "idle" | "pending" | "restarting" | "healthy" | "failed" | "rejected";
+  request_id: string | null;
+  updated_at: string | null;
+  message_code:
+    | "idle"
+    | "requested"
+    | "restarting"
+    | "healthy"
+    | "restart_failed"
+    | "cooldown"
+    | "invalid_request";
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -359,6 +373,16 @@ export const api = {
 
   listQBittorrentTorrents(): Promise<QBittorrentTorrentListing> {
     return request<QBittorrentTorrentListing>("/admin/services/qbittorrent/torrents");
+  },
+
+  getNewGreedyRestartStatus(): Promise<NewGreedyRestartStatus> {
+    return request<NewGreedyRestartStatus>("/admin/services/newgreedy/restart");
+  },
+
+  restartNewGreedy(): Promise<NewGreedyRestartStatus> {
+    return request<NewGreedyRestartStatus>("/admin/services/newgreedy/restart", {
+      method: "POST",
+    });
   },
 
   listAdminTrash(signal?: AbortSignal): Promise<AdminTrashListing> {

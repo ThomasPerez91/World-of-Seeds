@@ -79,10 +79,26 @@ jobs:
           bash -n \
             deploy/deploy-world-of-seeds \
             deploy/world-of-seeds-deploy-command
+          python3 - <<'PY'
+          from pathlib import Path
+          helper = Path("deploy/world-of-seeds-newgreedy-restart")
+          compile(helper.read_text(encoding="utf-8"), str(helper), "exec")
+          PY
+          test -x deploy/world-of-seeds-newgreedy-restart
           cp .env.example .env
           WOS_IMAGE="ghcr.io/thomasperez91/world-of-seeds@sha256:$(printf '0%.0s' {1..64})" \
             docker compose --env-file .env \
               -f deploy/compose.production.yaml config --quiet
+          WOS_IMAGE="ghcr.io/thomasperez91/world-of-seeds@sha256:$(printf '0%.0s' {1..64})" \
+            docker compose --env-file .env \
+              -f deploy/compose.production.yaml config --format json \
+            | jq -e '
+                .services.app.networks | has("torrent-internal")
+              ' >/dev/null
+          if grep -F '/var/run/docker.sock' deploy/compose.production.yaml; then
+            echo "The application container must not mount the Docker socket."
+            exit 1
+          fi
           if SSH_ORIGINAL_COMMAND='interactive-shell' \
             deploy/world-of-seeds-deploy-command; then
             echo "The restricted SSH command accepted an invalid command."

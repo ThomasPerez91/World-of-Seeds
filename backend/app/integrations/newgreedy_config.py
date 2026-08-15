@@ -596,8 +596,11 @@ class NewGreedyConfigStore:
                 except OSError:
                     pass
 
-    def _control_directory_fd(self) -> "_DirectoryChain":
-        return _DirectoryChain(self._data_root, (CONTROL_DIRECTORY, NEWGREEDY_DIRECTORY))
+    def _control_directory_fd(self) -> "SecureDirectoryChain":
+        return SecureDirectoryChain(
+            self._data_root,
+            (CONTROL_DIRECTORY, NEWGREEDY_DIRECTORY),
+        )
 
     @staticmethod
     def _parse(raw: bytes) -> list[ConfigFieldValue]:
@@ -720,7 +723,7 @@ def _validate_number(spec: ConfigFieldSpec, value: int | float) -> None:
         raise NewGreedyConfigValidationError("Numeric value is above the allowed maximum")
 
 
-class _DirectoryChain:
+class SecureDirectoryChain:
     def __init__(self, root: Path, components: tuple[str, ...]) -> None:
         self._root = root
         self._components = components
