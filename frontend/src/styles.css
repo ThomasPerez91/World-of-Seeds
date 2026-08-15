@@ -1721,6 +1721,192 @@ button:disabled {
   background: rgb(174 213 156 / 10%);
 }
 
+.services-refresh-button {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.services-refresh-button svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.services-refresh-button svg.rotating {
+  animation: service-refresh-rotation 1s linear infinite;
+}
+
+@keyframes service-refresh-rotation {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.integration-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.integration-card {
+  min-width: 0;
+  padding: clamp(1.1rem, 3vw, 1.5rem);
+  border: 1px solid rgb(117 199 139 / 16%);
+  border-radius: 1.1rem;
+  background:
+    radial-gradient(circle at 100% 0%, rgb(117 199 139 / 8%), transparent 13rem),
+    rgb(5 12 10 / 28%);
+}
+
+.integration-card.unavailable {
+  border-color: rgb(211 115 105 / 22%);
+  background:
+    radial-gradient(circle at 100% 0%, rgb(211 115 105 / 7%), transparent 13rem),
+    rgb(5 12 10 / 28%);
+}
+
+.integration-card.unconfigured {
+  border-color: rgb(202 171 105 / 22%);
+  background:
+    radial-gradient(circle at 100% 0%, rgb(202 171 105 / 7%), transparent 13rem),
+    rgb(5 12 10 / 28%);
+}
+
+.integration-card-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.integration-card-icon {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border-radius: 0.8rem;
+  color: #b8dca8;
+  background: rgb(174 213 156 / 10%);
+}
+
+.integration-card-icon svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.integration-card-heading h3 {
+  margin: 0;
+  color: #e7eee9;
+  font-size: 1rem;
+}
+
+.integration-card-heading p {
+  margin: 0.2rem 0 0;
+  color: #819087;
+  font-size: 0.72rem;
+}
+
+.integration-status {
+  display: inline-flex;
+  min-height: 1.9rem;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  color: #a8dcae;
+  background: rgb(117 199 139 / 10%);
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.integration-status > span {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: #75c78b;
+  box-shadow: 0 0 0 0.25rem rgb(117 199 139 / 9%);
+  animation: health-pulse 2.2s ease-out infinite;
+}
+
+.integration-status.unavailable {
+  color: #dfaaa4;
+  background: rgb(211 115 105 / 10%);
+}
+
+.integration-status.unavailable > span {
+  background: #d37369;
+  box-shadow: 0 0 0 0.25rem rgb(211 115 105 / 9%);
+  animation: none;
+}
+
+.integration-status.unconfigured {
+  color: #d7bd85;
+  background: rgb(202 171 105 / 10%);
+}
+
+.integration-status.unconfigured > span {
+  background: #caab69;
+  box-shadow: 0 0 0 0.25rem rgb(202 171 105 / 9%);
+  animation: none;
+}
+
+.integration-service-message {
+  min-height: 1.25rem;
+  margin: 1.25rem 0;
+  color: #9ba8a0;
+  font-size: 0.78rem;
+}
+
+.integration-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.integration-metadata div {
+  padding: 0.75rem;
+  border: 1px solid rgb(255 255 255 / 5%);
+  border-radius: 0.7rem;
+  background: rgb(0 0 0 / 8%);
+}
+
+.integration-metadata dt {
+  color: #7f8d85;
+  font-size: 0.66rem;
+}
+
+.integration-metadata dd {
+  overflow: hidden;
+  margin: 0.3rem 0 0;
+  color: #d8e2db;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.integration-grid-loading {
+  min-height: 12rem;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 6%);
+  border-radius: 1rem;
+  color: #8d9a92;
+  background: linear-gradient(90deg, #101d18, #172820, #101d18);
+  background-size: 200% 100%;
+  animation: loading-shimmer 1.3s infinite linear;
+}
+
+.services-last-check {
+  margin: 0.85rem 0 0;
+  color: #74827a;
+  font-size: 0.68rem;
+  text-align: right;
+}
+
 .section-intro {
   max-width: 45rem;
   margin: 0.55rem 0 0;
@@ -2117,6 +2303,10 @@ select:focus-visible {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .integration-grid {
+    grid-template-columns: 1fr;
+  }
+
   .admin-trash-actions {
     align-items: stretch;
     flex-wrap: wrap;
@@ -2197,6 +2387,15 @@ select:focus-visible {
   .admin-navigation {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .integration-card-heading {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .integration-status {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
   .admin-storage-summary {
@@ -2344,6 +2543,10 @@ select:focus-visible {
     content: "↻";
   }
 
+  .services-refresh-button::before {
+    content: none;
+  }
+
   .state-actions {
     align-items: stretch;
     flex-direction: column;
@@ -2395,7 +2598,8 @@ select:focus-visible {
   .trash-browser,
   .mutation-dialog,
   .legal-document,
-  .service-health {
+  .service-health,
+  .integration-card {
     border: 1px solid ButtonText;
   }
 

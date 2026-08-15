@@ -9,6 +9,9 @@ import {
   FolderInput,
   LockKeyhole,
   Pencil,
+  Gauge,
+  RefreshCw,
+  Server,
   Sprout,
   Trash2,
   X,
@@ -72,4 +75,16 @@ export function BackIcon(props: AppIconProps) {
 
 export function CloseIcon(props: AppIconProps) {
   return <X {...decorative} {...props} />;
+}
+
+export function NewGreedyServiceIcon(props: AppIconProps) {
+  return <Server {...decorative} {...props} />;
+}
+
+export function QBittorrentServiceIcon(props: AppIconProps) {
+  return <Gauge {...decorative} {...props} />;
+}
+
+export function RefreshIcon(props: AppIconProps) {
+  return <RefreshCw {...decorative} {...props} />;
 }

@@ -37,6 +37,7 @@ def test_cookie_is_not_secure_for_the_initial_ssh_tunnel() -> None:
         ("qbittorrent_password", ""),
         ("newgreedy_url", "http://user:password@newgreedy:8080"),
         ("qbittorrent_url", "http://qbittorrent:8080/api/v2"),
+        ("integration_auth_failure_cache_seconds", 59),
     ],
 )
 def test_critical_runtime_settings_reject_unsafe_values(field: str, value: object) -> None:

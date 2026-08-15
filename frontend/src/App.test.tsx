@@ -311,6 +311,27 @@ describe("App", () => {
         }
         if (url === "/api/v1/trash") return response({ entries: [], truncated: false }, 200);
         if (url === "/api/v1/admin/users") return response([admin], 200);
+        if (url === "/api/v1/admin/services/health") {
+          return response(
+            {
+              status: "ok",
+              checked_at: "2026-08-15T14:00:00Z",
+              newgreedy: {
+                status: "healthy",
+                latency_ms: 4,
+                version: null,
+                error_code: null,
+              },
+              qbittorrent: {
+                status: "healthy",
+                latency_ms: 7,
+                version: "v5.1.2",
+                error_code: null,
+              },
+            },
+            200,
+          );
+        }
         if (url === "/api/v1/admin/storage") {
           return response(
             {
@@ -342,6 +363,13 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
     await user.click(screen.getByRole("button", { name: "Administration" }));
     await screen.findByRole("heading", { name: "Comptes utilisateurs" });
+
+    await user.click(screen.getByRole("button", { name: "Services" }));
+    await screen.findByRole("heading", { name: "Services torrent" });
+    expect(screen.getByRole("article", { name: "NewGreedy : Opérationnel" })).toBeDefined();
+    expect(screen.getByRole("article", { name: "qBittorrent : Opérationnel" })).toBeDefined();
+    expect(screen.getByText("v5.1.2")).toBeDefined();
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
     await user.click(screen.getByRole("button", { name: "Stockage" }));
     await screen.findByRole("heading", { name: "Stockage de la seedbox" });
