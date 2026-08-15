@@ -43,7 +43,7 @@ async def get_services_health(
     monitor: ExternalServicesMonitorDependency,
     _: Annotated[AuthContext, Depends(require_current_admin)],
 ) -> AdminSystemHealthResponse:
-    snapshot = await monitor.snapshot(force=True)
+    snapshot = await monitor.snapshot()
     return AdminSystemHealthResponse(
         status="ok" if snapshot.healthy else "degraded",
         checked_at=snapshot.checked_at,

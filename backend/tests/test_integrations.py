@@ -87,8 +87,10 @@ async def test_qbittorrent_authentication_failure_is_bounded_and_cached() -> Non
 
     first = await monitor.snapshot()
     second = await monitor.snapshot()
+    forced = await monitor.snapshot(force=True)
 
     assert first.qbittorrent.state == "unavailable"
     assert first.qbittorrent.error_code == "authentication_failed"
     assert second is first
+    assert forced is first
     assert attempts == 1

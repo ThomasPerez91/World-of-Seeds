@@ -93,6 +93,22 @@ export interface AdminTrashPurgeResult {
   remaining: number;
 }
 
+export type ExternalServiceState = "healthy" | "unavailable" | "unconfigured";
+
+export interface ExternalServiceHealth {
+  status: ExternalServiceState;
+  latency_ms: number | null;
+  version: string | null;
+  error_code: string | null;
+}
+
+export interface AdminServicesHealth {
+  status: "ok" | "degraded";
+  checked_at: string;
+  newgreedy: ExternalServiceHealth;
+  qbittorrent: ExternalServiceHealth;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -227,6 +243,10 @@ export const api = {
 
   getAdminStorage(): Promise<AdminStorageOverview> {
     return request<AdminStorageOverview>("/admin/storage");
+  },
+
+  getAdminServicesHealth(): Promise<AdminServicesHealth> {
+    return request<AdminServicesHealth>("/admin/services/health");
   },
 
   listAdminTrash(signal?: AbortSignal): Promise<AdminTrashListing> {

@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     integration_connect_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
     integration_read_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     integration_health_cache_seconds: float = Field(default=10.0, ge=1, le=300)
+    integration_auth_failure_cache_seconds: float = Field(default=300.0, ge=60, le=3600)
 
     @field_validator("data_root", "static_root")
     @classmethod

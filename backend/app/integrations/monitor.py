@@ -25,10 +25,11 @@ class ExternalServicesMonitor:
     async def snapshot(self, *, force: bool = False) -> ExternalServicesSnapshot:
         async with self._lock:
             now = monotonic()
+            cache_ttl = self._cache_ttl()
             if (
-                not force
-                and self._cached_snapshot is not None
-                and now - self._cached_at < self._settings.integration_health_cache_seconds
+                self._cached_snapshot is not None
+                and now - self._cached_at < cache_ttl
+                and (not force or self._authentication_circuit_is_open())
             ):
                 return self._cached_snapshot
 
@@ -44,6 +45,17 @@ class ExternalServicesMonitor:
             self._cached_snapshot = result
             self._cached_at = monotonic()
             return result
+
+    def _authentication_circuit_is_open(self) -> bool:
+        return (
+            self._cached_snapshot is not None
+            and self._cached_snapshot.qbittorrent.error_code == "authentication_failed"
+        )
+
+    def _cache_ttl(self) -> float:
+        if self._authentication_circuit_is_open():
+            return self._settings.integration_auth_failure_cache_seconds
+        return self._settings.integration_health_cache_seconds
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
