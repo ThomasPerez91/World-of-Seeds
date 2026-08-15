@@ -81,7 +81,7 @@ describe("App", () => {
     expect(document.querySelector("#dashboard-content")?.getAttribute("tabindex")).toBe("-1");
     expect(screen.queryByText("Bonjour, thomas")).toBeNull();
     expect(document.querySelector(".account-avatar")?.textContent).toBe("T");
-    expect(screen.getAllByText("v1.1.0").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("v1.2.0").length).toBeGreaterThan(0);
     expect(document.querySelector(".account-settings-trigger")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
     await screen.findByText("Ce dossier est vide");
