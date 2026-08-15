@@ -21,9 +21,10 @@ Les capacités fonctionnelles principales de la V1 sont en place :
 - montage hôte limité à `/srv/seedbox:/data` ;
 - contrôles de qualité automatisés.
 
-La V1 applicative est complète. À partir de la version `v1.1.0`, la publication d'une
-release stable ciblant `master` construit une image immuable dans GHCR puis la déploie sur
-OVH par une identité SSH restreinte. Le déclenchement manuel reste disponible en secours.
+La V1 applicative est complète. Toute PR de release fusionnée dans `master` publie la
+version stable déclarée par le projet, puis transmet son commit immuable au workflow de
+déploiement. L'image est construite dans GHCR et déployée sur OVH par une identité SSH
+restreinte. Le déclenchement manuel reste disponible en secours.
 
 ## Démarrage local sans Docker
 

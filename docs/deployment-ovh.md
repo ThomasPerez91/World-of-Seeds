@@ -2,8 +2,10 @@
 
 ## Modèle de sécurité
 
-Le workflow `Deploy to OVH` est lancé automatiquement à la publication d'une release
-stable ciblant `master`. Un déclenchement manuel depuis `master` reste disponible en secours :
+Une fusion dans `master` dont le message commence par `release:` publie automatiquement
+la version stable déclarée par le projet. Le commit de la release est ensuite transmis au
+workflow `Deploy to OVH` par un événement interne exécuté depuis `master`. Un déclenchement
+manuel depuis `master` reste disponible en secours :
 
 1. GitHub Actions construit l'image de production ;
 2. l'image est publiée dans GHCR avec sa provenance et son SBOM ;
@@ -192,8 +194,14 @@ pbcopy < /tmp/world-of-seeds-known-hosts
 
 ## 7. Déploiements
 
-Une release stable publiée depuis `master` déclenche automatiquement le déploiement de
-son commit immuable. Les préreleases et les releases ciblant une autre branche sont ignorées.
+Une PR de release doit porter un titre commençant par `release:`. Sa fusion dans `master`
+crée automatiquement le tag et la release stable, puis déploie leur commit immuable. Si la
+release existe déjà, elle est vérifiée et redéployée sans recréer le tag. Les préreleases et
+les releases ciblant une autre branche sont ignorées.
+
+L'événement interne de déploiement est volontaire : l'environnement GitHub `production`
+continue ainsi à n'autoriser que `master`, tandis que le workflow vérifie que le tag demandé
+correspond bien à une release stable publiée et à son commit exact.
 
 Pour un premier déploiement ou une relance manuelle : **Actions → Deploy to OVH → Run
 workflow → master**. Le workflow refuse de déployer une autre branche et sérialise les
