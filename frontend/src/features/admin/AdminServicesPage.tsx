@@ -13,6 +13,7 @@ import {
 } from "../../components/icons";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 import { NewGreedyControlPanel } from "./NewGreedyControlPanel";
+import { TorrentMonitoringPanel } from "./TorrentMonitoringPanel";
 
 const statusCopy = {
   healthy: "Opérationnel",
@@ -174,6 +175,7 @@ export function AdminServicesPage({
           </div>
         )}
 
+        <TorrentMonitoringPanel onSessionExpired={onSessionExpired} />
         <NewGreedyControlPanel onSessionExpired={onSessionExpired} />
       </section>
     </AdminPageShell>

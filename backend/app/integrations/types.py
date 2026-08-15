@@ -34,6 +34,37 @@ class NewGreedyStatsReset:
 
 
 @dataclass(frozen=True, slots=True)
+class NewGreedyTorrent:
+    id: str
+    mode: Literal["down", "seed"]
+    downloaded_bytes: int
+    reported_uploaded_bytes: int
+    fake_uploaded_bytes: int
+    ratio: float | None
+    announce_count: int
+    stalled: bool
+    target_reached: bool
+    last_announce_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class QBittorrentTorrent:
+    id: str
+    name: str
+    state: str
+    progress: float
+    size_bytes: int
+    downloaded_bytes: int
+    uploaded_bytes: int
+    download_speed_bytes: int
+    upload_speed_bytes: int
+    ratio: float
+    eta_seconds: int | None
+    category: str | None
+    tracker_host: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class ExternalServicesSnapshot:
     checked_at: datetime
     newgreedy: ServiceProbe
