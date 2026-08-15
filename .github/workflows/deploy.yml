@@ -93,7 +93,8 @@ jobs:
           release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$DEPLOY_TAG")"
           jq -e \
             --arg tag "$DEPLOY_TAG" \
-            '.tag_name == $tag and .draft == false and .prerelease == false and .target_commitish == "master"' \
+            --arg sha "$DEPLOY_SHA" \
+            '.tag_name == $tag and .draft == false and .prerelease == false and (.target_commitish == "master" or .target_commitish == $sha)' \
             <<<"$release_json" >/dev/null
           git fetch --force origin \
             "refs/tags/$DEPLOY_TAG:refs/tags/$DEPLOY_TAG"
