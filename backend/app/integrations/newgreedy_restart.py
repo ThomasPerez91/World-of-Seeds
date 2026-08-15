@@ -61,8 +61,9 @@ class NewGreedyRestartStatus:
 
 
 class NewGreedyRestartStore:
-    def __init__(self, data_root: Path) -> None:
+    def __init__(self, data_root: Path, *, status_owner_uid: int = 0) -> None:
         self._data_root = data_root
+        self._status_owner_uid = status_owner_uid
         self._lock = Lock()
 
     def status(self) -> NewGreedyRestartStatus:
@@ -245,7 +246,10 @@ class NewGreedyRestartStore:
         )
 
     def _status_directory_fd(self) -> "StatusDirectoryChain":
-        return StatusDirectoryChain(self._data_root)
+        return StatusDirectoryChain(
+            self._data_root,
+            owner_uid=self._status_owner_uid,
+        )
 
 
 def _parse_pending_request(value: object) -> NewGreedyRestartStatus:
@@ -317,8 +321,9 @@ type CallableDirectory = Callable[[], AbstractContextManager[int]]
 
 
 class StatusDirectoryChain:
-    def __init__(self, data_root: Path) -> None:
+    def __init__(self, data_root: Path, *, owner_uid: int) -> None:
         self._data_root = data_root
+        self._owner_uid = owner_uid
         self._fd: int | None = None
 
     def __enter__(self) -> int:
@@ -354,12 +359,11 @@ class StatusDirectoryChain:
         if directory_stat.st_mode & 0o022 or directory_stat.st_uid != os.geteuid():
             raise NewGreedyRestartUnsafeError("Control directory is unsafe")
 
-    @staticmethod
-    def _validate_status_directory(directory_fd: int) -> None:
+    def _validate_status_directory(self, directory_fd: int) -> None:
         directory_stat = os.fstat(directory_fd)
         if not stat.S_ISDIR(directory_stat.st_mode):
             raise NewGreedyRestartUnsafeError("Status path is not a directory")
-        if directory_stat.st_mode & 0o022 or directory_stat.st_uid != 0:
+        if directory_stat.st_mode & 0o022 or directory_stat.st_uid != self._owner_uid:
             raise NewGreedyRestartUnsafeError("Status directory is unsafe")
         if directory_stat.st_gid != os.getegid():
             raise NewGreedyRestartUnsafeError("Status directory group is unsafe")

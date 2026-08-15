@@ -1,3 +1,4 @@
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -57,7 +58,10 @@ async def client(db_session: AsyncSession, data_root: Path) -> AsyncIterator[Asy
         test_settings.data_root,
         max_bytes=test_settings.newgreedy_config_max_bytes,
     )
-    app.state.newgreedy_restart_store = NewGreedyRestartStore(test_settings.data_root)
+    app.state.newgreedy_restart_store = NewGreedyRestartStore(
+        test_settings.data_root,
+        status_owner_uid=os.geteuid(),
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as test_client:
         yield test_client

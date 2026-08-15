@@ -22,7 +22,11 @@ def make_control_tree(data_root: Path) -> tuple[NewGreedyRestartStore, Path, Pat
     control_root.chmod(0o700)
     request_directory.chmod(0o700)
     status_directory.chmod(0o750)
-    return NewGreedyRestartStore(data_root), request_directory, status_directory
+    return (
+        NewGreedyRestartStore(data_root, status_owner_uid=os.geteuid()),
+        request_directory,
+        status_directory,
+    )
 
 
 def test_restart_store_creates_one_exclusive_request(data_root: Path) -> None:
