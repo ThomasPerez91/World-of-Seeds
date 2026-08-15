@@ -16,6 +16,24 @@ class ServiceProbe:
 
 
 @dataclass(frozen=True, slots=True)
+class NewGreedyOverview:
+    torrents: int
+    downloading: int
+    seeding: int
+    stalled: int
+    target_reached: int
+    total_downloaded_bytes: int
+    total_reported_uploaded_bytes: int
+    total_fake_uploaded_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class NewGreedyStatsReset:
+    purged: int
+    remaining: int
+
+
+@dataclass(frozen=True, slots=True)
 class ExternalServicesSnapshot:
     checked_at: datetime
     newgreedy: ServiceProbe

@@ -11,7 +11,9 @@ import {
   Pencil,
   Gauge,
   RefreshCw,
+  Save,
   Server,
+  Settings2,
   Sprout,
   Trash2,
   X,
@@ -87,4 +89,12 @@ export function QBittorrentServiceIcon(props: AppIconProps) {
 
 export function RefreshIcon(props: AppIconProps) {
   return <RefreshCw {...decorative} {...props} />;
+}
+
+export function SettingsIcon(props: AppIconProps) {
+  return <Settings2 {...decorative} {...props} />;
+}
+
+export function SaveIcon(props: AppIconProps) {
+  return <Save {...decorative} {...props} />;
 }

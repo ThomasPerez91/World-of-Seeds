@@ -1907,6 +1907,261 @@ button:disabled {
   text-align: right;
 }
 
+.newgreedy-control {
+  margin-top: 2rem;
+  padding-top: 1.75rem;
+  border-top: 1px solid rgb(255 255 255 / 7%);
+}
+
+.service-control-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1.25rem;
+}
+
+.service-control-heading h3 {
+  margin: 0.25rem 0 0;
+  color: #e9f0eb;
+  font-size: 1.35rem;
+}
+
+.service-control-heading p:last-child,
+.newgreedy-config-heading p {
+  margin: 0.35rem 0 0;
+  color: #849188;
+  font-size: 0.75rem;
+}
+
+.service-control-heading button,
+.newgreedy-config-actions button {
+  display: inline-flex;
+  width: auto;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.service-control-heading button svg,
+.newgreedy-config-actions button svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.newgreedy-control > .operation-notice {
+  margin-top: 1rem;
+  border: 1px solid rgb(174 213 156 / 12%);
+  border-radius: 0.75rem;
+}
+
+.newgreedy-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1.25rem 0 0;
+}
+
+.newgreedy-metrics > div {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid rgb(255 255 255 / 6%);
+  border-radius: 0.85rem;
+  background: rgb(4 10 8 / 24%);
+}
+
+.newgreedy-metrics > div.warning {
+  border-color: rgb(202 171 105 / 25%);
+}
+
+.newgreedy-metrics dt {
+  color: #829087;
+  font-size: 0.68rem;
+}
+
+.newgreedy-metrics dd {
+  overflow: hidden;
+  margin: 0.35rem 0;
+  color: #e5eee7;
+  font-size: 1.15rem;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.newgreedy-metrics .metric-detail {
+  margin: 0;
+  color: #75837a;
+  font-size: 0.64rem;
+  font-weight: 400;
+}
+
+.newgreedy-metrics.loading,
+.newgreedy-config-loading {
+  display: grid;
+  min-height: 7rem;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 6%);
+  border-radius: 0.85rem;
+  color: #819087;
+  background: rgb(4 10 8 / 24%);
+  font-size: 0.75rem;
+}
+
+.newgreedy-config-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.newgreedy-config-heading > svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  color: #aed59c;
+}
+
+.newgreedy-config-heading h4 {
+  margin: 0;
+  color: #dfe8e2;
+  font-size: 1rem;
+}
+
+.newgreedy-config-form {
+  margin-top: 1rem;
+}
+
+.newgreedy-config-sections {
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 0.95rem;
+}
+
+.newgreedy-config-sections details + details {
+  border-top: 1px solid rgb(255 255 255 / 6%);
+}
+
+.newgreedy-config-sections summary {
+  padding: 0.9rem 1rem;
+  color: #cbd8cf;
+  background: rgb(7 15 12 / 34%);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.newgreedy-config-sections summary:hover {
+  color: #edf4ef;
+  background: rgb(174 213 156 / 5%);
+}
+
+.newgreedy-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding: 0.8rem;
+}
+
+.newgreedy-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.65fr);
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid rgb(255 255 255 / 5%);
+  border-radius: 0.75rem;
+  background: rgb(0 0 0 / 7%);
+}
+
+.newgreedy-field.locked {
+  opacity: 0.58;
+}
+
+.newgreedy-field label {
+  margin: 0;
+  color: #d4ded7;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.newgreedy-field p {
+  margin: 0.25rem 0 0;
+  color: #75827a;
+  font-size: 0.62rem;
+  line-height: 1.35;
+}
+
+.newgreedy-field input:not([type="checkbox"]),
+.newgreedy-field select {
+  width: 100%;
+  height: 2.45rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.newgreedy-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.newgreedy-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.newgreedy-toggle > span {
+  position: relative;
+  width: 2.35rem;
+  height: 1.3rem;
+  border: 1px solid #34453c;
+  border-radius: 999px;
+  background: #111d18;
+}
+
+.newgreedy-toggle > span::after {
+  position: absolute;
+  width: 0.88rem;
+  height: 0.88rem;
+  border-radius: 50%;
+  background: #738078;
+  content: "";
+  inset: 0.15rem auto auto 0.16rem;
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+.newgreedy-toggle input:checked + span {
+  border-color: rgb(143 189 130 / 50%);
+  background: rgb(143 189 130 / 14%);
+}
+
+.newgreedy-toggle input:checked + span::after {
+  background: #aed59c;
+  transform: translateX(1rem);
+}
+
+.newgreedy-toggle input:focus-visible + span {
+  outline: 2px solid #8fbd82;
+  outline-offset: 2px;
+}
+
+.newgreedy-config-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.newgreedy-config-actions > span {
+  color: #78867d;
+  font-size: 0.68rem;
+}
+
 .section-intro {
   max-width: 45rem;
   margin: 0.55rem 0 0;
@@ -2236,6 +2491,15 @@ select:focus-visible {
 }
 
 @media (max-width: 820px) {
+  .newgreedy-metrics,
+  .newgreedy-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .newgreedy-fields {
+    grid-template-columns: 1fr;
+  }
+
   .login-page {
     grid-template-columns: 1fr;
   }
@@ -2336,6 +2600,30 @@ select:focus-visible {
 }
 
 @media (max-width: 680px) {
+  .service-control-heading,
+  .newgreedy-config-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .service-control-heading button,
+  .newgreedy-config-actions button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .newgreedy-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .newgreedy-field {
+    grid-template-columns: 1fr;
+  }
+
+  .newgreedy-toggle {
+    justify-content: flex-start;
+  }
+
   .app-header {
     min-height: 4.5rem;
     padding: 0.75rem 1rem;

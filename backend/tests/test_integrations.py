@@ -94,3 +94,58 @@ async def test_qbittorrent_authentication_failure_is_bounded_and_cached() -> Non
     assert second is first
     assert forced is first
     assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_newgreedy_overview_and_full_stats_reset_are_validated() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET" and request.url.path == "/api/stats":
+            return httpx.Response(
+                200,
+                json={
+                    "deadbeef": {
+                        "cumul_rep_dl": 1_000,
+                        "cumul_rep_ul": 1_500,
+                        "cumul_real_ul": 100,
+                        "mode": "down",
+                        "stalled": True,
+                    },
+                    "01234567": {
+                        "cumul_rep_dl": 2_000,
+                        "cumul_rep_ul": 3_000,
+                        "cumul_real_ul": 400,
+                        "mode": "seed",
+                        "target_reached": True,
+                    },
+                },
+            )
+        if request.method == "DELETE" and request.url.path == "/api/stats/purge":
+            assert dict(request.url.params) == {
+                "keep_active": "false",
+                "inactive_hours": "0",
+            }
+            return httpx.Response(200, json={"purged": 2, "remaining": 0})
+        raise AssertionError(f"Unexpected integration request: {request.method} {request.url}")
+
+    monitor = ExternalServicesMonitor(
+        Settings.model_validate({"newgreedy_url": "http://newgreedy:8080"}),
+        transport=httpx.MockTransport(handler),
+    )
+
+    overview = await monitor.newgreedy_overview()
+    reset = await monitor.reset_newgreedy_stats()
+
+    assert overview.torrents == 2
+    assert overview.downloading == 1
+    assert overview.seeding == 1
+    assert overview.stalled == 1
+    assert overview.target_reached == 1
+    assert overview.total_downloaded_bytes == 3_000
+    assert overview.total_reported_uploaded_bytes == 4_500
+    assert overview.total_fake_uploaded_bytes == 4_000
+    assert reset.purged == 2
+    assert reset.remaining == 0
+    assert len(requests) == 2

@@ -17,7 +17,16 @@ from app.auth.service import (
 from app.core.config import Settings, get_settings
 from app.files import WorkspaceError
 from app.files.dependencies import WorkspaceManagerDependency
-from app.integrations.dependencies import ExternalServicesMonitorDependency
+from app.integrations.dependencies import (
+    ExternalServicesMonitorDependency,
+    NewGreedyConfigStoreDependency,
+)
+from app.integrations.http import IntegrationRequestError
+from app.integrations.newgreedy_config import (
+    ConfigFieldValue,
+    NewGreedyConfigError,
+    NewGreedyConfigValidationError,
+)
 from app.models import TrashEntry, User
 from app.schemas.admin import (
     AdminStorageResponse,
@@ -31,6 +40,15 @@ from app.schemas.auth import (
     UserStatusRequest,
 )
 from app.schemas.health import AdminSystemHealthResponse, ServiceHealthDetail
+from app.schemas.integrations import (
+    SECTION_LABELS,
+    NewGreedyConfigFieldResponse,
+    NewGreedyConfigResponse,
+    NewGreedyConfigSectionResponse,
+    NewGreedyConfigUpdateRequest,
+    NewGreedyOverviewResponse,
+    NewGreedyStatsResetResponse,
+)
 from app.trash.dependencies import TrashServiceDependency
 from app.trash.filesystem import TrashPurgeError, TrashStorageError, TrashStorageUnsafeError
 from app.trash.service import TrashEntryNotFoundError, TrashPersistenceError
@@ -60,6 +78,118 @@ async def get_services_health(
             error_code=snapshot.qbittorrent.error_code,
         ),
     )
+
+
+def _config_response(
+    fields: list[ConfigFieldValue], *, restart_required: bool = False
+) -> NewGreedyConfigResponse:
+    grouped: dict[str, list[NewGreedyConfigFieldResponse]] = {}
+    for field in fields:
+        spec = field.spec
+        grouped.setdefault(spec.section, []).append(
+            NewGreedyConfigFieldResponse(
+                id=spec.identifier,
+                key=spec.key,
+                label=spec.label,
+                description=spec.description,
+                input_type=spec.input_type,
+                value=field.value,
+                editable=spec.editable,
+                minimum=spec.minimum,
+                maximum=spec.maximum,
+                options=list(spec.options),
+            )
+        )
+    return NewGreedyConfigResponse(
+        sections=[
+            NewGreedyConfigSectionResponse(
+                id=section,
+                label=SECTION_LABELS.get(section, section),
+                fields=section_fields,
+            )
+            for section, section_fields in grouped.items()
+        ],
+        restart_required=restart_required,
+    )
+
+
+def _raise_newgreedy_config_error(exc: NewGreedyConfigError) -> Never:
+    if isinstance(exc, NewGreedyConfigValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="NewGreedy configuration is invalid",
+        ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="NewGreedy configuration is unavailable",
+    ) from exc
+
+
+@router.get("/services/newgreedy/config", response_model=NewGreedyConfigResponse)
+async def get_newgreedy_config(
+    store: NewGreedyConfigStoreDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> NewGreedyConfigResponse:
+    try:
+        fields = await run_in_threadpool(store.read)
+    except NewGreedyConfigError as exc:
+        _raise_newgreedy_config_error(exc)
+    return _config_response(fields)
+
+
+@router.patch("/services/newgreedy/config", response_model=NewGreedyConfigResponse)
+async def update_newgreedy_config(
+    payload: NewGreedyConfigUpdateRequest,
+    store: NewGreedyConfigStoreDependency,
+    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+) -> NewGreedyConfigResponse:
+    try:
+        fields = await run_in_threadpool(store.update, payload.changes)
+    except NewGreedyConfigError as exc:
+        _raise_newgreedy_config_error(exc)
+    return _config_response(fields, restart_required=True)
+
+
+@router.get("/services/newgreedy/overview", response_model=NewGreedyOverviewResponse)
+async def get_newgreedy_overview(
+    monitor: ExternalServicesMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> NewGreedyOverviewResponse:
+    try:
+        overview = await monitor.newgreedy_overview()
+    except IntegrationRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="NewGreedy statistics are unavailable",
+        ) from exc
+    return NewGreedyOverviewResponse(
+        torrents=overview.torrents,
+        downloading=overview.downloading,
+        seeding=overview.seeding,
+        stalled=overview.stalled,
+        target_reached=overview.target_reached,
+        total_downloaded_bytes=overview.total_downloaded_bytes,
+        total_reported_uploaded_bytes=overview.total_reported_uploaded_bytes,
+        total_fake_uploaded_bytes=overview.total_fake_uploaded_bytes,
+    )
+
+
+@router.delete(
+    "/services/newgreedy/stats",
+    response_model=NewGreedyStatsResetResponse,
+)
+async def reset_newgreedy_stats(
+    monitor: ExternalServicesMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+) -> NewGreedyStatsResetResponse:
+    try:
+        result = await monitor.reset_newgreedy_stats()
+    except IntegrationRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="NewGreedy statistics could not be reset",
+        ) from exc
+    return NewGreedyStatsResetResponse(purged=result.purged, remaining=result.remaining)
 
 
 def _raise_admin_trash_error(exc: Exception) -> Never:
