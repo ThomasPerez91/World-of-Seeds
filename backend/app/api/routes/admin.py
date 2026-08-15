@@ -17,6 +17,7 @@ from app.auth.service import (
 from app.core.config import Settings, get_settings
 from app.files import WorkspaceError
 from app.files.dependencies import WorkspaceManagerDependency
+from app.integrations.dependencies import ExternalServicesMonitorDependency
 from app.models import TrashEntry, User
 from app.schemas.admin import (
     AdminStorageResponse,
@@ -29,11 +30,36 @@ from app.schemas.auth import (
     UserResponse,
     UserStatusRequest,
 )
+from app.schemas.health import AdminSystemHealthResponse, ServiceHealthDetail
 from app.trash.dependencies import TrashServiceDependency
 from app.trash.filesystem import TrashPurgeError, TrashStorageError, TrashStorageUnsafeError
 from app.trash.service import TrashEntryNotFoundError, TrashPersistenceError
 
 router = APIRouter()
+
+
+@router.get("/services/health", response_model=AdminSystemHealthResponse)
+async def get_services_health(
+    monitor: ExternalServicesMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> AdminSystemHealthResponse:
+    snapshot = await monitor.snapshot(force=True)
+    return AdminSystemHealthResponse(
+        status="ok" if snapshot.healthy else "degraded",
+        checked_at=snapshot.checked_at,
+        newgreedy=ServiceHealthDetail(
+            status=snapshot.newgreedy.state,
+            latency_ms=snapshot.newgreedy.latency_ms,
+            version=snapshot.newgreedy.version,
+            error_code=snapshot.newgreedy.error_code,
+        ),
+        qbittorrent=ServiceHealthDetail(
+            status=snapshot.qbittorrent.state,
+            latency_ms=snapshot.qbittorrent.latency_ms,
+            version=snapshot.qbittorrent.version,
+            error_code=snapshot.qbittorrent.error_code,
+        ),
+    )
 
 
 def _raise_admin_trash_error(exc: Exception) -> Never:

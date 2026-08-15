@@ -50,8 +50,8 @@ function ServiceHealth() {
   const check = useCallback(async () => {
     setChecking(true);
     try {
-      await api.health();
-      if (mounted.current) setHealth("healthy");
+      const status = await api.health();
+      if (mounted.current) setHealth(status.status === "ok" ? "healthy" : "unavailable");
     } catch {
       if (mounted.current) setHealth("unavailable");
     } finally {
@@ -61,6 +61,7 @@ function ServiceHealth() {
 
   useEffect(() => {
     mounted.current = true;
+    void check();
     const interval = window.setInterval(() => void check(), 30_000);
     return () => {
       mounted.current = false;

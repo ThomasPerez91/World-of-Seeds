@@ -2,7 +2,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, SecretStr, StringConstraints, field_validator, model_validator
+from pydantic import (
+    AnyHttpUrl,
+    Field,
+    SecretStr,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -43,12 +50,37 @@ class Settings(BaseSettings):
     postgres_password: SecretStr = Field(default=SecretStr("world_of_seeds"), repr=False)
     data_root: Path = Path("/data")
     static_root: Path = Path("/app/static")
+    newgreedy_url: AnyHttpUrl | None = None
+    qbittorrent_url: AnyHttpUrl | None = None
+    qbittorrent_username: str | None = Field(default=None, min_length=1, max_length=128)
+    qbittorrent_password: SecretStr | None = Field(default=None, repr=False)
+    integration_connect_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
+    integration_read_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+    integration_health_cache_seconds: float = Field(default=10.0, ge=1, le=300)
 
     @field_validator("data_root", "static_root")
     @classmethod
     def require_absolute_container_path(cls, value: Path) -> Path:
         if not value.is_absolute():
             raise ValueError("Container paths must be absolute")
+        return value
+
+    @field_validator("qbittorrent_password")
+    @classmethod
+    def reject_empty_qbittorrent_password(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and value.get_secret_value() == "":
+            raise ValueError("qBittorrent password must not be empty")
+        return value
+
+    @field_validator("newgreedy_url", "qbittorrent_url")
+    @classmethod
+    def require_origin_only_integration_url(cls, value: AnyHttpUrl | None) -> AnyHttpUrl | None:
+        if value is None:
+            return value
+        if value.username is not None or value.password is not None:
+            raise ValueError("Integration credentials must not be embedded in URLs")
+        if value.path not in ("", "/") or value.query is not None or value.fragment is not None:
+            raise ValueError("Integration URLs must contain only an origin")
         return value
 
     @model_validator(mode="after")
