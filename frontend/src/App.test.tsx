@@ -349,6 +349,52 @@ describe("App", () => {
             200,
           );
         }
+        if (url === "/api/v1/admin/services/qbittorrent/torrents") {
+          return response(
+            {
+              torrents: [
+                {
+                  id: `deadbeef${"a".repeat(32)}`,
+                  name: "Film de test.mkv",
+                  state: "downloading",
+                  progress: 0.42,
+                  size_bytes: 10_737_418_240,
+                  downloaded_bytes: 4_509_715_660,
+                  uploaded_bytes: 1_073_741_824,
+                  download_speed_bytes: 2_097_152,
+                  upload_speed_bytes: 262_144,
+                  ratio: 0.24,
+                  eta_seconds: 3_600,
+                  category: "films",
+                  tracker_host: "tracker.example",
+                },
+              ],
+              truncated: false,
+            },
+            200,
+          );
+        }
+        if (url === "/api/v1/admin/services/newgreedy/torrents") {
+          return response(
+            {
+              torrents: [
+                {
+                  id: "deadbeef",
+                  mode: "down",
+                  downloaded_bytes: 4_000,
+                  reported_uploaded_bytes: 6_000,
+                  fake_uploaded_bytes: 5_000,
+                  ratio: 1.5,
+                  announce_count: 4,
+                  stalled: false,
+                  target_reached: false,
+                  last_announce_at: "2026-08-15T14:00:00Z",
+                },
+              ],
+            },
+            200,
+          );
+        }
         if (
           url === "/api/v1/admin/services/newgreedy/config" &&
           init?.method === "PATCH"
@@ -458,6 +504,9 @@ describe("App", () => {
     expect(screen.getByRole("article", { name: "NewGreedy : Opérationnel" })).toBeDefined();
     expect(screen.getByRole("article", { name: "qBittorrent : Opérationnel" })).toBeDefined();
     expect(screen.getByText("v5.1.2")).toBeDefined();
+    await screen.findByText("Film de test.mkv");
+    expect(screen.getByText("Téléchargement")).toBeDefined();
+    expect(screen.getByText(/Actif · 4,9 Ko/)).toBeDefined();
     await screen.findByText("4 Go");
     await user.click(screen.getByText("Simulation"));
     const ratioInput = screen.getByRole("spinbutton", { name: "Ratio cible" });

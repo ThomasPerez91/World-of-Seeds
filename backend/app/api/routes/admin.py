@@ -48,6 +48,10 @@ from app.schemas.integrations import (
     NewGreedyConfigUpdateRequest,
     NewGreedyOverviewResponse,
     NewGreedyStatsResetResponse,
+    NewGreedyTorrentListingResponse,
+    NewGreedyTorrentResponse,
+    QBittorrentTorrentListingResponse,
+    QBittorrentTorrentResponse,
 )
 from app.trash.dependencies import TrashServiceDependency
 from app.trash.filesystem import TrashPurgeError, TrashStorageError, TrashStorageUnsafeError
@@ -190,6 +194,47 @@ async def reset_newgreedy_stats(
             detail="NewGreedy statistics could not be reset",
         ) from exc
     return NewGreedyStatsResetResponse(purged=result.purged, remaining=result.remaining)
+
+
+@router.get(
+    "/services/newgreedy/torrents",
+    response_model=NewGreedyTorrentListingResponse,
+)
+async def list_newgreedy_torrents(
+    monitor: ExternalServicesMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> NewGreedyTorrentListingResponse:
+    try:
+        torrents = await monitor.newgreedy_torrents()
+    except IntegrationRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="NewGreedy torrent statistics are unavailable",
+        ) from exc
+    return NewGreedyTorrentListingResponse(
+        torrents=[NewGreedyTorrentResponse.model_validate(torrent) for torrent in torrents]
+    )
+
+
+@router.get(
+    "/services/qbittorrent/torrents",
+    response_model=QBittorrentTorrentListingResponse,
+)
+async def list_qbittorrent_torrents(
+    monitor: ExternalServicesMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> QBittorrentTorrentListingResponse:
+    try:
+        torrents, truncated = await monitor.qbittorrent_torrents()
+    except IntegrationRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="qBittorrent torrents are unavailable",
+        ) from exc
+    return QBittorrentTorrentListingResponse(
+        torrents=[QBittorrentTorrentResponse.model_validate(torrent) for torrent in torrents],
+        truncated=truncated,
+    )
 
 
 def _raise_admin_trash_error(exc: Exception) -> Never:

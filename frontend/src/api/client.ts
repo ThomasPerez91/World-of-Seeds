@@ -152,6 +152,44 @@ export interface NewGreedyStatsReset {
   remaining: number;
 }
 
+export interface NewGreedyTorrent {
+  id: string;
+  mode: "down" | "seed";
+  downloaded_bytes: number;
+  reported_uploaded_bytes: number;
+  fake_uploaded_bytes: number;
+  ratio: number | null;
+  announce_count: number;
+  stalled: boolean;
+  target_reached: boolean;
+  last_announce_at: string | null;
+}
+
+export interface NewGreedyTorrentListing {
+  torrents: NewGreedyTorrent[];
+}
+
+export interface QBittorrentTorrent {
+  id: string;
+  name: string;
+  state: string;
+  progress: number;
+  size_bytes: number;
+  downloaded_bytes: number;
+  uploaded_bytes: number;
+  download_speed_bytes: number;
+  upload_speed_bytes: number;
+  ratio: number;
+  eta_seconds: number | null;
+  category: string | null;
+  tracker_host: string | null;
+}
+
+export interface QBittorrentTorrentListing {
+  torrents: QBittorrentTorrent[];
+  truncated: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -313,6 +351,14 @@ export const api = {
     return request<NewGreedyStatsReset>("/admin/services/newgreedy/stats", {
       method: "DELETE",
     });
+  },
+
+  listNewGreedyTorrents(): Promise<NewGreedyTorrentListing> {
+    return request<NewGreedyTorrentListing>("/admin/services/newgreedy/torrents");
+  },
+
+  listQBittorrentTorrents(): Promise<QBittorrentTorrentListing> {
+    return request<QBittorrentTorrentListing>("/admin/services/qbittorrent/torrents");
   },
 
   listAdminTrash(signal?: AbortSignal): Promise<AdminTrashListing> {

@@ -82,10 +82,44 @@ async def test_services_health_is_detailed_and_admin_only(
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/health":
             return httpx.Response(200, json={"total": 2})
+        if request.url.path == "/api/stats":
+            return httpx.Response(
+                200,
+                json={
+                    "deadbeef": {
+                        "cumul_rep_dl": 1000,
+                        "cumul_rep_ul": 1500,
+                        "cumul_real_ul": 100,
+                        "ann_count": 3,
+                        "mode": "down",
+                    }
+                },
+            )
         if request.url.path == "/api/v2/auth/login":
             return httpx.Response(200, text="Ok.", headers={"Set-Cookie": "SID=test; Path=/"})
         if request.url.path == "/api/v2/app/version":
             return httpx.Response(200, text="v5.1.2")
+        if request.url.path == "/api/v2/torrents/info":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "hash": "a" * 40,
+                        "name": "Film.mkv",
+                        "state": "uploading",
+                        "progress": 1,
+                        "total_size": 1000,
+                        "downloaded": 1000,
+                        "uploaded": 500,
+                        "dlspeed": 0,
+                        "upspeed": 100,
+                        "ratio": 0.5,
+                        "eta": 0,
+                        "category": "films",
+                        "tracker": "https://tracker.example/announce",
+                    }
+                ],
+            )
         if request.url.path == "/api/v2/auth/logout":
             return httpx.Response(200)
         raise AssertionError(f"Unexpected integration request: {request.method} {request.url}")
@@ -105,6 +139,8 @@ async def test_services_health_is_detailed_and_admin_only(
     await login(client, "regular", "regular-password-long")
     forbidden = await client.get("/api/v1/admin/services/health")
     assert forbidden.status_code == 403
+    forbidden_torrents = await client.get("/api/v1/admin/services/qbittorrent/torrents")
+    assert forbidden_torrents.status_code == 403
 
     await login(client, "admin", "admin-password-long")
     response = await client.get("/api/v1/admin/services/health")
@@ -126,6 +162,15 @@ async def test_services_health_is_detailed_and_admin_only(
             "error_code": None,
         },
     }
+
+    qbittorrent = await client.get("/api/v1/admin/services/qbittorrent/torrents")
+    newgreedy = await client.get("/api/v1/admin/services/newgreedy/torrents")
+
+    assert qbittorrent.status_code == 200
+    assert qbittorrent.json()["torrents"][0]["name"] == "Film.mkv"
+    assert qbittorrent.json()["torrents"][0]["tracker_host"] == "tracker.example"
+    assert newgreedy.status_code == 200
+    assert newgreedy.json()["torrents"][0]["id"] == "deadbeef"
 
 
 @pytest.mark.asyncio

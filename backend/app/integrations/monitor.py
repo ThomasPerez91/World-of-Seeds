@@ -13,6 +13,8 @@ from app.integrations.types import (
     ExternalServicesSnapshot,
     NewGreedyOverview,
     NewGreedyStatsReset,
+    NewGreedyTorrent,
+    QBittorrentTorrent,
     ServiceProbe,
 )
 
@@ -64,6 +66,24 @@ class ExternalServicesMonitor:
             self._cached_snapshot = None
         return result
 
+    async def newgreedy_torrents(self) -> list[NewGreedyTorrent]:
+        base_url = self._require_newgreedy_url()
+        async with self._client() as http_client:
+            return await NewGreedyClient(http_client, base_url).torrents()
+
+    async def qbittorrent_torrents(self) -> tuple[list[QBittorrentTorrent], bool]:
+        snapshot = await self.snapshot()
+        if snapshot.qbittorrent.state != "healthy":
+            raise IntegrationRequestError("qBittorrent is unavailable")
+        base_url, username, password = self._require_qbittorrent_credentials()
+        async with self._client() as http_client:
+            return await QBittorrentClient(
+                http_client,
+                base_url,
+                username,
+                password,
+            ).torrents()
+
     def _authentication_circuit_is_open(self) -> bool:
         return (
             self._cached_snapshot is not None
@@ -113,3 +133,17 @@ class ExternalServicesMonitor:
                 self._settings.qbittorrent_username,
                 password.get_secret_value(),
             ).probe()
+
+    def _require_qbittorrent_credentials(self) -> tuple[str, str, str]:
+        password = self._settings.qbittorrent_password
+        if (
+            self._settings.qbittorrent_url is None
+            or self._settings.qbittorrent_username is None
+            or password is None
+        ):
+            raise IntegrationRequestError("qBittorrent is not configured")
+        return (
+            str(self._settings.qbittorrent_url),
+            self._settings.qbittorrent_username,
+            password.get_secret_value(),
+        )

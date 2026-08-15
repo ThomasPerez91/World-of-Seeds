@@ -4,6 +4,7 @@ from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.integrations import ExternalServicesMonitor
+from app.integrations.http import IntegrationRequestError
 
 
 @pytest.mark.asyncio
@@ -112,6 +113,7 @@ async def test_newgreedy_overview_and_full_stats_reset_are_validated() -> None:
                         "cumul_real_ul": 100,
                         "mode": "down",
                         "stalled": True,
+                        "last_announce_ts": 1_700_000_000,
                     },
                     "01234567": {
                         "cumul_rep_dl": 2_000,
@@ -119,6 +121,7 @@ async def test_newgreedy_overview_and_full_stats_reset_are_validated() -> None:
                         "cumul_real_ul": 400,
                         "mode": "seed",
                         "target_reached": True,
+                        "last_announce_ts": 1_800_000_000,
                     },
                 },
             )
@@ -136,6 +139,7 @@ async def test_newgreedy_overview_and_full_stats_reset_are_validated() -> None:
     )
 
     overview = await monitor.newgreedy_overview()
+    torrents = await monitor.newgreedy_torrents()
     reset = await monitor.reset_newgreedy_stats()
 
     assert overview.torrents == 2
@@ -146,6 +150,99 @@ async def test_newgreedy_overview_and_full_stats_reset_are_validated() -> None:
     assert overview.total_downloaded_bytes == 3_000
     assert overview.total_reported_uploaded_bytes == 4_500
     assert overview.total_fake_uploaded_bytes == 4_000
+    assert [torrent.id for torrent in torrents] == ["01234567", "deadbeef"]
+    assert torrents[0].mode == "seed"
+    assert torrents[0].fake_uploaded_bytes == 2_600
+    assert torrents[1].stalled is True
     assert reset.purged == 2
     assert reset.remaining == 0
-    assert len(requests) == 2
+    assert len(requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_qbittorrent_torrent_listing_is_normalized_and_hides_tracker_secret() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/v2/auth/login":
+            assert request.content == b"username=admin&password=secret-password"
+            return httpx.Response(200, text="Ok.", headers={"Set-Cookie": "SID=test; Path=/"})
+        if request.url.path == "/api/v2/app/version":
+            return httpx.Response(200, text="v5.1.2")
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        if request.url.path == "/api/v2/torrents/info":
+            assert request.url.params["limit"] == "1001"
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "hash": "a" * 40,
+                        "name": "Film de test.mkv",
+                        "state": "downloading",
+                        "progress": 0.42,
+                        "total_size": 10_000,
+                        "downloaded": 4_200,
+                        "uploaded": 1_000,
+                        "dlspeed": 2_000,
+                        "upspeed": 300,
+                        "ratio": 0.238,
+                        "eta": 8_640_000,
+                        "category": "films",
+                        "tracker": "https://tracker.private.example/secret-passkey/announce",
+                    }
+                ],
+            )
+        raise AssertionError(f"Unexpected integration request: {request.method} {request.url}")
+
+    monitor = ExternalServicesMonitor(
+        Settings.model_validate(
+            {
+                "qbittorrent_url": "http://qbittorrent:8080",
+                "qbittorrent_username": "admin",
+                "qbittorrent_password": SecretStr("secret-password"),
+            }
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    torrents, truncated = await monitor.qbittorrent_torrents()
+
+    assert truncated is False
+    assert len(torrents) == 1
+    torrent = torrents[0]
+    assert torrent.name == "Film de test.mkv"
+    assert torrent.progress == 0.42
+    assert torrent.eta_seconds is None
+    assert torrent.tracker_host == "tracker.private.example"
+    assert "secret-passkey" not in repr(torrent)
+    assert len(requests) == 6
+
+
+@pytest.mark.asyncio
+async def test_qbittorrent_torrent_listing_respects_cached_authentication_failure() -> None:
+    attempts = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(200, text="Fails.")
+
+    monitor = ExternalServicesMonitor(
+        Settings.model_validate(
+            {
+                "qbittorrent_url": "http://qbittorrent:8080",
+                "qbittorrent_username": "admin",
+                "qbittorrent_password": SecretStr("wrong-password"),
+            }
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(IntegrationRequestError, match="unavailable"):
+        await monitor.qbittorrent_torrents()
+    with pytest.raises(IntegrationRequestError, match="unavailable"):
+        await monitor.qbittorrent_torrents()
+
+    assert attempts == 1

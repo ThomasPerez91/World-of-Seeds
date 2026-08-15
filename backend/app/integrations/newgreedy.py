@@ -1,10 +1,17 @@
+import re
+from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any
 
 import httpx
 
 from app.integrations.http import IntegrationRequestError, read_limited_json
-from app.integrations.types import NewGreedyOverview, NewGreedyStatsReset, ServiceProbe
+from app.integrations.types import (
+    NewGreedyOverview,
+    NewGreedyStatsReset,
+    NewGreedyTorrent,
+    ServiceProbe,
+)
 
 
 class NewGreedyClient:
@@ -34,9 +41,7 @@ class NewGreedyClient:
         )
 
     async def overview(self) -> NewGreedyOverview:
-        payload = await self._request_json("GET", "/api/stats", max_bytes=8 * 1024 * 1024)
-        if not isinstance(payload, dict) or len(payload) > 10_000:
-            raise IntegrationRequestError("NewGreedy stats payload is invalid")
+        payload = await self._stats_payload()
 
         total_downloaded = 0.0
         total_reported_uploaded = 0.0
@@ -75,6 +80,42 @@ class NewGreedyClient:
             total_fake_uploaded_bytes=round(max(0, total_reported_uploaded - total_real_uploaded)),
         )
 
+    async def torrents(self) -> list[NewGreedyTorrent]:
+        payload = await self._stats_payload()
+        result: list[NewGreedyTorrent] = []
+        for info_hash, raw_entry in payload.items():
+            if not re.fullmatch(r"[0-9a-fA-F]{8,40}", info_hash):
+                raise IntegrationRequestError("NewGreedy torrent identifier is invalid")
+            downloaded = _safe_counter(raw_entry.get("cumul_rep_dl", 0))
+            reported_uploaded = _safe_counter(raw_entry.get("cumul_rep_ul", 0))
+            real_uploaded = _safe_counter(raw_entry.get("cumul_real_ul", 0))
+            announce_count = raw_entry.get("ann_count", 0)
+            if type(announce_count) is not int or announce_count < 0:
+                raise IntegrationRequestError("NewGreedy announce counter is invalid")
+            mode = raw_entry.get("mode", "seed" if downloaded == 0 else "down")
+            if mode not in ("down", "seed"):
+                raise IntegrationRequestError("NewGreedy torrent mode is invalid")
+            last_announce = _optional_timestamp(raw_entry.get("last_announce_ts", 0))
+            result.append(
+                NewGreedyTorrent(
+                    id=info_hash.lower(),
+                    mode=mode,
+                    downloaded_bytes=round(downloaded),
+                    reported_uploaded_bytes=round(reported_uploaded),
+                    fake_uploaded_bytes=round(max(0, reported_uploaded - real_uploaded)),
+                    ratio=round(reported_uploaded / downloaded, 4) if downloaded > 0 else None,
+                    announce_count=announce_count,
+                    stalled=raw_entry.get("stalled") is True,
+                    target_reached=raw_entry.get("target_reached") is True,
+                    last_announce_at=last_announce,
+                )
+            )
+        return sorted(
+            result,
+            key=lambda torrent: torrent.last_announce_at or datetime.min.replace(tzinfo=UTC),
+            reverse=True,
+        )
+
     async def reset_stats(self) -> NewGreedyStatsReset:
         payload = await self._request_json(
             "DELETE",
@@ -109,6 +150,17 @@ class NewGreedyClient:
         except httpx.HTTPError as exc:
             raise IntegrationRequestError("NewGreedy request failed") from exc
 
+    async def _stats_payload(self) -> dict[str, dict[str, object]]:
+        payload = await self._request_json("GET", "/api/stats", max_bytes=8 * 1024 * 1024)
+        if not isinstance(payload, dict) or len(payload) > 10_000:
+            raise IntegrationRequestError("NewGreedy stats payload is invalid")
+        result: dict[str, dict[str, object]] = {}
+        for info_hash, raw_entry in payload.items():
+            if not isinstance(info_hash, str) or not isinstance(raw_entry, dict):
+                raise IntegrationRequestError("NewGreedy stats payload is invalid")
+            result[info_hash] = raw_entry
+        return result
+
 
 def _latency_ms(started_at: float) -> int:
     return max(0, round((perf_counter() - started_at) * 1000))
@@ -121,3 +173,13 @@ def _safe_counter(value: object) -> float:
     if result < 0 or result != result or result in (float("inf"), float("-inf")):
         raise IntegrationRequestError("NewGreedy counter is invalid")
     return result
+
+
+def _optional_timestamp(value: object) -> datetime | None:
+    if value in (None, 0, 0.0):
+        return None
+    timestamp = _safe_counter(value)
+    try:
+        return datetime.fromtimestamp(timestamp, tz=UTC)
+    except (OverflowError, OSError, ValueError) as exc:
+        raise IntegrationRequestError("NewGreedy timestamp is invalid") from exc

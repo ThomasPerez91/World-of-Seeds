@@ -10,6 +10,10 @@ class IntegrationRequestError(Exception):
     """Raised when an integration does not return a bounded, valid response."""
 
 
+class IntegrationAuthenticationError(IntegrationRequestError):
+    """Raised when an integration rejects configured credentials."""
+
+
 async def read_limited_json(
     response: httpx.Response,
     *,
