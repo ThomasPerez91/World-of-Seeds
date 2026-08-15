@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { BackIcon } from "../../components/icons";
+
 export type AdminView = "admin-users" | "admin-storage" | "admin-trash";
 
 const navigation: { view: AdminView; label: string }[] = [
@@ -22,14 +24,10 @@ export function AdminPageShell({
   return (
     <section className="admin-page" aria-labelledby="administration-title">
       <button type="button" className="back-button" onClick={onBack}>
-        <span aria-hidden="true">←</span> Retour aux fichiers
+        <BackIcon /> Retour aux fichiers
       </button>
       <header className="admin-page-header">
-        <div>
-          <p className="eyebrow">Espace sécurisé</p>
-          <h1 id="administration-title">Administration</h1>
-          <p>Gère les accès et le stockage de la seedbox depuis un espace dédié.</p>
-        </div>
+        <h1 id="administration-title">Administration</h1>
         <nav className="admin-navigation" aria-label="Sections d’administration">
           {navigation.map((item) => (
             <button

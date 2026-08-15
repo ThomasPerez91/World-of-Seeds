@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from app.files.workspaces import DIRECTORY_OPEN_FLAGS, WorkspaceManager
+from app.files.directory_sizes import DirectorySizeBudget, DirectorySizeCalculator
+from app.files.workspaces import (
+    DIRECTORY_OPEN_FLAGS,
+    RETIRED_WORKSPACE_DIRECTORIES,
+    WorkspaceManager,
+)
 
 MAX_PATH_BYTES = 4096
 MAX_COMPONENT_BYTES = 255
@@ -102,8 +107,13 @@ class DirectorySnapshot:
 
 
 class SandboxedFileBrowser:
-    def __init__(self, workspace_manager: WorkspaceManager) -> None:
+    def __init__(
+        self,
+        workspace_manager: WorkspaceManager,
+        directory_size_calculator: DirectorySizeCalculator | None = None,
+    ) -> None:
         self._workspace_manager = workspace_manager
+        self._directory_size_calculator = directory_size_calculator or DirectorySizeCalculator()
 
     def list_directory(self, username: str, raw_path: str) -> DirectorySnapshot:
         relative_path = RelativePath.parse(raw_path)
@@ -118,16 +128,19 @@ class SandboxedFileBrowser:
             truncated=truncated,
         )
 
-    @staticmethod
     def _list_entries(
+        self,
         directory_fd: int,
         relative_path: RelativePath,
     ) -> tuple[list[FileEntry], bool]:
         entries: list[FileEntry] = []
         truncated = False
+        size_budget = DirectorySizeBudget()
         try:
             with os.scandir(directory_fd) as iterator:
                 for entry in iterator:
+                    if not relative_path.components and entry.name in RETIRED_WORKSPACE_DIRECTORIES:
+                        continue
                     if len(entries) >= MAX_DIRECTORY_ENTRIES:
                         truncated = True
                         break
@@ -142,12 +155,24 @@ class SandboxedFileBrowser:
                         FileEntryKind.OTHER,
                     }
                     item_path = "/".join((*relative_path.components, entry.name))
+                    size: int | None
+                    if kind is FileEntryKind.FILE:
+                        size = entry_stat.st_size
+                    elif kind is FileEntryKind.DIRECTORY and not blocked:
+                        size = self._directory_size_calculator.calculate(
+                            directory_fd,
+                            entry.name,
+                            entry_stat,
+                            size_budget,
+                        )
+                    else:
+                        size = None
                     entries.append(
                         FileEntry(
                             name=entry.name,
                             path=item_path,
                             kind=kind,
-                            size=entry_stat.st_size if kind is FileEntryKind.FILE else None,
+                            size=size,
                             modified_at=datetime.fromtimestamp(entry_stat.st_mtime, tz=UTC),
                             media_type=(
                                 mimetypes.guess_type(entry.name)[0]
@@ -184,6 +209,9 @@ def open_sandboxed_directory(
     relative_path: RelativePath,
 ) -> Iterator[int]:
     """Open a directory path without ever resolving a symbolic link."""
+
+    if relative_path.components and relative_path.components[0] in RETIRED_WORKSPACE_DIRECTORIES:
+        raise BrowserPathBlockedError("Retired workspace directories are hidden")
 
     current_fd = os.dup(workspace_fd)
     try:

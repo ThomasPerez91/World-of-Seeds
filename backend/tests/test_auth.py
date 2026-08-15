@@ -127,7 +127,7 @@ async def test_admin_generates_initial_credentials_and_user_changes_them(
     assert "expires_at" not in initial["user"]
     assert len(initial["initial_password"]) >= 12
     initial_workspace = data_root / initial["user"]["username"]
-    assert {entry.name for entry in initial_workspace.iterdir()} == {"downloads", "watch"}
+    assert {entry.name for entry in initial_workspace.iterdir()} == {"downloads"}
 
     generated_user = await db_session.scalar(
         select(User).where(User.username == initial["user"]["username"])
@@ -140,6 +140,13 @@ async def test_admin_generates_initial_credentials_and_user_changes_them(
     await login(client, generated_user.username, initial["initial_password"])
     forbidden = await client.get("/api/v1/admin/users")
     assert forbidden.status_code == 403
+
+    separate_update_forbidden = await client.patch(
+        "/api/v1/auth/username",
+        json={"username": "not-ready"},
+        headers=csrf_header(client),
+    )
+    assert separate_update_forbidden.status_code == 403
 
     case_insensitive_collision = await client.patch(
         "/api/v1/auth/credentials",
@@ -167,7 +174,6 @@ async def test_admin_generates_initial_credentials_and_user_changes_them(
     assert changed.json()["user"]["must_change_credentials"] is False
     assert not initial_workspace.exists()
     assert (data_root / "Shadowsun" / "downloads").is_dir()
-    assert (data_root / "Shadowsun" / "watch").is_dir()
 
     active_sessions = (
         await db_session.scalars(
@@ -187,6 +193,76 @@ async def test_admin_generates_initial_credentials_and_user_changes_them(
     users = await client.get("/api/v1/admin/users")
     assert users.status_code == 200
     assert {user["username"] for user in users.json()} == {"admin", "Shadowsun"}
+
+
+@pytest.mark.asyncio
+async def test_user_updates_username_then_password_in_separate_flows(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    account = await create_user(
+        db_session,
+        username="thomas",
+        password="current-password-long",
+    )
+    workspace = data_root / "thomas"
+    (workspace / "downloads").mkdir(parents=True)
+    marker = workspace / "downloads" / "movie.mkv"
+    marker.write_bytes(b"content")
+    await login(client, "thomas", "current-password-long")
+
+    renamed = await client.patch(
+        "/api/v1/auth/username",
+        json={"username": "Shadowsun"},
+        headers=csrf_header(client),
+    )
+
+    assert renamed.status_code == 200
+    assert renamed.json()["user"]["username"] == "Shadowsun"
+    assert not workspace.exists()
+    assert (data_root / "Shadowsun" / "downloads" / "movie.mkv").read_bytes() == b"content"
+    assert (await client.get("/api/v1/auth/me")).json()["user"]["username"] == "Shadowsun"
+
+    wrong_password = await client.patch(
+        "/api/v1/auth/password",
+        json={
+            "current_password": "wrong-password",
+            "new_password": "new-password-long",
+        },
+        headers=csrf_header(client),
+    )
+    assert wrong_password.status_code == 401
+    assert (await client.get("/api/v1/auth/me")).status_code == 200
+
+    changed_password = await client.patch(
+        "/api/v1/auth/password",
+        json={
+            "current_password": "current-password-long",
+            "new_password": "new-password-long",
+        },
+        headers=csrf_header(client),
+    )
+    assert changed_password.status_code == 204
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
+
+    active_sessions = (
+        await db_session.scalars(
+            select(UserSession).where(
+                UserSession.user_id == account.id,
+                UserSession.revoked_at.is_(None),
+            )
+        )
+    ).all()
+    assert active_sessions == []
+
+    client.cookies.clear()
+    rejected_old_password = await client.post(
+        "/api/v1/auth/login",
+        json={"username": "Shadowsun", "password": "current-password-long"},
+    )
+    assert rejected_old_password.status_code == 401
+    await login(client, "shadowsun", "new-password-long")
 
 
 @pytest.mark.asyncio

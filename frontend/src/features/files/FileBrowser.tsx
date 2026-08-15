@@ -6,7 +6,20 @@ import {
   type DirectoryListing,
   type FileEntry,
   type FileEntryKind,
+  type StorageUsage,
 } from "../../api/client";
+import {
+  DeleteIcon,
+  DownloadIcon,
+  FileIcon as FileGlyph,
+  FolderIcon,
+  LockedEntryIcon,
+  MoveIcon,
+  OpenIcon,
+  RenameIcon,
+  VideoFileIcon,
+} from "../../components/icons";
+import { Notice } from "../../components/Notice";
 import { formatBytes } from "../../utils/format";
 import {
   FileMutationDialog,
@@ -49,31 +62,15 @@ function listingErrorMessage(error: unknown): string {
   );
 }
 
-function FileIcon({ kind, mediaType }: { kind: FileEntryKind; mediaType: string | null }) {
+function EntryIcon({ kind, mediaType }: { kind: FileEntryKind; mediaType: string | null }) {
   if (kind === "directory") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M3.5 7.5h6l1.7 2h9.3v8.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2V7.5Z" />
-        <path d="M3.5 8V5.7a2.2 2.2 0 0 1 2.2-2.2h3.1l2 2.2h7.5a2.2 2.2 0 0 1 2.2 2.2v1.6" />
-      </svg>
-    );
+    return <FolderIcon />;
   }
   if (kind === "symlink" || kind === "other") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="4" y="10" width="16" height="11" rx="2" />
-        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-      </svg>
-    );
+    return <LockedEntryIcon />;
   }
   const isVideo = mediaType?.startsWith("video/") ?? false;
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M6 2.8h7l5 5V21H6V2.8Z" />
-      <path d="M13 2.8V8h5" />
-      {isVideo && <path d="m10 12.2 4.8 2.8-4.8 2.8v-5.6Z" />}
-    </svg>
-  );
+  return isVideo ? <VideoFileIcon /> : <FileGlyph />;
 }
 
 function LoadingRows() {
@@ -90,16 +87,18 @@ function LoadingRows() {
 }
 
 function isProtectedRootEntry(entry: FileEntry): boolean {
-  return !entry.path.includes("/") && ["downloads", "watch"].includes(entry.name);
+  return !entry.path.includes("/") && entry.name === "downloads";
 }
 
 export function FileBrowser({
   onFilesChanged,
   onSessionExpired,
+  onStorageChanged,
   revision,
 }: {
   onFilesChanged: () => void;
   onSessionExpired: () => void;
+  onStorageChanged: (storage: StorageUsage) => void;
   revision: number;
 }) {
   const [path, setPath] = useState(initialPath);
@@ -125,7 +124,10 @@ export function FileBrowser({
     setError("");
     void api
       .listFiles(path, controller.signal)
-      .then(setListing)
+      .then((result) => {
+        setListing(result);
+        onStorageChanged(result.storage);
+      })
       .catch((caught: unknown) => {
         if (caught instanceof DOMException && caught.name === "AbortError") return;
         if (caught instanceof ApiError && caught.status === 401) {
@@ -139,7 +141,7 @@ export function FileBrowser({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [onSessionExpired, path, reloadKey, revision]);
+  }, [onSessionExpired, onStorageChanged, path, reloadKey, revision]);
 
   function navigate(nextPath: string) {
     const url = new URL(window.location.href);
@@ -157,41 +159,13 @@ export function FileBrowser({
     onFilesChanged();
   }
 
-  const storagePercent =
-    listing === null || listing.storage.total === 0
-      ? 0
-      : Math.min((listing.storage.used / listing.storage.total) * 100, 100);
-
   return (
     <section
       className="file-browser"
       aria-labelledby="file-browser-title"
       aria-busy={loading}
     >
-      <header className="browser-header">
-        <div>
-          <p className="eyebrow">Espace personnel</p>
-          <h2 id="file-browser-title">Mes fichiers</h2>
-          <p className="browser-subtitle">Ton espace privé sur la seedbox.</p>
-        </div>
-        {listing !== null && (
-          <div className="storage-card" role="group" aria-label="Utilisation du stockage">
-            <div className="storage-copy">
-              <span>{formatBytes(listing.storage.used)} utilisés</span>
-              <strong>{formatBytes(listing.storage.available)} disponibles</strong>
-            </div>
-            <progress
-              className="storage-track"
-              max={100}
-              value={storagePercent}
-              aria-label={`${storagePercent.toFixed(0)} % du stockage utilisé`}
-            >
-              {storagePercent.toFixed(0)} %
-            </progress>
-            <span className="storage-total">Capacité totale : {formatBytes(listing.storage.total)}</span>
-          </div>
-        )}
-      </header>
+      <h2 id="file-browser-title" className="sr-only">Explorateur de fichiers</h2>
 
       <div className="browser-navigation">
         <nav className="breadcrumbs" aria-label="Fil d’Ariane">
@@ -220,11 +194,7 @@ export function FileBrowser({
         </button>
       </div>
 
-      {notice !== "" && (
-        <p className="operation-notice" role="status">
-          {notice}
-        </p>
-      )}
+      <Notice message={notice} onDismiss={() => setNotice("")} />
 
       {loading && <LoadingRows />}
 
@@ -282,7 +252,7 @@ export function FileBrowser({
                   <td className="file-name-cell">
                     <div className="file-name-content">
                       <span className={`file-icon ${entry.kind}`}>
-                        <FileIcon kind={entry.kind} mediaType={entry.media_type} />
+                        <EntryIcon kind={entry.kind} mediaType={entry.media_type} />
                       </span>
                       <span className="file-name-copy" title={entry.name}>
                         {entry.kind === "directory" && !entry.blocked ? (
@@ -325,7 +295,7 @@ export function FileBrowser({
                           aria-label={`Ouvrir ${entry.name}`}
                           title="Ouvrir"
                         >
-                          <span aria-hidden="true">›</span>
+                          <OpenIcon />
                         </button>
                       ) : entry.blocked ? (
                         <span className="blocked-badge">Bloqué</span>
@@ -337,11 +307,7 @@ export function FileBrowser({
                           aria-label={`Télécharger ${entry.name}`}
                           title="Télécharger"
                         >
-                          <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M12 3v12" />
-                            <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
-                            <path d="M5 20h14" />
-                          </svg>
+                          <DownloadIcon />
                           <span className="download-label">Télécharger</span>
                         </a>
                       )}
@@ -354,10 +320,7 @@ export function FileBrowser({
                             aria-label={`Renommer ${entry.name}`}
                             title="Renommer"
                           >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <path d="m4 16-.8 4 4-.8L18.5 7.9l-3.2-3.2L4 16Z" />
-                              <path d="m13.8 6.2 3.2 3.2" />
-                            </svg>
+                            <RenameIcon />
                             <span>Renommer</span>
                           </button>
                           <button
@@ -367,10 +330,7 @@ export function FileBrowser({
                             aria-label={`Déplacer ${entry.name}`}
                             title="Déplacer"
                           >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <path d="M3.5 7.5h6l1.7 2h10.3v8.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2V7.5Z" />
-                              <path d="m13 13 2-2 2 2M15 11v5" />
-                            </svg>
+                            <MoveIcon />
                             <span>Déplacer</span>
                           </button>
                           <button
@@ -380,12 +340,7 @@ export function FileBrowser({
                             aria-label={`Placer ${entry.name} dans la corbeille`}
                             title="Placer dans la corbeille"
                           >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <path d="M4.5 7h15" />
-                              <path d="m9 7 .7-2h4.6l.7 2" />
-                              <path d="m6.5 7 .8 13h9.4l.8-13" />
-                              <path d="M10 11v5M14 11v5" />
-                            </svg>
+                            <DeleteIcon />
                             <span>Corbeille</span>
                           </button>
                         </>

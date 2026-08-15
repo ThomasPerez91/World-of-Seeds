@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api, ApiError, type AdminTrashEntry, type AdminTrashListing } from "../../api/client";
 import { formatBytes } from "../../utils/format";
+import { Notice } from "../../components/Notice";
 import { FileDialog } from "../files/FileDialog";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 
@@ -150,7 +151,6 @@ export function AdminTrashPage({
           <div>
             <p className="eyebrow">Nettoyage global</p>
             <h2 id="admin-trash-title">Corbeilles utilisateurs</h2>
-            <p className="section-intro">Contrôle et purge les éléments de tous les comptes.</p>
           </div>
           <div className="admin-trash-actions">
             <button
@@ -172,11 +172,7 @@ export function AdminTrashPage({
           </div>
         </div>
 
-        {notice !== "" && (
-          <p className="operation-notice" role="status">
-            {notice}
-          </p>
-        )}
+        <Notice message={notice} onDismiss={() => setNotice("")} />
         <p className="form-message error-message" role="alert">
           {error}
         </p>

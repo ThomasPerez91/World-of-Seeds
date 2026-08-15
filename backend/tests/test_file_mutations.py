@@ -99,9 +99,10 @@ async def test_files_and_directories_move_between_sandboxed_directories(
 ) -> None:
     await create_workspace_user(db_session, data_root)
     downloads = workspace(data_root) / "downloads"
-    watch = workspace(data_root) / "watch"
-    archive = watch / "archive"
+    archive = downloads / "archive"
     archive.mkdir()
+    library = downloads / "library"
+    library.mkdir()
     (downloads / "movie.mkv").write_bytes(b"video")
     series = downloads / "series"
     series.mkdir()
@@ -112,22 +113,22 @@ async def test_files_and_directories_move_between_sandboxed_directories(
         "/api/v1/files/move",
         json={
             "path": "downloads/movie.mkv",
-            "destination_directory": "watch/archive",
+            "destination_directory": "downloads/archive",
         },
         headers=csrf_header(client),
     )
     moved_directory = await client.post(
         "/api/v1/files/move",
-        json={"path": "downloads/series", "destination_directory": "watch"},
+        json={"path": "downloads/series", "destination_directory": "downloads/library"},
         headers=csrf_header(client),
     )
 
     assert moved_file.status_code == 200
-    assert moved_file.json()["path"] == "watch/archive/movie.mkv"
+    assert moved_file.json()["path"] == "downloads/archive/movie.mkv"
     assert (archive / "movie.mkv").read_bytes() == b"video"
     assert moved_directory.status_code == 200
     assert moved_directory.json()["kind"] == "directory"
-    assert (watch / "series" / "episode.mkv").read_bytes() == b"episode"
+    assert (library / "series" / "episode.mkv").read_bytes() == b"episode"
     assert not (downloads / "series").exists()
 
 
@@ -140,22 +141,23 @@ async def test_mutations_never_replace_an_existing_or_concurrent_destination(
 ) -> None:
     await create_workspace_user(db_session, data_root)
     downloads = workspace(data_root) / "downloads"
-    watch = workspace(data_root) / "watch"
+    target = downloads / "target"
+    target.mkdir()
     (downloads / "movie.mkv").write_bytes(b"source")
-    (watch / "movie.mkv").write_bytes(b"existing")
+    (target / "movie.mkv").write_bytes(b"existing")
     await login(client)
 
     collision = await client.post(
         "/api/v1/files/move",
-        json={"path": "downloads/movie.mkv", "destination_directory": "watch"},
+        json={"path": "downloads/movie.mkv", "destination_directory": "downloads/target"},
         headers=csrf_header(client),
     )
 
     assert collision.status_code == 409
     assert (downloads / "movie.mkv").read_bytes() == b"source"
-    assert (watch / "movie.mkv").read_bytes() == b"existing"
+    assert (target / "movie.mkv").read_bytes() == b"existing"
 
-    (watch / "movie.mkv").unlink()
+    (target / "movie.mkv").unlink()
     original_rename = mutations_module.rename_without_replacement
 
     def create_destination_then_rename(
@@ -187,13 +189,13 @@ async def test_mutations_never_replace_an_existing_or_concurrent_destination(
     )
     concurrent = await client.post(
         "/api/v1/files/move",
-        json={"path": "downloads/movie.mkv", "destination_directory": "watch"},
+        json={"path": "downloads/movie.mkv", "destination_directory": "downloads/target"},
         headers=csrf_header(client),
     )
 
     assert concurrent.status_code == 409
     assert (downloads / "movie.mkv").read_bytes() == b"source"
-    assert (watch / "movie.mkv").read_bytes() == b"concurrent"
+    assert (target / "movie.mkv").read_bytes() == b"concurrent"
 
 
 @pytest.mark.asyncio
@@ -228,7 +230,7 @@ async def test_mutations_reject_traversal_symlinks_and_protected_roots(
     )
     downloads_root = await client.post(
         "/api/v1/files/move",
-        json={"path": "downloads", "destination_directory": "watch"},
+        json={"path": "downloads", "destination_directory": ""},
         headers=headers,
     )
     control_character = await client.patch(
@@ -279,7 +281,8 @@ def test_source_swapped_during_mutation_is_restored_without_following_symlink(
 ) -> None:
     WorkspaceManager(data_root).create("thomas")
     downloads = workspace(data_root) / "downloads"
-    watch = workspace(data_root) / "watch"
+    target = downloads / "target"
+    target.mkdir()
     source = downloads / "movie.mkv"
     source.write_bytes(b"original")
     outside = tmp_path / "outside.txt"
@@ -321,12 +324,12 @@ def test_source_swapped_during_mutation_is_restored_without_following_symlink(
         SandboxedFileMutator(WorkspaceManager(data_root)).move(
             "thomas",
             "downloads/movie.mkv",
-            "watch",
+            "downloads/target",
         )
 
     assert calls == 2
     assert source.is_symlink()
-    assert not (watch / "movie.mkv").exists()
+    assert not (target / "movie.mkv").exists()
     assert (downloads / "original-away.mkv").read_bytes() == b"original"
     assert outside.read_bytes() == b"secret"
 

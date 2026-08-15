@@ -32,6 +32,15 @@ class ChangeCredentialsRequest(BaseModel):
     new_password: Password
 
 
+class ChangeUsernameRequest(BaseModel):
+    username: Username
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: Password
+
+
 class UserStatusRequest(BaseModel):
     is_active: bool
 

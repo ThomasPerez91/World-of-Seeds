@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.security import hash_password
 from app.files import BrowserPathBlockedError, WorkspaceManager
 from app.files.browser import InvalidRelativePathError, RelativePath, SandboxedFileBrowser
+from app.files.directory_sizes import DirectorySizeBudget, DirectorySizeCalculator
 from app.models import User
 
 
@@ -60,8 +61,9 @@ async def test_user_lists_root_and_nested_directory_metadata(
     root = root_response.json()
     assert root["path"] == ""
     assert root["breadcrumbs"] == [{"label": "Mes fichiers", "path": ""}]
-    assert [entry["name"] for entry in root["entries"]] == ["downloads", "watch"]
+    assert [entry["name"] for entry in root["entries"]] == ["downloads"]
     assert all(entry["kind"] == "directory" for entry in root["entries"])
+    assert root["entries"][0]["size"] == len(b"video-content") + len(b"hello")
     assert root["storage"]["total"] > 0
     assert root["storage"]["used"] >= 0
     assert root["storage"]["available"] > 0
@@ -80,12 +82,39 @@ async def test_user_lists_root_and_nested_directory_metadata(
         "notes.txt",
     ]
     movie_entry = next(entry for entry in nested["entries"] if entry["name"] == "movie.mkv")
+    folder_entry = next(entry for entry in nested["entries"] if entry["name"] == "Movies")
+    assert folder_entry["size"] == 0
     assert movie_entry["path"] == "downloads/movie.mkv"
     assert movie_entry["kind"] == "file"
     assert movie_entry["size"] == len(b"video-content")
     assert movie_entry["media_type"] in {"video/x-matroska", "video/matroska"}
     assert movie_entry["blocked"] is False
     assert movie_entry["modified_at"].endswith("Z")
+
+
+@pytest.mark.asyncio
+async def test_retired_watch_directory_is_hidden_and_cannot_be_opened(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    await create_workspace_user(db_session, data_root)
+    watch = data_root / "thomas" / "watch"
+    watch.mkdir()
+    (watch / "legacy.torrent").write_text("legacy", encoding="utf-8")
+    await login(client, "thomas", "correct-horse-battery")
+
+    listing = await client.get("/api/v1/files")
+    blocked = await client.get("/api/v1/files", params={"path": "watch"})
+    blocked_download = await client.get(
+        "/api/v1/files/download",
+        params={"path": "watch/legacy.torrent"},
+    )
+
+    assert [entry["name"] for entry in listing.json()["entries"]] == ["downloads"]
+    assert blocked.status_code == 403
+    assert blocked_download.status_code == 403
+    assert "legacy.torrent" not in blocked.text
 
 
 @pytest.mark.asyncio
@@ -222,3 +251,47 @@ def test_storage_metadata_errors_are_reported_as_blocked_paths(
 
     with pytest.raises(BrowserPathBlockedError):
         SandboxedFileBrowser(manager).list_directory("thomas", "")
+
+
+def test_directory_size_scan_is_bounded_and_does_not_follow_symlinks(
+    data_root: Path,
+    tmp_path: Path,
+) -> None:
+    manager = WorkspaceManager(data_root)
+    manager.create("thomas")
+    downloads = data_root / "thomas" / "downloads"
+    folder = downloads / "collection"
+    folder.mkdir()
+    (folder / "one.bin").write_bytes(b"one")
+    (folder / "two.bin").write_bytes(b"two")
+    outside = tmp_path / "outside-size"
+    outside.mkdir()
+    (outside / "secret.bin").write_bytes(b"secret" * 100)
+    (folder / "outside").symlink_to(outside, target_is_directory=True)
+
+    downloads_fd = os.open(downloads, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        folder_stat = os.stat("collection", dir_fd=downloads_fd, follow_symlinks=False)
+        calculator = DirectorySizeCalculator()
+        assert (
+            calculator.calculate(
+                downloads_fd,
+                "collection",
+                folder_stat,
+                DirectorySizeBudget(remaining_entries=10),
+            )
+            == 6
+        )
+
+        uncached_calculator = DirectorySizeCalculator()
+        assert (
+            uncached_calculator.calculate(
+                downloads_fd,
+                "collection",
+                folder_stat,
+                DirectorySizeBudget(remaining_entries=1),
+            )
+            is None
+        )
+    finally:
+        os.close(downloads_fd)

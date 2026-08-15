@@ -6,13 +6,21 @@ import {
   useState,
 } from "react";
 
-import { api, ApiError, type User } from "./api/client";
+import { api, ApiError, type StorageUsage, type User } from "./api/client";
 import { type AdminView } from "./features/admin/AdminPageShell";
 import { AdminStoragePage } from "./features/admin/AdminStoragePage";
 import { AdminTrashPage } from "./features/admin/AdminTrashPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { FileBrowser } from "./features/files/FileBrowser";
 import { TrashBrowser } from "./features/files/TrashBrowser";
+import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
+import {
+  LegalLinks,
+  LegalPage,
+  type LegalDocument,
+} from "./components/LegalPage";
+import { formatBytes } from "./utils/format";
+import { APP_VERSION } from "./version";
 
 type AuthState =
   | { status: "loading" }
@@ -29,16 +37,64 @@ function clearFilePathFromUrl() {
 function BrandMark() {
   return (
     <div className="brand-mark" aria-hidden="true">
-      <svg viewBox="0 0 48 48" role="img">
-        <path d="M24 40V21" />
-        <path d="M24 27C14 27 9 20 9 10c10 0 15 7 15 17Z" />
-        <path d="M24 22c0-9 6-14 15-14 0 9-6 14-15 14Z" />
-      </svg>
+      <BrandIcon />
     </div>
   );
 }
 
-function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
+function ServiceHealth() {
+  const [health, setHealth] = useState<"healthy" | "unavailable">("healthy");
+  const [checking, setChecking] = useState(false);
+  const mounted = useRef(true);
+
+  const check = useCallback(async () => {
+    setChecking(true);
+    try {
+      await api.health();
+      if (mounted.current) setHealth("healthy");
+    } catch {
+      if (mounted.current) setHealth("unavailable");
+    } finally {
+      if (mounted.current) setChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    const interval = window.setInterval(() => void check(), 30_000);
+    return () => {
+      mounted.current = false;
+      window.clearInterval(interval);
+    };
+  }, [check]);
+
+  return (
+    <button
+      type="button"
+      className={`service-health ${health}`}
+      onClick={() => void check()}
+      disabled={checking}
+      aria-label="Vérifier l’état du service"
+    >
+      <span className="service-health-dot" aria-hidden="true" />
+      <span aria-live="polite">
+        {checking
+          ? "Vérification en cours…"
+          : health === "healthy"
+            ? "Tous les services fonctionnent normalement."
+            : "Le service est momentanément interrompu."}
+      </span>
+    </button>
+  );
+}
+
+function LoginScreen({
+  onLogin,
+  onOpenLegal,
+}: {
+  onLogin: (user: User) => void;
+  onOpenLegal: (document: LegalDocument) => void;
+}) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -71,12 +127,10 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
         <p className="eyebrow">Espace privé</p>
         <h1 id="brand-title">World of Seeds</h1>
         <p className="brand-copy">
-          Vos fichiers, vos téléchargements et votre espace seedbox dans une interface unique.
+          Un espace discret où chaque graine déposée trouve sa place, grandit puis rejoint ta
+          collection.
         </p>
-        <div className="privacy-note">
-          <span className="privacy-dot" aria-hidden="true" />
-          Accès restreint et connexion par tunnel privé
-        </div>
+        <ServiceHealth />
       </section>
 
       <section className="form-panel" aria-labelledby="login-title">
@@ -115,12 +169,21 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
             </p>
           </form>
         </div>
+        <LegalLinks onOpen={onOpenLegal} />
       </section>
     </main>
   );
 }
 
-function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (user: User) => void }) {
+function CredentialChangeScreen({
+  user,
+  onChanged,
+  onOpenLegal,
+}: {
+  user: User;
+  onChanged: (user: User) => void;
+  onOpenLegal: (document: LegalDocument) => void;
+}) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -220,6 +283,7 @@ function CredentialChangeScreen({ user, onChanged }: { user: User; onChanged: (u
             {error}
           </p>
         </form>
+        <LegalLinks onOpen={onOpenLegal} />
       </section>
     </main>
   );
@@ -280,24 +344,19 @@ function AccountMenu({
 
   return (
     <div className="account-menu" ref={containerRef}>
-      <div className="account-identity">
-        <span className="account-avatar" aria-hidden="true">
-          {user.username.slice(0, 1).toUpperCase()}
-        </span>
-        <strong>{user.username}</strong>
-      </div>
       <button
         type="button"
-        className="account-settings-trigger"
+        className="account-trigger"
         aria-label="Ouvrir le menu du compte"
         aria-expanded={open}
         aria-controls="account-dropdown"
         onClick={() => setOpen((current) => !current)}
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" />
-          <path d="M19.4 13.5c.1-.5.1-1 0-1.5l2-1.6-2-3.4-2.5 1a8 8 0 0 0-1.3-.8L15.2 4h-4l-.4 3.2c-.5.2-.9.5-1.3.8L7 7 5 10.4 7 12c-.1.5-.1 1 0 1.5l-2 1.6 2 3.4 2.5-1c.4.3.8.6 1.3.8l.4 3.2h4l.4-3.2c.5-.2.9-.5 1.3-.8l2.5 1 2-3.4-2-1.6Z" />
-        </svg>
+        <span className="account-avatar" aria-hidden="true">
+          {user.username.slice(0, 1).toUpperCase()}
+        </span>
+        <strong>{user.username}</strong>
+        <AccountMenuIcon className="account-trigger-icon" />
       </button>
       {open && (
         <div id="account-dropdown" className="account-dropdown">
@@ -347,41 +406,61 @@ function AccountSettingsPage({
   user,
   onBack,
   onChanged,
+  onPasswordChanged,
   onSessionExpired,
 }: {
   user: User;
   onBack: () => void;
   onChanged: (user: User) => void;
+  onPasswordChanged: () => void;
   onSessionExpired: () => void;
 }) {
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [usernameError, setUsernameError] = useState("");
+  const [usernameNotice, setUsernameNotice] = useState("");
+  const [usernameSubmitting, setUsernameSubmitting] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const [username, setUsername] = useState(user.username);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submitUsername(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
+    setUsernameSubmitting(true);
+    setUsernameError("");
+    setUsernameNotice("");
+    try {
+      const updated = await api.changeUsername(username);
+      onChanged(updated);
+      setUsername(updated.username);
+      setUsernameNotice("Ton nom d’utilisateur a été mis à jour.");
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setUsernameError(
+        caught instanceof ApiError && caught.status === 409
+          ? "Ce nom d’utilisateur est indisponible ou ton espace ne peut pas être renommé."
+          : "Impossible de modifier le nom d’utilisateur pour le moment.",
+      );
+    } finally {
+      setUsernameSubmitting(false);
+    }
+  }
+
+  async function submitPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
     const newPassword = String(form.get("new-password"));
     if (newPassword !== String(form.get("password-confirmation"))) {
-      setError("Les deux nouveaux mots de passe ne correspondent pas.");
+      setPasswordError("Les deux nouveaux mots de passe ne correspondent pas.");
       return;
     }
 
-    setSubmitting(true);
-    setError("");
-    setNotice("");
+    setPasswordSubmitting(true);
+    setPasswordError("");
     try {
-      const updated = await api.changeCredentials(
-        String(form.get("current-password")),
-        String(form.get("username")),
-        newPassword,
-      );
-      onChanged(updated);
-      setNotice("Tes identifiants ont été mis à jour.");
-      formElement.reset();
-      setUsername(updated.username);
+      await api.changePassword(String(form.get("current-password")), newPassword);
+      onPasswordChanged();
     } catch (caught) {
       if (
         caught instanceof ApiError &&
@@ -391,82 +470,187 @@ function AccountSettingsPage({
         onSessionExpired();
         return;
       }
-      if (caught instanceof ApiError && caught.status === 401) {
-        setError("Le mot de passe actuel est incorrect.");
-      } else if (caught instanceof ApiError && caught.status === 409) {
-        setError("Ce nom d’utilisateur est indisponible.");
-      } else {
-        setError("Impossible de modifier le compte pour le moment.");
-      }
+      setPasswordError(
+        caught instanceof ApiError && caught.status === 401
+          ? "Le mot de passe actuel est incorrect."
+          : "Impossible de modifier le mot de passe pour le moment.",
+      );
     } finally {
-      setSubmitting(false);
+      setPasswordSubmitting(false);
     }
   }
 
   return (
     <section className="settings-page" aria-labelledby="account-settings-title">
       <button type="button" className="back-button" onClick={onBack}>
-        <span aria-hidden="true">←</span> Retour aux fichiers
+        <BackIcon /> Retour aux fichiers
       </button>
-      <div className="settings-card">
+      <div className="settings-header">
         <p className="eyebrow">Compte</p>
         <h1 id="account-settings-title">Paramètres du compte</h1>
         <p className="settings-intro">
-          Le changement du nom d’utilisateur renomme également ton espace de stockage.
+          Mets à jour ton identité et sécurise ton accès depuis deux formulaires indépendants.
         </p>
-        <form onSubmit={(event) => void submit(event)}>
-          <label htmlFor="settings-current-password">Mot de passe actuel</label>
-          <input
-            id="settings-current-password"
-            name="current-password"
-            type="password"
-            autoComplete="current-password"
-            required
-          />
-          <label htmlFor="settings-username">Nom d’utilisateur</label>
-          <input
-            id="settings-username"
-            name="username"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}"
-            autoComplete="username"
-            required
-          />
-          <p className="field-hint">
-            3–32 caractères : lettres, chiffres, tiret ou tiret bas.
-          </p>
-          <label htmlFor="settings-new-password">Nouveau mot de passe</label>
-          <input
-            id="settings-new-password"
-            name="new-password"
-            type="password"
-            minLength={12}
-            autoComplete="new-password"
-            required
-          />
-          <label htmlFor="settings-password-confirmation">Confirmer le mot de passe</label>
-          <input
-            id="settings-password-confirmation"
-            name="password-confirmation"
-            type="password"
-            minLength={12}
-            autoComplete="new-password"
-            required
-          />
-          <p className="form-message error-message" role="alert">
-            {error}
-          </p>
-          {notice !== "" && (
-            <p className="settings-notice" role="status">
-              {notice}
-            </p>
-          )}
-          <button type="submit" disabled={submitting}>
-            {submitting ? "Enregistrement…" : "Enregistrer les modifications"}
-          </button>
-        </form>
       </div>
+      <div className="settings-grid">
+        <section className="settings-card" aria-labelledby="username-settings-title">
+          <h2 id="username-settings-title">Nom d’utilisateur</h2>
+          <p className="settings-section-intro">
+            Le dossier personnel sera renommé en même temps, sans déplacer son contenu.
+          </p>
+          <form onSubmit={(event) => void submitUsername(event)}>
+            <label htmlFor="settings-username">Nom d’utilisateur</label>
+            <input
+              id="settings-username"
+              name="username"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}"
+              autoComplete="username"
+              required
+            />
+            <p className="field-hint">
+              3–32 caractères : lettres, chiffres, tiret ou tiret bas.
+            </p>
+            <p className="form-message error-message" role="alert">
+              {usernameError}
+            </p>
+            {usernameNotice !== "" && (
+              <p className="settings-notice" role="status">
+                {usernameNotice}
+              </p>
+            )}
+            <button type="submit" disabled={usernameSubmitting || username === user.username}>
+              {usernameSubmitting ? "Enregistrement…" : "Mettre à jour le nom"}
+            </button>
+          </form>
+        </section>
+
+        <section className="settings-card" aria-labelledby="password-settings-title">
+          <h2 id="password-settings-title">Mot de passe</h2>
+          <p className="settings-section-intro">
+            Toutes tes sessions seront fermées après la modification.
+          </p>
+          <form onSubmit={(event) => void submitPassword(event)}>
+            <label htmlFor="settings-current-password">Mot de passe actuel</label>
+            <input
+              id="settings-current-password"
+              name="current-password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
+            <label htmlFor="settings-new-password">Nouveau mot de passe</label>
+            <input
+              id="settings-new-password"
+              name="new-password"
+              type="password"
+              minLength={12}
+              autoComplete="new-password"
+              required
+            />
+            <label htmlFor="settings-password-confirmation">Confirmer le mot de passe</label>
+            <input
+              id="settings-password-confirmation"
+              name="password-confirmation"
+              type="password"
+              minLength={12}
+              autoComplete="new-password"
+              required
+            />
+            <p className="form-message error-message" role="alert">
+              {passwordError}
+            </p>
+            <button type="submit" disabled={passwordSubmitting}>
+              {passwordSubmitting ? "Modification…" : "Modifier le mot de passe"}
+            </button>
+          </form>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function StorageCard({ storage }: { storage: StorageUsage | null }) {
+  if (storage === null) {
+    return <div className="storage-card storage-card-loading" aria-hidden="true" />;
+  }
+  const percent =
+    storage.total === 0 ? 0 : Math.min((storage.used / storage.total) * 100, 100);
+  return (
+    <div className="storage-card" role="group" aria-label="Utilisation du stockage">
+      <div className="storage-copy">
+        <span>{formatBytes(storage.used)} utilisés</span>
+        <strong>{formatBytes(storage.available)} disponibles</strong>
+      </div>
+      <progress
+        className="storage-track"
+        max={100}
+        value={percent}
+        aria-label={`${percent.toFixed(0)} % du stockage utilisé`}
+      >
+        {percent.toFixed(0)} %
+      </progress>
+      <span className="storage-total">Capacité totale : {formatBytes(storage.total)}</span>
+    </div>
+  );
+}
+
+function FilesWorkspace({
+  onFilesChanged,
+  onSessionExpired,
+  revision,
+}: {
+  onFilesChanged: () => void;
+  onSessionExpired: () => void;
+  revision: number;
+}) {
+  const [activeView, setActiveView] = useState<"files" | "trash">("files");
+  const [storage, setStorage] = useState<StorageUsage | null>(null);
+
+  return (
+    <section className="files-workspace" aria-labelledby="files-page-title">
+      <header className="files-page-header">
+        <div>
+          <p className="eyebrow">Espace personnel</p>
+          <h1 id="files-page-title">Mes fichiers</h1>
+        </div>
+        <StorageCard storage={storage} />
+      </header>
+      <div className="file-view-tabs" role="group" aria-label="Vues de l’espace personnel">
+        <button
+          type="button"
+          aria-pressed={activeView === "files"}
+          onClick={() => setActiveView("files")}
+        >
+          Mes fichiers
+        </button>
+        <button
+          type="button"
+          aria-pressed={activeView === "trash"}
+          onClick={() => setActiveView("trash")}
+        >
+          Corbeille
+        </button>
+      </div>
+      {activeView === "files" ? (
+        <div>
+          <FileBrowser
+            onFilesChanged={onFilesChanged}
+            onSessionExpired={onSessionExpired}
+            onStorageChanged={setStorage}
+            revision={revision}
+          />
+        </div>
+      ) : (
+        <div>
+          <TrashBrowser
+            onFilesChanged={onFilesChanged}
+            onSessionExpired={onSessionExpired}
+            revision={revision}
+          />
+        </div>
+      )}
     </section>
   );
 }
@@ -475,18 +659,27 @@ function Dashboard({
   user,
   onUserChanged,
   onLogout,
+  onOpenLegal,
   onSessionExpired,
 }: {
   user: User;
   onUserChanged: (user: User) => void;
   onLogout: () => Promise<void>;
+  onOpenLegal: (document: LegalDocument) => void;
   onSessionExpired: () => void;
 }) {
   const [view, setView] = useState<"files" | "settings" | AdminView>("files");
   const [filesRevision, setFilesRevision] = useState(0);
+  const [filesHomeKey, setFilesHomeKey] = useState(0);
   const handleFilesChanged = useCallback(() => {
     setFilesRevision((value) => value + 1);
   }, []);
+
+  function openFilesHome() {
+    clearFilePathFromUrl();
+    setView("files");
+    setFilesHomeKey((value) => value + 1);
+  }
 
   return (
     <main className="app-shell">
@@ -494,10 +687,16 @@ function Dashboard({
         Aller au contenu principal
       </a>
       <header className="app-header">
-        <div className="wordmark">
+        <button
+          type="button"
+          className="wordmark"
+          onClick={openFilesHome}
+          aria-label="Ouvrir Mes fichiers"
+        >
           <BrandMark />
           <span>World of Seeds</span>
-        </div>
+          <span className="version-badge">v{APP_VERSION}</span>
+        </button>
         <AccountMenu
           user={user}
           onOpenAdmin={() => setView("admin-users")}
@@ -510,43 +709,42 @@ function Dashboard({
         {view === "settings" ? (
           <AccountSettingsPage
             user={user}
-            onBack={() => setView("files")}
+            onBack={openFilesHome}
             onChanged={onUserChanged}
+            onPasswordChanged={onSessionExpired}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-users" && user.is_admin ? (
           <AdminUsersPage
-            onBack={() => setView("files")}
+            onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-storage" && user.is_admin ? (
           <AdminStoragePage
-            onBack={() => setView("files")}
+            onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-trash" && user.is_admin ? (
           <AdminTrashPage
-            onBack={() => setView("files")}
+            onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : (
-          <>
-            <FileBrowser
-              onFilesChanged={handleFilesChanged}
-              onSessionExpired={onSessionExpired}
-              revision={filesRevision}
-            />
-            <TrashBrowser
-              onFilesChanged={handleFilesChanged}
-              onSessionExpired={onSessionExpired}
-              revision={filesRevision}
-            />
-          </>
+          <FilesWorkspace
+            key={filesHomeKey}
+            onFilesChanged={handleFilesChanged}
+            onSessionExpired={onSessionExpired}
+            revision={filesRevision}
+          />
         )}
       </div>
+      <footer className="app-footer">
+        <span>World of Seeds · v{APP_VERSION}</span>
+        <LegalLinks onOpen={onOpenLegal} />
+      </footer>
     </main>
   );
 }
@@ -573,6 +771,7 @@ function UnavailableScreen({ onRetry }: { onRetry: () => void }) {
 
 export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
+  const [legalDocument, setLegalDocument] = useState<LegalDocument | null>(null);
   const handleSessionExpired = useCallback(() => {
     clearFilePathFromUrl();
     setAuth({ status: "anonymous" });
@@ -602,6 +801,16 @@ export function App() {
     setAuth({ status: "anonymous" });
   }
 
+  if (legalDocument !== null) {
+    return (
+      <LegalPage
+        document={legalDocument}
+        onBack={() => setLegalDocument(null)}
+        onOpen={setLegalDocument}
+      />
+    );
+  }
+
   if (auth.status === "loading") {
     return (
       <main className="loading-page" aria-live="polite" aria-busy="true">
@@ -613,13 +822,19 @@ export function App() {
     return <UnavailableScreen onRetry={loadSession} />;
   }
   if (auth.status === "anonymous") {
-    return <LoginScreen onLogin={(user) => setAuth({ status: "authenticated", user })} />;
+    return (
+      <LoginScreen
+        onLogin={(user) => setAuth({ status: "authenticated", user })}
+        onOpenLegal={setLegalDocument}
+      />
+    );
   }
   if (auth.user.must_change_credentials) {
     return (
       <CredentialChangeScreen
         user={auth.user}
         onChanged={(user) => setAuth({ status: "authenticated", user })}
+        onOpenLegal={setLegalDocument}
       />
     );
   }
@@ -628,6 +843,7 @@ export function App() {
       user={auth.user}
       onUserChanged={(user) => setAuth({ status: "authenticated", user })}
       onLogout={logout}
+      onOpenLegal={setLegalDocument}
       onSessionExpired={handleSessionExpired}
     />
   );

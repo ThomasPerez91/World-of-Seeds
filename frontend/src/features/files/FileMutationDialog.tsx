@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 
 import { api, ApiError, type DirectoryListing, type FileEntry } from "../../api/client";
+import { FolderIcon } from "../../components/icons";
 import { FileDialog } from "./FileDialog";
 
 export type FileMutationAction = "move" | "rename" | "trash";
@@ -216,7 +217,7 @@ function MoveDialog({
                       onClick={() => setDestination(candidate.path)}
                       disabled={forbidden}
                     >
-                      <span aria-hidden="true">▰</span>
+                      <FolderIcon />
                       <strong>{candidate.name}</strong>
                       <span>{forbidden ? "Dossier source" : "Ouvrir"}</span>
                     </button>

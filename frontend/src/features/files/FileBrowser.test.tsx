@@ -64,6 +64,7 @@ describe("FileBrowser", () => {
       <FileBrowser
         onFilesChanged={onFilesChanged}
         onSessionExpired={vi.fn()}
+        onStorageChanged={vi.fn()}
         revision={0}
       />,
     );
@@ -90,6 +91,8 @@ describe("FileBrowser", () => {
       "textContent",
       "« movie.mkv » a été placé dans la corbeille.",
     );
+    await user.click(screen.getByRole("button", { name: "Fermer le message" }));
+    expect(screen.queryByText("« movie.mkv » a été placé dans la corbeille.")).toBeNull();
     await waitFor(() => expect(onFilesChanged).toHaveBeenCalledOnce());
   });
 });
