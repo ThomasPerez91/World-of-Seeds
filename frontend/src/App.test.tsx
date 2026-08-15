@@ -19,7 +19,10 @@ describe("App", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(response({ detail: "Database unavailable" }, 503))
       .mockResolvedValueOnce(response({ detail: "Not authenticated" }, 401))
-      .mockResolvedValueOnce(response({ detail: "Database unavailable" }, 503));
+      .mockResolvedValueOnce(response({ status: "ok", checked_at: "2026-08-15T14:00:00Z" }, 200))
+      .mockResolvedValueOnce(
+        response({ status: "degraded", checked_at: "2026-08-15T14:00:01Z" }, 200),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     const view = render(<App />);
@@ -32,7 +35,7 @@ describe("App", () => {
     expect(screen.getByText("Tous les services fonctionnent normalement.")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Vérifier l’état du service" }));
     await screen.findByText("Le service est momentanément interrompu.");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
@@ -78,7 +81,7 @@ describe("App", () => {
     expect(document.querySelector("#dashboard-content")?.getAttribute("tabindex")).toBe("-1");
     expect(screen.queryByText("Bonjour, thomas")).toBeNull();
     expect(document.querySelector(".account-avatar")?.textContent).toBe("T");
-    expect(screen.getAllByText("v1.1.0").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("v1.2.0").length).toBeGreaterThan(0);
     expect(document.querySelector(".account-settings-trigger")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
     await screen.findByText("Ce dossier est vide");
@@ -289,6 +292,9 @@ describe("App", () => {
       deleted_at: "2026-08-13T20:00:00Z",
     };
     let trashPurged = false;
+    let newgreedyTargetRatio = 1.6;
+    let newgreedyStatsPurged = false;
+    let newgreedyRestartState = "idle";
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -308,6 +314,186 @@ describe("App", () => {
         }
         if (url === "/api/v1/trash") return response({ entries: [], truncated: false }, 200);
         if (url === "/api/v1/admin/users") return response([admin], 200);
+        if (url === "/api/v1/admin/services/health") {
+          return response(
+            {
+              status: "ok",
+              checked_at: "2026-08-15T14:00:00Z",
+              newgreedy: {
+                status: "healthy",
+                latency_ms: 4,
+                version: null,
+                error_code: null,
+              },
+              qbittorrent: {
+                status: "healthy",
+                latency_ms: 7,
+                version: "v5.1.2",
+                error_code: null,
+              },
+            },
+            200,
+          );
+        }
+        if (url === "/api/v1/admin/services/newgreedy/overview") {
+          return response(
+            {
+              torrents: newgreedyStatsPurged ? 0 : 3,
+              downloading: newgreedyStatsPurged ? 0 : 1,
+              seeding: newgreedyStatsPurged ? 0 : 2,
+              stalled: 0,
+              target_reached: newgreedyStatsPurged ? 0 : 1,
+              total_downloaded_bytes: newgreedyStatsPurged ? 0 : 4_294_967_296,
+              total_reported_uploaded_bytes: newgreedyStatsPurged ? 0 : 6_442_450_944,
+              total_fake_uploaded_bytes: newgreedyStatsPurged ? 0 : 5_368_709_120,
+            },
+            200,
+          );
+        }
+        if (url === "/api/v1/admin/services/qbittorrent/torrents") {
+          return response(
+            {
+              torrents: [
+                {
+                  id: `deadbeef${"a".repeat(32)}`,
+                  name: "Film de test.mkv",
+                  state: "downloading",
+                  progress: 0.42,
+                  size_bytes: 10_737_418_240,
+                  downloaded_bytes: 4_509_715_660,
+                  uploaded_bytes: 1_073_741_824,
+                  download_speed_bytes: 2_097_152,
+                  upload_speed_bytes: 262_144,
+                  ratio: 0.24,
+                  eta_seconds: 3_600,
+                  category: "films",
+                  tracker_host: "tracker.example",
+                },
+              ],
+              truncated: false,
+            },
+            200,
+          );
+        }
+        if (url === "/api/v1/admin/services/newgreedy/torrents") {
+          return response(
+            {
+              torrents: [
+                {
+                  id: "deadbeef",
+                  mode: "down",
+                  downloaded_bytes: 4_000,
+                  reported_uploaded_bytes: 6_000,
+                  fake_uploaded_bytes: 5_000,
+                  ratio: 1.5,
+                  announce_count: 4,
+                  stalled: false,
+                  target_reached: false,
+                  last_announce_at: "2026-08-15T14:00:00Z",
+                },
+              ],
+            },
+            200,
+          );
+        }
+        if (
+          url === "/api/v1/admin/services/newgreedy/restart" &&
+          init?.method === "POST"
+        ) {
+          newgreedyRestartState = "pending";
+          return response(
+            {
+              state: "pending",
+              request_id: "f2daee75-5a88-4904-985c-f17e8f89e123",
+              updated_at: "2026-08-15T15:00:00Z",
+              message_code: "requested",
+            },
+            202,
+          );
+        }
+        if (url === "/api/v1/admin/services/newgreedy/restart") {
+          return response(
+            {
+              state: newgreedyRestartState,
+              request_id: null,
+              updated_at: null,
+              message_code: newgreedyRestartState === "idle" ? "idle" : "requested",
+            },
+            200,
+          );
+        }
+        if (
+          url === "/api/v1/admin/services/newgreedy/config" &&
+          init?.method === "PATCH"
+        ) {
+          const body = JSON.parse(String(init.body)) as {
+            changes: { "spoofing.target_ratio": number };
+          };
+          newgreedyTargetRatio = body.changes["spoofing.target_ratio"];
+          return response(
+            {
+              sections: [
+                {
+                  id: "spoofing",
+                  label: "Simulation",
+                  fields: [
+                    {
+                      id: "spoofing.target_ratio",
+                      key: "target_ratio",
+                      label: "Ratio cible",
+                      description: "Ratio upload/download visé.",
+                      input_type: "number",
+                      value: newgreedyTargetRatio,
+                      editable: true,
+                      requires_restart: true,
+                      minimum: 0,
+                      maximum: 20,
+                      options: [],
+                    },
+                  ],
+                },
+              ],
+              restart_required: true,
+            },
+            200,
+          );
+        }
+        if (url === "/api/v1/admin/services/newgreedy/config") {
+          return response(
+            {
+              sections: [
+                {
+                  id: "spoofing",
+                  label: "Simulation",
+                  fields: [
+                    {
+                      id: "spoofing.target_ratio",
+                      key: "target_ratio",
+                      label: "Ratio cible",
+                      description: "Ratio upload/download visé.",
+                      input_type: "number",
+                      value: newgreedyTargetRatio,
+                      editable: true,
+                      requires_restart: true,
+                      minimum: 0,
+                      maximum: 20,
+                      options: [],
+                    },
+                  ],
+                },
+              ],
+              restart_required: false,
+            },
+            200,
+          );
+        }
+        if (
+          url === "/api/v1/admin/services/newgreedy/stats" &&
+          init?.method === "DELETE"
+        ) {
+          newgreedyStatsPurged = true;
+          return response({ purged: 3, remaining: 0 }, 200);
+        }
         if (url === "/api/v1/admin/storage") {
           return response(
             {
@@ -339,6 +525,36 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
     await user.click(screen.getByRole("button", { name: "Administration" }));
     await screen.findByRole("heading", { name: "Comptes utilisateurs" });
+
+    await user.click(screen.getByRole("button", { name: "Services" }));
+    await screen.findByRole("heading", { name: "Services torrent" });
+    expect(screen.getByRole("article", { name: "NewGreedy : Opérationnel" })).toBeDefined();
+    expect(screen.getByRole("article", { name: "qBittorrent : Opérationnel" })).toBeDefined();
+    expect(screen.getByText("v5.1.2")).toBeDefined();
+    await screen.findByText("Film de test.mkv");
+    expect(screen.getByText("Téléchargement")).toBeDefined();
+    expect(screen.getByText(/Actif · 4,9 Ko/)).toBeDefined();
+    await screen.findByText("4 Go");
+    await screen.findByText("NewGreedy peut être redémarré depuis cette interface.");
+    await user.click(screen.getByRole("button", { name: "Redémarrer NewGreedy" }));
+    await screen.findByRole("heading", { name: "Redémarrer NewGreedy ?" });
+    await user.click(screen.getByRole("button", { name: "Confirmer le redémarrage" }));
+    await screen.findByText("Demande de redémarrage envoyée au serveur.");
+    expect(newgreedyRestartState).toBe("pending");
+    await user.click(screen.getByText("Simulation"));
+    const ratioInput = screen.getByRole("spinbutton", { name: "Ratio cible" });
+    await user.clear(ratioInput);
+    await user.type(ratioInput, "2.2");
+    await user.click(screen.getByRole("button", { name: "Enregistrer les modifications" }));
+    await screen.findByText("Configuration enregistrée. Redémarre NewGreedy pour l’appliquer.");
+    expect(newgreedyTargetRatio).toBe(2.2);
+
+    await user.click(screen.getByRole("button", { name: "Remettre les stats à zéro" }));
+    await screen.findByRole("heading", { name: "Remettre les statistiques à zéro ?" });
+    await user.click(screen.getByRole("button", { name: "Confirmer" }));
+    await screen.findByText("3 statistiques supprimées.");
+    expect(newgreedyStatsPurged).toBe(true);
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
     await user.click(screen.getByRole("button", { name: "Stockage" }));
     await screen.findByRole("heading", { name: "Stockage de la seedbox" });

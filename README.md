@@ -17,6 +17,8 @@ Les capacités fonctionnelles principales de la V1 sont en place :
 - renommage et déplacement atomiques sans écrasement, avec confirmations dans l’interface ;
 - corbeille privée par utilisateur, restauration avec détection de collision et purge définitive ;
 - pages d’administration dédiées aux utilisateurs, au stockage global et au nettoyage des corbeilles ;
+- supervision privée de NewGreedy et qBittorrent, liste des torrents et configuration NewGreedy contrôlée ;
+- redémarrage NewGreedy médié par systemd, sans socket Docker dans le conteneur applicatif ;
 - image Docker unique pour l'API et le frontend ;
 - montage hôte limité à `/srv/seedbox:/data` ;
 - contrôles de qualité automatisés.
@@ -81,6 +83,12 @@ ssh -N -L 18081:127.0.0.1:18081 ovh
 ```
 
 Puis ouvrir <http://127.0.0.1:18081>.
+
+En production, WOS rejoint aussi le réseau Docker externe `torrent-internal` pour joindre
+les API de NewGreedy et qBittorrent sans publier de nouveau port. Ce réseau ne donne aucun
+accès au socket Docker. Le redémarrage NewGreedy passe par un fichier de requête borné sous
+`/srv/seedbox/.wos-control` et un service systemd limité à la recréation de cet unique
+service.
 
 Le mot de passe administrateur est demandé interactivement et n'est ni placé dans `.env`, ni écrit dans les logs. Pour l'accès initial par tunnel HTTP, `WOS_COOKIE_SECURE=false`. Cette valeur devra devenir `true` en même temps que l'ajout de HTTPS.
 

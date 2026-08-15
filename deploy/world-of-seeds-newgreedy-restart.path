@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for World of Seeds NewGreedy restart requests
+
+[Path]
+PathExists=/srv/seedbox/.wos-control/newgreedy/restart-request.json
+Unit=world-of-seeds-newgreedy-restart.service
+
+[Install]
+WantedBy=multi-user.target

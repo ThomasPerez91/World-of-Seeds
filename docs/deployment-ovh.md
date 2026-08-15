@@ -95,10 +95,20 @@ sudo install -o root -g root -m 755 \
 sudo install -o root -g root -m 755 \
   "$WOS_SETUP_DIR/repository/deploy/world-of-seeds-deploy-command" \
   /usr/local/sbin/world-of-seeds-deploy-command
+sudo install -o root -g root -m 755 \
+  "$WOS_SETUP_DIR/repository/deploy/world-of-seeds-newgreedy-restart" \
+  /usr/local/sbin/world-of-seeds-newgreedy-restart
+sudo install -o root -g root -m 644 \
+  "$WOS_SETUP_DIR/repository/deploy/world-of-seeds-newgreedy-restart.service" \
+  /etc/systemd/system/world-of-seeds-newgreedy-restart.service
+sudo install -o root -g root -m 644 \
+  "$WOS_SETUP_DIR/repository/deploy/world-of-seeds-newgreedy-restart.path" \
+  /etc/systemd/system/world-of-seeds-newgreedy-restart.path
 sudo install -o root -g root -m 440 \
   "$WOS_SETUP_DIR/repository/deploy/world-of-seeds.sudoers" \
   /etc/sudoers.d/world-of-seeds
 sudo visudo -cf /etc/sudoers.d/world-of-seeds
+sudo systemctl daemon-reload
 
 rm -rf -- "$WOS_SETUP_DIR"
 ```
@@ -125,6 +135,11 @@ WOS_ENVIRONMENT=production
 WOS_LOG_LEVEL=info
 WOS_COOKIE_SECURE=false
 WOS_ALLOWED_HOSTS=["127.0.0.1","localhost"]
+
+WOS_NEWGREEDY_URL=http://newgreedy:8080
+WOS_QBITTORRENT_URL=http://qbittorrent:8080
+WOS_QBITTORRENT_USERNAME=REMPLACER_PAR_LE_USER_WEBUI_QBITTORRENT
+WOS_QBITTORRENT_PASSWORD=REMPLACER_PAR_LE_PASSWORD_WEBUI_QBITTORRENT
 ```
 
 Générer le mot de passe sans le publier dans GitHub :
@@ -140,7 +155,61 @@ sudo stat -c '%A %a %U:%G %n' /opt/world-of-seeds/.env
 sudo test -r /opt/world-of-seeds/.env
 ```
 
-## 5. Vérifier l'empreinte SSH
+Les identifiants WebUI qBittorrent ne doivent pas être collés dans une issue, une PR ou un
+terminal enregistré. Ils restent uniquement dans ce fichier `root:root` en mode `600`.
+
+## 5. Préparer le canal de contrôle NewGreedy
+
+Le fichier actif devient `/srv/seedbox/.wos-control/newgreedy/config.ini`. L’application
+peut le modifier, mais elle ne peut pas commander Docker. Un helper systemd root consomme
+uniquement une demande bornée et recrée uniquement le service Compose `newgreedy`.
+
+Sur OVH :
+
+```bash
+sudo install -d -o ubuntu -g ubuntu -m 700 \
+  /srv/seedbox/.wos-control \
+  /srv/seedbox/.wos-control/newgreedy
+sudo install -d -o root -g ubuntu -m 750 \
+  /srv/seedbox/.wos-control/newgreedy-status
+sudo install -o ubuntu -g ubuntu -m 600 \
+  /home/ubuntu/deploy/newgreedy-test/config.ini \
+  /srv/seedbox/.wos-control/newgreedy/config.ini
+```
+
+Modifier ensuite le volume `config.ini` du service NewGreedy dans
+`/home/ubuntu/deploy/newgreedy-test/docker-compose.yml`. Sa source doit devenir exactement :
+
+```yaml
+- /srv/seedbox/.wos-control/newgreedy/config.ini:/app/config.ini:ro
+```
+
+Valider puis recréer NewGreedy :
+
+```bash
+cd /home/ubuntu/deploy/newgreedy-test
+docker compose -f docker-compose.yml config --quiet
+docker compose -f docker-compose.yml up -d --force-recreate --no-deps newgreedy
+
+docker inspect newgreedy --format \
+  '{{range .Mounts}}{{if eq .Destination "/app/config.ini"}}{{.Source}}{{end}}{{end}}'
+docker inspect newgreedy --format \
+  '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}sans-healthcheck{{end}}'
+```
+
+Les résultats attendus sont le nouveau chemin complet, puis `running healthy`. Activer
+enfin la surveillance :
+
+```bash
+sudo systemctl enable --now world-of-seeds-newgreedy-restart.path
+sudo systemctl is-active world-of-seeds-newgreedy-restart.path
+sudo systemctl status --no-pager world-of-seeds-newgreedy-restart.path
+```
+
+Le conteneur WOS continue de ne monter que `/srv/seedbox:/data`. Le dossier de statut est
+`root:ubuntu` en mode `750`; WOS peut le lire avec son GID 1000, mais pas le modifier.
+
+## 6. Vérifier l'empreinte SSH
 
 Sur OVH, relever l'empreinte officielle :
 
@@ -163,7 +232,7 @@ doit pas être utilisé dans GitHub : il faut son vrai `HostName`, visible avec 
 ssh -G ovh | awk '/^(hostname|port|user) / { print }'
 ```
 
-## 6. Configurer l'environnement GitHub
+## 7. Configurer l'environnement GitHub
 
 Dans le dépôt : **Settings → Environments → New environment → `production`**.
 
@@ -192,7 +261,7 @@ pbcopy < "$HOME/.ssh/world_of_seeds_deploy"
 pbcopy < /tmp/world-of-seeds-known-hosts
 ```
 
-## 7. Déploiements
+## 8. Déploiements
 
 Une PR de release doit porter un titre commençant par `release:`. Sa fusion dans `master`
 crée automatiquement le tag et la release stable, puis déploie leur commit immuable. Si la
@@ -221,7 +290,7 @@ exit
 
 Le mot de passe n'est ni placé dans `.env`, ni écrit dans GitHub Actions.
 
-## 8. Vérifications finales
+## 9. Vérifications finales
 
 Sur OVH :
 
@@ -229,7 +298,14 @@ Sur OVH :
 curl --fail --silent --show-error \
   http://127.0.0.1:18081/api/v1/health/ready
 sudo ss -lntp | grep ':18081 '
+docker inspect world-of-seeds-app-1 \
+  --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}'
+docker inspect world-of-seeds-app-1 \
+  --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
 ```
+
+La première commande `docker inspect` doit inclure `torrent-internal`. La seconde doit
+toujours afficher uniquement `/srv/seedbox -> /data` et jamais `/var/run/docker.sock`.
 
 Depuis le Mac :
 

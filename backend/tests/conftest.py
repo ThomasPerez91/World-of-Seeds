@@ -1,3 +1,4 @@
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -9,6 +10,9 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db_session
+from app.integrations import ExternalServicesMonitor
+from app.integrations.newgreedy_config import NewGreedyConfigStore
+from app.integrations.newgreedy_restart import NewGreedyRestartStore
 from app.main import app
 from app.models import Base
 
@@ -49,6 +53,15 @@ async def client(db_session: AsyncSession, data_root: Path) -> AsyncIterator[Asy
 
     app.dependency_overrides[get_db_session] = override_db_session
     app.dependency_overrides[get_settings] = override_settings
+    app.state.external_services_monitor = ExternalServicesMonitor(test_settings)
+    app.state.newgreedy_config_store = NewGreedyConfigStore(
+        test_settings.data_root,
+        max_bytes=test_settings.newgreedy_config_max_bytes,
+    )
+    app.state.newgreedy_restart_store = NewGreedyRestartStore(
+        test_settings.data_root,
+        status_owner_uid=os.geteuid(),
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as test_client:
         yield test_client

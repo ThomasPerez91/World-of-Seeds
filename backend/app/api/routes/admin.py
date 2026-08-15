@@ -17,6 +17,22 @@ from app.auth.service import (
 from app.core.config import Settings, get_settings
 from app.files import WorkspaceError
 from app.files.dependencies import WorkspaceManagerDependency
+from app.integrations.dependencies import (
+    ExternalServicesMonitorDependency,
+    NewGreedyConfigStoreDependency,
+    NewGreedyRestartStoreDependency,
+)
+from app.integrations.http import IntegrationRequestError
+from app.integrations.newgreedy_config import (
+    ConfigFieldValue,
+    NewGreedyConfigError,
+    NewGreedyConfigValidationError,
+)
+from app.integrations.newgreedy_restart import (
+    NewGreedyRestartError,
+    NewGreedyRestartPendingError,
+    NewGreedyRestartStatus,
+)
 from app.models import TrashEntry, User
 from app.schemas.admin import (
     AdminStorageResponse,
@@ -29,11 +45,257 @@ from app.schemas.auth import (
     UserResponse,
     UserStatusRequest,
 )
+from app.schemas.health import AdminSystemHealthResponse, ServiceHealthDetail
+from app.schemas.integrations import (
+    SECTION_LABELS,
+    NewGreedyConfigFieldResponse,
+    NewGreedyConfigResponse,
+    NewGreedyConfigSectionResponse,
+    NewGreedyConfigUpdateRequest,
+    NewGreedyOverviewResponse,
+    NewGreedyRestartStatusResponse,
+    NewGreedyStatsResetResponse,
+    NewGreedyTorrentListingResponse,
+    NewGreedyTorrentResponse,
+    QBittorrentTorrentListingResponse,
+    QBittorrentTorrentResponse,
+)
 from app.trash.dependencies import TrashServiceDependency
 from app.trash.filesystem import TrashPurgeError, TrashStorageError, TrashStorageUnsafeError
 from app.trash.service import TrashEntryNotFoundError, TrashPersistenceError
 
 router = APIRouter()
+
+
+@router.get("/services/health", response_model=AdminSystemHealthResponse)
+async def get_services_health(
+    monitor: ExternalServicesMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> AdminSystemHealthResponse:
+    snapshot = await monitor.snapshot()
+    return AdminSystemHealthResponse(
+        status="ok" if snapshot.healthy else "degraded",
+        checked_at=snapshot.checked_at,
+        newgreedy=ServiceHealthDetail(
+            status=snapshot.newgreedy.state,
+            latency_ms=snapshot.newgreedy.latency_ms,
+            version=snapshot.newgreedy.version,
+            error_code=snapshot.newgreedy.error_code,
+        ),
+        qbittorrent=ServiceHealthDetail(
+            status=snapshot.qbittorrent.state,
+            latency_ms=snapshot.qbittorrent.latency_ms,
+            version=snapshot.qbittorrent.version,
+            error_code=snapshot.qbittorrent.error_code,
+        ),
+    )
+
+
+def _config_response(
+    fields: list[ConfigFieldValue], *, restart_required: bool = False
+) -> NewGreedyConfigResponse:
+    grouped: dict[str, list[NewGreedyConfigFieldResponse]] = {}
+    for field in fields:
+        spec = field.spec
+        grouped.setdefault(spec.section, []).append(
+            NewGreedyConfigFieldResponse(
+                id=spec.identifier,
+                key=spec.key,
+                label=spec.label,
+                description=spec.description,
+                input_type=spec.input_type,
+                value=field.value,
+                editable=spec.editable,
+                minimum=spec.minimum,
+                maximum=spec.maximum,
+                options=list(spec.options),
+            )
+        )
+    return NewGreedyConfigResponse(
+        sections=[
+            NewGreedyConfigSectionResponse(
+                id=section,
+                label=SECTION_LABELS.get(section, section),
+                fields=section_fields,
+            )
+            for section, section_fields in grouped.items()
+        ],
+        restart_required=restart_required,
+    )
+
+
+def _raise_newgreedy_config_error(exc: NewGreedyConfigError) -> Never:
+    if isinstance(exc, NewGreedyConfigValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="NewGreedy configuration is invalid",
+        ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="NewGreedy configuration is unavailable",
+    ) from exc
+
+
+@router.get("/services/newgreedy/config", response_model=NewGreedyConfigResponse)
+async def get_newgreedy_config(
+    store: NewGreedyConfigStoreDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> NewGreedyConfigResponse:
+    try:
+        fields = await run_in_threadpool(store.read)
+    except NewGreedyConfigError as exc:
+        _raise_newgreedy_config_error(exc)
+    return _config_response(fields)
+
+
+@router.patch("/services/newgreedy/config", response_model=NewGreedyConfigResponse)
+async def update_newgreedy_config(
+    payload: NewGreedyConfigUpdateRequest,
+    store: NewGreedyConfigStoreDependency,
+    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+) -> NewGreedyConfigResponse:
+    try:
+        fields = await run_in_threadpool(store.update, payload.changes)
+    except NewGreedyConfigError as exc:
+        _raise_newgreedy_config_error(exc)
+    return _config_response(fields, restart_required=True)
+
+
+@router.get("/services/newgreedy/overview", response_model=NewGreedyOverviewResponse)
+async def get_newgreedy_overview(
+    monitor: ExternalServicesMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> NewGreedyOverviewResponse:
+    try:
+        overview = await monitor.newgreedy_overview()
+    except IntegrationRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="NewGreedy statistics are unavailable",
+        ) from exc
+    return NewGreedyOverviewResponse(
+        torrents=overview.torrents,
+        downloading=overview.downloading,
+        seeding=overview.seeding,
+        stalled=overview.stalled,
+        target_reached=overview.target_reached,
+        total_downloaded_bytes=overview.total_downloaded_bytes,
+        total_reported_uploaded_bytes=overview.total_reported_uploaded_bytes,
+        total_fake_uploaded_bytes=overview.total_fake_uploaded_bytes,
+    )
+
+
+@router.delete(
+    "/services/newgreedy/stats",
+    response_model=NewGreedyStatsResetResponse,
+)
+async def reset_newgreedy_stats(
+    monitor: ExternalServicesMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+) -> NewGreedyStatsResetResponse:
+    try:
+        result = await monitor.reset_newgreedy_stats()
+    except IntegrationRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="NewGreedy statistics could not be reset",
+        ) from exc
+    return NewGreedyStatsResetResponse(purged=result.purged, remaining=result.remaining)
+
+
+@router.get(
+    "/services/newgreedy/torrents",
+    response_model=NewGreedyTorrentListingResponse,
+)
+async def list_newgreedy_torrents(
+    monitor: ExternalServicesMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> NewGreedyTorrentListingResponse:
+    try:
+        torrents = await monitor.newgreedy_torrents()
+    except IntegrationRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="NewGreedy torrent statistics are unavailable",
+        ) from exc
+    return NewGreedyTorrentListingResponse(
+        torrents=[NewGreedyTorrentResponse.model_validate(torrent) for torrent in torrents]
+    )
+
+
+@router.get(
+    "/services/qbittorrent/torrents",
+    response_model=QBittorrentTorrentListingResponse,
+)
+async def list_qbittorrent_torrents(
+    monitor: ExternalServicesMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> QBittorrentTorrentListingResponse:
+    try:
+        torrents, truncated = await monitor.qbittorrent_torrents()
+    except IntegrationRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="qBittorrent torrents are unavailable",
+        ) from exc
+    return QBittorrentTorrentListingResponse(
+        torrents=[QBittorrentTorrentResponse.model_validate(torrent) for torrent in torrents],
+        truncated=truncated,
+    )
+
+
+def _restart_status_response(
+    restart_status: NewGreedyRestartStatus,
+) -> NewGreedyRestartStatusResponse:
+    return NewGreedyRestartStatusResponse(
+        state=restart_status.state,
+        request_id=restart_status.request_id,
+        updated_at=restart_status.updated_at,
+        message_code=restart_status.message_code,
+    )
+
+
+def _raise_newgreedy_restart_error(exc: NewGreedyRestartError) -> Never:
+    if isinstance(exc, NewGreedyRestartPendingError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A NewGreedy restart is already pending",
+        ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="NewGreedy restart control is unavailable",
+    ) from exc
+
+
+@router.get(
+    "/services/newgreedy/restart",
+    response_model=NewGreedyRestartStatusResponse,
+)
+async def get_newgreedy_restart_status(
+    store: NewGreedyRestartStoreDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> NewGreedyRestartStatusResponse:
+    try:
+        restart_status = await run_in_threadpool(store.status)
+    except NewGreedyRestartError as exc:
+        _raise_newgreedy_restart_error(exc)
+    return _restart_status_response(restart_status)
+
+
+@router.post(
+    "/services/newgreedy/restart",
+    response_model=NewGreedyRestartStatusResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def request_newgreedy_restart(
+    store: NewGreedyRestartStoreDependency,
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
+) -> NewGreedyRestartStatusResponse:
+    try:
+        restart_status = await run_in_threadpool(store.request, context.user.id)
+    except NewGreedyRestartError as exc:
+        _raise_newgreedy_restart_error(exc)
+    return _restart_status_response(restart_status)
 
 
 def _raise_admin_trash_error(exc: Exception) -> Never:

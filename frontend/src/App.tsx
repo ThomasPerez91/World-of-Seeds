@@ -9,6 +9,7 @@ import {
 import { api, ApiError, type StorageUsage, type User } from "./api/client";
 import { type AdminView } from "./features/admin/AdminPageShell";
 import { AdminStoragePage } from "./features/admin/AdminStoragePage";
+import { AdminServicesPage } from "./features/admin/AdminServicesPage";
 import { AdminTrashPage } from "./features/admin/AdminTrashPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { FileBrowser } from "./features/files/FileBrowser";
@@ -50,8 +51,8 @@ function ServiceHealth() {
   const check = useCallback(async () => {
     setChecking(true);
     try {
-      await api.health();
-      if (mounted.current) setHealth("healthy");
+      const status = await api.health();
+      if (mounted.current) setHealth(status.status === "ok" ? "healthy" : "unavailable");
     } catch {
       if (mounted.current) setHealth("unavailable");
     } finally {
@@ -61,6 +62,7 @@ function ServiceHealth() {
 
   useEffect(() => {
     mounted.current = true;
+    void check();
     const interval = window.setInterval(() => void check(), 30_000);
     return () => {
       mounted.current = false;
@@ -722,6 +724,12 @@ function Dashboard({
           />
         ) : view === "admin-storage" && user.is_admin ? (
           <AdminStoragePage
+            onBack={openFilesHome}
+            onNavigate={setView}
+            onSessionExpired={onSessionExpired}
+          />
+        ) : view === "admin-services" && user.is_admin ? (
+          <AdminServicesPage
             onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}

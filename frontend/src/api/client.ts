@@ -10,10 +10,9 @@ interface AuthResponse {
   user: User;
 }
 
-export interface HealthStatus {
-  status: "ok";
-  service: string;
-  version: string;
+export interface PublicSystemHealth {
+  status: "ok" | "degraded";
+  checked_at: string;
 }
 
 export interface GeneratedCredentials {
@@ -94,6 +93,117 @@ export interface AdminTrashPurgeResult {
   remaining: number;
 }
 
+export type ExternalServiceState = "healthy" | "unavailable" | "unconfigured";
+
+export interface ExternalServiceHealth {
+  status: ExternalServiceState;
+  latency_ms: number | null;
+  version: string | null;
+  error_code: string | null;
+}
+
+export interface AdminServicesHealth {
+  status: "ok" | "degraded";
+  checked_at: string;
+  newgreedy: ExternalServiceHealth;
+  qbittorrent: ExternalServiceHealth;
+}
+
+export type NewGreedyConfigValue = boolean | number | string;
+
+export interface NewGreedyConfigField {
+  id: string;
+  key: string;
+  label: string;
+  description: string;
+  input_type: "boolean" | "integer" | "number" | "text" | "select";
+  value: NewGreedyConfigValue;
+  editable: boolean;
+  requires_restart: boolean;
+  minimum: number | null;
+  maximum: number | null;
+  options: string[];
+}
+
+export interface NewGreedyConfigSection {
+  id: string;
+  label: string;
+  fields: NewGreedyConfigField[];
+}
+
+export interface NewGreedyConfig {
+  sections: NewGreedyConfigSection[];
+  restart_required: boolean;
+}
+
+export interface NewGreedyOverview {
+  torrents: number;
+  downloading: number;
+  seeding: number;
+  stalled: number;
+  target_reached: number;
+  total_downloaded_bytes: number;
+  total_reported_uploaded_bytes: number;
+  total_fake_uploaded_bytes: number;
+}
+
+export interface NewGreedyStatsReset {
+  purged: number;
+  remaining: number;
+}
+
+export interface NewGreedyTorrent {
+  id: string;
+  mode: "down" | "seed";
+  downloaded_bytes: number;
+  reported_uploaded_bytes: number;
+  fake_uploaded_bytes: number;
+  ratio: number | null;
+  announce_count: number;
+  stalled: boolean;
+  target_reached: boolean;
+  last_announce_at: string | null;
+}
+
+export interface NewGreedyTorrentListing {
+  torrents: NewGreedyTorrent[];
+}
+
+export interface QBittorrentTorrent {
+  id: string;
+  name: string;
+  state: string;
+  progress: number;
+  size_bytes: number;
+  downloaded_bytes: number;
+  uploaded_bytes: number;
+  download_speed_bytes: number;
+  upload_speed_bytes: number;
+  ratio: number;
+  eta_seconds: number | null;
+  category: string | null;
+  tracker_host: string | null;
+}
+
+export interface QBittorrentTorrentListing {
+  torrents: QBittorrentTorrent[];
+  truncated: boolean;
+}
+
+export interface NewGreedyRestartStatus {
+  state: "idle" | "pending" | "restarting" | "healthy" | "failed" | "rejected";
+  request_id: string | null;
+  updated_at: string | null;
+  message_code:
+    | "idle"
+    | "requested"
+    | "restarting"
+    | "healthy"
+    | "restart_failed"
+    | "cooldown"
+    | "invalid_request";
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -148,8 +258,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  health(): Promise<HealthStatus> {
-    return request<HealthStatus>("/health/ready");
+  health(): Promise<PublicSystemHealth> {
+    return request<PublicSystemHealth>("/health/status");
   },
 
   async login(username: string, password: string): Promise<User> {
@@ -228,6 +338,51 @@ export const api = {
 
   getAdminStorage(): Promise<AdminStorageOverview> {
     return request<AdminStorageOverview>("/admin/storage");
+  },
+
+  getAdminServicesHealth(): Promise<AdminServicesHealth> {
+    return request<AdminServicesHealth>("/admin/services/health");
+  },
+
+  getNewGreedyConfig(): Promise<NewGreedyConfig> {
+    return request<NewGreedyConfig>("/admin/services/newgreedy/config");
+  },
+
+  updateNewGreedyConfig(
+    changes: Record<string, NewGreedyConfigValue>,
+  ): Promise<NewGreedyConfig> {
+    return request<NewGreedyConfig>("/admin/services/newgreedy/config", {
+      method: "PATCH",
+      body: JSON.stringify({ changes }),
+    });
+  },
+
+  getNewGreedyOverview(): Promise<NewGreedyOverview> {
+    return request<NewGreedyOverview>("/admin/services/newgreedy/overview");
+  },
+
+  resetNewGreedyStats(): Promise<NewGreedyStatsReset> {
+    return request<NewGreedyStatsReset>("/admin/services/newgreedy/stats", {
+      method: "DELETE",
+    });
+  },
+
+  listNewGreedyTorrents(): Promise<NewGreedyTorrentListing> {
+    return request<NewGreedyTorrentListing>("/admin/services/newgreedy/torrents");
+  },
+
+  listQBittorrentTorrents(): Promise<QBittorrentTorrentListing> {
+    return request<QBittorrentTorrentListing>("/admin/services/qbittorrent/torrents");
+  },
+
+  getNewGreedyRestartStatus(): Promise<NewGreedyRestartStatus> {
+    return request<NewGreedyRestartStatus>("/admin/services/newgreedy/restart");
+  },
+
+  restartNewGreedy(): Promise<NewGreedyRestartStatus> {
+    return request<NewGreedyRestartStatus>("/admin/services/newgreedy/restart", {
+      method: "POST",
+    });
   },
 
   listAdminTrash(signal?: AbortSignal): Promise<AdminTrashListing> {
