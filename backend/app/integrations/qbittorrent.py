@@ -112,8 +112,19 @@ class QBittorrentClient:
             data={"username": self._username, "password": self._password},
             headers=self._browser_headers(),
         ) as response:
+            if response.status_code == 401:
+                return False
+
             response.raise_for_status()
-            result = await read_limited_text(response, max_bytes=MAX_VERSION_BYTES)
+
+            if response.status_code == 204:
+                return True
+
+            result = await read_limited_text(
+                response,
+                max_bytes=MAX_VERSION_BYTES,
+            )
+
         return result.strip() == "Ok."
 
     async def _logout(self) -> None:
