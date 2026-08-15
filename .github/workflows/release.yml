@@ -1,0 +1,91 @@
+name: Publish release
+
+on:
+  push:
+    branches:
+      - master
+
+permissions: {}
+
+concurrency:
+  group: world-of-seeds-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish stable release
+    if: startsWith(github.event.head_commit.message, 'release:')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate the application version
+        id: version
+        run: |
+          set -Eeuo pipefail
+          version="$(python3 - <<'PY'
+          import json
+          import re
+          import tomllib
+          from pathlib import Path
+
+          backend = tomllib.loads(Path("backend/pyproject.toml").read_text())["project"]["version"]
+          frontend = json.loads(Path("frontend/package.json").read_text())["version"]
+          source = Path("frontend/src/version.ts").read_text()
+          match = re.search(r'APP_VERSION = "([^"]+)"', source)
+          versions = {backend, frontend, match.group(1) if match else None}
+          if len(versions) != 1 or None in versions:
+              raise SystemExit(f"Inconsistent release versions: {sorted(map(str, versions))}")
+          print(backend)
+          PY
+          )"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          printf 'tag=v%s\n' "$version" >>"$GITHUB_OUTPUT"
+
+      - name: Publish or verify the stable release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -Eeuo pipefail
+          if release_json="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" 2>/dev/null)"; then
+            jq -e \
+              --arg tag "$RELEASE_TAG" \
+              '.tag_name == $tag and .draft == false and .prerelease == false and .target_commitish == "master"' \
+              <<<"$release_json" >/dev/null
+            git fetch --force origin \
+              "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            release_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+            git merge-base --is-ancestor "$release_sha" "$GITHUB_SHA"
+          else
+            gh release create "$RELEASE_TAG" \
+              --target "$GITHUB_SHA" \
+              --title "World of Seeds $RELEASE_TAG" \
+              --generate-notes
+            release_sha="$GITHUB_SHA"
+          fi
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+          printf 'sha=%s\n' "$release_sha" >>"$GITHUB_OUTPUT"
+
+      - name: Dispatch the immutable release deployment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --arg sha "$RELEASE_SHA" \
+            --arg tag "$RELEASE_TAG" \
+            '{event_type: "deploy-release", client_payload: {sha: $sha, tag: $tag}}' \
+            | gh api \
+                --method POST \
+                "repos/$GITHUB_REPOSITORY/dispatches" \
+                --input -
