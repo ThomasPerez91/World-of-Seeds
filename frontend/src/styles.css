@@ -2167,6 +2167,73 @@ button:disabled {
   height: 1rem;
 }
 
+.service-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.restart-live-status {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgb(255 255 255 / 6%);
+  border-radius: 0.75rem;
+  color: #89978e;
+  background: rgb(4 10 8 / 22%);
+}
+
+.restart-live-status > span {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #77857c;
+}
+
+.restart-live-status p {
+  margin: 0;
+  font-size: 0.7rem;
+}
+
+.restart-live-status.pending,
+.restart-live-status.restarting {
+  color: #d4bd8d;
+  border-color: rgb(202 171 105 / 18%);
+}
+
+.restart-live-status.pending > span,
+.restart-live-status.restarting > span {
+  background: #caab69;
+  box-shadow: 0 0 0 0.25rem rgb(202 171 105 / 9%);
+  animation: health-pulse 1.4s ease-out infinite;
+}
+
+.restart-live-status.healthy {
+  color: #afd5b3;
+  border-color: rgb(117 199 139 / 18%);
+}
+
+.restart-live-status.healthy > span {
+  background: #75c78b;
+}
+
+.restart-live-status.failed,
+.restart-live-status.rejected,
+.restart-live-status.unavailable {
+  color: #d5a09a;
+  border-color: rgb(211 115 105 / 18%);
+}
+
+.restart-live-status.failed > span,
+.restart-live-status.rejected > span,
+.restart-live-status.unavailable > span {
+  background: #d37369;
+}
+
 .newgreedy-control > .operation-notice {
   margin-top: 1rem;
   border: 1px solid rgb(174 213 156 / 12%);
@@ -2849,6 +2916,10 @@ select:focus-visible {
   .service-control-heading,
   .newgreedy-config-actions {
     align-items: stretch;
+    flex-direction: column;
+  }
+
+  .service-control-actions {
     flex-direction: column;
   }
 

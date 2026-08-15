@@ -34,7 +34,7 @@ World-of-Seeds/
 │   │   ├── api/             # Routes HTTP et dépendances d'autorisation
 │   │   ├── core/            # Configuration, base de données, sécurité
 │   │   ├── files/           # Résolution sûre des chemins et opérations disque
-│   │   ├── integrations/    # Adaptateur qBittorrent réservé à la V2
+│   │   ├── integrations/    # Clients internes NewGreedy et qBittorrent
 │   │   ├── models/          # Modèles SQLAlchemy
 │   │   ├── schemas/         # Contrats Pydantic
 │   │   └── services/        # Cas d'usage métier
@@ -103,11 +103,13 @@ Le mot de passe est saisi sans écho dans le terminal. Il ne transite pas par le
 
 La page de connexion sera la seule vue accessible anonymement. Cela limite l'exposition fonctionnelle, mais le caractère privé repose réellement sur la restriction réseau et les contrôles serveur, pas sur le fait de cacher du JavaScript au navigateur.
 
-L’administration est organisée en trois pages accessibles depuis le menu du compte :
+L’administration est organisée en quatre pages accessibles depuis le menu du compte :
 
 - **Utilisateurs** : génération des identifiants initiaux, suspension, réactivation et suppression logique d’un accès ;
 - **Stockage** : capacité globale issue de `fstatvfs`, comptes actifs ou suspendus et volume connu des fichiers en corbeille ;
-- **Corbeilles** : liste globale et suppression définitive individuelle ou par lot.
+- **Corbeilles** : liste globale et suppression définitive individuelle ou par lot ;
+- **Services** : santé de NewGreedy et qBittorrent, torrents, statistiques et paramètres
+  NewGreedy autorisés.
 
 La page Stockage ne parcourt jamais récursivement les espaces utilisateurs. Le volume des dossiers en corbeille reste donc volontairement inconnu. Un nettoyage global traite au maximum 1 000 éléments par requête, puis indique le nombre restant afin d’éviter une requête sans limite sur un serveur réel.
 
@@ -206,6 +208,21 @@ Le service applicatif est configuré avec :
 - aucun port PostgreSQL publié ;
 - aucun socket Docker monté.
 
+Le conteneur applicatif rejoint le réseau Docker externe `torrent-internal` afin de joindre
+uniquement les API internes de NewGreedy et qBittorrent. Les identifiants qBittorrent sont
+injectés depuis le fichier `.env` root-only du serveur. Les réponses tierces sont bornées et
+validées ; l’URL complète d’un tracker n’est jamais envoyée au navigateur afin de ne pas
+divulguer un éventuel passkey.
+
+Le redémarrage de NewGreedy ne remet pas en cause cette frontière : WOS écrit une demande
+JSON exclusive dans `/data/.wos-control/newgreedy`. Une unité systemd surveille ce fichier
+et lance un helper root dont les chemins, le projet Compose, le service et le nom du
+conteneur sont constants. Le helper ne répercute aucun argument applicatif vers Docker,
+impose un délai entre deux redémarrages, recrée uniquement NewGreedy puis contrôle son
+healthcheck et son montage `config.ini`. Son statut est écrit atomiquement dans un dossier
+root non modifiable par l’application. Le socket Docker n’entre jamais dans le conteneur
+WOS.
+
 ## Découpage prévu des PR
 
 1. **Fondations** : documentation, squelette exécutable, Docker et CI.
@@ -219,4 +236,5 @@ Le service applicatif est configuré avec :
 9. **Responsive et accessibilité** : finition desktop/mobile, clavier, focus et lecteurs d'écran.
 10. **Déploiement** : image GHCR, secrets, migration et GitHub Action de déploiement validée ensemble.
 
-L'intégration qBittorrent reste hors V1, mais son futur client vivra derrière une interface dans `backend/app/integrations/qbittorrent`.
+La V1.2 observe qBittorrent en lecture seule. Les mutations de torrents et le dépôt de
+fichiers `.torrent` restent réservés à la V2.

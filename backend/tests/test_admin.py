@@ -1,5 +1,7 @@
+import json
 import uuid
 from pathlib import Path
+from uuid import UUID
 
 import httpx
 import pytest
@@ -263,6 +265,49 @@ web_port = 8080
     )
     assert reset.status_code == 200
     assert reset.json() == {"purged": 1, "remaining": 0}
+
+
+@pytest.mark.asyncio
+async def test_admin_requests_newgreedy_restart_through_control_channel(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    admin = await create_user(
+        db_session,
+        username="admin",
+        password="admin-password-long",
+        is_admin=True,
+    )
+    control_root = data_root / ".wos-control"
+    request_directory = control_root / "newgreedy"
+    status_directory = control_root / "newgreedy-status"
+    request_directory.mkdir(parents=True)
+    status_directory.mkdir()
+    control_root.chmod(0o700)
+    request_directory.chmod(0o700)
+    status_directory.chmod(0o750)
+    await login(client, "admin", "admin-password-long")
+
+    initial = await client.get("/api/v1/admin/services/newgreedy/restart")
+    missing_csrf = await client.post("/api/v1/admin/services/newgreedy/restart")
+    requested = await client.post(
+        "/api/v1/admin/services/newgreedy/restart",
+        headers=csrf_header(client),
+    )
+    duplicate = await client.post(
+        "/api/v1/admin/services/newgreedy/restart",
+        headers=csrf_header(client),
+    )
+
+    assert initial.status_code == 200
+    assert initial.json()["state"] == "idle"
+    assert missing_csrf.status_code == 403
+    assert requested.status_code == 202
+    assert requested.json()["state"] == "pending"
+    assert duplicate.status_code == 409
+    payload = json.loads((request_directory / "restart-request.json").read_text(encoding="utf-8"))
+    assert UUID(payload["requested_by"]) == admin.id
 
 
 @pytest.mark.asyncio

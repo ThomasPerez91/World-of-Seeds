@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -94,6 +95,21 @@ class QBittorrentTorrentResponse(BaseModel):
 class QBittorrentTorrentListingResponse(BaseModel):
     torrents: list[QBittorrentTorrentResponse]
     truncated: bool
+
+
+class NewGreedyRestartStatusResponse(BaseModel):
+    state: Literal["idle", "pending", "restarting", "healthy", "failed", "rejected"]
+    request_id: UUID | None
+    updated_at: datetime | None
+    message_code: Literal[
+        "idle",
+        "requested",
+        "restarting",
+        "healthy",
+        "restart_failed",
+        "cooldown",
+        "invalid_request",
+    ]
 
 
 SECTION_LABELS = {

@@ -6,6 +6,10 @@ readonly COMPOSE_FILE="${PROJECT_DIR}/compose.production.yaml"
 readonly ENV_FILE="${PROJECT_DIR}/.env"
 readonly IMAGE_REPOSITORY="ghcr.io/thomasperez91/world-of-seeds"
 readonly STATE_FILE="${PROJECT_DIR}/.deployed-image"
+readonly CONTROL_DIRECTORY="/srv/seedbox/.wos-control/newgreedy"
+readonly STATUS_DIRECTORY="/srv/seedbox/.wos-control/newgreedy-status"
+readonly NEWGREEDY_CONFIG="${CONTROL_DIRECTORY}/config.ini"
+readonly TORRENT_NETWORK="torrent-internal"
 
 DOCKER_CONFIG_DIR=""
 STATE_TMP=""
@@ -53,10 +57,32 @@ readonly REGISTRY_USER="$2"
 ENV_MODE=$(stat -c '%a' "${ENV_FILE}")
 [[ "${ENV_MODE}" == "600" || "${ENV_MODE}" == "400" ]] || fail "${ENV_FILE} doit être en mode 600 ou 400."
 
-for command in docker curl mktemp stat; do
+for command in docker curl mktemp stat systemctl; do
   command -v "${command}" >/dev/null || fail "commande requise absente: ${command}"
 done
 docker compose version >/dev/null
+docker network inspect "${TORRENT_NETWORK}" >/dev/null \
+  || fail "le réseau Docker ${TORRENT_NETWORK} est absent."
+[[ -d "${CONTROL_DIRECTORY}" && ! -L "${CONTROL_DIRECTORY}" ]] \
+  || fail "le dossier de contrôle NewGreedy est absent ou invalide."
+[[ -d "${STATUS_DIRECTORY}" && ! -L "${STATUS_DIRECTORY}" ]] \
+  || fail "le dossier de statut NewGreedy est absent ou invalide."
+[[ -f "${NEWGREEDY_CONFIG}" && ! -L "${NEWGREEDY_CONFIG}" ]] \
+  || fail "le config.ini géré de NewGreedy est absent ou invalide."
+[[ $(stat -c '%a' "${CONTROL_DIRECTORY}") == "700" ]] \
+  || fail "le dossier de contrôle NewGreedy doit être en mode 700."
+[[ $(stat -c '%a' "${STATUS_DIRECTORY}") == "750" ]] \
+  || fail "le dossier de statut NewGreedy doit être en mode 750."
+[[ $(stat -c '%a' "${NEWGREEDY_CONFIG}") == "600" ]] \
+  || fail "le config.ini géré de NewGreedy doit être en mode 600."
+[[ $(stat -c '%u:%g' "${CONTROL_DIRECTORY}") == $(stat -c '%u:%g' "${NEWGREEDY_CONFIG}") ]] \
+  || fail "le config.ini et son dossier doivent avoir le même propriétaire."
+[[ $(stat -c '%u' "${STATUS_DIRECTORY}") == "0" ]] \
+  || fail "le dossier de statut NewGreedy doit appartenir à root."
+[[ $(stat -c '%g' "${STATUS_DIRECTORY}") == $(stat -c '%g' "${CONTROL_DIRECTORY}") ]] \
+  || fail "les dossiers de contrôle NewGreedy doivent partager le même groupe."
+systemctl is-active --quiet world-of-seeds-newgreedy-restart.path \
+  || fail "la surveillance de redémarrage NewGreedy n'est pas active."
 
 IFS= read -r REGISTRY_TOKEN || fail "jeton GHCR absent sur l'entrée standard."
 [[ ${#REGISTRY_TOKEN} -ge 20 && ${#REGISTRY_TOKEN} -le 4096 ]] || fail "jeton GHCR invalide."
@@ -85,6 +111,10 @@ cd "${PROJECT_DIR}"
   || fail "le port applicatif n'est pas limité à 127.0.0.1:18081."
 curl --fail --silent --show-error \
   http://127.0.0.1:18081/api/v1/health/ready >/dev/null
+SYSTEM_HEALTH=$(curl --fail --silent --show-error \
+  http://127.0.0.1:18081/api/v1/health/status)
+[[ "${SYSTEM_HEALTH}" == *'"status":"ok"'* ]] \
+  || fail "NewGreedy ou qBittorrent n'est pas opérationnel depuis World of Seeds."
 
 STATE_TMP=$(mktemp "${PROJECT_DIR}/.deployed-image.XXXXXX")
 chmod 600 "${STATE_TMP}"
