@@ -19,7 +19,10 @@ describe("App", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(response({ detail: "Database unavailable" }, 503))
       .mockResolvedValueOnce(response({ detail: "Not authenticated" }, 401))
-      .mockResolvedValueOnce(response({ detail: "Database unavailable" }, 503));
+      .mockResolvedValueOnce(response({ status: "ok", checked_at: "2026-08-15T14:00:00Z" }, 200))
+      .mockResolvedValueOnce(
+        response({ status: "degraded", checked_at: "2026-08-15T14:00:01Z" }, 200),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     const view = render(<App />);
@@ -32,7 +35,7 @@ describe("App", () => {
     expect(screen.getByText("Tous les services fonctionnent normalement.")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Vérifier l’état du service" }));
     await screen.findByText("Le service est momentanément interrompu.");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 

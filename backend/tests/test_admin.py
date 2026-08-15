@@ -1,13 +1,18 @@
 import uuid
 from pathlib import Path
 
+import httpx
 import pytest
 from httpx import AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.security import hash_password
+from app.core.config import Settings
 from app.files import WorkspaceManager
+from app.integrations import ExternalServicesMonitor
+from app.main import app
 from app.models import TrashEntry, User
 
 
@@ -55,6 +60,72 @@ def csrf_header(client: AsyncClient) -> dict[str, str]:
     token = client.cookies.get("wos_csrf")
     assert token is not None
     return {"X-CSRF-Token": token}
+
+
+@pytest.mark.asyncio
+async def test_services_health_is_detailed_and_admin_only(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await create_user(
+        db_session,
+        username="admin",
+        password="admin-password-long",
+        is_admin=True,
+    )
+    await create_user(
+        db_session,
+        username="regular",
+        password="regular-password-long",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/health":
+            return httpx.Response(200, json={"total": 2})
+        if request.url.path == "/api/v2/auth/login":
+            return httpx.Response(200, text="Ok.", headers={"Set-Cookie": "SID=test; Path=/"})
+        if request.url.path == "/api/v2/app/version":
+            return httpx.Response(200, text="v5.1.2")
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError(f"Unexpected integration request: {request.method} {request.url}")
+
+    app.state.external_services_monitor = ExternalServicesMonitor(
+        Settings.model_validate(
+            {
+                "newgreedy_url": "http://newgreedy:8080",
+                "qbittorrent_url": "http://qbittorrent:8080",
+                "qbittorrent_username": "admin",
+                "qbittorrent_password": SecretStr("secret-password"),
+            }
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    await login(client, "regular", "regular-password-long")
+    forbidden = await client.get("/api/v1/admin/services/health")
+    assert forbidden.status_code == 403
+
+    await login(client, "admin", "admin-password-long")
+    response = await client.get("/api/v1/admin/services/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "checked_at": response.json()["checked_at"],
+        "newgreedy": {
+            "status": "healthy",
+            "latency_ms": response.json()["newgreedy"]["latency_ms"],
+            "version": None,
+            "error_code": None,
+        },
+        "qbittorrent": {
+            "status": "healthy",
+            "latency_ms": response.json()["qbittorrent"]["latency_ms"],
+            "version": "v5.1.2",
+            "error_code": None,
+        },
+    }
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
-from app.schemas.health import HealthResponse
+from app.integrations.dependencies import ExternalServicesMonitorDependency
+from app.schemas.health import HealthResponse, PublicSystemHealthResponse
 
 router = APIRouter()
 
@@ -30,3 +31,21 @@ async def readiness(
             detail="Service unavailable",
         ) from exc
     return HealthResponse(status="ok")
+
+
+@router.get("/status", response_model=PublicSystemHealthResponse)
+async def system_status(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    monitor: ExternalServicesMonitorDependency,
+) -> PublicSystemHealthResponse:
+    database_healthy = True
+    try:
+        await session.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        database_healthy = False
+
+    snapshot = await monitor.snapshot()
+    return PublicSystemHealthResponse(
+        status="ok" if database_healthy and snapshot.healthy else "degraded",
+        checked_at=snapshot.checked_at,
+    )

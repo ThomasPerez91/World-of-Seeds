@@ -10,10 +10,9 @@ interface AuthResponse {
   user: User;
 }
 
-export interface HealthStatus {
-  status: "ok";
-  service: string;
-  version: string;
+export interface PublicSystemHealth {
+  status: "ok" | "degraded";
+  checked_at: string;
 }
 
 export interface GeneratedCredentials {
@@ -148,8 +147,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  health(): Promise<HealthStatus> {
-    return request<HealthStatus>("/health/ready");
+  health(): Promise<PublicSystemHealth> {
+    return request<PublicSystemHealth>("/health/status");
   },
 
   async login(username: string, password: string): Promise<User> {
