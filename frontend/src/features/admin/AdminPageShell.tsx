@@ -2,11 +2,17 @@ import type { ReactNode } from "react";
 
 import { BackIcon } from "../../components/icons";
 
-export type AdminView = "admin-users" | "admin-services" | "admin-storage" | "admin-trash";
+export type AdminView =
+  | "admin-users"
+  | "admin-services"
+  | "admin-settings"
+  | "admin-storage"
+  | "admin-trash";
 
 const navigation: { view: AdminView; label: string }[] = [
   { view: "admin-users", label: "Utilisateurs" },
   { view: "admin-services", label: "Services" },
+  { view: "admin-settings", label: "Paramètres" },
   { view: "admin-storage", label: "Stockage" },
   { view: "admin-trash", label: "Corbeilles" },
 ];

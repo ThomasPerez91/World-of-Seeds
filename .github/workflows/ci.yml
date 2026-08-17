@@ -81,10 +81,18 @@ jobs:
             deploy/world-of-seeds-deploy-command
           python3 - <<'PY'
           from pathlib import Path
-          helper = Path("deploy/world-of-seeds-newgreedy-restart")
-          compile(helper.read_text(encoding="utf-8"), str(helper), "exec")
+          for name in (
+              "world-of-seeds-newgreedy-restart",
+              "world-of-seeds-app-restart",
+          ):
+              helper = Path("deploy") / name
+              compile(helper.read_text(encoding="utf-8"), str(helper), "exec")
           PY
-          test -x deploy/world-of-seeds-newgreedy-restart
+          test -x deploy/world-of-seeds-newgreedy-restart \
+            && test -x deploy/world-of-seeds-app-restart
+          grep -F 'PROJECT_DIRECTORY = Path("/opt/world-of-seeds")' \
+            deploy/world-of-seeds-app-restart
+          grep -F '"--no-deps", "app"' deploy/world-of-seeds-app-restart
           cp .env.example .env
           WOS_IMAGE="ghcr.io/thomasperez91/world-of-seeds@sha256:$(printf '0%.0s' {1..64})" \
             docker compose --env-file .env \

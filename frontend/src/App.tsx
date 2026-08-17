@@ -10,6 +10,7 @@ import { api, ApiError, type StorageUsage, type User } from "./api/client";
 import { type AdminView } from "./features/admin/AdminPageShell";
 import { AdminStoragePage } from "./features/admin/AdminStoragePage";
 import { AdminServicesPage } from "./features/admin/AdminServicesPage";
+import { AdminSettingsPage } from "./features/admin/AdminSettingsPage";
 import { AdminTrashPage } from "./features/admin/AdminTrashPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { FileBrowser } from "./features/files/FileBrowser";
@@ -729,6 +730,12 @@ function Dashboard({
           />
         ) : view === "admin-services" && user.is_admin ? (
           <AdminServicesPage
+            onBack={openFilesHome}
+            onNavigate={setView}
+            onSessionExpired={onSessionExpired}
+          />
+        ) : view === "admin-settings" && user.is_admin ? (
+          <AdminSettingsPage
             onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}

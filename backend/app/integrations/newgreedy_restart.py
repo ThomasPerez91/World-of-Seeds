@@ -61,9 +61,18 @@ class NewGreedyRestartStatus:
 
 
 class NewGreedyRestartStore:
-    def __init__(self, data_root: Path, *, status_owner_uid: int = 0) -> None:
+    def __init__(
+        self,
+        data_root: Path,
+        *,
+        status_owner_uid: int = 0,
+        request_directory: str = NEWGREEDY_DIRECTORY,
+        status_directory: str = STATUS_DIRECTORY,
+    ) -> None:
         self._data_root = data_root
         self._status_owner_uid = status_owner_uid
+        self._request_directory = request_directory
+        self._status_directory = status_directory
         self._lock = Lock()
 
     def status(self) -> NewGreedyRestartStatus:
@@ -242,13 +251,14 @@ class NewGreedyRestartStore:
     def _control_directory_fd(self) -> SecureDirectoryChain:
         return SecureDirectoryChain(
             self._data_root,
-            (CONTROL_DIRECTORY, NEWGREEDY_DIRECTORY),
+            (CONTROL_DIRECTORY, self._request_directory),
         )
 
     def _status_directory_fd(self) -> "StatusDirectoryChain":
         return StatusDirectoryChain(
             self._data_root,
             owner_uid=self._status_owner_uid,
+            status_directory=self._status_directory,
         )
 
 
@@ -321,9 +331,10 @@ type CallableDirectory = Callable[[], AbstractContextManager[int]]
 
 
 class StatusDirectoryChain:
-    def __init__(self, data_root: Path, *, owner_uid: int) -> None:
+    def __init__(self, data_root: Path, *, owner_uid: int, status_directory: str) -> None:
         self._data_root = data_root
         self._owner_uid = owner_uid
+        self._status_directory = status_directory
         self._fd: int | None = None
 
     def __enter__(self) -> int:
@@ -336,7 +347,7 @@ class StatusDirectoryChain:
                 os.close(current_fd)
                 current_fd = next_fd
                 self._validate_application_directory(current_fd)
-            next_fd = os.open(STATUS_DIRECTORY, flags, dir_fd=current_fd)
+            next_fd = os.open(self._status_directory, flags, dir_fd=current_fd)
             os.close(current_fd)
             current_fd = next_fd
             self._validate_status_directory(current_fd)

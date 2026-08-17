@@ -33,7 +33,16 @@ class _CachedSize:
 class DirectorySizeCalculator:
     """Bounded, symlink-safe directory size calculation with a short-lived cache."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        cache_seconds: float = DIRECTORY_SIZE_CACHE_SECONDS,
+        max_cache_entries: int = MAX_DIRECTORY_SIZE_CACHE_ENTRIES,
+    ) -> None:
+        if cache_seconds <= 0 or max_cache_entries <= 0:
+            raise ValueError("Directory size cache limits must be positive")
+        self._cache_seconds = cache_seconds
+        self._max_cache_entries = max_cache_entries
         self._cache: OrderedDict[tuple[int, int, int, int], _CachedSize] = OrderedDict()
         self._cache_lock = Lock()
 
@@ -137,8 +146,8 @@ class DirectorySizeCalculator:
         with self._cache_lock:
             self._cache[key] = _CachedSize(
                 size=size,
-                expires_at=time.monotonic() + DIRECTORY_SIZE_CACHE_SECONDS,
+                expires_at=time.monotonic() + self._cache_seconds,
             )
             self._cache.move_to_end(key)
-            while len(self._cache) > MAX_DIRECTORY_SIZE_CACHE_ENTRIES:
+            while len(self._cache) > self._max_cache_entries:
                 self._cache.popitem(last=False)

@@ -176,6 +176,93 @@ async def test_services_health_is_detailed_and_admin_only(
 
 
 @pytest.mark.asyncio
+async def test_admin_manages_typed_options_and_requests_wos_restart(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    await create_user(
+        db_session,
+        username="admin",
+        password="admin-password-long",
+        is_admin=True,
+    )
+    await create_user(
+        db_session,
+        username="regular",
+        password="regular-password-long",
+    )
+    control = data_root / ".wos-control"
+    request_directory = control / "wos"
+    status_directory = control / "wos-status"
+    request_directory.mkdir(parents=True)
+    status_directory.mkdir()
+    control.chmod(0o700)
+    request_directory.chmod(0o700)
+    status_directory.chmod(0o750)
+
+    await login(client, "regular", "regular-password-long")
+    forbidden = await client.get("/api/v1/admin/options")
+    assert forbidden.status_code == 403
+
+    await login(client, "admin", "admin-password-long")
+    loaded = await client.get("/api/v1/admin/options")
+    assert loaded.status_code == 200
+    fields = {
+        field["key"]: field for section in loaded.json()["sections"] for field in section["fields"]
+    }
+    assert fields["WOS_TORRENT_MAX_ACTIVE_PER_USER"]["value"] == 5
+    assert fields["WOS_WORKER_CONCURRENCY"]["restart_required"] is True
+
+    missing_csrf = await client.patch(
+        "/api/v1/admin/options",
+        json={"changes": {"WOS_TORRENT_MAX_ACTIVE_PER_USER": 8}},
+    )
+    assert missing_csrf.status_code == 403
+
+    invalid = await client.patch(
+        "/api/v1/admin/options",
+        json={"changes": {"WOS_TORRENT_MAX_ACTIVE_PER_USER": 0}},
+        headers=csrf_header(client),
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["detail"] == {
+        "code": "invalid_option",
+        "message": "La valeur minimale est 1.",
+        "field": "WOS_TORRENT_MAX_ACTIVE_PER_USER",
+    }
+
+    updated = await client.patch(
+        "/api/v1/admin/options",
+        json={
+            "changes": {
+                "WOS_TORRENT_MAX_ACTIVE_PER_USER": 8,
+                "WOS_WORKER_CONCURRENCY": 4,
+            }
+        },
+        headers=csrf_header(client),
+    )
+    assert updated.status_code == 200
+    assert updated.json()["restart_required"] is True
+    assert updated.json()["changed_keys"] == [
+        "WOS_TORRENT_MAX_ACTIVE_PER_USER",
+        "WOS_WORKER_CONCURRENCY",
+    ]
+    assert (control / ".options").stat().st_mode & 0o777 == 0o600
+
+    restart_status = await client.get("/api/v1/admin/services/wos/restart")
+    assert restart_status.status_code == 200
+    assert restart_status.json()["state"] == "idle"
+    restart = await client.post(
+        "/api/v1/admin/services/wos/restart",
+        headers=csrf_header(client),
+    )
+    assert restart.status_code == 202
+    assert restart.json()["state"] == "pending"
+    assert (request_directory / "restart-request.json").is_file()
+
+
+@pytest.mark.asyncio
 async def test_admin_controls_newgreedy_config_and_statistics(
     client: AsyncClient,
     db_session: AsyncSession,

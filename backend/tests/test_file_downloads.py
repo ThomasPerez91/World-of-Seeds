@@ -258,6 +258,46 @@ async def test_download_is_chunked_and_closes_its_descriptor(
 
 
 @pytest.mark.asyncio
+async def test_download_applies_the_dynamic_stream_chunk_size(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await create_workspace_user(db_session, data_root)
+    configured_chunk_size = 65_536
+    content = b"x" * (configured_chunk_size + 17)
+    (user_downloads(data_root) / "configured.bin").write_bytes(content)
+    control = data_root / ".wos-control"
+    control.mkdir(mode=0o700)
+    options = control / ".options"
+    options.write_text(
+        f"WOS_HTTP_STREAM_CHUNK_BYTES={configured_chunk_size}\n",
+        encoding="utf-8",
+    )
+    options.chmod(0o600)
+    await login(client)
+
+    original_pread = os.pread
+    requested_sizes: list[int] = []
+
+    def recording_pread(file_descriptor: int, size: int, offset: int) -> bytes:
+        requested_sizes.append(size)
+        return original_pread(file_descriptor, size, offset)
+
+    monkeypatch.setattr(os, "pread", recording_pread)
+    response = await client.get(
+        "/api/v1/files/download",
+        params={"path": "downloads/configured.bin"},
+    )
+
+    assert response.status_code == 200
+    assert response.content == content
+    assert len(requested_sizes) == 2
+    assert max(requested_sizes) <= configured_chunk_size
+
+
+@pytest.mark.asyncio
 async def test_interrupted_stream_closes_its_descriptor(data_root: Path) -> None:
     WorkspaceManager(data_root).create("thomas")
     content = b"x" * (DOWNLOAD_CHUNK_SIZE + 1)

@@ -21,6 +21,7 @@ from app.integrations.dependencies import (
     ExternalServicesMonitorDependency,
     NewGreedyConfigStoreDependency,
     NewGreedyRestartStoreDependency,
+    WosRestartStoreDependency,
 )
 from app.integrations.http import IntegrationRequestError
 from app.integrations.newgreedy_config import (
@@ -33,7 +34,21 @@ from app.integrations.newgreedy_restart import (
     NewGreedyRestartPendingError,
     NewGreedyRestartStatus,
 )
+from app.integrations.wos_restart import (
+    WosRestartError,
+    WosRestartPendingError,
+    WosRestartStatus,
+)
 from app.models import TrashEntry, User
+from app.options import (
+    CATEGORY_LABELS,
+    OptionFieldValue,
+    OptionsError,
+    OptionsUnavailableError,
+    OptionsUnsafeError,
+    OptionsValidationError,
+)
+from app.options.dependencies import OptionsStoreDependency
 from app.schemas.admin import (
     AdminStorageResponse,
     AdminTrashEntryResponse,
@@ -60,11 +75,111 @@ from app.schemas.integrations import (
     QBittorrentTorrentListingResponse,
     QBittorrentTorrentResponse,
 )
+from app.schemas.options import (
+    OptionFieldResponse,
+    OptionSectionResponse,
+    OptionsResponse,
+    OptionsUpdateRequest,
+)
 from app.trash.dependencies import TrashServiceDependency
 from app.trash.filesystem import TrashPurgeError, TrashStorageError, TrashStorageUnsafeError
 from app.trash.service import TrashEntryNotFoundError, TrashPersistenceError
 
 router = APIRouter()
+
+
+def _business_detail(code: str, message: str, field: str | None = None) -> dict[str, str | None]:
+    return {"code": code, "message": message, "field": field}
+
+
+def _options_response(
+    fields: list[OptionFieldValue],
+    *,
+    changed_keys: tuple[str, ...] = (),
+    restart_required: bool = False,
+) -> OptionsResponse:
+    grouped: dict[str, list[OptionFieldResponse]] = {}
+    for field in fields:
+        spec = field.spec
+        grouped.setdefault(spec.category, []).append(
+            OptionFieldResponse(
+                key=spec.key,
+                label=spec.label,
+                description=spec.description,
+                input_type=spec.input_type,
+                value=field.value,
+                default=spec.default,
+                unit=spec.unit,
+                minimum=spec.minimum,
+                maximum=spec.maximum,
+                choices=list(spec.choices),
+                editable=spec.editable,
+                restart_required=spec.restart_required,
+            )
+        )
+    return OptionsResponse(
+        sections=[
+            OptionSectionResponse(id=category, label=label, fields=grouped.get(category, []))
+            for category, label in CATEGORY_LABELS.items()
+            if grouped.get(category)
+        ],
+        changed_keys=list(changed_keys),
+        restart_required=restart_required,
+    )
+
+
+def _raise_options_error(exc: OptionsError) -> Never:
+    if isinstance(exc, OptionsValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=_business_detail(exc.code, str(exc), exc.field),
+        ) from exc
+    if isinstance(exc, OptionsUnsafeError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_business_detail(
+                "unsafe_options_storage",
+                "Le stockage de la configuration a échoué à son contrôle d’intégrité.",
+            ),
+        ) from exc
+    if isinstance(exc, OptionsUnavailableError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_business_detail(
+                "options_unavailable",
+                "La configuration fonctionnelle n’est pas disponible.",
+            ),
+        ) from exc
+    raise exc
+
+
+@router.get("/options", response_model=OptionsResponse)
+async def get_options(
+    store: OptionsStoreDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> OptionsResponse:
+    try:
+        fields = await run_in_threadpool(store.read)
+    except OptionsError as exc:
+        _raise_options_error(exc)
+    return _options_response(fields)
+
+
+@router.patch("/options", response_model=OptionsResponse)
+async def update_options(
+    payload: OptionsUpdateRequest,
+    store: OptionsStoreDependency,
+    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+) -> OptionsResponse:
+    try:
+        update = await run_in_threadpool(store.update, payload.changes)
+    except OptionsError as exc:
+        _raise_options_error(exc)
+    return _options_response(
+        update.fields,
+        changed_keys=update.changed_keys,
+        restart_required=update.restart_required,
+    )
 
 
 @router.get("/services/health", response_model=AdminSystemHealthResponse)
@@ -295,6 +410,55 @@ async def request_newgreedy_restart(
         restart_status = await run_in_threadpool(store.request, context.user.id)
     except NewGreedyRestartError as exc:
         _raise_newgreedy_restart_error(exc)
+    return _restart_status_response(restart_status)
+
+
+def _raise_wos_restart_error(exc: WosRestartError) -> Never:
+    if isinstance(exc, WosRestartPendingError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_business_detail(
+                "wos_restart_pending",
+                "Un redémarrage de World of Seeds est déjà en cours.",
+            ),
+        ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=_business_detail(
+            "wos_restart_unavailable",
+            "Le contrôle de redémarrage de World of Seeds n’est pas disponible.",
+        ),
+    ) from exc
+
+
+@router.get(
+    "/services/wos/restart",
+    response_model=NewGreedyRestartStatusResponse,
+)
+async def get_wos_restart_status(
+    store: WosRestartStoreDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> NewGreedyRestartStatusResponse:
+    try:
+        restart_status: WosRestartStatus = await run_in_threadpool(store.status)
+    except WosRestartError as exc:
+        _raise_wos_restart_error(exc)
+    return _restart_status_response(restart_status)
+
+
+@router.post(
+    "/services/wos/restart",
+    response_model=NewGreedyRestartStatusResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def request_wos_restart(
+    store: WosRestartStoreDependency,
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
+) -> NewGreedyRestartStatusResponse:
+    try:
+        restart_status: WosRestartStatus = await run_in_threadpool(store.request, context.user.id)
+    except WosRestartError as exc:
+        _raise_wos_restart_error(exc)
     return _restart_status_response(restart_status)
 
 
