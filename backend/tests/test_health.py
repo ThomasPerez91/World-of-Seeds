@@ -3,6 +3,7 @@ import pytest
 from httpx import AsyncClient
 from pydantic import SecretStr
 
+from app import __version__
 from app.core.config import Settings
 from app.integrations import ExternalServicesMonitor
 from app.main import app
@@ -16,7 +17,7 @@ async def test_liveness(client: AsyncClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "world-of-seeds",
-        "version": "1.2.1",
+        "version": __version__,
     }
 
 
@@ -28,7 +29,7 @@ async def test_readiness_checks_the_database(client: AsyncClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "world-of-seeds",
-        "version": "1.2.1",
+        "version": __version__,
     }
 
 

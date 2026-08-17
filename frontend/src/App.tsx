@@ -129,8 +129,7 @@ function LoginScreen({
         <p className="eyebrow">Espace privé</p>
         <h1 id="brand-title">World of Seeds</h1>
         <p className="brand-copy">
-          Un espace discret où chaque graine déposée trouve sa place, grandit puis rejoint ta
-          collection.
+          Vos fichiers et téléchargements, réunis dans un espace privé.
         </p>
         <ServiceHealth />
       </section>
