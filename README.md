@@ -23,10 +23,10 @@ Les capacités fonctionnelles principales de la V1 sont en place :
 - montage hôte limité à `/srv/seedbox:/data` ;
 - contrôles de qualité automatisés.
 
-La V1 applicative est complète. Toute PR de release fusionnée dans `master` publie la
-version stable déclarée par le projet, puis transmet son commit immuable au workflow de
-déploiement. L'image est construite dans GHCR et déployée sur OVH par une identité SSH
-restreinte. Le déclenchement manuel reste disponible en secours.
+La V1 applicative est complète et la conception de la V2 est engagée. Toute PR de release
+fusionnée dans `master` prépare une release en brouillon, construit l’image depuis le commit
+immuable, vérifie sa version, publie la release puis déploie le digest validé sur OVH. Le
+déclenchement manuel reste disponible en secours.
 
 ## Démarrage local sans Docker
 
@@ -60,6 +60,17 @@ uv export --frozen --no-dev --no-emit-project --no-header \
 
 La CI refuse une divergence entre ces deux fichiers. L'image installe uniquement les
 versions et empreintes cryptographiques ainsi exportées.
+
+`VERSION` est la source canonique de version applicative. Pour préparer une nouvelle
+version et mettre à jour ses miroirs Python/npm :
+
+```bash
+python3 scripts/versioning.py set 1.3.0
+python3 scripts/versioning.py check --expected-tag v1.3.0 --print-version
+```
+
+La CI vérifie les miroirs et le label OCI de l’image avant qu’une release stable puisse être
+publiée.
 
 ## Déploiement Docker
 
@@ -105,10 +116,12 @@ refuse toute collision et ne touche jamais aux répertoires qBittorrent historiq
 `watch` propres aux utilisateurs lorsqu'ils sont vides ; un dossier non vide est conservé
 mais masqué par le navigateur.
 
-La conception détaillée et le découpage des prochaines PR sont documentés dans
-[`docs/architecture-v1.md`](docs/architecture-v1.md). La coexistence avec les chemins
-qBittorrent actuels est décrite dans
-[`docs/storage-migration.md`](docs/storage-migration.md).
+La V1 reste documentée dans [`docs/architecture-v1.md`](docs/architecture-v1.md). La cible
+V2, ses transitions métier et son découpage de PR sont décrits dans
+[`docs/architecture-v2.md`](docs/architecture-v2.md),
+[`docs/state-machines-v2.md`](docs/state-machines-v2.md) et
+[`docs/roadmap-v2.md`](docs/roadmap-v2.md). La coexistence avec les chemins qBittorrent
+actuels est détaillée dans [`docs/storage-migration.md`](docs/storage-migration.md).
 
 Le déploiement GitHub Actions et l'installation sécurisée de l'identité technique OVH
 sont détaillés pas à pas dans
