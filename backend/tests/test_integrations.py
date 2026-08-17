@@ -52,6 +52,43 @@ async def test_monitor_probes_newgreedy_and_qbittorrent_without_leaking_credenti
 
 
 @pytest.mark.asyncio
+async def test_qbittorrent_accepts_no_content_login_response() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/v2/auth/login":
+            return httpx.Response(204, headers={"Set-Cookie": "SID=test; Path=/"})
+        if request.url.path == "/api/v2/app/version":
+            assert request.headers["cookie"] == "SID=test"
+            return httpx.Response(200, text="v5.1.2")
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError(f"Unexpected integration request: {request.method} {request.url}")
+
+    monitor = ExternalServicesMonitor(
+        Settings.model_validate(
+            {
+                "qbittorrent_url": "http://qbittorrent:8080",
+                "qbittorrent_username": "admin",
+                "qbittorrent_password": SecretStr("secret-password"),
+            }
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    snapshot = await monitor.snapshot()
+
+    assert snapshot.qbittorrent.state == "healthy"
+    assert snapshot.qbittorrent.version == "v5.1.2"
+    assert [request.url.path for request in requests] == [
+        "/api/v2/auth/login",
+        "/api/v2/app/version",
+        "/api/v2/auth/logout",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_monitor_reports_unconfigured_services_without_network_requests() -> None:
     def fail_on_request(request: httpx.Request) -> httpx.Response:
         raise AssertionError(f"Unexpected integration request: {request.method} {request.url}")
