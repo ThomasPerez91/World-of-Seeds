@@ -31,6 +31,7 @@ from app.files.downloads import (
     parse_range_header,
 )
 from app.files.mutation_dependencies import FileMutatorDependency
+from app.options.dependencies import OptionsStoreDependency
 from app.schemas.files import (
     BreadcrumbResponse,
     DirectoryListingResponse,
@@ -145,9 +146,14 @@ def move_file(
 async def download_file(
     request: Request,
     downloader: FileDownloaderDependency,
+    options_store: OptionsStoreDependency,
     context: Annotated[AuthContext, Depends(require_current_credentials)],
     path: Annotated[str, Query(max_length=4096)],
 ) -> Response:
+    options = options_store.snapshot()
+    chunk_size = options["WOS_HTTP_STREAM_CHUNK_BYTES"]
+    if type(chunk_size) is not int:
+        raise RuntimeError("Download chunk size option has an invalid type")
     try:
         download = downloader.open(context.user.username, path)
     except InvalidRelativePathError as exc:
@@ -227,6 +233,7 @@ async def download_file(
         length=length,
         status_code=response_status,
         headers=response_headers,
+        chunk_size=chunk_size,
     )
 
 

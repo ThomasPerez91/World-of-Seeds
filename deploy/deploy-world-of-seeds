@@ -6,9 +6,13 @@ readonly COMPOSE_FILE="${PROJECT_DIR}/compose.production.yaml"
 readonly ENV_FILE="${PROJECT_DIR}/.env"
 readonly IMAGE_REPOSITORY="ghcr.io/thomasperez91/world-of-seeds"
 readonly STATE_FILE="${PROJECT_DIR}/.deployed-image"
-readonly CONTROL_DIRECTORY="/srv/seedbox/.wos-control/newgreedy"
-readonly STATUS_DIRECTORY="/srv/seedbox/.wos-control/newgreedy-status"
-readonly NEWGREEDY_CONFIG="${CONTROL_DIRECTORY}/config.ini"
+readonly CONTROL_ROOT="/srv/seedbox/.wos-control"
+readonly NEWGREEDY_CONTROL_DIRECTORY="${CONTROL_ROOT}/newgreedy"
+readonly NEWGREEDY_STATUS_DIRECTORY="${CONTROL_ROOT}/newgreedy-status"
+readonly NEWGREEDY_CONFIG="${NEWGREEDY_CONTROL_DIRECTORY}/config.ini"
+readonly WOS_CONTROL_DIRECTORY="${CONTROL_ROOT}/wos"
+readonly WOS_STATUS_DIRECTORY="${CONTROL_ROOT}/wos-status"
+readonly WOS_OPTIONS="${CONTROL_ROOT}/.options"
 readonly TORRENT_NETWORK="torrent-internal"
 
 DOCKER_CONFIG_DIR=""
@@ -63,26 +67,54 @@ done
 docker compose version >/dev/null
 docker network inspect "${TORRENT_NETWORK}" >/dev/null \
   || fail "le réseau Docker ${TORRENT_NETWORK} est absent."
-[[ -d "${CONTROL_DIRECTORY}" && ! -L "${CONTROL_DIRECTORY}" ]] \
+[[ -d "${CONTROL_ROOT}" && ! -L "${CONTROL_ROOT}" ]] \
+  || fail "le dossier racine de contrôle WOS est absent ou invalide."
+[[ -d "${NEWGREEDY_CONTROL_DIRECTORY}" && ! -L "${NEWGREEDY_CONTROL_DIRECTORY}" ]] \
   || fail "le dossier de contrôle NewGreedy est absent ou invalide."
-[[ -d "${STATUS_DIRECTORY}" && ! -L "${STATUS_DIRECTORY}" ]] \
+[[ -d "${NEWGREEDY_STATUS_DIRECTORY}" && ! -L "${NEWGREEDY_STATUS_DIRECTORY}" ]] \
   || fail "le dossier de statut NewGreedy est absent ou invalide."
+[[ -d "${WOS_CONTROL_DIRECTORY}" && ! -L "${WOS_CONTROL_DIRECTORY}" ]] \
+  || fail "le dossier de contrôle de l'application est absent ou invalide."
+[[ -d "${WOS_STATUS_DIRECTORY}" && ! -L "${WOS_STATUS_DIRECTORY}" ]] \
+  || fail "le dossier de statut de l'application est absent ou invalide."
 [[ -f "${NEWGREEDY_CONFIG}" && ! -L "${NEWGREEDY_CONFIG}" ]] \
   || fail "le config.ini géré de NewGreedy est absent ou invalide."
-[[ $(stat -c '%a' "${CONTROL_DIRECTORY}") == "700" ]] \
+[[ $(stat -c '%a' "${CONTROL_ROOT}") == "700" ]] \
+  || fail "le dossier racine de contrôle WOS doit être en mode 700."
+[[ $(stat -c '%a' "${NEWGREEDY_CONTROL_DIRECTORY}") == "700" ]] \
   || fail "le dossier de contrôle NewGreedy doit être en mode 700."
-[[ $(stat -c '%a' "${STATUS_DIRECTORY}") == "750" ]] \
+[[ $(stat -c '%a' "${NEWGREEDY_STATUS_DIRECTORY}") == "750" ]] \
   || fail "le dossier de statut NewGreedy doit être en mode 750."
+[[ $(stat -c '%a' "${WOS_CONTROL_DIRECTORY}") == "700" ]] \
+  || fail "le dossier de contrôle de l'application doit être en mode 700."
+[[ $(stat -c '%a' "${WOS_STATUS_DIRECTORY}") == "750" ]] \
+  || fail "le dossier de statut de l'application doit être en mode 750."
 [[ $(stat -c '%a' "${NEWGREEDY_CONFIG}") == "600" ]] \
   || fail "le config.ini géré de NewGreedy doit être en mode 600."
-[[ $(stat -c '%u:%g' "${CONTROL_DIRECTORY}") == $(stat -c '%u:%g' "${NEWGREEDY_CONFIG}") ]] \
+[[ $(stat -c '%u:%g' "${NEWGREEDY_CONTROL_DIRECTORY}") == $(stat -c '%u:%g' "${NEWGREEDY_CONFIG}") ]] \
   || fail "le config.ini et son dossier doivent avoir le même propriétaire."
-[[ $(stat -c '%u' "${STATUS_DIRECTORY}") == "0" ]] \
+[[ $(stat -c '%u' "${NEWGREEDY_STATUS_DIRECTORY}") == "0" ]] \
   || fail "le dossier de statut NewGreedy doit appartenir à root."
-[[ $(stat -c '%g' "${STATUS_DIRECTORY}") == $(stat -c '%g' "${CONTROL_DIRECTORY}") ]] \
+[[ $(stat -c '%g' "${NEWGREEDY_STATUS_DIRECTORY}") == $(stat -c '%g' "${NEWGREEDY_CONTROL_DIRECTORY}") ]] \
   || fail "les dossiers de contrôle NewGreedy doivent partager le même groupe."
+[[ $(stat -c '%u:%g' "${CONTROL_ROOT}") == $(stat -c '%u:%g' "${WOS_CONTROL_DIRECTORY}") ]] \
+  || fail "les dossiers de contrôle WOS doivent partager le même propriétaire."
+[[ $(stat -c '%u' "${WOS_STATUS_DIRECTORY}") == "0" ]] \
+  || fail "le dossier de statut de l'application doit appartenir à root."
+[[ $(stat -c '%g' "${WOS_STATUS_DIRECTORY}") == $(stat -c '%g' "${WOS_CONTROL_DIRECTORY}") ]] \
+  || fail "les dossiers de contrôle de l'application doivent partager le même groupe."
+if [[ -e "${WOS_OPTIONS}" || -L "${WOS_OPTIONS}" ]]; then
+  [[ -f "${WOS_OPTIONS}" && ! -L "${WOS_OPTIONS}" ]] \
+    || fail ".options est invalide."
+  [[ $(stat -c '%a' "${WOS_OPTIONS}") == "600" ]] \
+    || fail ".options doit être en mode 600."
+  [[ $(stat -c '%u:%g' "${WOS_OPTIONS}") == $(stat -c '%u:%g' "${CONTROL_ROOT}") ]] \
+    || fail ".options doit appartenir au compte applicatif."
+fi
 systemctl is-active --quiet world-of-seeds-newgreedy-restart.path \
   || fail "la surveillance de redémarrage NewGreedy n'est pas active."
+systemctl is-active --quiet world-of-seeds-app-restart.path \
+  || fail "la surveillance de redémarrage de l'application n'est pas active."
 
 IFS= read -r REGISTRY_TOKEN || fail "jeton GHCR absent sur l'entrée standard."
 [[ ${#REGISTRY_TOKEN} -ge 20 && ${#REGISTRY_TOKEN} -le 4096 ]] || fail "jeton GHCR invalide."

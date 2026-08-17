@@ -198,12 +198,15 @@ async def stream_download(
     *,
     start: int,
     length: int,
+    chunk_size: int = DOWNLOAD_CHUNK_SIZE,
 ) -> AsyncGenerator[bytes, None]:
+    if chunk_size <= 0:
+        raise ValueError("Download chunk size must be positive")
     offset = start
     remaining = length
     try:
         while remaining > 0:
-            requested = min(remaining, DOWNLOAD_CHUNK_SIZE)
+            requested = min(remaining, chunk_size)
             chunk = await run_in_threadpool(
                 os.pread,
                 download.file_descriptor,
@@ -230,10 +233,11 @@ class DownloadStreamingResponse(StreamingResponse):
         length: int,
         status_code: int,
         headers: dict[str, str],
+        chunk_size: int = DOWNLOAD_CHUNK_SIZE,
     ) -> None:
         self._download = download
         super().__init__(
-            stream_download(download, start=start, length=length),
+            stream_download(download, start=start, length=length, chunk_size=chunk_size),
             status_code=status_code,
             headers=headers,
         )

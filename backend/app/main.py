@@ -13,6 +13,8 @@ from app.core.http_security import SecurityHeadersMiddleware
 from app.integrations import ExternalServicesMonitor
 from app.integrations.newgreedy_config import NewGreedyConfigStore
 from app.integrations.newgreedy_restart import NewGreedyRestartStore
+from app.integrations.wos_restart import WosRestartStore
+from app.options import OptionsStore
 
 
 @asynccontextmanager
@@ -40,6 +42,8 @@ def create_app() -> FastAPI:
         max_bytes=settings.newgreedy_config_max_bytes,
     )
     application.state.newgreedy_restart_store = NewGreedyRestartStore(settings.data_root)
+    application.state.wos_restart_store = WosRestartStore(settings.data_root)
+    application.state.options_store = OptionsStore(settings.data_root)
     application.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     application.add_middleware(
         SecurityHeadersMiddleware,

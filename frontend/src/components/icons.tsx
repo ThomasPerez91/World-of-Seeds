@@ -1,13 +1,17 @@
 import {
   ArrowLeft,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
   Download,
   File,
   FileVideo,
   Folder,
   FolderInput,
   LockKeyhole,
+  Info,
+  LoaderCircle,
   Pencil,
   Gauge,
   RefreshCw,
@@ -17,6 +21,7 @@ import {
   Settings2,
   Sprout,
   Trash2,
+  TriangleAlert,
   X,
   type LucideProps,
 } from "lucide-react";
@@ -102,4 +107,24 @@ export function SaveIcon(props: AppIconProps) {
 
 export function RestartIcon(props: AppIconProps) {
   return <RotateCw {...decorative} {...props} />;
+}
+
+export function SuccessIcon(props: AppIconProps) {
+  return <CheckCircle2 {...decorative} {...props} />;
+}
+
+export function ErrorIcon(props: AppIconProps) {
+  return <CircleAlert {...decorative} {...props} />;
+}
+
+export function WarningIcon(props: AppIconProps) {
+  return <TriangleAlert {...decorative} {...props} />;
+}
+
+export function InfoIcon(props: AppIconProps) {
+  return <Info {...decorative} {...props} />;
+}
+
+export function LoadingIcon(props: AppIconProps) {
+  return <LoaderCircle {...decorative} {...props} />;
 }

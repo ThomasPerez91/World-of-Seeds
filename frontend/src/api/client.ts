@@ -15,6 +15,12 @@ export interface PublicSystemHealth {
   checked_at: string;
 }
 
+export interface LivenessHealth {
+  status: "ok";
+  service: string;
+  version: string;
+}
+
 export interface GeneratedCredentials {
   user: User;
   initial_password: string;
@@ -204,10 +210,59 @@ export interface NewGreedyRestartStatus {
     | "invalid_request";
 }
 
+export type WosRestartStatus = NewGreedyRestartStatus;
+
+export type OptionValue = boolean | number | string;
+
+export interface OptionField {
+  key: string;
+  label: string;
+  description: string;
+  input_type: "boolean" | "integer" | "select";
+  value: OptionValue;
+  default: OptionValue;
+  unit: string | null;
+  minimum: number | null;
+  maximum: number | null;
+  choices: string[];
+  editable: boolean;
+  restart_required: boolean;
+}
+
+export interface OptionSection {
+  id: string;
+  label: string;
+  fields: OptionField[];
+}
+
+export interface OptionsResponse {
+  sections: OptionSection[];
+  changed_keys: string[];
+  restart_required: boolean;
+}
+
+interface BusinessErrorDetail {
+  code: string;
+  message: string;
+  field: string | null;
+}
+
+function isBusinessErrorDetail(value: unknown): value is BusinessErrorDetail {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<BusinessErrorDetail>;
+  return (
+    typeof candidate.code === "string" &&
+    typeof candidate.message === "string" &&
+    (typeof candidate.field === "string" || candidate.field === null)
+  );
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly code: string | null = null,
+    public readonly field: string | null = null,
   ) {
     super(message);
   }
@@ -243,13 +298,21 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (!response.ok) {
     let message = "Une erreur est survenue.";
+    let code: string | null = null;
+    let field: string | null = null;
     try {
-      const body = (await response.json()) as { detail?: string };
-      message = body.detail ?? message;
+      const body = (await response.json()) as { detail?: string | BusinessErrorDetail };
+      if (typeof body.detail === "string") {
+        message = body.detail;
+      } else if (isBusinessErrorDetail(body.detail)) {
+        message = body.detail.message;
+        code = body.detail.code;
+        field = body.detail.field;
+      }
     } catch {
       // Keep the generic message for non-JSON failures.
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, code, field);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -260,6 +323,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   health(): Promise<PublicSystemHealth> {
     return request<PublicSystemHealth>("/health/status");
+  },
+
+  liveHealth(): Promise<LivenessHealth> {
+    return request<LivenessHealth>("/health/live");
   },
 
   async login(username: string, password: string): Promise<User> {
@@ -381,6 +448,27 @@ export const api = {
 
   restartNewGreedy(): Promise<NewGreedyRestartStatus> {
     return request<NewGreedyRestartStatus>("/admin/services/newgreedy/restart", {
+      method: "POST",
+    });
+  },
+
+  getOptions(): Promise<OptionsResponse> {
+    return request<OptionsResponse>("/admin/options");
+  },
+
+  updateOptions(changes: Record<string, OptionValue>): Promise<OptionsResponse> {
+    return request<OptionsResponse>("/admin/options", {
+      method: "PATCH",
+      body: JSON.stringify({ changes }),
+    });
+  },
+
+  getWosRestartStatus(): Promise<WosRestartStatus> {
+    return request<WosRestartStatus>("/admin/services/wos/restart");
+  },
+
+  restartWos(): Promise<WosRestartStatus> {
+    return request<WosRestartStatus>("/admin/services/wos/restart", {
       method: "POST",
     });
   },

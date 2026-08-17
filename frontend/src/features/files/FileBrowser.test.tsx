@@ -87,8 +87,7 @@ describe("FileBrowser", () => {
     expect(document.activeElement).toBe(cancelButton);
     await user.click(screen.getByRole("button", { name: "Placer dans la corbeille" }));
 
-    expect(await screen.findByRole("status")).toHaveProperty(
-      "textContent",
+    expect((await screen.findByRole("status")).textContent).toContain(
       "« movie.mkv » a été placé dans la corbeille.",
     );
     await user.click(screen.getByRole("button", { name: "Fermer le message" }));
