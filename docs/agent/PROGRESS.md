@@ -4,12 +4,11 @@
 
 - Version: `1.3.0`.
 - Product line: V1.
-- Feature branch: `feature/final-v1-completion`.
-- Feature PR: `#38` into `develop`.
-- Release PR: next, from `develop` into `master`.
-- MASTER HEAD before release: `7630ae68081e370a3b43c15ad98189d4feee2c3f`.
-- DEVELOP HEAD after feature merge: `717189e4d14df982a3d3e29c7361e7ea7177683f`.
-- Feature remote HEAD after accessibility fix: `b6b943209f22ff95a071e1cb90e744c502e203e6`.
+- Feature PR: `#38`, merged into `develop`.
+- Release PR: `#39`, merged into `master`.
+- Corrective branch: `fix/release-draft-verification`.
+- MASTER HEAD after the V1 merge: `3d54e623b91e69409d3e84563de07a2f67e79b12`.
+- DEVELOP HEAD before the deployment fix: `c5e8ae9e55f4688e2bd75c42dd146fc2aaaf7f92`.
 
 ## Completed in the V1 completion feature
 
@@ -57,11 +56,14 @@
 - The initial frontend run found one missing accessible label.
 - The minimal `aria-label` correction is published.
 - The corrected feature CI run is fully green.
-- Agent handoff documentation is integrated into `develop`.
+- Agent handoff documentation is integrated into `develop` and `master`.
 - PR `#38` is merged into `develop` with green CI.
-- A release PR still needs to be opened from `develop` to `master`.
-- The release PR must pass all required CI before merge.
-- Final branch SHAs must be recorded in the completion handoff.
+- PR `#39` is merged into `master` with green PR CI.
+- The first post-merge deployment stopped before the image build.
+- Root cause: a read-only build token could not see the prepared draft release.
+- The corrective workflow isolates draft verification in a write-scoped job.
+- The build job retains read-only repository access.
+- Corrective CI, integration, release, and OVH deployment remain to complete.
 
 ## Known constraints
 
@@ -74,9 +76,9 @@
 
 ## Next task
 
-- Finish the V1 integration and release sequence only.
-- Merge PR `#38` into `develop` after documentation CI is green.
-- Open and validate the `develop` to `master` release PR for `1.3.0`.
-- Merge the release only with green backend, frontend, and container checks.
+- Finish the V1 deployment correction only.
+- Validate and merge the corrective PR into `develop`.
+- Integrate the correction into `master` with green CI.
+- Re-run the `v1.3.0` release path and verify the OVH deployment.
 - Do not start any V2 implementation as part of this release.
 - After V1 is released, the only authorized next product task is `Lot V2-A`.
