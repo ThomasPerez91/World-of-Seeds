@@ -10,10 +10,12 @@ import { api, ApiError, type StorageUsage, type User } from "./api/client";
 import { type AdminView } from "./features/admin/AdminPageShell";
 import { AdminStoragePage } from "./features/admin/AdminStoragePage";
 import { AdminServicesPage } from "./features/admin/AdminServicesPage";
+import { AdminSettingsPage } from "./features/admin/AdminSettingsPage";
 import { AdminTrashPage } from "./features/admin/AdminTrashPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { FileBrowser } from "./features/files/FileBrowser";
 import { TrashBrowser } from "./features/files/TrashBrowser";
+import { UserDownloadsPage } from "./features/torrents/UserDownloadsPage";
 import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
 import {
   LegalLinks,
@@ -129,8 +131,7 @@ function LoginScreen({
         <p className="eyebrow">Espace privé</p>
         <h1 id="brand-title">World of Seeds</h1>
         <p className="brand-copy">
-          Un espace discret où chaque graine déposée trouve sa place, grandit puis rejoint ta
-          collection.
+          Vos fichiers et téléchargements, réunis dans un espace privé.
         </p>
         <ServiceHealth />
       </section>
@@ -607,7 +608,7 @@ function FilesWorkspace({
   onSessionExpired: () => void;
   revision: number;
 }) {
-  const [activeView, setActiveView] = useState<"files" | "trash">("files");
+  const [activeView, setActiveView] = useState<"files" | "trash" | "downloads">("files");
   const [storage, setStorage] = useState<StorageUsage | null>(null);
 
   return (
@@ -634,6 +635,13 @@ function FilesWorkspace({
         >
           Corbeille
         </button>
+        <button
+          type="button"
+          aria-pressed={activeView === "downloads"}
+          onClick={() => setActiveView("downloads")}
+        >
+          Mes téléchargements
+        </button>
       </div>
       {activeView === "files" ? (
         <div>
@@ -644,7 +652,7 @@ function FilesWorkspace({
             revision={revision}
           />
         </div>
-      ) : (
+      ) : activeView === "trash" ? (
         <div>
           <TrashBrowser
             onFilesChanged={onFilesChanged}
@@ -652,6 +660,8 @@ function FilesWorkspace({
             revision={revision}
           />
         </div>
+      ) : (
+        <UserDownloadsPage onSessionExpired={onSessionExpired} />
       )}
     </section>
   );
@@ -730,6 +740,12 @@ function Dashboard({
           />
         ) : view === "admin-services" && user.is_admin ? (
           <AdminServicesPage
+            onBack={openFilesHome}
+            onNavigate={setView}
+            onSessionExpired={onSessionExpired}
+          />
+        ) : view === "admin-settings" && user.is_admin ? (
+          <AdminSettingsPage
             onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import { auditAccessibility } from "./test/accessibility";
+import { APP_VERSION } from "./version";
 
 function response(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -32,6 +33,9 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "Réessayer" }));
     await screen.findByRole("heading", { name: "Bienvenue" });
+    expect(
+      screen.getByText("Vos fichiers et téléchargements, réunis dans un espace privé."),
+    ).toBeDefined();
     expect(screen.getByText("Tous les services fonctionnent normalement.")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Vérifier l’état du service" }));
     await screen.findByText("Le service est momentanément interrompu.");
@@ -81,7 +85,7 @@ describe("App", () => {
     expect(document.querySelector("#dashboard-content")?.getAttribute("tabindex")).toBe("-1");
     expect(screen.queryByText("Bonjour, thomas")).toBeNull();
     expect(document.querySelector(".account-avatar")?.textContent).toBe("T");
-    expect(screen.getAllByText("v1.2.0").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(`v${APP_VERSION}`).length).toBeGreaterThan(0);
     expect(document.querySelector(".account-settings-trigger")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
     await screen.findByText("Ce dossier est vide");

@@ -54,13 +54,19 @@ class Settings(BaseSettings):
     qbittorrent_url: AnyHttpUrl | None = None
     qbittorrent_username: str | None = Field(default=None, min_length=1, max_length=128)
     qbittorrent_password: SecretStr | None = Field(default=None, repr=False)
+    qbittorrent_data_root: Path = Path("/data")
+    c411_passkey: SecretStr | None = Field(default=None, repr=False)
+    c411_tracker_hosts: list[AllowedHost] = Field(
+        default_factory=lambda: ["tracker.c411.org"],
+        min_length=1,
+    )
     integration_connect_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
     integration_read_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     integration_health_cache_seconds: float = Field(default=10.0, ge=1, le=300)
     integration_auth_failure_cache_seconds: float = Field(default=300.0, ge=60, le=3600)
     newgreedy_config_max_bytes: int = Field(default=128 * 1024, ge=1024, le=1024 * 1024)
 
-    @field_validator("data_root", "static_root")
+    @field_validator("data_root", "static_root", "qbittorrent_data_root")
     @classmethod
     def require_absolute_container_path(cls, value: Path) -> Path:
         if not value.is_absolute():
@@ -72,6 +78,20 @@ class Settings(BaseSettings):
     def reject_empty_qbittorrent_password(cls, value: SecretStr | None) -> SecretStr | None:
         if value is not None and value.get_secret_value() == "":
             raise ValueError("qBittorrent password must not be empty")
+        return value
+
+    @field_validator("c411_passkey")
+    @classmethod
+    def validate_c411_passkey(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None:
+            return value
+        secret = value.get_secret_value()
+        if (
+            not 8 <= len(secret) <= 256
+            or not secret.isascii()
+            or any(character in "/?#" for character in secret)
+        ):
+            raise ValueError("C411 passkey is invalid")
         return value
 
     @field_validator("newgreedy_url", "qbittorrent_url")

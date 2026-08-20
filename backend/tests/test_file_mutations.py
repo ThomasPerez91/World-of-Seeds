@@ -69,12 +69,12 @@ async def test_files_and_directories_are_renamed_without_loading_their_contents(
 
     renamed_file = await client.patch(
         "/api/v1/files/rename",
-        json={"path": "downloads/movie.mkv", "name": "film.mkv"},
+        json={"path": "downloads/movie.mkv", "basename": "film"},
         headers=csrf_header(client),
     )
     renamed_directory = await client.patch(
         "/api/v1/files/rename",
-        json={"path": "downloads/collection", "name": "series"},
+        json={"path": "downloads/collection", "basename": "series"},
         headers=csrf_header(client),
     )
 
@@ -89,6 +89,92 @@ async def test_files_and_directories_are_renamed_without_loading_their_contents(
     assert renamed_directory.status_code == 200
     assert renamed_directory.json()["path"] == "downloads/series"
     assert (downloads / "series" / "episode.mkv").read_bytes() == b"episode"
+
+
+@pytest.mark.asyncio
+async def test_single_directory_creation_is_sandboxed_and_reports_collisions(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    await create_workspace_user(db_session, data_root)
+    await login(client)
+    headers = csrf_header(client)
+
+    created = await client.post(
+        "/api/v1/files/directory",
+        json={"parent": "downloads", "name": "Nouveau dossier"},
+        headers=headers,
+    )
+    collision = await client.post(
+        "/api/v1/files/directory",
+        json={"parent": "downloads", "name": "Nouveau dossier"},
+        headers=headers,
+    )
+    traversal = await client.post(
+        "/api/v1/files/directory",
+        json={"parent": "../other", "name": "escape"},
+        headers=headers,
+    )
+
+    assert created.status_code == 201
+    assert created.json()["path"] == "downloads/Nouveau dossier"
+    assert (workspace(data_root) / "downloads" / "Nouveau dossier").is_dir()
+    assert collision.status_code == 409
+    assert traversal.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_file_rename_preserves_simple_compound_missing_and_hidden_extensions(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    await create_workspace_user(db_session, data_root)
+    downloads = workspace(data_root) / "downloads"
+    for name in ("film.mkv", "archive.tar.gz", "README", ".hiddenfile"):
+        (downloads / name).write_bytes(name.encode())
+    await login(client)
+    headers = csrf_header(client)
+
+    cases = [
+        ("film.mkv", "Mon film", "Mon film.mkv"),
+        ("archive.tar.gz", "sauvegarde", "sauvegarde.tar.gz"),
+        ("README", "LISEZMOI", "LISEZMOI"),
+        (".hiddenfile", "secret", "secret"),
+    ]
+    for source, basename, expected in cases:
+        response = await client.patch(
+            "/api/v1/files/rename",
+            json={"path": f"downloads/{source}", "basename": basename},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["name"] == expected
+        assert (downloads / expected).is_file()
+
+
+@pytest.mark.asyncio
+async def test_file_rename_cannot_change_or_remove_extension(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    await create_workspace_user(db_session, data_root)
+    downloads = workspace(data_root) / "downloads"
+    (downloads / "film.mkv").write_bytes(b"video")
+    await login(client)
+
+    response = await client.patch(
+        "/api/v1/files/rename",
+        json={"path": "downloads/film.mkv", "basename": "film.exe"},
+        headers=csrf_header(client),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "film.exe.mkv"
+    assert not (downloads / "film.exe").exists()
+    assert (downloads / "film.exe.mkv").read_bytes() == b"video"
 
 
 @pytest.mark.asyncio
@@ -215,17 +301,17 @@ async def test_mutations_reject_traversal_symlinks_and_protected_roots(
 
     traversal = await client.patch(
         "/api/v1/files/rename",
-        json={"path": "../outside.txt", "name": "stolen.txt"},
+        json={"path": "../outside.txt", "basename": "stolen"},
         headers=headers,
     )
     symlink = await client.patch(
         "/api/v1/files/rename",
-        json={"path": "downloads/escape", "name": "renamed"},
+        json={"path": "downloads/escape", "basename": "renamed"},
         headers=headers,
     )
     root = await client.patch(
         "/api/v1/files/rename",
-        json={"path": "", "name": "renamed"},
+        json={"path": "", "basename": "renamed"},
         headers=headers,
     )
     downloads_root = await client.post(
@@ -235,7 +321,7 @@ async def test_mutations_reject_traversal_symlinks_and_protected_roots(
     )
     control_character = await client.patch(
         "/api/v1/files/rename",
-        json={"path": "downloads/escape", "name": "bad\nname"},
+        json={"path": "downloads/escape", "basename": "bad\nname"},
         headers=headers,
     )
 
@@ -342,7 +428,7 @@ async def test_mutations_require_authentication_current_credentials_and_csrf(
 ) -> None:
     anonymous = await client.patch(
         "/api/v1/files/rename",
-        json={"path": "downloads/movie.mkv", "name": "film.mkv"},
+        json={"path": "downloads/movie.mkv", "basename": "film"},
     )
     assert anonymous.status_code == 401
 
@@ -355,7 +441,7 @@ async def test_mutations_require_authentication_current_credentials_and_csrf(
     await login(client, "temporary")
     forced_change = await client.patch(
         "/api/v1/files/rename",
-        json={"path": "downloads/movie.mkv", "name": "film.mkv"},
+        json={"path": "downloads/movie.mkv", "basename": "film"},
         headers=csrf_header(client),
     )
     assert forced_change.status_code == 403
@@ -365,6 +451,6 @@ async def test_mutations_require_authentication_current_credentials_and_csrf(
     await login(client, "active")
     missing_csrf = await client.patch(
         "/api/v1/files/rename",
-        json={"path": "downloads/movie.mkv", "name": "film.mkv"},
+        json={"path": "downloads/movie.mkv", "basename": "film"},
     )
     assert missing_csrf.status_code == 403

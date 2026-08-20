@@ -104,6 +104,15 @@ sudo install -o root -g root -m 644 \
 sudo install -o root -g root -m 644 \
   "$WOS_SETUP_DIR/repository/deploy/world-of-seeds-newgreedy-restart.path" \
   /etc/systemd/system/world-of-seeds-newgreedy-restart.path
+sudo install -o root -g root -m 755 \
+  "$WOS_SETUP_DIR/repository/deploy/world-of-seeds-app-restart" \
+  /usr/local/sbin/world-of-seeds-app-restart
+sudo install -o root -g root -m 644 \
+  "$WOS_SETUP_DIR/repository/deploy/world-of-seeds-app-restart.service" \
+  /etc/systemd/system/world-of-seeds-app-restart.service
+sudo install -o root -g root -m 644 \
+  "$WOS_SETUP_DIR/repository/deploy/world-of-seeds-app-restart.path" \
+  /etc/systemd/system/world-of-seeds-app-restart.path
 sudo install -o root -g root -m 440 \
   "$WOS_SETUP_DIR/repository/deploy/world-of-seeds.sudoers" \
   /etc/sudoers.d/world-of-seeds
@@ -140,6 +149,9 @@ WOS_NEWGREEDY_URL=http://newgreedy:8080
 WOS_QBITTORRENT_URL=http://qbittorrent:8080
 WOS_QBITTORRENT_USERNAME=REMPLACER_PAR_LE_USER_WEBUI_QBITTORRENT
 WOS_QBITTORRENT_PASSWORD=REMPLACER_PAR_LE_PASSWORD_WEBUI_QBITTORRENT
+WOS_QBITTORRENT_DATA_ROOT=/data
+WOS_C411_PASSKEY=REMPLACER_PAR_LA_PASSKEY_DU_COMPTE_WOS
+WOS_C411_TRACKER_HOSTS=["tracker.c411.org"]
 ```
 
 Générer le mot de passe sans le publier dans GitHub :
@@ -157,8 +169,14 @@ sudo test -r /opt/world-of-seeds/.env
 
 Les identifiants WebUI qBittorrent ne doivent pas être collés dans une issue, une PR ou un
 terminal enregistré. Ils restent uniquement dans ce fichier `root:root` en mode `600`.
+La passkey C411 suit la même règle et ne doit jamais être placée dans `.options`.
 
-## 5. Préparer le canal de contrôle NewGreedy
+qBittorrent doit disposer d’un bind mount contrôlé `/srv/seedbox:/data` avec une identité
+capable d’écrire dans les workspaces préparés. Ne pas utiliser `chmod 777`. Vérifier que son
+chemin interne correspond exactement à `WOS_QBITTORRENT_DATA_ROOT` avant d’activer le dépôt
+de torrents.
+
+## 5. Préparer les canaux de contrôle
 
 Le fichier actif devient `/srv/seedbox/.wos-control/newgreedy/config.ini`. L’application
 peut le modifier, mais elle ne peut pas commander Docker. Un helper systemd root consomme
@@ -169,13 +187,19 @@ Sur OVH :
 ```bash
 sudo install -d -o ubuntu -g ubuntu -m 700 \
   /srv/seedbox/.wos-control \
-  /srv/seedbox/.wos-control/newgreedy
+  /srv/seedbox/.wos-control/newgreedy \
+  /srv/seedbox/.wos-control/wos
 sudo install -d -o root -g ubuntu -m 750 \
-  /srv/seedbox/.wos-control/newgreedy-status
+  /srv/seedbox/.wos-control/newgreedy-status \
+  /srv/seedbox/.wos-control/wos-status
 sudo install -o ubuntu -g ubuntu -m 600 \
   /home/ubuntu/deploy/newgreedy-test/config.ini \
   /srv/seedbox/.wos-control/newgreedy/config.ini
 ```
+
+Le fichier `/srv/seedbox/.wos-control/.options` sera créé en mode `600` lors du premier
+enregistrement depuis l’administration. Tant qu’il est absent, les valeurs sûres du registre
+backend sont utilisées.
 
 Modifier ensuite le volume `config.ini` du service NewGreedy dans
 `/home/ubuntu/deploy/newgreedy-test/docker-compose.yml`. Sa source doit devenir exactement :
@@ -202,12 +226,18 @@ enfin la surveillance :
 
 ```bash
 sudo systemctl enable --now world-of-seeds-newgreedy-restart.path
+sudo systemctl enable --now world-of-seeds-app-restart.path
 sudo systemctl is-active world-of-seeds-newgreedy-restart.path
+sudo systemctl is-active world-of-seeds-app-restart.path
 sudo systemctl status --no-pager world-of-seeds-newgreedy-restart.path
+sudo systemctl status --no-pager world-of-seeds-app-restart.path
 ```
 
 Le conteneur WOS continue de ne monter que `/srv/seedbox:/data`. Le dossier de statut est
 `root:ubuntu` en mode `750`; WOS peut le lire avec son GID 1000, mais pas le modifier.
+Le helper de redémarrage WOS lit uniquement l’image immuable déjà inscrite dans
+`/opt/world-of-seeds/.deployed-image`, puis recrée exclusivement le service Compose `app`.
+Il n’accepte aucun argument et le conteneur applicatif ne monte toujours pas le socket Docker.
 
 ## 6. Vérifier l'empreinte SSH
 

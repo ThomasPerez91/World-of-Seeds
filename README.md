@@ -14,19 +14,21 @@ Les capacités fonctionnelles principales de la V1 sont en place :
 - renommage coordonné du compte et de son dossier avec compensation en cas d'échec SQL ;
 - navigation sécurisée avec métadonnées, fil d'Ariane et espace disque ;
 - téléchargement en flux avec HTTP Range, reprise, ETag et Last-Modified ;
-- renommage et déplacement atomiques sans écrasement, avec confirmations dans l’interface ;
+- création de dossier, renommage avec extension protégée et déplacement atomique sans écrasement ;
+- téléchargement de dossiers en ZIP sans recompression des contenus ;
 - corbeille privée par utilisateur, restauration avec détection de collision et purge définitive ;
 - pages d’administration dédiées aux utilisateurs, au stockage global et au nettoyage des corbeilles ;
 - supervision privée de NewGreedy et qBittorrent, liste des torrents et configuration NewGreedy contrôlée ;
+- dépôt utilisateur de `.torrent` C411, remplacement sûr de la passkey et suivi personnel via WOS ;
 - redémarrage NewGreedy médié par systemd, sans socket Docker dans le conteneur applicatif ;
 - image Docker unique pour l'API et le frontend ;
 - montage hôte limité à `/srv/seedbox:/data` ;
 - contrôles de qualité automatisés.
 
-La V1 applicative est complète. Toute PR de release fusionnée dans `master` publie la
-version stable déclarée par le projet, puis transmet son commit immuable au workflow de
-déploiement. L'image est construite dans GHCR et déployée sur OVH par une identité SSH
-restreinte. Le déclenchement manuel reste disponible en secours.
+La V1 applicative est complète et la conception de la V2 est engagée. Toute PR de release
+fusionnée dans `master` prépare une release en brouillon, construit l’image depuis le commit
+immuable, vérifie sa version, publie la release puis déploie le digest validé sur OVH. Le
+déclenchement manuel reste disponible en secours.
 
 ## Démarrage local sans Docker
 
@@ -61,6 +63,17 @@ uv export --frozen --no-dev --no-emit-project --no-header \
 La CI refuse une divergence entre ces deux fichiers. L'image installe uniquement les
 versions et empreintes cryptographiques ainsi exportées.
 
+`VERSION` est la source canonique de version applicative. Pour préparer une nouvelle
+version et mettre à jour ses miroirs Python/npm :
+
+```bash
+python3 scripts/versioning.py set 1.3.0
+python3 scripts/versioning.py check --expected-tag v1.3.0 --print-version
+```
+
+La CI vérifie les miroirs et le label OCI de l’image avant qu’une release stable puisse être
+publiée.
+
 ## Déploiement Docker
 
 Le déploiement ne doit pas être lancé avant d'avoir configuré `.env` et préparé les permissions de `/srv/seedbox` :
@@ -90,6 +103,13 @@ accès au socket Docker. Le redémarrage NewGreedy passe par un fichier de requ�
 `/srv/seedbox/.wos-control` et un service systemd limité à la recréation de cet unique
 service.
 
+Pour les téléchargements personnels, qBittorrent doit monter `/srv/seedbox` sur `/data` et
+WOS lui transmet uniquement `/data/<username>/downloads`, calculé depuis le compte
+authentifié. Le navigateur ne fournit aucun `save_path`. La passkey C411 WOS reste
+uniquement dans `.env` via `WOS_C411_PASSKEY` ; celle d’un torrent utilisateur est remplacée
+en mémoire puis abandonnée, sans écriture en base, dans `.options`, dans Redis ou dans les
+logs.
+
 Le mot de passe administrateur est demandé interactivement et n'est ni placé dans `.env`, ni écrit dans les logs. Pour l'accès initial par tunnel HTTP, `WOS_COOKIE_SECURE=false`. Cette valeur devra devenir `true` en même temps que l'ajout de HTTPS.
 
 La commande de création de l'administrateur initialise aussi
@@ -105,10 +125,12 @@ refuse toute collision et ne touche jamais aux répertoires qBittorrent historiq
 `watch` propres aux utilisateurs lorsqu'ils sont vides ; un dossier non vide est conservé
 mais masqué par le navigateur.
 
-La conception détaillée et le découpage des prochaines PR sont documentés dans
-[`docs/architecture-v1.md`](docs/architecture-v1.md). La coexistence avec les chemins
-qBittorrent actuels est décrite dans
-[`docs/storage-migration.md`](docs/storage-migration.md).
+La V1 reste documentée dans [`docs/architecture-v1.md`](docs/architecture-v1.md). La cible
+V2, ses transitions métier et son découpage de PR sont décrits dans
+[`docs/architecture-v2.md`](docs/architecture-v2.md),
+[`docs/state-machines-v2.md`](docs/state-machines-v2.md) et
+[`docs/roadmap-v2.md`](docs/roadmap-v2.md). La coexistence avec les chemins qBittorrent
+actuels est détaillée dans [`docs/storage-migration.md`](docs/storage-migration.md).
 
 Le déploiement GitHub Actions et l'installation sécurisée de l'identité technique OVH
 sont détaillés pas à pas dans

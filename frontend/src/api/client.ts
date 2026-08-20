@@ -15,6 +15,12 @@ export interface PublicSystemHealth {
   checked_at: string;
 }
 
+export interface LivenessHealth {
+  status: "ok";
+  service: string;
+  version: string;
+}
+
 export interface GeneratedCredentials {
   user: User;
   initial_password: string;
@@ -55,6 +61,37 @@ export interface FileMutation {
   path: string;
   name: string;
   kind: "directory" | "file";
+}
+
+export type UserTorrentState =
+  | "adding"
+  | "pending"
+  | "downloading"
+  | "stalled"
+  | "completed"
+  | "error";
+
+export interface UserTorrent {
+  id: string;
+  name: string;
+  size_bytes: number;
+  progress: number;
+  state: UserTorrentState;
+  downloaded_bytes: number;
+  download_speed_bytes: number;
+  eta_seconds: number | null;
+  error: string | null;
+  created_at: string;
+}
+
+export interface UserTorrentListing {
+  torrents: UserTorrent[];
+}
+
+export interface TorrentUploadResult {
+  id: string;
+  name: string;
+  total_size: number;
 }
 
 export interface TrashEntry {
@@ -204,10 +241,59 @@ export interface NewGreedyRestartStatus {
     | "invalid_request";
 }
 
+export type WosRestartStatus = NewGreedyRestartStatus;
+
+export type OptionValue = boolean | number | string;
+
+export interface OptionField {
+  key: string;
+  label: string;
+  description: string;
+  input_type: "boolean" | "integer" | "select";
+  value: OptionValue;
+  default: OptionValue;
+  unit: string | null;
+  minimum: number | null;
+  maximum: number | null;
+  choices: string[];
+  editable: boolean;
+  restart_required: boolean;
+}
+
+export interface OptionSection {
+  id: string;
+  label: string;
+  fields: OptionField[];
+}
+
+export interface OptionsResponse {
+  sections: OptionSection[];
+  changed_keys: string[];
+  restart_required: boolean;
+}
+
+interface BusinessErrorDetail {
+  code: string;
+  message: string;
+  field: string | null;
+}
+
+function isBusinessErrorDetail(value: unknown): value is BusinessErrorDetail {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<BusinessErrorDetail>;
+  return (
+    typeof candidate.code === "string" &&
+    typeof candidate.message === "string" &&
+    (typeof candidate.field === "string" || candidate.field === null)
+  );
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly code: string | null = null,
+    public readonly field: string | null = null,
   ) {
     super(message);
   }
@@ -226,7 +312,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = init.method?.toUpperCase() ?? "GET";
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
-  if (init.body !== undefined) {
+  if (init.body !== undefined && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
   if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
@@ -243,13 +329,21 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (!response.ok) {
     let message = "Une erreur est survenue.";
+    let code: string | null = null;
+    let field: string | null = null;
     try {
-      const body = (await response.json()) as { detail?: string };
-      message = body.detail ?? message;
+      const body = (await response.json()) as { detail?: string | BusinessErrorDetail };
+      if (typeof body.detail === "string") {
+        message = body.detail;
+      } else if (isBusinessErrorDetail(body.detail)) {
+        message = body.detail.message;
+        code = body.detail.code;
+        field = body.detail.field;
+      }
     } catch {
       // Keep the generic message for non-JSON failures.
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, code, field);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -260,6 +354,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   health(): Promise<PublicSystemHealth> {
     return request<PublicSystemHealth>("/health/status");
+  },
+
+  liveHealth(): Promise<LivenessHealth> {
+    return request<LivenessHealth>("/health/live");
   },
 
   async login(username: string, password: string): Promise<User> {
@@ -385,6 +483,27 @@ export const api = {
     });
   },
 
+  getOptions(): Promise<OptionsResponse> {
+    return request<OptionsResponse>("/admin/options");
+  },
+
+  updateOptions(changes: Record<string, OptionValue>): Promise<OptionsResponse> {
+    return request<OptionsResponse>("/admin/options", {
+      method: "PATCH",
+      body: JSON.stringify({ changes }),
+    });
+  },
+
+  getWosRestartStatus(): Promise<WosRestartStatus> {
+    return request<WosRestartStatus>("/admin/services/wos/restart");
+  },
+
+  restartWos(): Promise<WosRestartStatus> {
+    return request<WosRestartStatus>("/admin/services/wos/restart", {
+      method: "POST",
+    });
+  },
+
   listAdminTrash(signal?: AbortSignal): Promise<AdminTrashListing> {
     return request<AdminTrashListing>("/admin/trash", { signal });
   },
@@ -415,11 +534,36 @@ export const api = {
     return `/api/v1/files/download?${search.toString()}`;
   },
 
-  renameFile(path: string, name: string): Promise<FileMutation> {
+  folderDownloadUrl(path: string): string {
+    const search = new URLSearchParams({ path });
+    return `/api/v1/files/download-folder?${search.toString()}`;
+  },
+
+  createDirectory(parent: string, name: string): Promise<FileMutation> {
+    return request<FileMutation>("/files/directory", {
+      method: "POST",
+      body: JSON.stringify({ parent, name }),
+    });
+  },
+
+  renameFile(path: string, basename: string): Promise<FileMutation> {
     return request<FileMutation>("/files/rename", {
       method: "PATCH",
-      body: JSON.stringify({ path, name }),
+      body: JSON.stringify({ path, basename }),
     });
+  },
+
+  uploadTorrent(file: File): Promise<TorrentUploadResult> {
+    const form = new FormData();
+    form.set("torrent", file, file.name);
+    return request<TorrentUploadResult>("/torrents", {
+      method: "POST",
+      body: form,
+    });
+  },
+
+  listUserTorrents(signal?: AbortSignal): Promise<UserTorrentListing> {
+    return request<UserTorrentListing>("/torrents", { signal });
   },
 
   moveFile(path: string, destinationDirectory: string): Promise<FileMutation> {

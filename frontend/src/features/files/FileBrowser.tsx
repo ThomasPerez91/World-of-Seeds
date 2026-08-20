@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 
 import {
   api,
@@ -21,10 +21,80 @@ import {
 } from "../../components/icons";
 import { Notice } from "../../components/Notice";
 import { formatBytes } from "../../utils/format";
+import { splitDisplayName } from "../../utils/files";
+import {
+  FileDialog,
+} from "./FileDialog";
 import {
   FileMutationDialog,
   type FileMutationAction,
 } from "./FileMutationDialog";
+
+function CreateFolderDialog({
+  parent,
+  onClose,
+  onCompleted,
+  onSessionExpired,
+}: {
+  parent: string;
+  onClose: () => void;
+  onCompleted: (message: string) => void;
+  onSessionExpired: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      const result = await api.createDirectory(parent, name);
+      onCompleted(`Le dossier « ${result.name} » a été créé.`);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setError(
+        caught instanceof ApiError && caught.status === 409
+          ? "Un élément porte déjà ce nom dans ce dossier."
+          : "Le dossier n’a pas pu être créé.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <FileDialog
+      title="Créer un dossier"
+      description="Le dossier sera créé uniquement à l’emplacement actuel."
+      onClose={onClose}
+      closeDisabled={submitting}
+    >
+      <form className="mutation-form" onSubmit={(event) => void submit(event)}>
+        <label htmlFor="new-folder-name">Nom du dossier</label>
+        <input
+          id="new-folder-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          maxLength={255}
+          data-initial-focus
+          required
+        />
+        <p className="form-message error-message" role="alert">{error}</p>
+        <div className="dialog-actions">
+          <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>Annuler</button>
+          <button type="submit" disabled={submitting || name.length === 0}>
+            {submitting ? "Création…" : "Créer le dossier"}
+          </button>
+        </div>
+      </form>
+    </FileDialog>
+  );
+}
 
 const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
   dateStyle: "medium",
@@ -107,6 +177,7 @@ export function FileBrowser({
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [notice, setNotice] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const [mutation, setMutation] = useState<{
     action: FileMutationAction;
     entry: FileEntry;
@@ -184,14 +255,19 @@ export function FileBrowser({
             ),
           )}
         </nav>
-        <button
-          type="button"
-          className="refresh-button"
-          onClick={() => setReloadKey((value) => value + 1)}
-          disabled={loading}
-        >
-          Actualiser
-        </button>
+        <div className="browser-navigation-actions">
+          <button type="button" className="refresh-button" onClick={() => setCreatingFolder(true)}>
+            Nouveau dossier
+          </button>
+          <button
+            type="button"
+            className="refresh-button"
+            onClick={() => setReloadKey((value) => value + 1)}
+            disabled={loading}
+          >
+            Actualiser
+          </button>
+        </div>
       </div>
 
       <Notice message={notice} onDismiss={() => setNotice("")} />
@@ -230,6 +306,7 @@ export function FileBrowser({
             </caption>
             <colgroup>
               <col className="file-name-column" />
+              <col className="file-extension-column" />
               <col className="file-type-column" />
               <col className="file-size-column" />
               <col className="file-date-column" />
@@ -238,6 +315,7 @@ export function FileBrowser({
             <thead>
               <tr>
                 <th scope="col">Nom</th>
+                <th scope="col">Extension</th>
                 <th scope="col">Type</th>
                 <th scope="col">Taille</th>
                 <th scope="col">Modification</th>
@@ -247,7 +325,9 @@ export function FileBrowser({
               </tr>
             </thead>
             <tbody>
-              {listing.entries.map((entry) => (
+              {listing.entries.map((entry) => {
+                const displayed = splitDisplayName(entry);
+                return (
                 <tr className={entry.blocked ? "blocked-row" : undefined} key={entry.name}>
                   <td className="file-name-cell">
                     <div className="file-name-content">
@@ -257,10 +337,10 @@ export function FileBrowser({
                       <span className="file-name-copy" title={entry.name}>
                         {entry.kind === "directory" && !entry.blocked ? (
                           <button type="button" onClick={() => navigate(entry.path)}>
-                            {entry.name}
+                            {displayed.basename}
                           </button>
                         ) : (
-                          <strong>{entry.name}</strong>
+                          <strong>{displayed.basename}</strong>
                         )}
                         <span className="mobile-file-meta">
                           {typeLabel(entry)} · {formatBytes(entry.size)}
@@ -274,6 +354,7 @@ export function FileBrowser({
                       </span>
                     </div>
                   </td>
+                  <td className="file-extension-cell">{displayed.extension || "—"}</td>
                   <td>{typeLabel(entry)}</td>
                   <td>{formatBytes(entry.size)}</td>
                   <td>
@@ -288,15 +369,27 @@ export function FileBrowser({
                       aria-label={`Actions pour ${entry.name}`}
                     >
                       {entry.kind === "directory" && !entry.blocked ? (
-                        <button
-                          type="button"
-                          className="open-folder-button"
-                          onClick={() => navigate(entry.path)}
-                          aria-label={`Ouvrir ${entry.name}`}
-                          title="Ouvrir"
-                        >
-                          <OpenIcon />
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            className="open-folder-button"
+                            onClick={() => navigate(entry.path)}
+                            aria-label={`Ouvrir ${entry.name}`}
+                            title="Ouvrir"
+                          >
+                            <OpenIcon />
+                          </button>
+                          <a
+                            className="download-link"
+                            href={api.folderDownloadUrl(entry.path)}
+                            download={`${entry.name}.zip`}
+                            aria-label={`Télécharger le dossier ${entry.name}`}
+                            title="Télécharger le dossier"
+                          >
+                            <DownloadIcon />
+                            <span className="download-label">Télécharger le dossier</span>
+                          </a>
+                        </>
                       ) : entry.blocked ? (
                         <span className="blocked-badge">Bloqué</span>
                       ) : (
@@ -348,7 +441,8 @@ export function FileBrowser({
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -366,6 +460,17 @@ export function FileBrowser({
           entry={mutation.entry}
           onClose={() => setMutation(null)}
           onCompleted={completeMutation}
+          onSessionExpired={onSessionExpired}
+        />
+      )}
+      {creatingFolder && (
+        <CreateFolderDialog
+          parent={listing?.path ?? path}
+          onClose={() => setCreatingFolder(false)}
+          onCompleted={(message) => {
+            setCreatingFolder(false);
+            completeMutation(message);
+          }}
           onSessionExpired={onSessionExpired}
         />
       )}

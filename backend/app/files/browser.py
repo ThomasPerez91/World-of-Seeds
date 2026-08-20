@@ -111,9 +111,16 @@ class SandboxedFileBrowser:
         self,
         workspace_manager: WorkspaceManager,
         directory_size_calculator: DirectorySizeCalculator | None = None,
+        *,
+        max_directory_entries: int = MAX_DIRECTORY_ENTRIES,
+        max_size_scan_entries: int = 50_000,
     ) -> None:
+        if max_directory_entries <= 0 or max_size_scan_entries <= 0:
+            raise ValueError("File browser limits must be positive")
         self._workspace_manager = workspace_manager
         self._directory_size_calculator = directory_size_calculator or DirectorySizeCalculator()
+        self._max_directory_entries = max_directory_entries
+        self._max_size_scan_entries = max_size_scan_entries
 
     def list_directory(self, username: str, raw_path: str) -> DirectorySnapshot:
         relative_path = RelativePath.parse(raw_path)
@@ -135,13 +142,13 @@ class SandboxedFileBrowser:
     ) -> tuple[list[FileEntry], bool]:
         entries: list[FileEntry] = []
         truncated = False
-        size_budget = DirectorySizeBudget()
+        size_budget = DirectorySizeBudget(remaining_entries=self._max_size_scan_entries)
         try:
             with os.scandir(directory_fd) as iterator:
                 for entry in iterator:
                     if not relative_path.components and entry.name in RETIRED_WORKSPACE_DIRECTORIES:
                         continue
-                    if len(entries) >= MAX_DIRECTORY_ENTRIES:
+                    if len(entries) >= self._max_directory_entries:
                         truncated = True
                         break
                     try:

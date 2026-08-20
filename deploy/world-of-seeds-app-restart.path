@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for World of Seeds application restart requests
+
+[Path]
+PathExists=/srv/seedbox/.wos-control/wos/restart-request.json
+Unit=world-of-seeds-app-restart.service
+
+[Install]
+WantedBy=multi-user.target

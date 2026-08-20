@@ -81,10 +81,18 @@ jobs:
             deploy/world-of-seeds-deploy-command
           python3 - <<'PY'
           from pathlib import Path
-          helper = Path("deploy/world-of-seeds-newgreedy-restart")
-          compile(helper.read_text(encoding="utf-8"), str(helper), "exec")
+          for name in (
+              "world-of-seeds-newgreedy-restart",
+              "world-of-seeds-app-restart",
+          ):
+              helper = Path("deploy") / name
+              compile(helper.read_text(encoding="utf-8"), str(helper), "exec")
           PY
-          test -x deploy/world-of-seeds-newgreedy-restart
+          test -x deploy/world-of-seeds-newgreedy-restart \
+            && test -x deploy/world-of-seeds-app-restart
+          grep -F 'PROJECT_DIRECTORY = Path("/opt/world-of-seeds")' \
+            deploy/world-of-seeds-app-restart
+          grep -F '"--no-deps", "app"' deploy/world-of-seeds-app-restart
           cp .env.example .env
           WOS_IMAGE="ghcr.io/thomasperez91/world-of-seeds@sha256:$(printf '0%.0s' {1..64})" \
             docker compose --env-file .env \
@@ -105,39 +113,24 @@ jobs:
             exit 1
           fi
       - name: Validate application version consistency
-        run: |
-          python3 - <<'PY'
-          import json
-          import re
-          import tomllib
-          from pathlib import Path
-
-          backend_project = tomllib.loads(Path("backend/pyproject.toml").read_text())
-          backend_version = backend_project["project"]["version"]
-          backend_module = Path("backend/app/__init__.py").read_text()
-          module_match = re.search(r'__version__ = "([^"]+)"', backend_module)
-          frontend_package = json.loads(Path("frontend/package.json").read_text())
-          frontend_lock = json.loads(Path("frontend/package-lock.json").read_text())
-          frontend_source = Path("frontend/src/version.ts").read_text()
-          source_match = re.search(r'APP_VERSION = "([^"]+)"', frontend_source)
-          versions = {
-              backend_version,
-              module_match.group(1) if module_match else None,
-              frontend_package["version"],
-              frontend_lock["version"],
-              frontend_lock["packages"][""]["version"],
-              source_match.group(1) if source_match else None,
-          }
-          if len(versions) != 1 or None in versions:
-              raise SystemExit(f"Inconsistent application versions: {sorted(map(str, versions))}")
-          print(f"Application version: {backend_version}")
-          PY
+        run: python3 scripts/versioning.py check --print-version
       - name: Build and start production stack
         run: |
           cp .env.example .env
           mkdir -p "$RUNNER_TEMP/seedbox"
+          version="$(python3 scripts/versioning.py check --print-version)"
+          docker compose build --build-arg "WOS_APP_VERSION=$version"
           SEEDBOX_HOST_PATH="$RUNNER_TEMP/seedbox" docker compose up \
-            --detach --build --wait --wait-timeout 120
+            --detach --no-build --wait --wait-timeout 120
+      - name: Verify application image version
+        run: |
+          expected_version="$(cat VERSION)"
+          app_container="$(docker compose ps --quiet app)"
+          app_image="$(docker inspect --format '{{.Image}}' "$app_container")"
+          actual_version="$(docker image inspect \
+            --format '{{index .Config.Labels "org.opencontainers.image.version"}}' \
+            "$app_image")"
+          test "$actual_version" = "$expected_version"
       - name: Verify host-only application port
         run: |
           curl --fail --silent --show-error \

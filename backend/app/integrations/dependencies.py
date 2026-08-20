@@ -5,6 +5,7 @@ from fastapi import Depends, Request
 from app.integrations.monitor import ExternalServicesMonitor
 from app.integrations.newgreedy_config import NewGreedyConfigStore
 from app.integrations.newgreedy_restart import NewGreedyRestartStore
+from app.integrations.wos_restart import WosRestartStore
 
 
 def get_external_services_monitor(request: Request) -> ExternalServicesMonitor:
@@ -34,4 +35,14 @@ def get_newgreedy_restart_store(request: Request) -> NewGreedyRestartStore:
 NewGreedyRestartStoreDependency = Annotated[
     NewGreedyRestartStore,
     Depends(get_newgreedy_restart_store),
+]
+
+
+def get_wos_restart_store(request: Request) -> WosRestartStore:
+    return cast(WosRestartStore, request.app.state.wos_restart_store)
+
+
+WosRestartStoreDependency = Annotated[
+    WosRestartStore,
+    Depends(get_wos_restart_store),
 ]

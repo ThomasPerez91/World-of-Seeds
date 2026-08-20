@@ -35,10 +35,12 @@ jobs:
           set -Eeuo pipefail
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          RELEASE_VERSION="${RELEASE_TAG#v}"
           jq -n \
             --arg sha "$RELEASE_SHA" \
             --arg tag "$RELEASE_TAG" \
-            '{event_type: "deploy-release", client_payload: {sha: $sha, tag: $tag}}' \
+            --arg version "$RELEASE_VERSION" \
+            '{event_type: "deploy-release", client_payload: {sha: $sha, tag: $tag, version: $version}}' \
             | gh api \
                 --method POST \
                 "repos/$GITHUB_REPOSITORY/dispatches" \
@@ -55,26 +57,35 @@ jobs:
       packages: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
+      sha: ${{ steps.context.outputs.sha }}
+      tag: ${{ steps.context.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Resolve the deployment revision
         id: context
         env:
           DISPATCH_SHA: ${{ github.event.client_payload.sha }}
           DISPATCH_TAG: ${{ github.event.client_payload.tag }}
+          DISPATCH_VERSION: ${{ github.event.client_payload.version }}
         run: |
           set -Eeuo pipefail
           if [[ "$GITHUB_EVENT_NAME" == "repository_dispatch" ]]; then
             DEPLOY_SHA="$DISPATCH_SHA"
             DEPLOY_TAG="$DISPATCH_TAG"
+            DEPLOY_VERSION="$DISPATCH_VERSION"
             [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
             [[ "$DEPLOY_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            [[ "$DEPLOY_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            [[ "$DEPLOY_TAG" == "v$DEPLOY_VERSION" ]]
           else
             DEPLOY_SHA="$GITHUB_SHA"
             DEPLOY_TAG=""
+            DEPLOY_VERSION=""
             [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
           fi
           printf 'sha=%s\n' "$DEPLOY_SHA" >>"$GITHUB_OUTPUT"
           printf 'tag=%s\n' "$DEPLOY_TAG" >>"$GITHUB_OUTPUT"
+          printf 'dispatched_version=%s\n' "$DEPLOY_VERSION" >>"$GITHUB_OUTPUT"
 
       - name: Check out the deployed revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -82,7 +93,22 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.context.outputs.sha }}
 
-      - name: Verify the published release
+      - name: Validate the deployed application version
+        id: version
+        env:
+          DEPLOY_TAG: ${{ steps.context.outputs.tag }}
+          DISPATCH_VERSION: ${{ steps.context.outputs.dispatched_version }}
+        run: |
+          set -Eeuo pipefail
+          version="$(python3 scripts/versioning.py check --print-version)"
+          if [[ -n "$DEPLOY_TAG" ]]; then
+            python3 scripts/versioning.py check \
+              --expected-version "$DISPATCH_VERSION" \
+              --expected-tag "$DEPLOY_TAG"
+          fi
+          printf 'version=%s\n' "$version" >>"$GITHUB_OUTPUT"
+
+      - name: Verify the prepared release
         if: github.event_name == 'repository_dispatch'
         env:
           DEPLOY_SHA: ${{ steps.context.outputs.sha }}
@@ -90,14 +116,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -Eeuo pipefail
-          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$DEPLOY_TAG")"
+          releases_json="$(gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100")"
+          release_json="$(jq -cer --arg tag "$DEPLOY_TAG" \
+            '[.[][] | select(.tag_name == $tag)] | if length == 1 then .[0] else error("prepared release not found or duplicated") end' \
+            <<<"$releases_json")"
           jq -e \
             --arg tag "$DEPLOY_TAG" \
-            '.tag_name == $tag and .draft == false and .prerelease == false and .target_commitish == "master"' \
+            --arg sha "$DEPLOY_SHA" \
+            '.tag_name == $tag and .prerelease == false and (.target_commitish == "master" or .target_commitish == $sha)' \
             <<<"$release_json" >/dev/null
-          git fetch --force origin \
-            "refs/tags/$DEPLOY_TAG:refs/tags/$DEPLOY_TAG"
-          [[ "$(git rev-list -n 1 "$DEPLOY_TAG")" == "$DEPLOY_SHA" ]]
           [[ "$(git rev-parse HEAD)" == "$DEPLOY_SHA" ]]
 
       - name: Set up Docker Buildx
@@ -119,17 +147,79 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ghcr.io/thomasperez91/world-of-seeds:sha-${{ steps.context.outputs.sha }}
+          build-args: |
+            WOS_APP_VERSION=${{ steps.version.outputs.version }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ steps.context.outputs.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
 
+      - name: Verify the immutable image version
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -Eeuo pipefail
+          image="ghcr.io/thomasperez91/world-of-seeds@$IMAGE_DIGEST"
+          docker pull "$image"
+          actual_version="$(docker image inspect \
+            --format '{{index .Config.Labels "org.opencontainers.image.version"}}' \
+            "$image")"
+          [[ "$actual_version" == "$EXPECTED_VERSION" ]]
+
+  publish:
+    name: Publish verified release
+    needs: build
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish or verify the stable release
+        if: needs.build.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ needs.build.outputs.sha }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_TAG" == "v$RELEASE_VERSION" ]]
+          releases_json="$(gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100")"
+          release_json="$(jq -cer --arg tag "$RELEASE_TAG" \
+            '[.[][] | select(.tag_name == $tag)] | if length == 1 then .[0] else error("prepared release not found or duplicated") end' \
+            <<<"$releases_json")"
+          jq -e \
+            --arg tag "$RELEASE_TAG" \
+            --arg sha "$RELEASE_SHA" \
+            '.tag_name == $tag and .prerelease == false and (.target_commitish == "master" or .target_commitish == $sha)' \
+            <<<"$release_json" >/dev/null
+          if [[ "$(jq -r '.draft' <<<"$release_json")" == "true" ]]; then
+            gh release edit "$RELEASE_TAG" \
+              --draft=false \
+              --latest \
+              --target "$RELEASE_SHA"
+          fi
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          jq -e '.draft == false and .prerelease == false' <<<"$release_json" >/dev/null
+          tag_ref="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG")"
+          tag_sha="$(jq -r '.object.sha' <<<"$tag_ref")"
+          if [[ "$(jq -r '.object.type' <<<"$tag_ref")" == "tag" ]]; then
+            tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_sha" --jq '.object.sha')"
+          fi
+          [[ "$tag_sha" == "$RELEASE_SHA" ]]
+
   deploy:
     name: Deploy immutable image
-    needs: build
+    needs:
+      - build
+      - publish
+    if: needs.build.result == 'success' && needs.publish.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:

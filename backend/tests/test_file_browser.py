@@ -93,6 +93,30 @@ async def test_user_lists_root_and_nested_directory_metadata(
 
 
 @pytest.mark.asyncio
+async def test_file_listing_applies_the_dynamic_options_limit(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    await create_workspace_user(db_session, data_root)
+    downloads = data_root / "thomas" / "downloads"
+    for index in range(101):
+        (downloads / f"file-{index:03}.txt").touch()
+    control = data_root / ".wos-control"
+    control.mkdir(mode=0o700)
+    options = control / ".options"
+    options.write_text("WOS_FILES_LIST_MAX_ENTRIES=100\n", encoding="utf-8")
+    options.chmod(0o600)
+    await login(client, "thomas", "correct-horse-battery")
+
+    response = await client.get("/api/v1/files", params={"path": "downloads"})
+
+    assert response.status_code == 200
+    assert len(response.json()["entries"]) == 100
+    assert response.json()["truncated"] is True
+
+
+@pytest.mark.asyncio
 async def test_retired_watch_directory_is_hidden_and_cannot_be_opened(
     client: AsyncClient,
     db_session: AsyncSession,

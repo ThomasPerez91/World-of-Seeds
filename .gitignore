@@ -1,5 +1,7 @@
 .DS_Store
 .env
+.options
+.options.backup
 .idea/
 .vscode/
 *.py[cod]

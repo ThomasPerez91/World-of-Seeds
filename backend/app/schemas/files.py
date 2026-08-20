@@ -41,7 +41,7 @@ class RenameFileRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str = Field(max_length=4096)
-    name: str = Field(min_length=1, max_length=255)
+    basename: str = Field(min_length=1, max_length=255)
 
 
 class MoveFileRequest(BaseModel):
@@ -49,6 +49,13 @@ class MoveFileRequest(BaseModel):
 
     path: str = Field(max_length=4096)
     destination_directory: str = Field(max_length=4096)
+
+
+class CreateDirectoryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parent: str = Field(max_length=4096)
+    name: str = Field(min_length=1, max_length=255)
 
 
 class FileMutationResponse(BaseModel):

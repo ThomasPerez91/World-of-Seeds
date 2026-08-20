@@ -74,6 +74,10 @@ class WorkspaceManager:
     def __init__(self, data_root: Path) -> None:
         self._data_root = data_root
 
+    @property
+    def data_root(self) -> Path:
+        return self._data_root
+
     @staticmethod
     def _validate_name(username: str) -> str:
         try:

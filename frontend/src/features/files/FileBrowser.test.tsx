@@ -72,7 +72,8 @@ describe("FileBrowser", () => {
     const trashButton = await screen.findByRole("button", {
       name: "Placer movie.mkv dans la corbeille",
     });
-    const fileNameCell = screen.getByText("movie.mkv").closest("td");
+    const fileNameCell = screen.getByText("movie").closest("td");
+    expect(screen.getByText(".mkv")).toBeTruthy();
     expect(fileNameCell?.classList.contains("file-name-cell")).toBe(true);
     expect(fileNameCell?.firstElementChild?.classList.contains("file-name-content")).toBe(
       true,
@@ -87,12 +88,49 @@ describe("FileBrowser", () => {
     expect(document.activeElement).toBe(cancelButton);
     await user.click(screen.getByRole("button", { name: "Placer dans la corbeille" }));
 
-    expect(await screen.findByRole("status")).toHaveProperty(
-      "textContent",
+    expect((await screen.findByRole("status")).textContent).toContain(
       "« movie.mkv » a été placé dans la corbeille.",
     );
     await user.click(screen.getByRole("button", { name: "Fermer le message" }));
     expect(screen.queryByText("« movie.mkv » a été placé dans la corbeille.")).toBeNull();
     await waitFor(() => expect(onFilesChanged).toHaveBeenCalledOnce());
   });
+
+  it.each([320, 375, 390, 430])(
+    "conserve les noms très longs et les actions au viewport %d px",
+    async (width) => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+      const longName =
+        "Film.Name.2026.MULTi.TRUEFRENCH.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.DTS-HD.MA.7.1-GROUP.mkv";
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          response({
+            path: "downloads",
+            breadcrumbs: [
+              { label: "Mes fichiers", path: "" },
+              { label: "Un-dossier-avec-un-nom-extremement-long-qui-ne-doit-pas-deborder", path: "downloads" },
+            ],
+            entries: [{ ...movie, name: longName, path: `downloads/${longName}` }],
+            storage: { total: 1000, used: 5, available: 995 },
+            truncated: false,
+          }),
+        ),
+      );
+      window.history.replaceState({}, "", "/?path=downloads");
+
+      render(
+        <FileBrowser
+          onFilesChanged={vi.fn()}
+          onSessionExpired={vi.fn()}
+          onStorageChanged={vi.fn()}
+          revision={0}
+        />,
+      );
+
+      expect(await screen.findByText(longName.slice(0, -4))).toBeTruthy();
+      expect(screen.getByRole("link", { name: `Télécharger ${longName}` })).toBeTruthy();
+      expect(screen.getByRole("button", { name: `Renommer ${longName}` })).toBeTruthy();
+    },
+  );
 });

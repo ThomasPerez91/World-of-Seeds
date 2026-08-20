@@ -1,0 +1,358 @@
+#!/usr/bin/python3
+"""Consume one fixed WOS app restart request without exposing Docker to WOS."""
+
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import time
+from contextlib import suppress
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from uuid import UUID
+
+CONTROL_ROOT = Path("/srv/seedbox/.wos-control")
+REQUEST_DIRECTORY = CONTROL_ROOT / "wos"
+STATUS_DIRECTORY = CONTROL_ROOT / "wos-status"
+REQUEST_FILENAME = "restart-request.json"
+STATUS_FILENAME = "restart-status.json"
+PROJECT_DIRECTORY = Path("/opt/world-of-seeds")
+COMPOSE_FILE = PROJECT_DIRECTORY / "compose.production.yaml"
+ENV_FILE = PROJECT_DIRECTORY / ".env"
+DEPLOYED_IMAGE_FILE = PROJECT_DIRECTORY / ".deployed-image"
+RUNTIME_DIRECTORY = Path("/run/world-of-seeds-app")
+LOCK_FILE = RUNTIME_DIRECTORY / "restart.lock"
+LAST_SUCCESS_FILE = RUNTIME_DIRECTORY / "last-success"
+DOCKER = "/usr/bin/docker"
+MAX_REQUEST_BYTES = 4096
+MAX_IMAGE_BYTES = 512
+REQUEST_MAX_AGE = timedelta(minutes=5)
+RESTART_COOLDOWN_SECONDS = 60
+HEALTH_TIMEOUT_SECONDS = 120
+IMAGE_PATTERN = re.compile(
+    r"^ghcr\.io/thomasperez91/world-of-seeds@sha256:[0-9a-f]{64}$"
+)
+
+
+class ControlError(Exception):
+    """A fixed deployment or control invariant was not met."""
+
+
+def directory_fd(path: Path) -> int:
+    return os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+
+
+def validate_directories() -> tuple[int, int]:
+    control_stat = os.stat(CONTROL_ROOT, follow_symlinks=False)
+    request_stat = os.stat(REQUEST_DIRECTORY, follow_symlinks=False)
+    status_stat = os.stat(STATUS_DIRECTORY, follow_symlinks=False)
+    if not all(stat.S_ISDIR(item.st_mode) for item in (control_stat, request_stat, status_stat)):
+        raise ControlError("control path is not a directory")
+    if any(item.st_mode & 0o022 for item in (control_stat, request_stat, status_stat)):
+        raise ControlError("control directory permissions are unsafe")
+    if request_stat.st_uid == 0 or control_stat.st_uid != request_stat.st_uid:
+        raise ControlError("request directory ownership is unsafe")
+    if status_stat.st_uid != 0 or status_stat.st_gid != request_stat.st_gid:
+        raise ControlError("status directory ownership is unsafe")
+    if stat.S_IMODE(control_stat.st_mode) != 0o700:
+        raise ControlError("control root must use mode 700")
+    if stat.S_IMODE(request_stat.st_mode) != 0o700:
+        raise ControlError("request directory must use mode 700")
+    if stat.S_IMODE(status_stat.st_mode) != 0o750:
+        raise ControlError("status directory must use mode 750")
+    return request_stat.st_uid, status_stat.st_gid
+
+
+def consume_request(owner_uid: int) -> UUID:
+    request_directory_fd = directory_fd(REQUEST_DIRECTORY)
+    try:
+        try:
+            request_fd = os.open(
+                REQUEST_FILENAME,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=request_directory_fd,
+            )
+        except FileNotFoundError as exc:
+            raise ControlError("restart request is absent") from exc
+        try:
+            request_stat = os.fstat(request_fd)
+            if not stat.S_ISREG(request_stat.st_mode) or request_stat.st_uid != owner_uid:
+                raise ControlError("restart request ownership or type is unsafe")
+            if stat.S_IMODE(request_stat.st_mode) != 0o600:
+                raise ControlError("restart request must use mode 600")
+            if request_stat.st_size > MAX_REQUEST_BYTES:
+                raise ControlError("restart request is too large")
+            raw = bytearray()
+            while len(raw) <= MAX_REQUEST_BYTES:
+                chunk = os.read(request_fd, min(1024, MAX_REQUEST_BYTES + 1 - len(raw)))
+                if not chunk:
+                    break
+                raw.extend(chunk)
+        finally:
+            os.close(request_fd)
+        if len(raw) > MAX_REQUEST_BYTES:
+            raise ControlError("restart request is too large")
+        latest_stat = os.stat(REQUEST_FILENAME, dir_fd=request_directory_fd, follow_symlinks=False)
+        if (latest_stat.st_dev, latest_stat.st_ino) != (request_stat.st_dev, request_stat.st_ino):
+            raise ControlError("restart request changed concurrently")
+        os.unlink(REQUEST_FILENAME, dir_fd=request_directory_fd)
+        os.fsync(request_directory_fd)
+    finally:
+        os.close(request_directory_fd)
+
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ControlError("restart request is not valid JSON") from exc
+    if not isinstance(payload, dict) or set(payload) != {
+        "request_id",
+        "requested_at",
+        "requested_by",
+    }:
+        raise ControlError("restart request shape is invalid")
+    try:
+        request_id = UUID(payload["request_id"])
+        UUID(payload["requested_by"])
+        requested_at = datetime.fromisoformat(payload["requested_at"].replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ControlError("restart request values are invalid") from exc
+    if requested_at.tzinfo is None:
+        raise ControlError("restart request timestamp has no timezone")
+    requested_at = requested_at.astimezone(UTC)
+    now = datetime.now(UTC)
+    if requested_at < now - REQUEST_MAX_AGE or requested_at > now + timedelta(seconds=30):
+        raise ControlError("restart request has expired")
+    return request_id
+
+
+def discard_request() -> None:
+    request_directory_fd = directory_fd(REQUEST_DIRECTORY)
+    try:
+        with suppress(FileNotFoundError):
+            os.unlink(REQUEST_FILENAME, dir_fd=request_directory_fd)
+            os.fsync(request_directory_fd)
+    finally:
+        os.close(request_directory_fd)
+
+
+def write_status(state: str, message_code: str, request_id: UUID | None, status_gid: int) -> None:
+    status_directory_fd = directory_fd(STATUS_DIRECTORY)
+    temporary_name = f".{STATUS_FILENAME}.{os.getpid()}.{os.urandom(8).hex()}.tmp"
+    created = False
+    try:
+        status_stat = os.fstat(status_directory_fd)
+        if (
+            not stat.S_ISDIR(status_stat.st_mode)
+            or status_stat.st_uid != 0
+            or status_stat.st_gid != status_gid
+            or stat.S_IMODE(status_stat.st_mode) != 0o750
+        ):
+            raise ControlError("status directory changed or is unsafe")
+        temporary_fd = os.open(
+            temporary_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o640,
+            dir_fd=status_directory_fd,
+        )
+        created = True
+        try:
+            os.fchown(temporary_fd, 0, status_gid)
+            content = json.dumps(
+                {
+                    "state": state,
+                    "request_id": str(request_id) if request_id is not None else None,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                    "message_code": message_code,
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
+            view = memoryview(content)
+            while view:
+                written = os.write(temporary_fd, view)
+                if written <= 0:
+                    raise OSError("short status write")
+                view = view[written:]
+            os.fsync(temporary_fd)
+        finally:
+            os.close(temporary_fd)
+        os.replace(
+            temporary_name,
+            STATUS_FILENAME,
+            src_dir_fd=status_directory_fd,
+            dst_dir_fd=status_directory_fd,
+        )
+        created = False
+        os.fsync(status_directory_fd)
+    finally:
+        if created:
+            with suppress(OSError):
+                os.unlink(temporary_name, dir_fd=status_directory_fd)
+        os.close(status_directory_fd)
+
+
+def read_deployed_image() -> str:
+    file_fd = os.open(DEPLOYED_IMAGE_FILE, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        file_stat = os.fstat(file_fd)
+        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_uid != 0:
+            raise ControlError("deployed image state ownership or type is unsafe")
+        if file_stat.st_mode & 0o077 or file_stat.st_size > MAX_IMAGE_BYTES:
+            raise ControlError("deployed image state permissions or size are unsafe")
+        chunks: list[bytes] = []
+        remaining = MAX_IMAGE_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(file_fd, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    finally:
+        os.close(file_fd)
+    raw = b"".join(chunks)
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise ControlError("deployed image state is too large")
+    try:
+        image = raw.decode("ascii").strip()
+    except UnicodeDecodeError as exc:
+        raise ControlError("deployed image state is invalid") from exc
+    if IMAGE_PATTERN.fullmatch(image) is None:
+        raise ControlError("deployed image reference is invalid")
+    return image
+
+
+def validate_deployment_files() -> None:
+    for path, allowed_modes in ((COMPOSE_FILE, {0o644}), (ENV_FILE, {0o400, 0o600})):
+        item_stat = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(item_stat.st_mode) or item_stat.st_uid != 0:
+            raise ControlError(f"unsafe deployment file: {path}")
+        if stat.S_IMODE(item_stat.st_mode) not in allowed_modes:
+            raise ControlError(f"unexpected deployment file mode: {path}")
+
+
+def compose_arguments(*arguments: str) -> list[str]:
+    return [
+        DOCKER,
+        "compose",
+        "--env-file",
+        str(ENV_FILE),
+        "--file",
+        str(COMPOSE_FILE),
+        *arguments,
+    ]
+
+
+def compose_environment(image: str) -> dict[str, str]:
+    return {
+        "DOCKER_CONFIG": str(RUNTIME_DIRECTORY / "docker-config"),
+        "PATH": "/usr/bin:/bin",
+        "WOS_IMAGE": image,
+    }
+
+
+def restart_app(image: str) -> None:
+    subprocess.run(
+        compose_arguments("up", "--detach", "--force-recreate", "--no-deps", "app"),
+        cwd=PROJECT_DIRECTORY,
+        env=compose_environment(image),
+        check=True,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        timeout=150,
+    )
+
+
+def wait_until_healthy(image: str) -> None:
+    deadline = time.monotonic() + HEALTH_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        container = subprocess.run(
+            compose_arguments("ps", "--quiet", "app"),
+            cwd=PROJECT_DIRECTORY,
+            env=compose_environment(image),
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=10,
+        )
+        container_id = container.stdout.strip()
+        if container.returncode == 0 and re.fullmatch(r"[0-9a-f]{12,64}", container_id):
+            inspected = subprocess.run(
+                [DOCKER, "inspect", container_id, "--format", "{{.State.Status}} {{.State.Health.Status}}"],
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=10,
+            )
+            if inspected.returncode == 0 and inspected.stdout.strip() == "running healthy":
+                return
+        time.sleep(1)
+    raise ControlError("WOS app did not become healthy")
+
+
+def cooldown_active() -> bool:
+    try:
+        last_success = float(LAST_SUCCESS_FILE.read_text(encoding="ascii"))
+    except (FileNotFoundError, ValueError):
+        return False
+    return time.time() - last_success < RESTART_COOLDOWN_SECONDS
+
+
+def record_success() -> None:
+    temporary = RUNTIME_DIRECTORY / f".last-success.{os.getpid()}.tmp"
+    temporary.write_text(str(time.time()), encoding="ascii")
+    temporary.chmod(0o600)
+    os.replace(temporary, LAST_SUCCESS_FILE)
+
+
+def main() -> int:
+    if os.geteuid() != 0:
+        raise ControlError("helper must run as root")
+    if sys.argv != [sys.argv[0]]:
+        raise ControlError("helper accepts no arguments")
+    if not RUNTIME_DIRECTORY.is_dir():
+        raise ControlError(f"runtime directory is absent: {RUNTIME_DIRECTORY}")
+    docker_config = RUNTIME_DIRECTORY / "docker-config"
+    docker_config.mkdir(mode=0o700, exist_ok=True)
+    if stat.S_IMODE(docker_config.stat().st_mode) != 0o700:
+        raise ControlError("runtime Docker configuration permissions are unsafe")
+
+    with LOCK_FILE.open("a+", encoding="ascii") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        owner_uid, status_gid = validate_directories()
+        request_id: UUID | None = None
+        try:
+            request_id = consume_request(owner_uid)
+        except (ControlError, OSError):
+            discard_request()
+            write_status("rejected", "invalid_request", request_id, status_gid)
+            raise
+        if cooldown_active():
+            write_status("rejected", "cooldown", request_id, status_gid)
+            return 0
+
+        write_status("restarting", "restarting", request_id, status_gid)
+        try:
+            if not Path(DOCKER).is_file():
+                raise ControlError("docker client is absent")
+            validate_deployment_files()
+            image = read_deployed_image()
+            restart_app(image)
+            wait_until_healthy(image)
+        except (ControlError, OSError, subprocess.SubprocessError):
+            write_status("failed", "restart_failed", request_id, status_gid)
+            raise
+        record_success()
+        write_status("healthy", "healthy", request_id, status_gid)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (BlockingIOError, ControlError, OSError, subprocess.SubprocessError) as exc:
+        print(f"WOS app restart refused or failed: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc

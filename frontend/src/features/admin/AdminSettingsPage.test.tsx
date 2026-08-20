@@ -1,0 +1,145 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+import { auditAccessibility } from "../../test/accessibility";
+import { AdminSettingsPage } from "./AdminSettingsPage";
+
+const options = {
+  sections: [
+    {
+      id: "torrents",
+      label: "Torrents",
+      fields: [
+        {
+          key: "WOS_TORRENT_MAX_ACTIVE_PER_USER",
+          label: "Torrents actifs par utilisateur",
+          description: "Nombre maximal de demandes actives.",
+          input_type: "integer",
+          value: 5,
+          default: 5,
+          unit: "count",
+          minimum: 1,
+          maximum: 100,
+          choices: [],
+          editable: true,
+          restart_required: false,
+        },
+      ],
+    },
+  ],
+  changed_keys: [],
+  restart_required: false,
+} as const;
+
+function response(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+describe("AdminSettingsPage", () => {
+  it("affiche une erreur métier structurée sous le champ concerné", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const url = String(input);
+        if (url === "/api/v1/admin/options" && init?.method === undefined) {
+          return response(options);
+        }
+        if (url === "/api/v1/admin/options" && init?.method === "PATCH") {
+          return response(
+            {
+              detail: {
+                code: "invalid_option",
+                message: "Cette limite est incompatible avec la capacité globale.",
+                field: "WOS_TORRENT_MAX_ACTIVE_PER_USER",
+              },
+            },
+            422,
+          );
+        }
+        throw new Error(`Requête inattendue : ${init?.method ?? "GET"} ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const view = render(
+      <AdminSettingsPage
+        onBack={vi.fn()}
+        onNavigate={vi.fn()}
+        onSessionExpired={vi.fn()}
+      />,
+    );
+
+    const input = await screen.findByRole("spinbutton", {
+      name: "Torrents actifs par utilisateur",
+    });
+    await user.clear(input);
+    await user.type(input, "6");
+    await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Cette limite est incompatible avec la capacité globale.",
+    );
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
+  it("confirme le redémarrage puis attend le retour du service", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const url = String(input);
+        if (url === "/api/v1/admin/options") return response(options);
+        if (url === "/api/v1/admin/services/wos/restart" && init?.method === "POST") {
+          return response({
+            state: "pending",
+            request_id: "request-1",
+            updated_at: "2026-08-17T12:00:00Z",
+            message_code: "requested",
+          }, 202);
+        }
+        if (url === "/api/v1/admin/services/wos/restart") {
+          return response({
+            state: "healthy",
+            request_id: "request-1",
+            updated_at: "2026-08-17T12:00:02Z",
+            message_code: "healthy",
+          });
+        }
+        if (url === "/api/v1/health/live") {
+          return response({ status: "ok", service: "world-of-seeds", version: "1.2.1" });
+        }
+        throw new Error(`Requête inattendue : ${init?.method ?? "GET"} ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    render(
+      <AdminSettingsPage
+        onBack={vi.fn()}
+        onNavigate={vi.fn()}
+        onSessionExpired={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Paramètres fonctionnels" });
+    await user.click(screen.getByRole("button", { name: "Redémarrer WOS" }));
+    await screen.findByRole("dialog");
+    await user.click(screen.getByRole("button", { name: "Confirmer le redémarrage" }));
+
+    expect(
+      await screen.findByText(
+        "World of Seeds a redémarré avec succès.",
+        {},
+        { timeout: 2500 },
+      ),
+    ).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/admin/services/wos/restart",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+});
