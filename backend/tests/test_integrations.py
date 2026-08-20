@@ -4,7 +4,8 @@ from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.integrations import ExternalServicesMonitor
-from app.integrations.http import IntegrationRequestError
+from app.integrations.http import IntegrationAuthenticationError, IntegrationRequestError
+from app.integrations.qbittorrent import QBittorrentClient
 
 
 @pytest.mark.asyncio
@@ -86,6 +87,72 @@ async def test_qbittorrent_accepts_no_content_login_response() -> None:
         "/api/v2/app/version",
         "/api/v2/auth/logout",
     ]
+
+
+@pytest.mark.asyncio
+async def test_qbittorrent_add_uses_multipart_server_save_path_and_204_login() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/v2/auth/login":
+            return httpx.Response(204, headers={"Set-Cookie": "SID=test; Path=/"})
+        if request.url.path == "/api/v2/torrents/add":
+            assert request.headers["cookie"] == "SID=test"
+            assert b'name="savepath"' in request.content
+            assert b"/data/thomas/downloads" in request.content
+            assert b'name="torrents"; filename="upload.torrent"' in request.content
+            assert b"normalized-torrent" in request.content
+            return httpx.Response(200, text="Ok.")
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError(request.url.path)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        await QBittorrentClient(
+            http_client,
+            "http://qbittorrent:8080",
+            "admin",
+            "password",
+        ).add_torrent(b"normalized-torrent", save_path="/data/thomas/downloads")
+
+    assert [request.url.path for request in requests] == [
+        "/api/v2/auth/login",
+        "/api/v2/torrents/add",
+        "/api/v2/auth/logout",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("add_status", "add_body", "error_type"),
+    [
+        (200, "Fails.", IntegrationRequestError),
+        (401, "", IntegrationAuthenticationError),
+    ],
+)
+async def test_qbittorrent_add_maps_rejection_and_expired_session(
+    add_status: int,
+    add_body: str,
+    error_type: type[Exception],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v2/auth/login":
+            return httpx.Response(200, text="Ok.", headers={"Set-Cookie": "SID=test; Path=/"})
+        if request.url.path == "/api/v2/torrents/add":
+            return httpx.Response(add_status, text=add_body)
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError(request.url.path)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        with pytest.raises(error_type):
+            await QBittorrentClient(
+                http_client,
+                "http://qbittorrent:8080",
+                "admin",
+                "password",
+            ).add_torrent(b"normalized-torrent", save_path="/data/thomas/downloads")
 
 
 @pytest.mark.asyncio

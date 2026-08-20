@@ -1,4 +1,6 @@
+import io
 import os
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -481,3 +483,61 @@ async def test_download_requires_authenticated_current_credentials(
 
     assert anonymous.status_code == 401
     assert forced_change.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_folder_download_returns_stored_zip_with_empty_and_long_names(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    await create_workspace_user(db_session, data_root)
+    folder = user_downloads(data_root) / "Collection"
+    folder.mkdir()
+    empty = folder / "Dossier vide"
+    empty.mkdir()
+    long_name = "Film.Name.2026.MULTi.TRUEFRENCH.2160p.UHD.BluRay.REMUX.mkv"
+    (folder / long_name).write_bytes(b"video")
+    await login(client)
+
+    response = await client.get(
+        "/api/v1/files/download-folder",
+        params={"path": "downloads/Collection"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert archive.read(f"Collection/{long_name}") == b"video"
+        assert "Collection/Dossier vide/" in archive.namelist()
+        assert all(info.compress_type == zipfile.ZIP_STORED for info in archive.infolist())
+    assert not list((data_root / ".wos-control" / "archives").iterdir())
+
+
+@pytest.mark.asyncio
+async def test_folder_download_rejects_traversal_and_symlink_escape(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+    tmp_path: Path,
+) -> None:
+    await create_workspace_user(db_session, data_root)
+    folder = user_downloads(data_root) / "Collection"
+    folder.mkdir()
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret", encoding="utf-8")
+    (folder / "escape").symlink_to(outside)
+    await login(client)
+
+    traversal = await client.get(
+        "/api/v1/files/download-folder",
+        params={"path": "../Collection"},
+    )
+    symlink = await client.get(
+        "/api/v1/files/download-folder",
+        params={"path": "downloads/Collection"},
+    )
+
+    assert traversal.status_code == 400
+    assert symlink.status_code == 403
+    assert b"secret" not in symlink.content

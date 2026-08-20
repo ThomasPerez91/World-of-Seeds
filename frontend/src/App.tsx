@@ -15,6 +15,7 @@ import { AdminTrashPage } from "./features/admin/AdminTrashPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { FileBrowser } from "./features/files/FileBrowser";
 import { TrashBrowser } from "./features/files/TrashBrowser";
+import { UserDownloadsPage } from "./features/torrents/UserDownloadsPage";
 import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
 import {
   LegalLinks,
@@ -607,7 +608,7 @@ function FilesWorkspace({
   onSessionExpired: () => void;
   revision: number;
 }) {
-  const [activeView, setActiveView] = useState<"files" | "trash">("files");
+  const [activeView, setActiveView] = useState<"files" | "trash" | "downloads">("files");
   const [storage, setStorage] = useState<StorageUsage | null>(null);
 
   return (
@@ -634,6 +635,13 @@ function FilesWorkspace({
         >
           Corbeille
         </button>
+        <button
+          type="button"
+          aria-pressed={activeView === "downloads"}
+          onClick={() => setActiveView("downloads")}
+        >
+          Mes téléchargements
+        </button>
       </div>
       {activeView === "files" ? (
         <div>
@@ -644,7 +652,7 @@ function FilesWorkspace({
             revision={revision}
           />
         </div>
-      ) : (
+      ) : activeView === "trash" ? (
         <div>
           <TrashBrowser
             onFilesChanged={onFilesChanged}
@@ -652,6 +660,8 @@ function FilesWorkspace({
             revision={revision}
           />
         </div>
+      ) : (
+        <UserDownloadsPage onSessionExpired={onSessionExpired} />
       )}
     </section>
   );

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, utc_now
 
 if TYPE_CHECKING:
+    from app.models.torrent import UserTorrent
     from app.models.trash import TrashEntry
 
 
@@ -47,6 +48,11 @@ class User(Base):
         passive_deletes=True,
     )
     trash_entries: Mapped[list[TrashEntry]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    torrents: Mapped[list[UserTorrent]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,

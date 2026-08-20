@@ -1,6 +1,7 @@
 from typing import Annotated, Never
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import (
     AuthContext,
@@ -22,8 +23,9 @@ from app.files import (
     RangeNotSatisfiableError,
     WorkspaceError,
 )
+from app.files.archives import ArchiveError, ArchiveStreamingResponse, ArchiveTooLargeError
 from app.files.browser_dependencies import FileBrowserDependency
-from app.files.download_dependencies import FileDownloaderDependency
+from app.files.download_dependencies import FileDownloaderDependency, FolderArchiverDependency
 from app.files.downloads import (
     ByteRange,
     DownloadStreamingResponse,
@@ -34,6 +36,7 @@ from app.files.mutation_dependencies import FileMutatorDependency
 from app.options.dependencies import OptionsStoreDependency
 from app.schemas.files import (
     BreadcrumbResponse,
+    CreateDirectoryRequest,
     DirectoryListingResponse,
     FileEntryResponse,
     FileMutationResponse,
@@ -87,6 +90,28 @@ def _raise_mutation_error(exc: Exception) -> Never:
     raise exc
 
 
+@router.post("/directory", response_model=FileMutationResponse, status_code=status.HTTP_201_CREATED)
+def create_directory(
+    payload: CreateDirectoryRequest,
+    mutator: FileMutatorDependency,
+    context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
+) -> FileMutationResponse:
+    try:
+        result = mutator.create_directory(context.user.username, payload.parent, payload.name)
+    except (
+        InvalidRelativePathError,
+        BrowserPathNotFoundError,
+        BrowserPathNotDirectoryError,
+        BrowserPathBlockedError,
+        MutationCollisionError,
+        MutationCompensationError,
+        FileMutationError,
+        WorkspaceError,
+    ) as exc:
+        _raise_mutation_error(exc)
+    return FileMutationResponse.model_validate(result)
+
+
 @router.patch("/rename", response_model=FileMutationResponse)
 def rename_file(
     payload: RenameFileRequest,
@@ -94,7 +119,7 @@ def rename_file(
     context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
 ) -> FileMutationResponse:
     try:
-        result = mutator.rename(context.user.username, payload.path, payload.name)
+        result = mutator.rename(context.user.username, payload.path, payload.basename)
     except (
         InvalidRelativePathError,
         BrowserPathNotFoundError,
@@ -235,6 +260,40 @@ async def download_file(
         headers=response_headers,
         chunk_size=chunk_size,
     )
+
+
+@router.get("/download-folder", response_model=None, operation_id="download_folder")
+async def download_folder(
+    archiver: FolderArchiverDependency,
+    options_store: OptionsStoreDependency,
+    context: Annotated[AuthContext, Depends(require_current_credentials)],
+    path: Annotated[str, Query(max_length=4096)],
+) -> Response:
+    options = options_store.snapshot()
+    max_source_bytes = options["WOS_FOLDER_ARCHIVE_MAX_BYTES"]
+    chunk_size = options["WOS_HTTP_STREAM_CHUNK_BYTES"]
+    if type(max_source_bytes) is not int or type(chunk_size) is not int:
+        raise RuntimeError("Archive options have invalid types")
+    try:
+        archive = await run_in_threadpool(
+            archiver.create,
+            context.user.username,
+            path,
+            max_source_bytes=max_source_bytes,
+        )
+    except InvalidRelativePathError as exc:
+        raise HTTPException(status_code=400, detail="Invalid relative path") from exc
+    except BrowserPathNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Directory not found") from exc
+    except BrowserPathNotDirectoryError as exc:
+        raise HTTPException(status_code=400, detail="Path is not a directory") from exc
+    except BrowserPathBlockedError as exc:
+        raise HTTPException(status_code=403, detail="Path is blocked") from exc
+    except ArchiveTooLargeError as exc:
+        raise HTTPException(status_code=413, detail="Folder is too large to archive") from exc
+    except (ArchiveError, WorkspaceError) as exc:
+        raise HTTPException(status_code=503, detail="Folder archive is unavailable") from exc
+    return ArchiveStreamingResponse(archive, chunk_size=chunk_size)
 
 
 @router.get("", response_model=DirectoryListingResponse)

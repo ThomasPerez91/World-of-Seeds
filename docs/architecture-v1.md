@@ -212,7 +212,11 @@ Le conteneur applicatif rejoint le réseau Docker externe `torrent-internal` afi
 uniquement les API internes de NewGreedy et qBittorrent. Les identifiants qBittorrent sont
 injectés depuis le fichier `.env` root-only du serveur. Les réponses tierces sont bornées et
 validées ; l’URL complète d’un tracker n’est jamais envoyée au navigateur afin de ne pas
-divulguer un éventuel passkey.
+divulguer un éventuel passkey. Les dépôts `.torrent` utilisateur sont parsés comme du
+bencode, limités en taille, réservés aux hôtes C411 configurés et réécrits avec la passkey
+WOS de `.env` sans modifier les octets du dictionnaire `info`. La passkey reçue n’est jamais
+persistée. Une association minimale `user_torrents(user_id, info_hash)` limite ensuite le
+suivi aux téléchargements du compte.
 
 Le redémarrage de NewGreedy ne remet pas en cause cette frontière : WOS écrit une demande
 JSON exclusive dans `/data/.wos-control/newgreedy`. Une unité systemd surveille ce fichier
@@ -236,5 +240,7 @@ WOS.
 9. **Responsive et accessibilité** : finition desktop/mobile, clavier, focus et lecteurs d'écran.
 10. **Déploiement** : image GHCR, secrets, migration et GitHub Action de déploiement validée ensemble.
 
-La V1.2 observe qBittorrent en lecture seule. Les mutations de torrents et le dépôt de
-fichiers `.torrent` restent réservés à la V2.
+La V1 finale autorise uniquement l’ajout d’un torrent normalisé et sa lecture de progression.
+Le `save_path` est dérivé côté backend sous `/data/<username>/downloads`; le navigateur ne
+peut jamais en fournir un. Les opérations de gestion avancée, la déduplication partagée, le
+pool multi-comptes, Redis et le worker restent réservés à la V2.
