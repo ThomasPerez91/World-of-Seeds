@@ -65,6 +65,7 @@
 - The build job retains read-only repository access.
 - The first retry exposed an existing draft pinned to the previous master SHA.
 - Draft retries now retarget only unpublished releases to the current master SHA.
+- Release publication passes the repository explicitly when no checkout exists.
 - Corrective CI, integration, release, and OVH deployment remain to complete.
 
 ## Known constraints

@@ -214,6 +214,7 @@ jobs:
             <<<"$release_json" >/dev/null
           if [[ "$(jq -r '.draft' <<<"$release_json")" == "true" ]]; then
             gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
               --draft=false \
               --latest \
               --target "$RELEASE_SHA"
