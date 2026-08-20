@@ -113,6 +113,16 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         unit="seconds",
     ),
     _integer(
+        "WOS_FOLDER_ARCHIVE_MAX_BYTES",
+        "Taille maximale d’une archive dossier",
+        "Volume source maximal accepté pour un téléchargement ZIP de dossier.",
+        274_877_906_944,
+        "downloads",
+        minimum=1_048_576,
+        maximum=1_099_511_627_776,
+        unit="bytes",
+    ),
+    _integer(
         "WOS_TORRENT_MAX_ACTIVE_PER_USER",
         "Torrents actifs par utilisateur",
         "Nombre maximal de demandes actives pour un même compte.",

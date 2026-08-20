@@ -47,11 +47,37 @@ class MutationCompensationError(FileMutationError):
     pass
 
 
+COMPOUND_EXTENSIONS = frozenset(
+    {
+        ".tar.gz",
+        ".tar.bz2",
+        ".tar.xz",
+        ".tar.zst",
+        ".user.js",
+    }
+)
+
+
 @dataclass(frozen=True, slots=True)
 class MutationResult:
     path: str
     name: str
     kind: FileEntryKind
+
+
+def split_file_name(name: str) -> tuple[str, str]:
+    """Return the editable basename and protected extension for a regular file."""
+
+    if name.startswith(".") and name.count(".") == 1:
+        return name, ""
+    lowered = name.lower()
+    for extension in sorted(COMPOUND_EXTENSIONS, key=len, reverse=True):
+        if lowered.endswith(extension) and len(name) > len(extension):
+            return name[: -len(extension)], name[-len(extension) :]
+    dot = name.rfind(".")
+    if dot <= 0 or dot == len(name) - 1:
+        return name, ""
+    return name[:dot], name[dot:]
 
 
 def validate_mutable_source_path(raw_path: str) -> RelativePath:
@@ -159,12 +185,34 @@ class SandboxedFileMutator:
     def __init__(self, workspace_manager: WorkspaceManager) -> None:
         self._workspace_manager = workspace_manager
 
-    def rename(self, username: str, raw_path: str, new_name: str) -> MutationResult:
+    def rename(self, username: str, raw_path: str, new_basename: str) -> MutationResult:
         source = validate_mutable_source_path(raw_path)
-        if not is_safe_component(new_name):
+        if not is_safe_component(new_basename):
             raise InvalidRelativePathError("The new name is not a safe path component")
-        destination = RelativePath(components=(*source.components[:-1], new_name))
-        return self._relocate(username, source, destination)
+        return self._relocate(username, source, None, new_basename=new_basename)
+
+    def create_directory(self, username: str, raw_parent: str, name: str) -> MutationResult:
+        parent = RelativePath.parse(raw_parent)
+        if not is_safe_component(name):
+            raise InvalidRelativePathError("The directory name is not a safe path component")
+        with (
+            self._workspace_manager.open_workspace(username) as workspace_fd,
+            open_sandboxed_directory(workspace_fd, parent) as parent_fd,
+        ):
+            try:
+                os.mkdir(name, mode=0o750, dir_fd=parent_fd)
+            except FileExistsError as exc:
+                raise MutationCollisionError("The directory already exists") from exc
+            except OSError as exc:
+                raise FileMutationError("The directory could not be created safely") from exc
+            try:
+                created = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            except OSError as exc:
+                raise MutationCompensationError("The directory could not be verified") from exc
+            if not stat.S_ISDIR(created.st_mode):
+                raise MutationCompensationError("The created entry is not a directory")
+        destination = RelativePath(components=(*parent.components, name))
+        return MutationResult(path=destination.value, name=name, kind=FileEntryKind.DIRECTORY)
 
     def move(
         self,
@@ -183,15 +231,20 @@ class SandboxedFileMutator:
         self,
         username: str,
         source: RelativePath,
-        destination: RelativePath,
+        destination: RelativePath | None,
+        *,
+        new_basename: str | None = None,
     ) -> MutationResult:
-        if not destination.components:
+        if destination is not None and not destination.components:
             raise MutationInvalidTargetError("A destination name is required")
 
         source_parent = RelativePath(components=source.components[:-1])
-        destination_parent = RelativePath(components=destination.components[:-1])
         source_name = source.components[-1]
-        destination_name = destination.components[-1]
+        destination_parent = (
+            source_parent
+            if destination is None
+            else RelativePath(components=destination.components[:-1])
+        )
 
         with (
             self._workspace_manager.open_workspace(username) as workspace_fd,
@@ -200,6 +253,19 @@ class SandboxedFileMutator:
         ):
             source_stat = inspect_mutable_source(source_parent_fd, source_name)
             source_kind = entry_kind(source_stat.st_mode)
+
+            if new_basename is not None:
+                extension = ""
+                if source_kind is FileEntryKind.FILE:
+                    _, extension = split_file_name(source_name)
+                destination_name = f"{new_basename}{extension}"
+                if len(destination_name) > 255 or not is_safe_component(destination_name):
+                    raise InvalidRelativePathError("The new name is not a safe path component")
+                destination = RelativePath(components=(*source.components[:-1], destination_name))
+            elif destination is not None:
+                destination_name = destination.components[-1]
+            else:
+                raise MutationInvalidTargetError("A destination name is required")
 
             if source.components == destination.components:
                 return MutationResult(

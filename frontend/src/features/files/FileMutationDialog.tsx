@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useState } from "react";
 
 import { api, ApiError, type DirectoryListing, type FileEntry } from "../../api/client";
 import { FolderIcon } from "../../components/icons";
+import { splitDisplayName } from "../../utils/files";
 import { FileDialog } from "./FileDialog";
 
 export type FileMutationAction = "move" | "rename" | "trash";
@@ -46,7 +47,8 @@ function RenameDialog({
   onCompleted,
   onSessionExpired,
 }: Omit<FileMutationDialogProps, "action" | "currentDirectory">) {
-  const [name, setName] = useState(entry.name);
+  const displayed = splitDisplayName(entry);
+  const [name, setName] = useState(displayed.basename);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -85,6 +87,11 @@ function RenameDialog({
           data-initial-focus
           required
         />
+        {displayed.extension !== "" && (
+          <p className="field-hint">
+            L’extension <strong>{displayed.extension}</strong> sera conservée automatiquement.
+          </p>
+        )}
         <p className="mutation-warning">
           Si qBittorrent utilise encore cet élément, son téléchargement peut passer en erreur.
         </p>
@@ -100,7 +107,10 @@ function RenameDialog({
           >
             Annuler
           </button>
-          <button type="submit" disabled={submitting || name === entry.name || name.length === 0}>
+          <button
+            type="submit"
+            disabled={submitting || name === displayed.basename || name.length === 0}
+          >
             {submitting ? "Renommage…" : "Confirmer le renommage"}
           </button>
         </div>

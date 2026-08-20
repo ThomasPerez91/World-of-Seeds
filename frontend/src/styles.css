@@ -11,6 +11,19 @@
   box-sizing: border-box;
 }
 
+main,
+section,
+article,
+header,
+nav,
+div,
+form,
+table,
+dl {
+  min-width: 0;
+  max-width: 100%;
+}
+
 body {
   min-width: 320px;
   min-height: 100vh;
@@ -719,8 +732,15 @@ button:disabled {
   background: rgb(4 10 8 / 20%);
 }
 
+.browser-navigation-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.5rem;
+}
+
 .breadcrumbs {
   display: flex;
+  max-width: 100%;
   overflow-x: auto;
   align-items: center;
   padding: 0.25rem;
@@ -747,11 +767,14 @@ button:disabled {
 }
 
 .breadcrumb button {
+  max-width: min(32rem, 60vw);
+  overflow: hidden;
   padding: 0.4rem 0.55rem;
   color: #8c9a92;
   border-radius: 0.5rem;
   font-size: 0.78rem;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .breadcrumb button:hover,
@@ -774,7 +797,7 @@ button:disabled {
 }
 
 .file-table {
-  min-width: 64rem;
+  min-width: 68rem;
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
@@ -786,6 +809,15 @@ button:disabled {
 
 .file-type-column {
   width: 7.5rem;
+}
+
+.file-extension-column {
+  width: 6.5rem;
+}
+
+.file-extension-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .file-size-column {
@@ -907,6 +939,7 @@ button:disabled {
   align-items: center;
   justify-content: flex-end;
   gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .open-folder-button {
@@ -1011,6 +1044,161 @@ button:disabled {
 .download-label,
 .file-mutation-button span {
   display: none;
+}
+
+.user-downloads {
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 1rem;
+  background: #101d18;
+}
+
+.user-downloads-header {
+  padding: clamp(1.2rem, 4vw, 2rem);
+}
+
+.user-downloads-header h2 {
+  max-width: 100%;
+  margin-bottom: 0.55rem;
+  font-size: clamp(1.8rem, 6vw, 2.8rem);
+}
+
+.user-downloads-header > p:last-child {
+  margin: 0;
+  color: #8c9991;
+}
+
+.torrent-drop-zone {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0 clamp(1rem, 4vw, 2rem) 1rem;
+  padding: clamp(1.5rem, 6vw, 3rem) 1rem;
+  place-items: center;
+  border: 1px dashed #435a4d;
+  border-radius: 1rem;
+  color: #8d9b92;
+  background: rgb(5 12 10 / 28%);
+  text-align: center;
+  cursor: pointer;
+}
+
+.torrent-drop-zone:hover,
+.torrent-drop-zone:focus-visible,
+.torrent-drop-zone.dragging {
+  border-color: #8fbd82;
+  outline: none;
+  background: rgb(143 189 130 / 7%);
+}
+
+.torrent-drop-zone.disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.torrent-drop-zone > svg {
+  width: 1.8rem;
+  height: 1.8rem;
+  margin-bottom: 0.35rem;
+  color: #aed59c;
+}
+
+.torrent-drop-zone strong,
+.torrent-drop-zone span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.torrent-drop-zone strong {
+  color: #e0e9e3;
+}
+
+.torrent-drop-zone button {
+  width: auto;
+  min-height: 2.75rem;
+  margin-top: 0.65rem;
+  padding: 0.65rem 1rem;
+}
+
+.user-torrent-list {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0 clamp(1rem, 4vw, 2rem) 2rem;
+  list-style: none;
+}
+
+.user-torrent-card {
+  padding: 1rem;
+  border: 1px solid rgb(255 255 255 / 6%);
+  border-radius: 0.9rem;
+  background: rgb(4 10 8 / 24%);
+}
+
+.user-torrent-card > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.user-torrent-card h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #dfe8e2;
+  font-size: 0.86rem;
+}
+
+.user-torrent-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.85rem 0 0;
+}
+
+.user-torrent-metrics > div {
+  padding: 0.65rem;
+  border-radius: 0.6rem;
+  background: rgb(255 255 255 / 2.5%);
+}
+
+.user-torrent-metrics dt {
+  color: #6f7c74;
+  font-size: 0.59rem;
+}
+
+.user-torrent-metrics dd {
+  margin: 0.28rem 0 0;
+  overflow-wrap: anywhere;
+  color: #c9d4cd;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.torrent-user-error {
+  margin: 0.75rem 0 0;
+  color: #e2aaa3;
+  font-size: 0.72rem;
+}
+
+.torrent-primary-state.adding,
+.torrent-primary-state.pending {
+  color: #aeb9b2;
+  background: rgb(255 255 255 / 5%);
+}
+
+.torrent-primary-state.downloading {
+  color: #add7b2;
+  background: rgb(117 199 139 / 10%);
+}
+
+.torrent-primary-state.completed {
+  color: #b9dda9;
+  background: rgb(174 213 156 / 9%);
+}
+
+.torrent-primary-state.stalled {
+  color: #d7bc83;
+  background: rgb(202 171 105 / 10%);
 }
 
 .settings-page {
@@ -3128,6 +3316,31 @@ select:focus-visible {
   .torrent-monitoring-card > header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .torrent-monitoring-name h4,
+  .torrent-monitoring-name p {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .user-torrent-card > header {
+    flex-direction: column;
+  }
+
+  .user-torrent-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .file-view-tabs {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .file-view-tabs button {
+    flex: 1 1 auto;
   }
 
   .torrent-primary-state {

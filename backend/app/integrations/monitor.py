@@ -84,6 +84,28 @@ class ExternalServicesMonitor:
                 password,
             ).torrents()
 
+    async def qbittorrent_torrents_by_hashes(
+        self, hashes: list[str]
+    ) -> tuple[list[QBittorrentTorrent], bool]:
+        base_url, username, password = self._require_qbittorrent_credentials()
+        async with self._client() as http_client:
+            return await QBittorrentClient(
+                http_client,
+                base_url,
+                username,
+                password,
+            ).torrents_by_hashes(hashes)
+
+    async def add_qbittorrent_torrent(self, content: bytes, *, save_path: str) -> None:
+        base_url, username, password = self._require_qbittorrent_credentials()
+        async with self._client() as http_client:
+            await QBittorrentClient(
+                http_client,
+                base_url,
+                username,
+                password,
+            ).add_torrent(content, save_path=save_path)
+
     def _authentication_circuit_is_open(self) -> bool:
         return (
             self._cached_snapshot is not None

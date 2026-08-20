@@ -75,15 +75,28 @@ class QBittorrentClient:
         )
 
     async def torrents(self) -> tuple[list[QBittorrentTorrent], bool]:
+        return await self.torrents_by_hashes(None)
+
+    async def torrents_by_hashes(
+        self,
+        hashes: list[str] | None,
+    ) -> tuple[list[QBittorrentTorrent], bool]:
         logged_in = False
         try:
             if not await self._login():
                 raise IntegrationAuthenticationError("qBittorrent authentication failed")
             logged_in = True
+            params = {"sort": "added_on", "reverse": "true", "limit": str(MAX_TORRENTS + 1)}
+            if hashes:
+                if len(hashes) > MAX_TORRENTS or any(
+                    _TORRENT_HASH_RE.fullmatch(value) is None for value in hashes
+                ):
+                    raise IntegrationRequestError("qBittorrent torrent hashes are invalid")
+                params["hashes"] = "|".join(hashes)
             async with self._client.stream(
                 "GET",
                 f"{self._base_url}/api/v2/torrents/info",
-                params={"sort": "added_on", "reverse": "true", "limit": str(MAX_TORRENTS + 1)},
+                params=params,
                 headers=self._browser_headers(),
             ) as response:
                 response.raise_for_status()
@@ -104,6 +117,39 @@ class QBittorrentClient:
         truncated = len(payload) > MAX_TORRENTS
         torrents = [_parse_torrent(item) for item in payload[:MAX_TORRENTS]]
         return torrents, truncated
+
+    async def add_torrent(self, content: bytes, *, save_path: str) -> None:
+        if not content:
+            raise ValueError("Torrent content must not be empty")
+        logged_in = False
+        try:
+            if not await self._login():
+                raise IntegrationAuthenticationError("qBittorrent authentication failed")
+            logged_in = True
+            async with self._client.stream(
+                "POST",
+                f"{self._base_url}/api/v2/torrents/add",
+                data={"savepath": save_path},
+                files={"torrents": ("upload.torrent", content, "application/x-bittorrent")},
+                headers=self._browser_headers(),
+            ) as response:
+                if response.status_code == 401:
+                    raise IntegrationAuthenticationError("qBittorrent session expired")
+                response.raise_for_status()
+                result = (
+                    "Ok."
+                    if response.status_code == 204
+                    else (await read_limited_text(response, max_bytes=MAX_VERSION_BYTES)).strip()
+                )
+            if result != "Ok.":
+                raise IntegrationRequestError("qBittorrent rejected the torrent")
+        except (IntegrationAuthenticationError, IntegrationRequestError):
+            raise
+        except httpx.HTTPError as exc:
+            raise IntegrationRequestError("qBittorrent torrent add failed") from exc
+        finally:
+            if logged_in:
+                await self._logout()
 
     async def _login(self) -> bool:
         async with self._client.stream(

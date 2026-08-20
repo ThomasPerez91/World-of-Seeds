@@ -63,6 +63,37 @@ export interface FileMutation {
   kind: "directory" | "file";
 }
 
+export type UserTorrentState =
+  | "adding"
+  | "pending"
+  | "downloading"
+  | "stalled"
+  | "completed"
+  | "error";
+
+export interface UserTorrent {
+  id: string;
+  name: string;
+  size_bytes: number;
+  progress: number;
+  state: UserTorrentState;
+  downloaded_bytes: number;
+  download_speed_bytes: number;
+  eta_seconds: number | null;
+  error: string | null;
+  created_at: string;
+}
+
+export interface UserTorrentListing {
+  torrents: UserTorrent[];
+}
+
+export interface TorrentUploadResult {
+  id: string;
+  name: string;
+  total_size: number;
+}
+
 export interface TrashEntry {
   id: string;
   original_path: string;
@@ -281,7 +312,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = init.method?.toUpperCase() ?? "GET";
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
-  if (init.body !== undefined) {
+  if (init.body !== undefined && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
   if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
@@ -503,11 +534,36 @@ export const api = {
     return `/api/v1/files/download?${search.toString()}`;
   },
 
-  renameFile(path: string, name: string): Promise<FileMutation> {
+  folderDownloadUrl(path: string): string {
+    const search = new URLSearchParams({ path });
+    return `/api/v1/files/download-folder?${search.toString()}`;
+  },
+
+  createDirectory(parent: string, name: string): Promise<FileMutation> {
+    return request<FileMutation>("/files/directory", {
+      method: "POST",
+      body: JSON.stringify({ parent, name }),
+    });
+  },
+
+  renameFile(path: string, basename: string): Promise<FileMutation> {
     return request<FileMutation>("/files/rename", {
       method: "PATCH",
-      body: JSON.stringify({ path, name }),
+      body: JSON.stringify({ path, basename }),
     });
+  },
+
+  uploadTorrent(file: File): Promise<TorrentUploadResult> {
+    const form = new FormData();
+    form.set("torrent", file, file.name);
+    return request<TorrentUploadResult>("/torrents", {
+      method: "POST",
+      body: form,
+    });
+  },
+
+  listUserTorrents(signal?: AbortSignal): Promise<UserTorrentListing> {
+    return request<UserTorrentListing>("/torrents", { signal });
   },
 
   moveFile(path: string, destinationDirectory: string): Promise<FileMutation> {

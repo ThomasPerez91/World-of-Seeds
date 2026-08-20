@@ -14,10 +14,12 @@ Les capacités fonctionnelles principales de la V1 sont en place :
 - renommage coordonné du compte et de son dossier avec compensation en cas d'échec SQL ;
 - navigation sécurisée avec métadonnées, fil d'Ariane et espace disque ;
 - téléchargement en flux avec HTTP Range, reprise, ETag et Last-Modified ;
-- renommage et déplacement atomiques sans écrasement, avec confirmations dans l’interface ;
+- création de dossier, renommage avec extension protégée et déplacement atomique sans écrasement ;
+- téléchargement de dossiers en ZIP sans recompression des contenus ;
 - corbeille privée par utilisateur, restauration avec détection de collision et purge définitive ;
 - pages d’administration dédiées aux utilisateurs, au stockage global et au nettoyage des corbeilles ;
 - supervision privée de NewGreedy et qBittorrent, liste des torrents et configuration NewGreedy contrôlée ;
+- dépôt utilisateur de `.torrent` C411, remplacement sûr de la passkey et suivi personnel via WOS ;
 - redémarrage NewGreedy médié par systemd, sans socket Docker dans le conteneur applicatif ;
 - image Docker unique pour l'API et le frontend ;
 - montage hôte limité à `/srv/seedbox:/data` ;
@@ -100,6 +102,13 @@ les API de NewGreedy et qBittorrent sans publier de nouveau port. Ce réseau ne 
 accès au socket Docker. Le redémarrage NewGreedy passe par un fichier de requête borné sous
 `/srv/seedbox/.wos-control` et un service systemd limité à la recréation de cet unique
 service.
+
+Pour les téléchargements personnels, qBittorrent doit monter `/srv/seedbox` sur `/data` et
+WOS lui transmet uniquement `/data/<username>/downloads`, calculé depuis le compte
+authentifié. Le navigateur ne fournit aucun `save_path`. La passkey C411 WOS reste
+uniquement dans `.env` via `WOS_C411_PASSKEY` ; celle d’un torrent utilisateur est remplacée
+en mémoire puis abandonnée, sans écriture en base, dans `.options`, dans Redis ou dans les
+logs.
 
 Le mot de passe administrateur est demandé interactivement et n'est ni placé dans `.env`, ni écrit dans les logs. Pour l'accès initial par tunnel HTTP, `WOS_COOKIE_SECURE=false`. Cette valeur devra devenir `true` en même temps que l'ajout de HTTPS.
 

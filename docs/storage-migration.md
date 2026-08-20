@@ -12,7 +12,8 @@ Les espaces World of Seeds sont placés directement sous la racine montée :
 │   └── downloads/
 ├── <username>/
 │   └── downloads/
-└── .trash/                    # hors du navigateur, isolée par identifiant utilisateur
+├── .trash/                    # hors du navigateur, isolée par identifiant utilisateur
+└── .wos-control/              # options, contrôles et ZIP temporaires bornés
 ```
 
 Le navigateur d’un utilisateur est ancré dans `/data/<username>`. La présence des
@@ -63,6 +64,11 @@ supprimer l’un des deux.
 La commande ne touche jamais à `/srv/seedbox/downloads` ou `/srv/seedbox/watch`. Leur
 migration sera réalisée plus tard avec l’API qBittorrent afin de préserver les chemins de
 contenu et le seeding. Un simple déplacement manuel de ces données reste exclu.
+
+Les nouveaux torrents utilisateur utilisent directement
+`/srv/seedbox/<username>/downloads`. Le conteneur qBittorrent doit donc voir
+`/srv/seedbox` sous `/data`, comme WOS, sans exposer ce chemin au navigateur. WOS construit
+le chemin depuis l’utilisateur authentifié et vérifie son workspace avant chaque ajout.
 
 ## Permissions à vérifier au déploiement
 

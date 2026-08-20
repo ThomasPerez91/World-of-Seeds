@@ -149,6 +149,9 @@ WOS_NEWGREEDY_URL=http://newgreedy:8080
 WOS_QBITTORRENT_URL=http://qbittorrent:8080
 WOS_QBITTORRENT_USERNAME=REMPLACER_PAR_LE_USER_WEBUI_QBITTORRENT
 WOS_QBITTORRENT_PASSWORD=REMPLACER_PAR_LE_PASSWORD_WEBUI_QBITTORRENT
+WOS_QBITTORRENT_DATA_ROOT=/data
+WOS_C411_PASSKEY=REMPLACER_PAR_LA_PASSKEY_DU_COMPTE_WOS
+WOS_C411_TRACKER_HOSTS=["tracker.c411.org"]
 ```
 
 Générer le mot de passe sans le publier dans GitHub :
@@ -166,6 +169,12 @@ sudo test -r /opt/world-of-seeds/.env
 
 Les identifiants WebUI qBittorrent ne doivent pas être collés dans une issue, une PR ou un
 terminal enregistré. Ils restent uniquement dans ce fichier `root:root` en mode `600`.
+La passkey C411 suit la même règle et ne doit jamais être placée dans `.options`.
+
+qBittorrent doit disposer d’un bind mount contrôlé `/srv/seedbox:/data` avec une identité
+capable d’écrire dans les workspaces préparés. Ne pas utiliser `chmod 777`. Vérifier que son
+chemin interne correspond exactement à `WOS_QBITTORRENT_DATA_ROOT` avant d’activer le dépôt
+de torrents.
 
 ## 5. Préparer les canaux de contrôle
 
