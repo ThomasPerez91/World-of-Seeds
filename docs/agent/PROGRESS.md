@@ -6,9 +6,9 @@
 - Product line: V1.
 - Feature branch: `feature/final-v1-completion`.
 - Feature PR: `#38` into `develop`.
-- Release PR: pending, from `develop` into `master`.
+- Release PR: next, from `develop` into `master`.
 - MASTER HEAD before release: `7630ae68081e370a3b43c15ad98189d4feee2c3f`.
-- DEVELOP HEAD before feature merge: `d81ec069c2c93a3ecbd16c5011363fbac757da98`.
+- DEVELOP HEAD after feature merge: `717189e4d14df982a3d3e29c7361e7ea7177683f`.
 - Feature remote HEAD after accessibility fix: `b6b943209f22ff95a071e1cb90e744c502e203e6`.
 
 ## Completed in the V1 completion feature
@@ -57,8 +57,8 @@
 - The initial frontend run found one missing accessible label.
 - The minimal `aria-label` correction is published.
 - The corrected feature CI run is fully green.
-- Agent handoff documentation is being added before integration.
-- PR `#38` still needs to be marked ready and merged into `develop`.
+- Agent handoff documentation is integrated into `develop`.
+- PR `#38` is merged into `develop` with green CI.
 - A release PR still needs to be opened from `develop` to `master`.
 - The release PR must pass all required CI before merge.
 - Final branch SHAs must be recorded in the completion handoff.
