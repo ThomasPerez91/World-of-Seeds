@@ -131,6 +131,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
           ref={inputRef}
           className="sr-only"
           type="file"
+          aria-label="Fichier torrent"
           accept=".torrent,application/x-bittorrent"
           onChange={select}
           disabled={uploading}
