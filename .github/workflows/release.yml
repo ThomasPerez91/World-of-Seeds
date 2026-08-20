@@ -48,13 +48,14 @@ jobs:
           if [[ "$release_json" != "null" ]]; then
             jq -e \
               --arg tag "$RELEASE_TAG" \
-              --arg sha "$GITHUB_SHA" \
-              '.tag_name == $tag and .prerelease == false and (.target_commitish == "master" or .target_commitish == $sha)' \
+              '.tag_name == $tag and .prerelease == false' \
               <<<"$release_json" >/dev/null
             if [[ "$(jq -r '.draft' <<<"$release_json")" == "false" ]]; then
               git fetch --force origin \
                 "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
               [[ "$(git rev-list -n 1 "$RELEASE_TAG")" == "$GITHUB_SHA" ]]
+            else
+              gh release edit "$RELEASE_TAG" --target "$GITHUB_SHA"
             fi
           else
             gh release create "$RELEASE_TAG" \
@@ -63,6 +64,16 @@ jobs:
               --draft \
               --generate-notes
           fi
+          releases_json="$(gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100")"
+          release_json="$(jq -cer --arg tag "$RELEASE_TAG" \
+            '[.[][] | select(.tag_name == $tag)] | if length == 1 then .[0] else error("prepared release not found or duplicated") end' \
+            <<<"$releases_json")"
+          jq -e \
+            --arg tag "$RELEASE_TAG" \
+            --arg sha "$GITHUB_SHA" \
+            '.tag_name == $tag and .prerelease == false and (.target_commitish == "master" or .target_commitish == $sha)' \
+            <<<"$release_json" >/dev/null
 
       - name: Dispatch the immutable release build
         env:
