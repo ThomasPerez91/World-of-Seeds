@@ -37,7 +37,9 @@
   `2b870a52c6c4aeb834e1f883f7bb2675b277562d`.
 - V2-13 PR `#65` was merged into `develop_V2` at
   `5a1bab12be33681ccb6ad964dda18c40a57482c5`.
-- V2-13A is implemented on the dedicated `feat/v2-scheduler-runtime` branch from that
+- V2-13A PR `#66` was merged into `develop_V2` at
+  `782a7ff41817481a7bf1f929064380560c5cd6b3`.
+- V2-13B is implemented on the dedicated `feat/v2-worker-effects-sync` branch from that
   `develop_V2` commit.
 
 ## V1 completion state
@@ -358,6 +360,30 @@
   handlers, qB-to-domain state synchronization, multi-account routing, storage, API, frontend,
   V1 behavior, and `master` remain outside this PR.
 
+## V2-13B — Worker effects and qB state synchronization
+
+- Added concrete `ADD_TORRENT` and `SYNC_TORRENT` handlers backed by the existing
+  C411/NewGreedy and qBittorrent V2 gateways when the complete integration configuration is
+  present. The current qB-free foundation Compose keeps its inert worker until V2-29.
+- Added a private payload spool that validates uploaded metainfo and removes every tracker
+  credential before the first durable write. Only an opaque storage-key filename and a
+  secret-free `/announce` URL remain on disk; symlink payloads are refused.
+- The infrastructure passkey is injected only in worker memory immediately before the bounded
+  qB request. Successful or reconciled adds remove the staged payload; cleanup failure is safe
+  and does not convert an accepted qB effect into a duplicate retry.
+- Added replay-safe domain transitions for managed torrents and all active requests, including
+  durable retry timestamps aligned with job backoff and terminal `ERROR` after exhausted or
+  permanent failures.
+- Added an owned, bounded qB state snapshot API and normalized qB download/upload/stopped/error
+  states into `DOWNLOADING`, `PAUSED`, `READY`, or `ERROR` without exposing raw responses.
+- Added a periodic PostgreSQL-authoritative sync enqueuer using the dynamic sync interval and a
+  partial unique index, so at most one queued/running sync exists per physical torrent and an
+  integration outage cannot grow the queue without bound.
+- Added an additive/reversible migration plus payload security, handler transition, retry,
+  coalescing, qB ownership/state, and existing worker/scheduler regression tests.
+- Multi-account routing, shared content storage, API ingestion, frontend, Compose activation,
+  V1 behavior, and `master` remain outside this PR.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -446,6 +472,13 @@
 - V2-13A complete backend suite: PASS, 320 tests with 5 service-backed tests deferred to CI.
 - V2-13A full backend Ruff lint/format and mypy: PASS.
 - V2-13A PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
+- PR #66 (V2-13A) review and GitHub CI run `32529089374`: PASS; squash-merged into
+  `develop_V2` at `782a7ff41817481a7bf1f929064380560c5cd6b3`.
+- V2-13B targeted worker effects, payload staging, job runtime, qB/C411 gateways, and scheduler
+  runtime tests: PASS, 57 tests with 3 service-backed tests deferred to CI.
+- V2-13B complete backend suite: PASS, 327 tests with 5 service-backed tests deferred to CI.
+- V2-13B full backend Ruff lint/format and mypy: PASS.
+- V2-13B PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
 
 ## Known constraints
 
@@ -460,6 +493,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-13B — Worker effects and qB state synchronization`.
-- Do not start V2-13B until V2-13A has passed review, required CI is green, its PR is merged into
+- The next roadmap task is `V2-13C — Multi-account tracker/qB routing`.
+- Do not start V2-13C until V2-13B has passed review, required CI is green, its PR is merged into
   `develop_V2`, and explicit authorization is provided.

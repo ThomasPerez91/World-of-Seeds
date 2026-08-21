@@ -19,7 +19,7 @@ from app.jobs.worker import (
     TorrentWorkerConfig,
     TransientTorrentJobError,
 )
-from app.models import Base, ManagedTorrent, TorrentJob, TorrentJobState
+from app.models import Base, ManagedTorrent, ManagedTorrentState, TorrentJob, TorrentJobState
 
 NOW = datetime(2026, 8, 21, 18, tzinfo=UTC)
 CONFIG = TorrentWorkerConfig(
@@ -140,6 +140,29 @@ async def test_worker_retries_transient_failure_with_bounded_backoff(
     assert as_utc(job.available_at) == NOW + CONFIG.retry_base
     assert job.last_error_code == "integration_unavailable"
     assert job.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_worker_persists_managed_retry_state_with_job_backoff(
+    worker_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    job_id = await create_job(worker_sessions)
+
+    async def handler(_snapshot: TorrentJobSnapshot) -> None:
+        raise TransientTorrentJobError(
+            "integration_unavailable",
+            torrent_state=ManagedTorrentState.RETRY_WAIT,
+        )
+
+    await worker(worker_sessions, handler).process_once()
+
+    job = await load_job(worker_sessions, job_id)
+    async with worker_sessions() as session:
+        torrent = await session.get(ManagedTorrent, job.managed_torrent_id)
+        assert torrent is not None
+        assert torrent.state is ManagedTorrentState.RETRY_WAIT
+        assert torrent.retry_at is not None
+        assert as_utc(torrent.retry_at) == NOW + CONFIG.retry_base
 
 
 @pytest.mark.asyncio

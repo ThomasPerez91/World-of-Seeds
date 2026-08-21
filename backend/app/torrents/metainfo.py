@@ -126,7 +126,7 @@ def _encode(value: BValue | _RawValue) -> bytes:
     return b"d" + b"".join(_encode(key) + _encode(value[key]) for key in sorted(value)) + b"e"
 
 
-def _tracker_url(raw: bytes, *, passkey: str, allowed_hosts: frozenset[str]) -> bytes:
+def _tracker_url(raw: bytes, *, passkey: str | None, allowed_hosts: frozenset[str]) -> bytes:
     try:
         value = raw.decode("ascii")
         parsed = urlsplit(value)
@@ -143,12 +143,12 @@ def _tracker_url(raw: bytes, *, passkey: str, allowed_hosts: frozenset[str]) -> 
     ):
         raise TorrentValidationError("Ce torrent n’utilise pas un tracker C411 autorisé.")
     netloc = hostname if port is None else f"{hostname}:{port}"
-    path = f"/announce/{quote(passkey, safe='')}"
+    path = "/announce" if passkey is None else f"/announce/{quote(passkey, safe='')}"
     return urlunsplit((parsed.scheme, netloc, path, "", "")).encode("ascii")
 
 
 def _normalize_trackers(
-    metainfo: dict[bytes, BValue], *, passkey: str, allowed_hosts: frozenset[str]
+    metainfo: dict[bytes, BValue], *, passkey: str | None, allowed_hosts: frozenset[str]
 ) -> None:
     announce = metainfo.get(b"announce")
     if not isinstance(announce, bytes):
@@ -235,10 +235,10 @@ def _torrent_size(info: dict[bytes, BValue]) -> int:
     return total
 
 
-def normalize_torrent(
+def _rewrite_torrent(
     content: bytes,
     *,
-    passkey: str,
+    passkey: str | None,
     allowed_tracker_hosts: list[str],
     max_total_size: int,
 ) -> ParsedTorrent:
@@ -292,4 +292,37 @@ def normalize_torrent(
         info_hash=hashlib.sha1(info_raw, usedforsecurity=False).hexdigest(),
         name=name,
         total_size=total_size,
+    )
+
+
+def normalize_torrent(
+    content: bytes,
+    *,
+    passkey: str,
+    allowed_tracker_hosts: list[str],
+    max_total_size: int,
+) -> ParsedTorrent:
+    """Validate metainfo and inject the infrastructure passkey for immediate submission."""
+
+    return _rewrite_torrent(
+        content,
+        passkey=passkey,
+        allowed_tracker_hosts=allowed_tracker_hosts,
+        max_total_size=max_total_size,
+    )
+
+
+def sanitize_torrent(
+    content: bytes,
+    *,
+    allowed_tracker_hosts: list[str],
+    max_total_size: int,
+) -> ParsedTorrent:
+    """Validate metainfo and remove tracker credentials before durable staging."""
+
+    return _rewrite_torrent(
+        content,
+        passkey=None,
+        allowed_tracker_hosts=allowed_tracker_hosts,
+        max_total_size=max_total_size,
     )

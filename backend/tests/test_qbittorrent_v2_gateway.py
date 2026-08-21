@@ -11,6 +11,7 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2AddState,
     QBittorrentV2DesiredControl,
     QBittorrentV2Gateway,
+    QBittorrentV2ManagedIdentity,
     QBittorrentV2OwnershipError,
     QBittorrentV2RejectedError,
     QBittorrentV2RunState,
@@ -159,6 +160,36 @@ async def test_gateway_is_idempotent_when_owned_torrent_already_exists() -> None
         "/api/v2/auth/login",
         "/api/v2/torrents/info",
         "/api/v2/auth/logout",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gateway_reads_bounded_owned_torrent_state_snapshot() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v2/auth/login":
+            return _login_response()
+        if request.url.path == "/api/v2/torrents/info":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        **_managed_torrent(),
+                        "state": "stalledDL",
+                        "progress": 0.25,
+                    }
+                ],
+            )
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError(request.url.path)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        snapshots = await _gateway(client).inspect_managed_torrents(
+            (QBittorrentV2ManagedIdentity(INFO_HASH, STORAGE_KEY),)
+        )
+
+    assert [(item.info_hash, item.state, item.progress) for item in snapshots] == [
+        (INFO_HASH, "stalledDL", 0.25)
     ]
 
 

@@ -24,7 +24,7 @@ from app.jobs.torrent_jobs import (
     renew_torrent_job_claim,
     retry_torrent_job,
 )
-from app.models import TorrentJob, TorrentJobState
+from app.models import ManagedTorrent, ManagedTorrentState, TorrentJob, TorrentJobState
 
 logger = logging.getLogger(__name__)
 
@@ -36,17 +36,29 @@ type Jitter = Callable[[float, float], float]
 class TransientTorrentJobError(RuntimeError):
     """A retryable worker failure represented by a bounded, secret-safe code."""
 
-    def __init__(self, error_code: str) -> None:
+    def __init__(
+        self,
+        error_code: str,
+        *,
+        torrent_state: ManagedTorrentState | None = None,
+    ) -> None:
         super().__init__(error_code)
         self.error_code = error_code
+        self.torrent_state = torrent_state
 
 
 class PermanentTorrentJobError(RuntimeError):
     """A permanent worker failure represented by a bounded, secret-safe code."""
 
-    def __init__(self, error_code: str) -> None:
+    def __init__(
+        self,
+        error_code: str,
+        *,
+        torrent_state: ManagedTorrentState | None = None,
+    ) -> None:
         super().__init__(error_code)
         self.error_code = error_code
+        self.torrent_state = torrent_state
 
 
 class TorrentJobClaimLostError(RuntimeError):
@@ -236,9 +248,19 @@ class TorrentWorker:
             try:
                 await handler_task
             except TransientTorrentJobError as exc:
-                await self._finish_failure(snapshot, exc.error_code, permanent=False)
+                await self._finish_failure(
+                    snapshot,
+                    exc.error_code,
+                    permanent=False,
+                    torrent_state=exc.torrent_state,
+                )
             except PermanentTorrentJobError as exc:
-                await self._finish_failure(snapshot, exc.error_code, permanent=True)
+                await self._finish_failure(
+                    snapshot,
+                    exc.error_code,
+                    permanent=True,
+                    torrent_state=exc.torrent_state,
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -297,6 +319,7 @@ class TorrentWorker:
         error_code: str,
         *,
         permanent: bool,
+        torrent_state: ManagedTorrentState | None = None,
     ) -> None:
         now = self._clock()
         async with self._session_factory() as session, session.begin():
@@ -324,6 +347,20 @@ class TorrentWorker:
                     available_at=now + timedelta(seconds=delay),
                     error_code=error_code,
                 )
+            if torrent_state is not None:
+                managed = await session.get(
+                    ManagedTorrent,
+                    snapshot.managed_torrent_id,
+                    with_for_update=True,
+                )
+                if managed is not None:
+                    if job.state is TorrentJobState.FAILED:
+                        managed.state = ManagedTorrentState.ERROR
+                        managed.retry_at = None
+                    else:
+                        managed.state = torrent_state
+                        managed.retry_at = job.available_at
+                    managed.updated_at = now
 
     async def _owned_job(self, session: AsyncSession, job_id: uuid.UUID) -> TorrentJob:
         job = await session.scalar(
