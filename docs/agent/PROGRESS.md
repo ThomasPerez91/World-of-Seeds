@@ -13,7 +13,9 @@
   `80a253da7b9fe57ddec39b0dfe92eaa2daca7e6b`.
 - V2-01 PR `#53` was merged into `develop_V2` at
   `980b73182806b5604440b51c21f87df49c59b4e6`.
-- Active task branch: `feat/v2-compose-foundation`, based on that merge commit and
+- V2-02 PR `#54` was merged into `develop_V2` at
+  `b5a75f3c25f634ae7bcaef91ff9e26f2d8324ff9`.
+- Active task branch: `feat/v2-shared-torrent-schema`, based on that merge commit and
   targeting `develop_V2`.
 
 ## V1 completion state
@@ -100,6 +102,23 @@
 - No qBittorrent, NewGreedy, worker, scheduler, model, migration, or Rise2 deployment is
   included in V2-02.
 
+## V2-03 — Shared torrent schema
+
+- Added the additive `ManagedTorrent`, `TorrentRequest`, and `TorrentFile` SQLAlchemy
+  models without transforming or removing the V1 `UserTorrent` table.
+- Persisted the normative managed-torrent and user-request states as constrained strings.
+- Enforced one canonical lowercase 40-character infohash per physical managed torrent and
+  one opaque unique storage key per managed content.
+- Enforced one active `REQUESTED`, `ACTIVE`, or `READY` request per user and managed
+  torrent while allowing multiple users to own requests for the same physical torrent.
+- Added manifest constraints for non-negative indexes and sizes, safe relative paths, and
+  unique file indexes and paths inside each managed torrent.
+- Added an additive Alembic migration with a reverse migration to the V1 schema boundary.
+- Extended only the V2 CI path to execute the V2 downgrade and re-upgrade against
+  PostgreSQL; the V1 migration path remains upgrade-only.
+- No API, worker, Redis client, qBittorrent behavior, V1 import, or Rise2 deployment is
+  included in V2-03.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -115,8 +134,12 @@
 - V2-02 targeted Ruff lint and formatting: PASS.
 - V2-02 targeted mypy: PASS.
 - V2-02 `git diff --check`: PASS.
-- V2-02 real Compose configuration/startup/isolation validation: pending GitHub CI because
-  Docker is unavailable in the local execution environment.
+- V2-02 GitHub CI run `32485704318`: PASS; backend, frontend, container, and the real
+  Compose configuration/startup/isolation cycle are green.
+- V2-03 model and V1 torrent regression tests: PASS, 16 tests.
+- V2-03 targeted Ruff lint/format and mypy: PASS.
+- V2-03 PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
+- V2-03 migration execution against PostgreSQL and complete CI: pending PR CI.
 
 ## Known constraints
 
@@ -131,7 +154,7 @@
 
 ## Next task
 
-- Open and validate the V2-02 PR into `develop_V2`; do not merge it automatically.
-- After V2-02 is reviewed and merged, the next roadmap task is
-  `V2-03 — ManagedTorrent, TorrentRequest, and TorrentFile schema`.
-- Do not start V2-03 as part of the current task.
+- Open and validate the V2-03 PR into `develop_V2`; do not merge it automatically.
+- After V2-03 is reviewed and merged, the next roadmap task is
+  `V2-04 — TorrentJob schema, SQL claims, timeouts, retries, and cancellation`.
+- Do not start V2-04 as part of the current task.

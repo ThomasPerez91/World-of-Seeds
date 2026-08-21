@@ -52,7 +52,13 @@ jobs:
           uv export --frozen --no-dev --no-emit-project --no-header \
             --format requirements.txt --output-file /tmp/requirements.lock
           diff --unified requirements.lock /tmp/requirements.lock
-      - run: uv run alembic -c alembic.ini upgrade head
+      - name: Validate migrations and V2 rollback
+        run: |
+          uv run alembic -c alembic.ini upgrade head
+          if [ "$WOS_VERSION_CHANNEL" = "v2" ]; then
+            uv run alembic -c alembic.ini downgrade 20260820_05
+            uv run alembic -c alembic.ini upgrade head
+          fi
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy app tests
