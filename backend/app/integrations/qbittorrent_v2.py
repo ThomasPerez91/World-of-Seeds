@@ -1,5 +1,6 @@
 import json
 import re
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
@@ -19,6 +20,7 @@ WOS_V2_CATEGORY = "wos-v2"
 WOS_V2_TAG = "wos-v2"
 MAX_ADD_RESPONSE_BYTES = 16 * 1024
 MAX_LOOKUP_RESPONSE_BYTES = 256 * 1024
+MAX_CONTROL_TORRENTS = 200
 _SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -28,9 +30,30 @@ class QBittorrentV2AddState(StrEnum):
     RECONCILED = "reconciled"
 
 
+class QBittorrentV2RunState(StrEnum):
+    RUNNING = "running"
+    STOPPED = "stopped"
+
+
 @dataclass(frozen=True, slots=True)
 class QBittorrentV2AddResult:
     state: QBittorrentV2AddState
+
+
+@dataclass(frozen=True, slots=True)
+class QBittorrentV2DesiredControl:
+    info_hash: str
+    storage_key: UUID
+    run_state: QBittorrentV2RunState
+    download_limit_bytes_per_second: int
+
+
+@dataclass(frozen=True, slots=True)
+class QBittorrentV2ControlResult:
+    started: tuple[str, ...]
+    stopped: tuple[str, ...]
+    limits_updated: tuple[str, ...]
+    priorities_applied: tuple[str, ...]
 
 
 class QBittorrentV2TransientError(IntegrationRequestError):
@@ -38,7 +61,7 @@ class QBittorrentV2TransientError(IntegrationRequestError):
 
 
 class QBittorrentV2RejectedError(IntegrationRequestError):
-    """qBittorrent explicitly rejected a V2 torrent add."""
+    """qBittorrent explicitly rejected a V2 managed-torrent operation."""
 
 
 class QBittorrentV2OwnershipError(IntegrationRequestError):
@@ -57,6 +80,8 @@ class _TorrentRecord:
     save_path: str
     category: str
     tags: frozenset[str]
+    state: str | None
+    download_limit: int | None
 
 
 class _AmbiguousAdd(Exception):
@@ -124,6 +149,111 @@ class QBittorrentV2Gateway:
                 return await self._reconcile_ambiguous(expected_info_hash, identity, exc)
 
             return QBittorrentV2AddResult(QBittorrentV2AddState.ADDED)
+        finally:
+            if logged_in:
+                await self._logout()
+
+    async def apply_managed_controls(
+        self,
+        controls: Sequence[QBittorrentV2DesiredControl],
+    ) -> QBittorrentV2ControlResult:
+        """Reconcile bounded, explicitly-owned torrents against a scheduler decision."""
+        validated = _validate_controls(controls)
+        if not validated:
+            return QBittorrentV2ControlResult((), (), (), ())
+
+        logged_in = False
+        try:
+            try:
+                if not await self._login():
+                    raise IntegrationAuthenticationError("qBittorrent authentication failed")
+                logged_in = True
+                records = await self._lookup_many(tuple(control.info_hash for control in validated))
+            except IntegrationAuthenticationError:
+                raise
+            except (httpx.HTTPError, IntegrationRequestError) as exc:
+                raise QBittorrentV2TransientError("qBittorrent control preflight failed") from exc
+
+            by_hash = {record.info_hash: record for record in records}
+            if set(by_hash) != {control.info_hash for control in validated}:
+                raise QBittorrentV2TransientError("A managed torrent is not visible in qBittorrent")
+
+            # Ownership and snapshot validation are completed for the whole batch before
+            # the first mutation. This prevents a mixed batch from touching external torrents.
+            try:
+                for control in validated:
+                    record = by_hash[control.info_hash]
+                    self._require_owned(record, self._identity(control.storage_key))
+                    _require_control_snapshot(record)
+            except QBittorrentV2OwnershipError:
+                raise
+            except IntegrationRequestError as exc:
+                raise QBittorrentV2TransientError(
+                    "qBittorrent control snapshot is invalid"
+                ) from exc
+
+            stopped = tuple(
+                control.info_hash
+                for control in validated
+                if control.run_state == QBittorrentV2RunState.STOPPED
+                and not _is_stopped(by_hash[control.info_hash].state)
+            )
+            started = tuple(
+                control.info_hash
+                for control in validated
+                if control.run_state == QBittorrentV2RunState.RUNNING
+                and _is_stopped(by_hash[control.info_hash].state)
+            )
+            limits_updated = tuple(
+                control.info_hash
+                for control in validated
+                if _normalized_download_limit(by_hash[control.info_hash].download_limit)
+                != control.download_limit_bytes_per_second
+            )
+            running = tuple(
+                control.info_hash
+                for control in validated
+                if control.run_state == QBittorrentV2RunState.RUNNING
+            )
+
+            try:
+                if stopped:
+                    await self._post_control("stop", {"hashes": "|".join(stopped)})
+                for limit in sorted(
+                    {control.download_limit_bytes_per_second for control in validated}
+                ):
+                    hashes = tuple(
+                        control.info_hash
+                        for control in validated
+                        if control.info_hash in limits_updated
+                        and control.download_limit_bytes_per_second == limit
+                    )
+                    if hashes:
+                        await self._post_control(
+                            "setDownloadLimit",
+                            {"hashes": "|".join(hashes), "limit": str(limit)},
+                        )
+                # topPrio is relative. Applying it from lowest to highest recreates the
+                # scheduler order after qB or WOS restarts without trusting qB integers.
+                for info_hash in reversed(running):
+                    await self._post_control("topPrio", {"hashes": info_hash})
+                if started:
+                    await self._post_control("start", {"hashes": "|".join(started)})
+            except IntegrationAuthenticationError:
+                raise
+            except QBittorrentV2RejectedError:
+                raise
+            except (httpx.HTTPError, IntegrationRequestError) as exc:
+                raise QBittorrentV2TransientError(
+                    "qBittorrent control reconciliation failed"
+                ) from exc
+
+            return QBittorrentV2ControlResult(
+                started=started,
+                stopped=stopped,
+                limits_updated=limits_updated,
+                priorities_applied=running,
+            )
         finally:
             if logged_in:
                 await self._logout()
@@ -201,10 +331,16 @@ class QBittorrentV2Gateway:
             raise QBittorrentV2TransientError("qBittorrent preflight lookup failed") from exc
 
     async def _lookup(self, expected_info_hash: str) -> _TorrentRecord | None:
+        records = await self._lookup_many((expected_info_hash,))
+        if not records:
+            return None
+        return records[0]
+
+    async def _lookup_many(self, expected_info_hashes: Sequence[str]) -> tuple[_TorrentRecord, ...]:
         async with self._client.stream(
             "GET",
             f"{self._base_url}/api/v2/torrents/info",
-            params={"hashes": expected_info_hash},
+            params={"hashes": "|".join(expected_info_hashes)},
             headers=self._browser_headers(),
         ) as response:
             if response.status_code == 401:
@@ -212,14 +348,28 @@ class QBittorrentV2Gateway:
             response.raise_for_status()
             payload = await read_limited_json(response, max_bytes=MAX_LOOKUP_RESPONSE_BYTES)
 
-        if not isinstance(payload, list) or len(payload) > 1:
+        if not isinstance(payload, list) or len(payload) > len(expected_info_hashes):
             raise IntegrationRequestError("qBittorrent managed torrent lookup is invalid")
-        if not payload:
-            return None
-        record = _parse_torrent_record(payload[0])
-        if record.info_hash != expected_info_hash:
+        records = tuple(_parse_torrent_record(value) for value in payload)
+        returned_hashes = [record.info_hash for record in records]
+        if len(returned_hashes) != len(set(returned_hashes)) or not set(returned_hashes).issubset(
+            expected_info_hashes
+        ):
             raise IntegrationRequestError("qBittorrent returned an unexpected torrent")
-        return record
+        return records
+
+    async def _post_control(self, endpoint: str, data: dict[str, str]) -> None:
+        async with self._client.stream(
+            "POST",
+            f"{self._base_url}/api/v2/torrents/{endpoint}",
+            data=data,
+            headers=self._browser_headers(),
+        ) as response:
+            if response.status_code == 401:
+                raise IntegrationAuthenticationError("qBittorrent session expired")
+            if 400 <= response.status_code < 500:
+                raise QBittorrentV2RejectedError("qBittorrent rejected a managed torrent control")
+            response.raise_for_status()
 
     def _identity(self, storage_key: UUID) -> _ManagedIdentity:
         storage_id = storage_key.hex
@@ -307,6 +457,8 @@ def _parse_torrent_record(value: object) -> _TorrentRecord:
     save_path = value.get("save_path")
     category = value.get("category")
     tags = value.get("tags")
+    state = value.get("state")
+    download_limit = value.get("dl_limit")
     if not isinstance(info_hash, str) or _SHA1_RE.fullmatch(info_hash.lower()) is None:
         raise IntegrationRequestError("qBittorrent managed torrent hash is invalid")
     if not isinstance(save_path, str) or not 1 <= len(save_path) <= 4096:
@@ -320,4 +472,51 @@ def _parse_torrent_record(value: object) -> _TorrentRecord:
         save_path=save_path,
         category=category,
         tags=frozenset(tag.strip() for tag in tags.split(",") if tag.strip()),
+        state=state if isinstance(state, str) else None,
+        download_limit=download_limit if type(download_limit) is int else None,
     )
+
+
+def _validate_controls(
+    controls: Sequence[QBittorrentV2DesiredControl],
+) -> tuple[QBittorrentV2DesiredControl, ...]:
+    if len(controls) > MAX_CONTROL_TORRENTS:
+        raise ValueError("At most 200 torrents may be controlled at once")
+    validated = tuple(controls)
+    hashes: list[str] = []
+    for control in validated:
+        if not isinstance(control.storage_key, UUID):
+            raise ValueError("Controlled torrent storage key must be a UUID")
+        if not isinstance(control.run_state, QBittorrentV2RunState):
+            raise ValueError("Controlled torrent run state is invalid")
+        if not isinstance(control.info_hash, str) or _SHA1_RE.fullmatch(control.info_hash) is None:
+            raise ValueError("Controlled torrent hash must be a canonical SHA-1 hash")
+        if (
+            type(control.download_limit_bytes_per_second) is not int
+            or not 0 <= control.download_limit_bytes_per_second <= 10_000_000_000
+        ):
+            raise ValueError("Controlled torrent download limit is out of range")
+        hashes.append(control.info_hash)
+    if len(hashes) != len(set(hashes)):
+        raise ValueError("Each infohash may be controlled only once")
+    return validated
+
+
+def _require_control_snapshot(record: _TorrentRecord) -> None:
+    if record.state is None or record.download_limit is None:
+        raise IntegrationRequestError("qBittorrent control snapshot is incomplete")
+    normalized_state = record.state.lower()
+    if normalized_state in {"error", "missingfiles", "unknown"}:
+        raise IntegrationRequestError("qBittorrent torrent state cannot be controlled safely")
+
+
+def _is_stopped(state: str | None) -> bool:
+    return state is not None and state.lower().startswith(("stopped", "paused"))
+
+
+def _normalized_download_limit(limit: int | None) -> int:
+    if limit in {-1, 0}:
+        return 0
+    if limit is None or limit < 0:
+        raise IntegrationRequestError("qBittorrent download limit is invalid")
+    return limit

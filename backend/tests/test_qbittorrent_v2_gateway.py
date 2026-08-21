@@ -9,9 +9,11 @@ from app.integrations.http import IntegrationAuthenticationError
 from app.integrations.qbittorrent_v2 import (
     QBittorrentV2AddResult,
     QBittorrentV2AddState,
+    QBittorrentV2DesiredControl,
     QBittorrentV2Gateway,
     QBittorrentV2OwnershipError,
     QBittorrentV2RejectedError,
+    QBittorrentV2RunState,
     QBittorrentV2TransientError,
 )
 
@@ -19,6 +21,10 @@ INFO_HASH = "a" * 40
 STORAGE_KEY = UUID("12345678-1234-5678-1234-567812345678")
 SAVE_PATH = "/seedbox/content/12345678123456781234567812345678"
 IDENTITY_TAG = "wos-v2-12345678123456781234567812345678"
+INFO_HASH_B = "b" * 40
+STORAGE_KEY_B = UUID("87654321-4321-8765-4321-876543218765")
+SAVE_PATH_B = "/seedbox/content/87654321432187654321876543218765"
+IDENTITY_TAG_B = "wos-v2-87654321432187654321876543218765"
 
 
 def _gateway(client: httpx.AsyncClient) -> QBittorrentV2Gateway:
@@ -42,6 +48,42 @@ def _managed_torrent(*, category: str = "wos-v2", save_path: str = SAVE_PATH) ->
         "save_path": save_path,
         "tags": f"wos-v2, {IDENTITY_TAG}",
     }
+
+
+def _control_torrent(
+    info_hash: str,
+    *,
+    save_path: str,
+    identity_tag: str,
+    state: str,
+    limit: int,
+    category: str = "wos-v2",
+) -> dict[str, str | int]:
+    return {
+        "hash": info_hash,
+        "category": category,
+        "save_path": save_path,
+        "tags": f"wos-v2, {identity_tag}",
+        "state": state,
+        "dl_limit": limit,
+    }
+
+
+def _controls() -> tuple[QBittorrentV2DesiredControl, ...]:
+    return (
+        QBittorrentV2DesiredControl(
+            info_hash=INFO_HASH,
+            storage_key=STORAGE_KEY,
+            run_state=QBittorrentV2RunState.RUNNING,
+            download_limit_bytes_per_second=51,
+        ),
+        QBittorrentV2DesiredControl(
+            info_hash=INFO_HASH_B,
+            storage_key=STORAGE_KEY_B,
+            run_state=QBittorrentV2RunState.STOPPED,
+            download_limit_bytes_per_second=0,
+        ),
+    )
 
 
 async def _run(handler: Callable[[httpx.Request], httpx.Response]) -> QBittorrentV2AddResult:
@@ -258,3 +300,182 @@ async def test_gateway_validates_inputs_before_authentication() -> None:
                 expected_info_hash=INFO_HASH,
                 storage_key=STORAGE_KEY,
             )
+
+
+@pytest.mark.asyncio
+async def test_gateway_reconciles_qb5_state_limit_and_priority_in_safe_order() -> None:
+    requests: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.content.decode()
+        requests.append((request.url.path, body))
+        if request.url.path == "/api/v2/auth/login":
+            return _login_response()
+        if request.url.path == "/api/v2/torrents/info":
+            assert request.url.params["hashes"] == f"{INFO_HASH}|{INFO_HASH_B}"
+            return httpx.Response(
+                200,
+                json=[
+                    _control_torrent(
+                        INFO_HASH,
+                        save_path=SAVE_PATH,
+                        identity_tag=IDENTITY_TAG,
+                        state="stoppedDL",
+                        limit=-1,
+                    ),
+                    _control_torrent(
+                        INFO_HASH_B,
+                        save_path=SAVE_PATH_B,
+                        identity_tag=IDENTITY_TAG_B,
+                        state="downloading",
+                        limit=99,
+                    ),
+                ],
+            )
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        if request.url.path.startswith("/api/v2/torrents/"):
+            return httpx.Response(200)
+        raise AssertionError(request.url.path)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await _gateway(client).apply_managed_controls(_controls())
+
+    assert result.started == (INFO_HASH,)
+    assert result.stopped == (INFO_HASH_B,)
+    assert result.limits_updated == (INFO_HASH, INFO_HASH_B)
+    assert result.priorities_applied == (INFO_HASH,)
+    assert requests == [
+        ("/api/v2/auth/login", "username=wos&password=secret-password"),
+        ("/api/v2/torrents/info", ""),
+        ("/api/v2/torrents/stop", f"hashes={INFO_HASH_B}"),
+        ("/api/v2/torrents/setDownloadLimit", f"hashes={INFO_HASH_B}&limit=0"),
+        ("/api/v2/torrents/setDownloadLimit", f"hashes={INFO_HASH}&limit=51"),
+        ("/api/v2/torrents/topPrio", f"hashes={INFO_HASH}"),
+        ("/api/v2/torrents/start", f"hashes={INFO_HASH}"),
+        ("/api/v2/auth/logout", ""),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gateway_replay_skips_state_and_limit_writes_but_reasserts_priority() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        if request.url.path == "/api/v2/auth/login":
+            return _login_response()
+        if request.url.path == "/api/v2/torrents/info":
+            return httpx.Response(
+                200,
+                json=[
+                    _control_torrent(
+                        INFO_HASH,
+                        save_path=SAVE_PATH,
+                        identity_tag=IDENTITY_TAG,
+                        state="downloading",
+                        limit=51,
+                    ),
+                    _control_torrent(
+                        INFO_HASH_B,
+                        save_path=SAVE_PATH_B,
+                        identity_tag=IDENTITY_TAG_B,
+                        state="pausedDL",
+                        limit=-1,
+                    ),
+                ],
+            )
+        if request.url.path in {"/api/v2/torrents/topPrio", "/api/v2/auth/logout"}:
+            return httpx.Response(200)
+        raise AssertionError(request.url.path)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await _gateway(client).apply_managed_controls(_controls())
+
+    assert result.started == result.stopped == result.limits_updated == ()
+    assert requests == [
+        "/api/v2/auth/login",
+        "/api/v2/torrents/info",
+        "/api/v2/torrents/topPrio",
+        "/api/v2/auth/logout",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gateway_validates_entire_batch_ownership_before_mutation() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        if request.url.path == "/api/v2/auth/login":
+            return _login_response()
+        if request.url.path == "/api/v2/torrents/info":
+            return httpx.Response(
+                200,
+                json=[
+                    _control_torrent(
+                        INFO_HASH,
+                        save_path=SAVE_PATH,
+                        identity_tag=IDENTITY_TAG,
+                        state="stoppedDL",
+                        limit=-1,
+                    ),
+                    _control_torrent(
+                        INFO_HASH_B,
+                        save_path=SAVE_PATH_B,
+                        identity_tag=IDENTITY_TAG_B,
+                        state="downloading",
+                        limit=99,
+                        category="external",
+                    ),
+                ],
+            )
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError("No torrent mutation is allowed before full ownership validation")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(QBittorrentV2OwnershipError):
+            await _gateway(client).apply_managed_controls(_controls())
+
+    assert requests == [
+        "/api/v2/auth/login",
+        "/api/v2/torrents/info",
+        "/api/v2/auth/logout",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gateway_preserves_explicit_qb_control_rejection() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v2/auth/login":
+            return _login_response()
+        if request.url.path == "/api/v2/torrents/info":
+            return httpx.Response(
+                200,
+                json=[
+                    _control_torrent(
+                        INFO_HASH,
+                        save_path=SAVE_PATH,
+                        identity_tag=IDENTITY_TAG,
+                        state="downloading",
+                        limit=51,
+                    ),
+                    _control_torrent(
+                        INFO_HASH_B,
+                        save_path=SAVE_PATH_B,
+                        identity_tag=IDENTITY_TAG_B,
+                        state="pausedDL",
+                        limit=-1,
+                    ),
+                ],
+            )
+        if request.url.path == "/api/v2/torrents/topPrio":
+            return httpx.Response(409, text="Torrent queueing is disabled")
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError(request.url.path)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(QBittorrentV2RejectedError):
+            await _gateway(client).apply_managed_controls(_controls())
