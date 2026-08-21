@@ -58,6 +58,9 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ComposePolicyError("api must use only the edge and backend networks")
     if not api.get("healthcheck"):
         raise ComposePolicyError("api must define a healthcheck")
+    api_environment = _mapping(api.get("environment"), "services.api.environment")
+    if api_environment.get("WOS_REDIS_URL") != "redis://redis:6379/0":
+        raise ComposePolicyError("api must use only the internal V2 Redis service")
 
     dependencies = _mapping(api.get("depends_on"), "services.api.depends_on")
     for dependency in ("postgres", "redis"):

@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.coordination import RedisCoordinator
 from app.core.config import Settings, get_settings
 from app.core.database import get_db_session
 from app.integrations import ExternalServicesMonitor
@@ -56,6 +57,7 @@ async def client(db_session: AsyncSession, data_root: Path) -> AsyncIterator[Asy
     app.dependency_overrides[get_db_session] = override_db_session
     app.dependency_overrides[get_settings] = override_settings
     app.state.external_services_monitor = ExternalServicesMonitor(test_settings)
+    app.state.redis_coordinator = RedisCoordinator.unconfigured()
     app.state.newgreedy_config_store = NewGreedyConfigStore(
         test_settings.data_root,
         max_bytes=test_settings.newgreedy_config_max_bytes,

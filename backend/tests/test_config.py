@@ -38,6 +38,12 @@ def test_cookie_is_not_secure_for_the_initial_ssh_tunnel() -> None:
         ("newgreedy_url", "http://user:password@newgreedy:8080"),
         ("qbittorrent_url", "http://qbittorrent:8080/api/v2"),
         ("integration_auth_failure_cache_seconds", 59),
+        ("redis_url", "http://redis:6379/0"),
+        ("redis_url", "redis://redis:6379/cache"),
+        ("redis_url", "redis://redis:6379/0?unsafe=true"),
+        ("redis_namespace", "Invalid Namespace"),
+        ("redis_cache_ttl_seconds", 0),
+        ("redis_signal_queue_max_length", 0),
     ],
 )
 def test_critical_runtime_settings_reject_unsafe_values(field: str, value: object) -> None:
@@ -48,3 +54,9 @@ def test_critical_runtime_settings_reject_unsafe_values(field: str, value: objec
 def test_production_data_root_is_fixed_to_the_container_mount() -> None:
     with pytest.raises(ValidationError):
         Settings(environment="production", data_root=Path("/tmp/data"))
+
+
+def test_redis_url_credentials_are_hidden_from_settings_representation() -> None:
+    settings = Settings(redis_url=SecretStr("rediss://user:password@redis:6379/0"))
+
+    assert "password" not in repr(settings)

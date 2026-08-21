@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import (
     AnyHttpUrl,
@@ -48,6 +49,18 @@ class Settings(BaseSettings):
     postgres_db: str = Field(default="world_of_seeds", min_length=1)
     postgres_user: str = Field(default="world_of_seeds", min_length=1)
     postgres_password: SecretStr = Field(default=SecretStr("world_of_seeds"), repr=False)
+    redis_url: SecretStr | None = Field(default=None, repr=False)
+    redis_namespace: str = Field(
+        default="wos:v2",
+        min_length=3,
+        max_length=64,
+        pattern=r"^[a-z0-9][a-z0-9:_-]+$",
+    )
+    redis_connect_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
+    redis_socket_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
+    redis_cache_ttl_seconds: int = Field(default=60, ge=1, le=86_400)
+    redis_cache_stale_seconds: int = Field(default=300, ge=0, le=86_400)
+    redis_signal_queue_max_length: int = Field(default=1_000, ge=1, le=100_000)
     data_root: Path = Path("/data")
     static_root: Path = Path("/app/static")
     newgreedy_url: AnyHttpUrl | None = None
@@ -78,6 +91,26 @@ class Settings(BaseSettings):
     def reject_empty_qbittorrent_password(cls, value: SecretStr | None) -> SecretStr | None:
         if value is not None and value.get_secret_value() == "":
             raise ValueError("qBittorrent password must not be empty")
+        return value
+
+    @field_validator("redis_url")
+    @classmethod
+    def validate_redis_url(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None:
+            return value
+        parsed = urlsplit(value.get_secret_value())
+        if (
+            parsed.scheme not in {"redis", "rediss"}
+            or parsed.hostname is None
+            or parsed.query
+            or parsed.fragment
+            or (parsed.path not in {"", "/"} and not parsed.path.removeprefix("/").isdigit())
+        ):
+            raise ValueError("Redis URL must be a redis/rediss origin with an optional DB number")
+        try:
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("Redis URL port is invalid") from exc
         return value
 
     @field_validator("c411_passkey")

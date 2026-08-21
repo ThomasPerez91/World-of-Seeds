@@ -17,8 +17,10 @@
   `b5a75f3c25f634ae7bcaef91ff9e26f2d8324ff9`.
 - V2-03 PR `#55` was merged into `develop_V2` at
   `8ea43fe1f49ffaa5a898e1f0a12d44e9de702267`.
-- Active task branch: `feat/v2-torrent-jobs`, based on that merge commit and
-  targeting `develop_V2`.
+- V2-04 PR `#56` was merged into `develop_V2` at
+  `3b443ea46932e4aac728d85f3a4e0279ece061f0`.
+- V2-05 draft PR `#57` targets `develop_V2` from `feat/v2-redis-resilience`, based on
+  that merge commit.
 
 ## V1 completion state
 
@@ -139,6 +141,26 @@
 - No Redis client, scheduler policy, worker process, qBittorrent effect, API, or frontend is
   included in V2-04.
 
+## V2-05 — Fault-tolerant Redis coordination
+
+- Added the async Redis runtime client as an optional V1-safe dependency and configured it
+  only in the isolated V2 Compose stack.
+- Added strict secret-safe Redis URL parsing, bounded connect/socket timeouts, a validated
+  namespace, cache TTL/stale windows, and a bounded signal queue length.
+- Added best-effort job wake-up signals backed by a bounded Redis list; Redis remains a
+  nudge only and PostgreSQL remains the durable job authority and polling fallback.
+- Added namespaced JSON cache-aside with explicit `MISSING`, `FRESH`, and `STALE` states,
+  TTL expiry, invalid-payload eviction, post-commit invalidation support, and authoritative
+  loader fallback when Redis is empty or unavailable.
+- A configured Redis outage degrades public system health without failing PostgreSQL
+  readiness or blocking authoritative application reads.
+- Added clean async shutdown and a V2 Compose policy requiring the private internal Redis
+  service URL with no published Redis port.
+- Added fake-failure, cache reconstruction, signal, TTL, health, configuration, Compose
+  policy, and real-Redis integration tests.
+- No scheduler algorithm, worker process, PostgreSQL domain query cache consumer, API
+  mutation, qBittorrent effect, frontend, or Rise2 deployment is included in V2-05.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -165,7 +187,13 @@
   deferred to PR CI.
 - V2-04 targeted Ruff lint/format and mypy: PASS.
 - V2-04 PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
-- V2-04 real PostgreSQL concurrency, migration execution, and complete CI: pending PR CI.
+- V2-04 GitHub CI run `32494379045`: PASS; real PostgreSQL concurrency, migration
+  rollback/re-upgrade, backend, frontend, and container jobs are green.
+- V2-05 targeted Redis/config/health/Compose policy tests: PASS, 42 tests with the real
+  Redis integration test deferred to PR CI.
+- V2-05 targeted Ruff lint/format and mypy: PASS.
+- V2-05 GitHub CI run `32497192124`: PASS; real Redis integration, normalized Compose,
+  migrations, backend, frontend, and container jobs are green.
 
 ## Known constraints
 
@@ -180,7 +208,7 @@
 
 ## Next task
 
-- Open and validate the V2-04 PR into `develop_V2`; do not merge it automatically.
-- After V2-04 is reviewed and merged, the next roadmap task is
-  `V2-05 — fault-tolerant Redis client, queue signals, cache-aside, and degraded health`.
-- Do not start V2-05 as part of the current task.
+- Review V2-05 PR `#57` into `develop_V2`; do not merge it automatically.
+- After V2-05 is reviewed and merged, the next roadmap task is
+  `V2-06 — typed and audited PostgreSQL options registry`.
+- Do not start V2-06 as part of the current task.

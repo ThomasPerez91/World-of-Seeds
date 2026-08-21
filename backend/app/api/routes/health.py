@@ -1,3 +1,4 @@
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -5,6 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.coordination.dependencies import RedisCoordinatorDependency
 from app.core.database import get_db_session
 from app.integrations.dependencies import ExternalServicesMonitorDependency
 from app.schemas.health import HealthResponse, PublicSystemHealthResponse
@@ -37,6 +39,7 @@ async def readiness(
 async def system_status(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     monitor: ExternalServicesMonitorDependency,
+    redis: RedisCoordinatorDependency,
 ) -> PublicSystemHealthResponse:
     database_healthy = True
     try:
@@ -44,8 +47,15 @@ async def system_status(
     except SQLAlchemyError:
         database_healthy = False
 
-    snapshot = await monitor.snapshot()
+    snapshot, redis_health = await asyncio.gather(
+        monitor.snapshot(),
+        redis.check_health(),
+    )
     return PublicSystemHealthResponse(
-        status="ok" if database_healthy and snapshot.healthy else "degraded",
+        status=(
+            "ok"
+            if database_healthy and snapshot.healthy and redis_health.permits_requests
+            else "degraded"
+        ),
         checked_at=snapshot.checked_at,
     )
