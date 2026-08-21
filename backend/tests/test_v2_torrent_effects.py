@@ -25,6 +25,7 @@ from app.models import (
     Base,
     ManagedTorrent,
     ManagedTorrentState,
+    TorrentFile,
     TorrentJob,
     TorrentRequest,
     TorrentRequestState,
@@ -235,8 +236,12 @@ async def test_add_handler_transitions_requests_and_removes_staged_payload(
         assert torrent.qbittorrent_account_ref == QBITTORRENT_ACCOUNT_REF
         assert request is not None and request.state is TorrentRequestState.ACTIVE
         activities = list((await session.scalars(select(TrackerActivity))).all())
+        files = list((await session.scalars(select(TorrentFile))).all())
         assert len(activities) == 1
         assert activities[0].tracker_account_ref == TRACKER_ACCOUNT_REF
+        assert torrent.manifest_version == 1
+        assert torrent.manifest_file_count == 1
+        assert [(file.relative_path, file.size) for file in files] == [("Film.mkv", 5)]
     assert len(adder.contents) == 1
     assert (tmp_path / "data" / "content" / STORAGE_KEY.hex).is_dir()
     assert b"private-user-passkey" not in adder.contents[0]
