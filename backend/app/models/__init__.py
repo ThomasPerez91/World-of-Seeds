@@ -10,6 +10,10 @@ from app.models.torrent_v2 import (
     TorrentJobState,
     TorrentRequest,
     TorrentRequestState,
+    TrackerActivity,
+    TrackerActivityOutcome,
+    TrackerActivityType,
+    TrackerDiagnosticCode,
 )
 from app.models.trash import TrashEntry
 
@@ -20,6 +24,10 @@ __all__ = [
     "LoginThrottle",
     "ManagedTorrent",
     "ManagedTorrentState",
+    "TrackerActivity",
+    "TrackerActivityOutcome",
+    "TrackerActivityType",
+    "TrackerDiagnosticCode",
     "TorrentFile",
     "TorrentJob",
     "TorrentJobState",
