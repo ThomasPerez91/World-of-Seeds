@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     qbittorrent_data_root: Path = Path("/data")
     c411_passkey: SecretStr | None = Field(default=None, repr=False)
     c411_tracker_hosts: list[AllowedHost] = Field(
-        default_factory=lambda: ["tracker.c411.org"],
+        default_factory=lambda: ["c411.org", "tk.c411.tw"],
         min_length=1,
     )
     integration_connect_timeout_seconds: float = Field(default=2.0, gt=0, le=30)

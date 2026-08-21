@@ -50,6 +50,8 @@ describe("UserDownloadsPage", () => {
 
     expect((await screen.findByRole("status")).textContent).toContain("Film.mkv");
     expect(await screen.findByText("Téléchargement")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("value")).toBe("0.5");
+    expect(view.container.querySelector("[style]")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 

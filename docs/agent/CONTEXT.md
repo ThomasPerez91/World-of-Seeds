@@ -96,7 +96,8 @@ The V1 maintenance release documented here is `1.3.1`.
 - Do not re-encode `info` before computing the hash.
 - Announce URLs are restricted to the configured C411 tracker host allowlist.
 - The tracker URL is rewritten server-side to include the WOS passkey.
-- The canonical path is `/{WOS passkey}/announce` on the allowed tracker.
+- The default allowed hosts are `c411.org` and `tk.c411.tw`.
+- The canonical path is `/announce/{URL-encoded WOS passkey}` on an allowed tracker.
 - The WOS passkey is read only from `WOS_C411_PASSKEY`.
 - It is represented as a secret value in application settings.
 - A passkey supplied inside uploaded metainfo is discarded from memory.
