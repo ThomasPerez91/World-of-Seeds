@@ -223,6 +223,24 @@
 - No qBittorrent/NewGreedy handler, filesystem mutation, API, scheduler, frontend, schema
   migration, V1 Compose change, or `master` change is included in V2-08.
 
+## V2-09 — qBittorrent V2 gateway
+
+- Added a dedicated V2 qBittorrent gateway without changing the existing V1 client.
+- Every add derives its save path from the server-owned data root and opaque storage key;
+  callers cannot supply a path, category, tag, or other qBittorrent mutation option.
+- New torrents receive the fixed `wos-v2` category plus global and per-storage-key WOS V2
+  identity tags.
+- A mandatory infohash preflight makes retries idempotent and refuses to add or mutate an
+  existing torrent whose category, identity tags, or save path do not match the managed row.
+- Explicit qBittorrent authentication failures and add rejections remain failures. Transport,
+  read, malformed-success, and server-response ambiguity is reconciled by exact infohash; an
+  owned match succeeds, while a missing result remains retryable without hiding a rejection.
+- Added bounded response parsing and targeted tests for fixed identity, idempotent replay,
+  external ownership conflicts, accepted-but-timed-out reconciliation, retryable ambiguity,
+  explicit rejection, authentication, and input validation.
+- No worker job handler, C411/NewGreedy normalization, API, schema, filesystem mutation,
+  frontend, V1 client behavior, Compose, or `master` change is included in V2-09.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -274,6 +292,11 @@
 - V2-08 complete backend suite: PASS, 255 tests with 4 real-service tests deferred to CI.
 - V2-08 normalized Compose policy and `git diff --check`: PASS; real Docker startup is
   deferred to PR CI because Docker is unavailable in the development environment.
+- PR #60 (V2-08) review and GitHub CI run `32501866847`: PASS; squash-merged into
+  `develop_V2` at `7d1ad6141814f4a3a64f5292726a5be9c1a423e8`.
+- V2-09 targeted qBittorrent V2 gateway and V1 integration regression tests: PASS, 23 tests.
+- V2-09 complete backend suite: PASS, 265 tests with 4 service-backed tests deferred to CI.
+- V2-09 full backend Ruff lint/format and mypy: PASS.
 
 ## Known constraints
 
@@ -288,7 +311,6 @@
 
 ## Next task
 
-- Open and validate the V2-08 PR into `develop_V2`; do not merge it automatically.
-- After V2-08 is reviewed and merged, the next roadmap task is
-  `V2-09 — qBittorrent V2 gateway`.
-- Do not start V2-09 as part of the current task.
+- Open and validate the V2-09 PR into `develop_V2`; do not merge it automatically.
+- After V2-09 is reviewed and merged, continue with `V2-10` from the V2 roadmap.
+- Do not start V2-10 as part of the current task.
