@@ -45,6 +45,14 @@ class TorrentRequestState(StrEnum):
     EXPIRED = "EXPIRED"
 
 
+class TorrentJobState(StrEnum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
 ACTIVE_REQUEST_PREDICATE = text("state IN ('REQUESTED', 'ACTIVE', 'READY')")
 
 
@@ -87,6 +95,11 @@ class ManagedTorrent(Base):
         passive_deletes=True,
     )
     files: Mapped[list[TorrentFile]] = relationship(
+        back_populates="managed_torrent",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    jobs: Mapped[list[TorrentJob]] = relationship(
         back_populates="managed_torrent",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -138,6 +151,10 @@ class TorrentRequest(Base):
 
     user: Mapped[User] = relationship(back_populates="torrent_requests")
     managed_torrent: Mapped[ManagedTorrent] = relationship(back_populates="requests")
+    jobs: Mapped[list[TorrentJob]] = relationship(
+        back_populates="torrent_request",
+        passive_deletes=True,
+    )
 
 
 class TorrentFile(Base):
@@ -177,3 +194,71 @@ class TorrentFile(Base):
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     managed_torrent: Mapped[ManagedTorrent] = relationship(back_populates="files")
+
+
+class TorrentJob(Base):
+    __tablename__ = "torrent_jobs"
+    __table_args__ = (
+        CheckConstraint("length(job_type) BETWEEN 1 AND 64", name="ck_torrent_jobs_type"),
+        CheckConstraint("length(idempotency_key) BETWEEN 1 AND 128", name="ck_torrent_jobs_key"),
+        CheckConstraint("attempt_count >= 0", name="ck_torrent_jobs_attempt_count"),
+        CheckConstraint("max_attempts >= 1", name="ck_torrent_jobs_max_attempts"),
+        CheckConstraint(
+            "state <> 'QUEUED' OR attempt_count < max_attempts",
+            name="ck_torrent_jobs_queued_attempts",
+        ),
+        CheckConstraint(
+            "(state = 'RUNNING' AND claimed_by IS NOT NULL "
+            "AND claim_expires_at IS NOT NULL AND timeout_at IS NOT NULL) "
+            "OR (state <> 'RUNNING' AND claimed_by IS NULL "
+            "AND claim_expires_at IS NULL AND timeout_at IS NULL)",
+            name="ck_torrent_jobs_claim",
+        ),
+        CheckConstraint(
+            "(state IN ('COMPLETED', 'FAILED', 'CANCELLED') AND finished_at IS NOT NULL) "
+            "OR (state IN ('QUEUED', 'RUNNING') AND finished_at IS NULL)",
+            name="ck_torrent_jobs_finished",
+        ),
+        Index("ix_torrent_jobs_claimable", "state", "available_at", "created_at"),
+        Index("ix_torrent_jobs_torrent_created", "managed_torrent_id", "created_at"),
+        Index("ix_torrent_jobs_request", "torrent_request_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    managed_torrent_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("managed_torrents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    torrent_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("torrent_requests.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    job_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    state: Mapped[TorrentJobState] = mapped_column(
+        Enum(
+            TorrentJobState,
+            name="torrent_job_state",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+        ),
+        default=TorrentJobState.QUEUED,
+        nullable=False,
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    available_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    timeout_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    claimed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+
+    managed_torrent: Mapped[ManagedTorrent] = relationship(back_populates="jobs")
+    torrent_request: Mapped[TorrentRequest | None] = relationship(back_populates="jobs")

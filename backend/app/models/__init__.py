@@ -5,6 +5,8 @@ from app.models.torrent_v2 import (
     ManagedTorrent,
     ManagedTorrentState,
     TorrentFile,
+    TorrentJob,
+    TorrentJobState,
     TorrentRequest,
     TorrentRequestState,
 )
@@ -16,6 +18,8 @@ __all__ = [
     "ManagedTorrent",
     "ManagedTorrentState",
     "TorrentFile",
+    "TorrentJob",
+    "TorrentJobState",
     "TorrentRequest",
     "TorrentRequestState",
     "TrashEntry",

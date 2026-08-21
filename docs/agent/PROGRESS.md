@@ -15,7 +15,9 @@
   `980b73182806b5604440b51c21f87df49c59b4e6`.
 - V2-02 PR `#54` was merged into `develop_V2` at
   `b5a75f3c25f634ae7bcaef91ff9e26f2d8324ff9`.
-- Active task branch: `feat/v2-shared-torrent-schema`, based on that merge commit and
+- V2-03 PR `#55` was merged into `develop_V2` at
+  `8ea43fe1f49ffaa5a898e1f0a12d44e9de702267`.
+- Active task branch: `feat/v2-torrent-jobs`, based on that merge commit and
   targeting `develop_V2`.
 
 ## V1 completion state
@@ -119,6 +121,24 @@
 - No API, worker, Redis client, qBittorrent behavior, V1 import, or Rise2 deployment is
   included in V2-03.
 
+## V2-04 — Durable torrent jobs
+
+- Added the PostgreSQL-authoritative `TorrentJob` model with the exact normative states
+  `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`, and `CANCELLED`.
+- Added a globally unique idempotency key, generic bounded job type, managed-torrent link,
+  optional originating-request link, attempts, availability, deadlines, claims, safe error
+  codes, cancellation intent, and completion timestamps.
+- Added SQL constraints that reject exhausted queued jobs, incomplete running claims,
+  invalid attempt limits, and terminal jobs without a completion timestamp.
+- Added oldest-ready selection with PostgreSQL `FOR UPDATE SKIP LOCKED`, claim ownership,
+  bounded renewal, execution timeout, retry backoff, and expired-claim recovery.
+- Queued cancellation is immediate; running cancellation persists intent and becomes final
+  only at a worker checkpoint or after external-effect reconciliation.
+- Added an additive and reversible Alembic migration plus targeted state, idempotence,
+  retry, timeout, crash-recovery, cancellation, ownership, and PostgreSQL concurrency tests.
+- No Redis client, scheduler policy, worker process, qBittorrent effect, API, or frontend is
+  included in V2-04.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -139,7 +159,13 @@
 - V2-03 model and V1 torrent regression tests: PASS, 16 tests.
 - V2-03 targeted Ruff lint/format and mypy: PASS.
 - V2-03 PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
-- V2-03 migration execution against PostgreSQL and complete CI: pending PR CI.
+- V2-03 GitHub CI run `32488849874`: PASS; PostgreSQL migration rollback/re-upgrade,
+  backend, frontend, and container jobs are green.
+- V2-04 targeted model/job tests: PASS, 19 tests with the PostgreSQL-only concurrency test
+  deferred to PR CI.
+- V2-04 targeted Ruff lint/format and mypy: PASS.
+- V2-04 PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
+- V2-04 real PostgreSQL concurrency, migration execution, and complete CI: pending PR CI.
 
 ## Known constraints
 
@@ -154,7 +180,7 @@
 
 ## Next task
 
-- Open and validate the V2-03 PR into `develop_V2`; do not merge it automatically.
-- After V2-03 is reviewed and merged, the next roadmap task is
-  `V2-04 — TorrentJob schema, SQL claims, timeouts, retries, and cancellation`.
-- Do not start V2-04 as part of the current task.
+- Open and validate the V2-04 PR into `develop_V2`; do not merge it automatically.
+- After V2-04 is reviewed and merged, the next roadmap task is
+  `V2-05 — fault-tolerant Redis client, queue signals, cache-aside, and degraded health`.
+- Do not start V2-05 as part of the current task.
