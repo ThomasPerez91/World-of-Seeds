@@ -13,9 +13,8 @@ import httpx
 from app.coordination import RedisCoordinator
 from app.core.config import get_settings
 from app.core.database import engine, session_factory
-from app.integrations.c411_v2 import C411NewGreedyV2Gateway, NewGreedyV2Gateway
+from app.integrations.account_routing import build_deployment_account_router
 from app.integrations.http import integration_timeout
-from app.integrations.qbittorrent_v2 import QBittorrentV2Gateway
 from app.jobs.torrent_effects import TorrentEffectHandlers, TorrentSyncEnqueuer
 from app.jobs.torrent_payloads import MAX_MANAGED_TORRENT_BYTES, TorrentPayloadStore
 from app.jobs.worker import TorrentWorker
@@ -28,19 +27,23 @@ def _worker_id() -> str:
 
 async def main() -> None:
     settings = get_settings()
-    integration_values = (
+    legacy_integration_values = (
         settings.newgreedy_url,
         settings.qbittorrent_url,
         settings.qbittorrent_username,
         settings.qbittorrent_password,
         settings.c411_passkey,
     )
-    if any(value is not None for value in integration_values) and not all(
-        value is not None for value in integration_values
+    if settings.integration_accounts_json is not None and any(
+        value is not None for value in legacy_integration_values
     ):
-        raise RuntimeError("V2 worker integration configuration is incomplete")
+        raise RuntimeError("V2 worker integration configuration is ambiguous")
+    if settings.integration_accounts_json is None and any(
+        value is not None for value in legacy_integration_values
+    ):
+        raise RuntimeError("V2 worker deployment account registry is required")
     redis = RedisCoordinator.from_settings(settings)
-    if not any(value is not None for value in integration_values):
+    if settings.integration_accounts_json is None:
         worker = TorrentWorker(session_factory, redis, {}, worker_id=_worker_id())
         loop = asyncio.get_running_loop()
         for signal_number in (signal.SIGINT, signal.SIGTERM):
@@ -52,35 +55,24 @@ async def main() -> None:
             await engine.dispose()
         return
 
-    assert settings.newgreedy_url is not None
-    assert settings.qbittorrent_url is not None
-    assert settings.qbittorrent_username is not None
-    assert settings.qbittorrent_password is not None
-    assert settings.c411_passkey is not None
     timeout = integration_timeout(
         settings.integration_connect_timeout_seconds,
         settings.integration_read_timeout_seconds,
     )
     async with httpx.AsyncClient(timeout=timeout) as client:
-        qbittorrent = QBittorrentV2Gateway(
+        router = build_deployment_account_router(
+            settings.integration_accounts_json,
             client,
-            str(settings.qbittorrent_url),
-            settings.qbittorrent_username,
-            settings.qbittorrent_password.get_secret_value(),
-            data_root=settings.qbittorrent_data_root,
-        )
-        adder = C411NewGreedyV2Gateway(
-            qbittorrent,
-            NewGreedyV2Gateway(client, str(settings.newgreedy_url)),
-            passkey=settings.c411_passkey,
+            session_factory,
             allowed_tracker_hosts=settings.c411_tracker_hosts,
+            data_root=settings.qbittorrent_data_root,
             max_total_size=MAX_MANAGED_TORRENT_BYTES,
         )
         payloads = TorrentPayloadStore(
             settings.data_root,
             allowed_tracker_hosts=settings.c411_tracker_hosts,
         )
-        effects = TorrentEffectHandlers(session_factory, adder, qbittorrent, payloads)
+        effects = TorrentEffectHandlers(session_factory, router, payloads)
         worker = TorrentWorker(
             session_factory,
             redis,

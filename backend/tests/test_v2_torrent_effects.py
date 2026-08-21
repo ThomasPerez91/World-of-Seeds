@@ -1,7 +1,7 @@
 import hashlib
 import os
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -11,7 +11,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.coordination import RedisCoordinator
+from app.integrations.account_routing import DeploymentAccountRouter, TorrentEffectRoute
 from app.integrations.qbittorrent_v2 import (
+    QBittorrentV2ControlResult,
+    QBittorrentV2DesiredControl,
     QBittorrentV2ManagedIdentity,
     QBittorrentV2TorrentSnapshot,
 )
@@ -25,11 +28,14 @@ from app.models import (
     TorrentJob,
     TorrentRequest,
     TorrentRequestState,
+    TrackerActivity,
     User,
 )
 
 NOW = datetime(2026, 8, 21, 20, tzinfo=UTC)
 STORAGE_KEY = uuid.UUID("12345678-1234-5678-1234-567812345678")
+TRACKER_ACCOUNT_REF = uuid.UUID("11111111-1111-1111-1111-111111111111")
+QBITTORRENT_ACCOUNT_REF = uuid.UUID("22222222-2222-2222-2222-222222222222")
 INFO = {
     b"length": 5,
     b"name": b"Film.mkv",
@@ -140,9 +146,33 @@ class FakeInspector:
 
     async def inspect_managed_torrents(
         self,
-        _identities: tuple[QBittorrentV2ManagedIdentity, ...],
+        _identities: Sequence[QBittorrentV2ManagedIdentity],
     ) -> tuple[QBittorrentV2TorrentSnapshot, ...]:
         return (self.snapshot,)
+
+    async def apply_managed_controls(
+        self,
+        _controls: Sequence[QBittorrentV2DesiredControl],
+    ) -> QBittorrentV2ControlResult:
+        return QBittorrentV2ControlResult((), (), (), ())
+
+
+def _router(
+    sessions: async_sessionmaker[AsyncSession],
+    adder: FakeAdder,
+    snapshot: QBittorrentV2TorrentSnapshot,
+) -> DeploymentAccountRouter:
+    return DeploymentAccountRouter(
+        sessions,
+        (
+            TorrentEffectRoute(
+                TRACKER_ACCOUNT_REF,
+                QBITTORRENT_ACCOUNT_REF,
+                adder,
+                FakeInspector(snapshot),
+            ),
+        ),
+    )
 
 
 def test_payload_store_removes_user_passkeys_before_durable_write(tmp_path: Path) -> None:
@@ -179,8 +209,11 @@ async def test_add_handler_transitions_requests_and_removes_staged_payload(
     adder = FakeAdder()
     effects = TorrentEffectHandlers(
         sessions,
-        adder,
-        FakeInspector(QBittorrentV2TorrentSnapshot(INFO_HASH, "downloading", 0.2)),
+        _router(
+            sessions,
+            adder,
+            QBittorrentV2TorrentSnapshot(INFO_HASH, "downloading", 0.2),
+        ),
         payloads,
         clock=lambda: NOW,
     )
@@ -192,7 +225,12 @@ async def test_add_handler_transitions_requests_and_removes_staged_payload(
         request = await session.get(TorrentRequest, request_id)
         assert torrent is not None and torrent.state is ManagedTorrentState.DOWNLOADING
         assert torrent.qb_state == "added"
+        assert torrent.tracker_account_ref == TRACKER_ACCOUNT_REF
+        assert torrent.qbittorrent_account_ref == QBITTORRENT_ACCOUNT_REF
         assert request is not None and request.state is TorrentRequestState.ACTIVE
+        activities = list((await session.scalars(select(TrackerActivity))).all())
+        assert len(activities) == 1
+        assert activities[0].tracker_account_ref == TRACKER_ACCOUNT_REF
     assert len(adder.contents) == 1
     assert b"private-user-passkey" not in adder.contents[0]
     with pytest.raises(TorrentPayloadStoreError):
@@ -210,8 +248,11 @@ async def test_sync_handler_marks_completed_torrent_and_request_ready(
     )
     effects = TorrentEffectHandlers(
         sessions,
-        FakeAdder(),
-        FakeInspector(QBittorrentV2TorrentSnapshot(INFO_HASH, "stalledUP", 1.0)),
+        _router(
+            sessions,
+            FakeAdder(),
+            QBittorrentV2TorrentSnapshot(INFO_HASH, "stalledUP", 1.0),
+        ),
         _payloads(tmp_path),
         clock=lambda: NOW,
     )

@@ -120,6 +120,7 @@ class SchedulerRuntime:
                     torrent_id=torrent.id,
                     info_hash=torrent.info_hash,
                     storage_key=torrent.storage_key,
+                    qbittorrent_account_ref=torrent.qbittorrent_account_ref,
                 )
                 for torrent in torrents
             )

@@ -17,6 +17,7 @@ class ManagedTorrentControlIdentity:
     torrent_id: uuid.UUID
     info_hash: str
     storage_key: uuid.UUID
+    qbittorrent_account_ref: uuid.UUID | None = None
 
 
 def build_qbittorrent_control_plan(
@@ -60,6 +61,7 @@ def build_qbittorrent_control_plan(
             storage_key=by_torrent_id[torrent_id].storage_key,
             run_state=QBittorrentV2RunState.RUNNING,
             download_limit_bytes_per_second=shares[index],
+            qbittorrent_account_ref=by_torrent_id[torrent_id].qbittorrent_account_ref,
         )
         for index, torrent_id in enumerate(selected_ids)
     ]
@@ -72,6 +74,7 @@ def build_qbittorrent_control_plan(
                     storage_key=identity.storage_key,
                     run_state=QBittorrentV2RunState.STOPPED,
                     download_limit_bytes_per_second=0,
+                    qbittorrent_account_ref=identity.qbittorrent_account_ref,
                 )
             )
     return tuple(plan)
