@@ -28,6 +28,15 @@ def _valid_config() -> dict[str, Any]:
                 "networks": {"backend": None, "edge": None},
                 "ports": [{"host_ip": "127.0.0.1", "target": 8000}],
             },
+            "worker": {
+                "command": ["python", "-m", "app.worker"],
+                "depends_on": {
+                    "postgres": {"condition": "service_healthy"},
+                    "redis": {"condition": "service_healthy"},
+                },
+                "environment": {"WOS_REDIS_URL": "redis://redis:6379/0"},
+                "networks": {"backend": None},
+            },
             "postgres": {
                 "healthcheck": healthy,
                 "image": "postgres:17.11-alpine3.24",
@@ -65,6 +74,13 @@ def test_v2_compose_policy_accepts_the_isolated_foundation() -> None:
         lambda config: config["networks"]["backend"].update({"internal": False}),
         lambda config: config["services"]["api"].update(
             {"volumes": ["/var/run/docker.sock:/var/run/docker.sock"]}
+        ),
+        lambda config: config["services"]["worker"].update(
+            {"networks": {"backend": None, "edge": None}}
+        ),
+        lambda config: config["services"]["worker"].update({"ports": [{"target": 9000}]}),
+        lambda config: config["services"]["worker"].update(
+            {"command": ["uvicorn", "app.main:app"]}
         ),
     ],
 )

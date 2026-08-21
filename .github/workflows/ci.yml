@@ -211,6 +211,7 @@ jobs:
             exit 1
           fi
           test "$("${compose[@]}" exec -T redis redis-cli ping)" = "PONG"
+          test -n "$("${compose[@]}" ps --quiet --status running worker)"
       - name: Stop V2 foundation
         if: always() && env.WOS_VERSION_CHANNEL == 'v2'
         run: >-

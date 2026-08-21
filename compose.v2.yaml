@@ -51,6 +51,37 @@ services:
       retries: 3
       start_period: 10s
 
+  worker:
+    build:
+      context: .
+    command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+    stop_grace_period: 35s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      WOS_ENVIRONMENT: ${WOS_V2_ENVIRONMENT:-development}
+      WOS_POSTGRES_HOST: postgres
+      WOS_POSTGRES_PORT: 5432
+      WOS_POSTGRES_DB: ${WOS_V2_POSTGRES_DB:?set WOS_V2_POSTGRES_DB}
+      WOS_POSTGRES_USER: ${WOS_V2_POSTGRES_USER:?set WOS_V2_POSTGRES_USER}
+      WOS_POSTGRES_PASSWORD: ${WOS_V2_POSTGRES_PASSWORD:?set WOS_V2_POSTGRES_PASSWORD}
+      WOS_REDIS_URL: redis://redis:6379/0
+    networks:
+      - backend
+    user: "${WOS_V2_APP_UID:-1000}:${WOS_V2_APP_GID:-1000}"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+
   postgres:
     image: postgres:17.11-alpine3.24
     restart: unless-stopped

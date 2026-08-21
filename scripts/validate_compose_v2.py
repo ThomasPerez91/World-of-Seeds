@@ -27,12 +27,13 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ComposePolicyError("the V2 project name must stay isolated")
 
     services = _mapping(config.get("services"), "services")
-    if set(services) != {"api", "postgres", "redis"}:
+    if set(services) != {"api", "worker", "postgres", "redis"}:
         raise ComposePolicyError(
-            "the V2 foundation must contain only api/postgres/redis"
+            "the V2 foundation must contain only api/worker/postgres/redis"
         )
 
     api = _mapping(services["api"], "services.api")
+    worker = _mapping(services["worker"], "services.worker")
     postgres = _mapping(services["postgres"], "services.postgres")
     redis = _mapping(services["redis"], "services.redis")
 
@@ -56,17 +57,36 @@ def validate_config(config: Mapping[str, Any]) -> None:
     api_networks = set(_mapping(api.get("networks"), "services.api.networks"))
     if api_networks != {"edge", "backend"}:
         raise ComposePolicyError("api must use only the edge and backend networks")
+    if set(_mapping(worker.get("networks"), "services.worker.networks")) != {"backend"}:
+        raise ComposePolicyError("worker must use only the private backend network")
+    if worker.get("ports"):
+        raise ComposePolicyError("worker must not publish a host port")
+    if worker.get("command") != ["python", "-m", "app.worker"]:
+        raise ComposePolicyError("worker must use the dedicated worker entry point")
     if not api.get("healthcheck"):
         raise ComposePolicyError("api must define a healthcheck")
     api_environment = _mapping(api.get("environment"), "services.api.environment")
     if api_environment.get("WOS_REDIS_URL") != "redis://redis:6379/0":
         raise ComposePolicyError("api must use only the internal V2 Redis service")
+    worker_environment = _mapping(
+        worker.get("environment"), "services.worker.environment"
+    )
+    if worker_environment.get("WOS_REDIS_URL") != "redis://redis:6379/0":
+        raise ComposePolicyError("worker must use only the internal V2 Redis service")
 
     dependencies = _mapping(api.get("depends_on"), "services.api.depends_on")
     for dependency in ("postgres", "redis"):
         policy = _mapping(dependencies.get(dependency), f"api dependency {dependency}")
         if policy.get("condition") != "service_healthy":
             raise ComposePolicyError(f"api must wait for healthy {dependency}")
+        worker_policy = _mapping(
+            _mapping(worker.get("depends_on"), "services.worker.depends_on").get(
+                dependency
+            ),
+            f"worker dependency {dependency}",
+        )
+        if worker_policy.get("condition") != "service_healthy":
+            raise ComposePolicyError(f"worker must wait for healthy {dependency}")
 
     ports = api.get("ports")
     if not isinstance(ports, list) or len(ports) != 1:
