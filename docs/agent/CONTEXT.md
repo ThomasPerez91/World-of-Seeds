@@ -13,17 +13,19 @@ It provides authenticated users with a browser-based file manager.
 It also provides controlled torrent submission to a shared qBittorrent service.
 Administrators manage users, storage, and instance-wide functional options.
 The current production line is V1.
-The V1 maintenance release documented here is `1.3.1`.
+The stable V1 maintenance release documented here is `1.3.3`.
 
 ## Repository and branches
 
 - Repository: `ThomasPerez91/World-of-Seeds`.
-- `master` is the production/release branch.
-- `develop` is the integration branch.
-- Feature work starts from `develop`.
-- Feature work returns to `develop` through a pull request.
-- Releases move from `develop` to `master` through a pull request.
-- Do not push feature work directly to `master`.
+- `master` is the stable V1 production/release branch.
+- `develop` is the V1 preservation and maintenance branch.
+- `develop_V2` is the permanent V2 integration branch.
+- V1 maintenance starts from and returns to `develop` through a pull request.
+- V1 releases move from `develop` to `master` through a pull request.
+- Every V2 task starts from the latest `develop_V2` and returns to `develop_V2` through a
+  pull request.
+- Never merge V2 feature work directly to `develop` or `master`.
 - Do not merge when required CI checks are red.
 
 ## Technology
@@ -40,7 +42,8 @@ The V1 maintenance release documented here is `1.3.1`.
 
 ## Deployment topology
 
-- The application stack is driven by `docker-compose.yml`.
+- The V1 application stack is driven by `compose.yaml` and
+  `deploy/compose.production.yaml`.
 - PostgreSQL is internal and must not publish a host port.
 - The application port is bound to the host only as documented.
 - qBittorrent is an external dependency used through its Web API.
@@ -49,6 +52,9 @@ The V1 maintenance release documented here is `1.3.1`.
 - A user's download directory is `/data/<username>/downloads`.
 - Never solve permissions by introducing `chmod 777`.
 - Deployment variables are documented in `.env.example` and deployment docs.
+- The V2 target is a separate Rise2 stack integrating WOS API/workers, PostgreSQL, Redis,
+  qBittorrent, NewGreedy, ingress, Prometheus, Grafana, node-exporter, and cAdvisor.
+- Rise2 uses secrets, networks, volumes, storage, and monitoring isolated from V1.
 
 ## Authentication and authorization
 
@@ -143,11 +149,14 @@ The V1 maintenance release documented here is `1.3.1`.
 
 ## Functional options
 
-- Instance-wide functional options are stored through the existing option model.
+- V1 instance-wide functional options are stored through the existing option model.
 - Options may control safe limits such as maximum archive source size.
 - Secret credentials do not belong in functional options.
 - Option changes must retain existing validation and administrative authorization.
 - Restart behavior must use the centralized safe WOS restart path.
+- V2 safe dynamic options are authoritative in PostgreSQL and audited.
+- Infrastructure paths, service URLs, credentials, encryption keys, and TLS material remain
+  environment/deployment secrets and are never editable as functional options.
 
 ## Database changes
 
@@ -179,7 +188,7 @@ The V1 maintenance release documented here is `1.3.1`.
 - Keep all version declarations synchronized.
 - Use `scripts/versioning.py` for version changes and consistency checks.
 - Update dependency locks when dependency declarations change.
-- The current V1 maintenance release version is `1.3.1`.
+- The current V1 maintenance release version is `1.3.3`.
 - The release PR targets `master` from `develop`.
 - Merge the release only after backend, frontend, and container CI are green.
 - Confirm the resulting `master` and `develop` commit identifiers at handoff.
@@ -210,13 +219,18 @@ The V1 maintenance release documented here is `1.3.1`.
 - Update this file only when stable architecture or policy changes.
 - Never place secrets, tokens, passkeys, or private URLs in agent documents.
 
-## Official future-work rule
+## Official V1/V2 separation rule
 
-The V1 is complete only when its release is merged into `master` with green CI.
-After that release, the next product task is exclusively `Lot V2-A`.
-Do not begin, partially implement, scaffold, or opportunistically include V2 work
-while finishing or repairing the V1 release.
-Any V2 implementation requires a separate branch, explicit scope, and its own PR.
+V1 `1.3.3` is released. V1 maintenance remains isolated on `develop` and `master`.
+V2 work is authorized only as a scoped branch from `develop_V2`, with its own pull request
+back to `develop_V2`. Do not mix V1 hotfixes and V2 implementation. The future V2 release
+and Rise2 deployment require an explicit, separately validated workflow; they do not imply
+direct feature merges to `master`.
+
+For every task, read only this file and `PROGRESS.md` first, then only the files required by
+the task. Avoid repository-wide re-analysis and opportunistic refactors. Run targeted tests
+during development and the complete CI once when ready. Update `PROGRESS.md` at the end;
+change this file only for durable policy or architecture decisions.
 
 ## Authoritative references
 
@@ -224,6 +238,8 @@ Any V2 implementation requires a separate branch, explicit scope, and its own PR
 - `docs/architecture-v1.md` for the current architecture.
 - `docs/deployment-ovh.md` for production deployment.
 - `.env.example` for supported environment variables without secret values.
-- `docker-compose.yml` for runtime wiring.
+- `compose.yaml` and `deploy/compose.production.yaml` for V1 runtime wiring.
+- `docs/architecture-v2.md`, `docs/roadmap-v2.md`, and
+  `docs/deployment-rise2-v2.md` for the V2 target and delivery order.
 - `.github/workflows/` for required automated checks.
 - `docs/agent/PROGRESS.md` for the current handoff state.

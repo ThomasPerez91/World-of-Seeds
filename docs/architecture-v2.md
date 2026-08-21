@@ -1,172 +1,212 @@
-# Architecture cible de la V2
+# Architecture cible de World of Seeds V2
 
-## Statut et principes
+## Statut, baseline et frontières de livraison
 
-Ce document fixe les décisions d’architecture de la V2 avant leur implémentation. La
-baseline applicative est la version `1.2.1`. La V2 étend la V1 sans remplacer ses
-protections : sessions opaques, CSRF, isolation des workspaces, opérations filesystem par
-descripteurs, conteneur non-root, port lié à l’interface locale et absence de socket Docker.
+Ce document décrit la cible V2 ; il ne déclenche aucune modification fonctionnelle de la
+V1. La baseline de départ est la release stable `1.3.3`.
 
-World of Seeds devient un orchestrateur de demandes de téléchargement. Plusieurs comptes
-peuvent référencer le même contenu, mais WOS ne crée qu’un torrent qBittorrent et qu’une
-copie physique. PostgreSQL est toujours capable de reconstruire l’état métier sans Redis.
+- `master` reste la production V1 stable.
+- `develop` reste la branche de préservation et de maintenance V1.
+- `develop_V2` est la branche permanente d'intégration V2.
+- Chaque tâche V2 part du dernier `develop_V2` et revient par pull request vers
+  `develop_V2`.
+- Aucune fonctionnalité V2 ne cible directement `develop` ou `master`.
+- La V2 sera déployée sur l'hôte Rise2 dans une pile, des secrets, des volumes et une
+  supervision séparés de la V1.
+
+Les protections V1 restent des invariants : sessions opaques, CSRF, contrôle de rôle,
+chemins relatifs au workspace, opérations filesystem par descripteurs, refus des symlinks,
+conteneurs non-root, ports privés, absence de socket Docker et CSP stricte.
+
+## Topologie cible
 
 ```mermaid
 flowchart TB
-    Browser["Navigateur privé"] --> API["API FastAPI"]
+    Browser["Navigateur"] --> Ingress["Ingress TLS"]
+    Ingress --> API["API WOS"]
     API --> PG["PostgreSQL · autorité"]
-    API --> Redis["Redis · cache"]
-    Worker["Worker WOS"] --> PG
+    API --> Redis["Redis · coordination"]
+    Worker["Workers WOS"] --> PG
     Worker --> Redis
-    Worker --> QB["qBittorrent"]
-    API --> Data["/data sandboxé"]
-    Worker --> Data
+    Worker --> Services["qBittorrent + NewGreedy"]
+    API --> Storage["Stockage partagé"]
+    Worker --> Storage
+    Metrics["Prometheus + exporters"] --> Grafana["Grafana"]
 ```
 
-L’API et le worker utiliseront la même image, mais des processus et services Compose
-distincts. Le navigateur ne sonde jamais qBittorrent directement. Le worker centralise les
-ajouts, la synchronisation, les reprises et la réconciliation ; l’API lit PostgreSQL et les
-snapshots Redis.
+L'API et les workers utilisent la même image mais des commandes et services Compose
+distincts. Seul l'ingress publie HTTP(S). PostgreSQL, Redis, qBittorrent, NewGreedy et les
+exporters restent sur des réseaux internes. Le navigateur ne parle jamais directement aux
+services torrent. Le choix final de l'ingress et ses règles TLS fait l'objet d'une tâche
+dédiée, afin de ne pas figer un produit avant l'inventaire Rise2.
 
-## Frontières de sécurité
+### Services Compose V2
 
-- L’application ne monte que `/srv/seedbox:/data` et les sous-chemins de contrôle prévus.
-- Aucun composant WOS ne reçoit `/var/run/docker.sock`.
-- Les chemins fournis par un utilisateur restent relatifs à sa racine autorisée ; les
-  protections `*at`, `O_NOFOLLOW`, anti-traversal et anti-symlink de la V1 restent obligatoires.
-- `.env` contient les secrets et paramètres d’infrastructure. Il n’est jamais lisible ou
-  modifiable par l’interface web.
-- `.options` ne contient que des réglages fonctionnels connus, typés et non sensibles.
-- Seuls les torrents portant la catégorie WOS et connus en base peuvent être mutés ou purgés
-  automatiquement. Les torrents historiques ou externes restent en lecture seule.
-- Les URLs complètes de tracker, passkeys, mots de passe, chemins hôte et erreurs internes ne
-  sont jamais renvoyés au navigateur ou écrits dans les logs applicatifs.
-- Les redémarrages de services passent par un canal fichier borné et un helper systemd à
-  commande fixe. Aucun argument web n’est interpolé dans une commande hôte.
+| Service | Responsabilité | Persistance/exposition |
+| --- | --- | --- |
+| `api` | Authentification, API métier, flux de fichiers | Aucun port public direct |
+| `scheduler` | Admission, équité, création des jobs | PostgreSQL ; singleton avec lease |
+| `worker` | Ajout qB, sync, manifestes, purge, réconciliation | Réplicable ; accès stockage |
+| `postgres` | Autorité métier et jobs durables | Volume dédié, réseau privé |
+| `redis` | Réveil de workers, cache, compteurs courts | Volume/config dédiée, réseau privé |
+| `qbittorrent` | Exécution des torrents WOS V2 | Volume/config et données V2 dédiés |
+| `newgreedy` | Intégration tracker/proxy prévue | Réseau torrent interne uniquement |
+| `ingress` | TLS, limites HTTP, routage vers l'API | Seuls ports publics 80/443 |
+| `prometheus` | Collecte et règles d'alerte | Volume métriques dédié |
+| `grafana` | Tableaux de bord d'exploitation | Accès admin protégé |
+| `node-exporter` | Métriques hôte | Lecture hôte minimale et documentée |
+| `cadvisor` | Métriques conteneurs | Accès technique borné, jamais depuis WOS |
 
-## Stockage
+Des exporters PostgreSQL et Redis sont ajoutés si leurs métriques ne sont pas couvertes de
+façon sûre. Les accès privilégiés de supervision sont isolés de l'application.
+
+## Autorité et modèle métier
+
+PostgreSQL est l'autorité de tout état métier et de tout travail critique. Redis accélère
+les lectures, signale les jobs disponibles et porte des compteurs éphémères ; sa perte ne
+doit ni perdre un job ni autoriser une suppression.
+
+| Entité | Rôle et invariants principaux |
+| --- | --- |
+| `ManagedTorrent` | Un torrent physique WOS, infohash unique, chemin géré unique |
+| `TorrentRequest` | Demande et droit d'accès d'un utilisateur à un torrent partagé |
+| `TorrentFile` | Manifeste validé des fichiers, tailles et chemins relatifs sûrs |
+| `TrackerActivity` | Événements tracker expurgés de toute passkey et donnée sensible |
+| `TorrentJob` | Travail durable, idempotent, claimable, temporisé et rejouable |
+| `DownloadLease` | Protection temporaire d'un contenu servi contre la purge |
+
+`ManagedTorrent.info_hash` est couvert par une contrainte `UNIQUE`. Deux uploads
+concurrents du même torrent convergent donc vers un seul contenu physique et deux
+`TorrentRequest`. Une annulation retire seulement la référence de son propriétaire. Une
+purge exige zéro demande active, zéro lease valide et une rétention expirée.
+
+Les anciennes lignes V1 `UserTorrent` ne sont pas transformées implicitement. Une migration
+d'import explicite, idempotente et réversible sera conçue après validation du modèle V2.
+
+## Jobs durables et reprise
+
+`TorrentJob` utilise les états métier `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED` et
+`CANCELLED`. Les reprises utilisent `attempt_count`, `max_attempts`, `available_at`,
+`timeout_at`, `claimed_by` et `claim_expires_at`, sans état critique uniquement dans Redis.
+
+1. L'API écrit la demande, le torrent géré et le job dans une même transaction.
+2. Après commit, elle publie au mieux un signal Redis.
+3. Un worker claim le job par verrou SQL avec expiration.
+4. Chaque effet externe porte une clé d'idempotence et est vérifié avant répétition.
+5. Une erreur temporaire remet le job `QUEUED` avec backoff et jitter.
+6. Une erreur permanente ou des essais épuisés produit `FAILED` et un diagnostic expurgé.
+7. Une interruption autorisée produit `CANCELLED`; un worker mort est repris après
+   expiration de son claim.
+
+L'ajout qBittorrent est toujours réconcilié par infohash après une réponse ambiguë. Ainsi,
+un timeout survenu après acceptation ne crée ni faux échec ni second torrent.
+
+## Ordonnancement équitable et bande passante
+
+Le scheduler applique une file équitable pondérée par utilisateur, avec vieillissement :
+
+- quota de concurrence global et par utilisateur ;
+- classes de taille pour favoriser un petit téléchargement sans bloquer les grands ;
+- déficit accumulé/poids utilisateur pour garantir qu'un grand job progresse ;
+- bonus d'attente borné afin qu'aucune demande ne soit affamée ;
+- admission suspendue sous pression disque critique ; les jobs actifs restent observables ;
+- limites de débit appliquées centralement via qBittorrent et les flux HTTP WOS.
+
+Les poids, plafonds et seuils sont des options administratives typées. Le client ne fournit
+ni priorité absolue ni chemin de destination. Les choix algorithmiques et scénarios de
+non-famine sont testés par simulation avant leur connexion à qBittorrent.
+
+## Stockage, quotas et pression disque
 
 ```text
-/srv/seedbox/
-├── <username>/downloads/           # espace privé visible par l’utilisateur
-├── .trash/<user-uuid>/             # corbeille gérée par WOS
-├── .wos-content/<info-hash>/        # contenu physique partagé, V2
-└── .wos-control/
-    ├── .options                     # réglages fonctionnels persistants
-    └── <service-control-channels>/  # requêtes/statuts systemd bornés
+<V2_STORAGE_ROOT>/
+├── content/<managed-torrent-id>/   # copie physique partagée
+├── trash/<user-id>/                # corbeille sécurisée V2
+├── control/                         # états techniques non publics
+└── work/                            # temporaires bornés et récupérables
 ```
 
-Le chemin partagé est vu par WOS sous `/data/.wos-content` et devra être monté dans
-qBittorrent sous un chemin statique décidé au déploiement. Un save path libre fourni par le
-navigateur est interdit. Les workspaces utilisateurs exposent des références ou des accès
-contrôlés au contenu partagé ; ils ne créent pas une copie physique par demande.
+Le chemin hôte est une variable d'infrastructure et n'est jamais renvoyé par l'API. Les
+utilisateurs voient des références virtuelles autorisées au contenu ; aucun symlink n'est
+créé dans leur workspace. Le manifeste `TorrentFile` et des compteurs transactionnels
+alimentent les quotas : aucune requête web ne lance un parcours récursif du stockage.
 
-## Autorité des données
+Un reconciler lent et borné compare périodiquement manifestes, qBittorrent et filesystem.
+Les seuils d'espace libre et d'occupation passent l'admission en `warning` ou `critical`.
+Les suppressions sont idempotentes, auditables et bloquées par les leases.
 
-| Donnée | PostgreSQL | Redis | Filesystem/qBittorrent |
-| --- | --- | --- | --- |
-| Utilisateurs, sessions, corbeille | Autorité | Cache éventuel borné | Effets contrôlés |
-| `ManagedTorrent`, ownership, lifecycle | Autorité | Index et snapshots | qB est moteur d’exécution |
-| `TorrentRequest` par utilisateur | Autorité | Liste rapide par utilisateur | Aucun état métier |
-| Manifeste `TorrentFile` | Autorité | Cache de lecture éventuel | Contenu physique |
-| Progression, vitesses, ETA | Dernier snapshot utile | Snapshot court prioritaire | qB est source opérationnelle |
-| Rate limits et compteurs courts | Audit si nécessaire | Autorité volatile autorisée | Aucun |
-| Leases de téléchargement | Persistance si la suppression en dépend | Accélération/coordination | Flux HTTP actif |
+## Téléchargement récursif sans archive géante
 
-Une contrainte SQL `UNIQUE` sur l’info-hash garantit la déduplication. Un `SETNX` Redis ne
-constitue jamais la garantie métier. Toute mutation persistante suit l’ordre : transaction
-PostgreSQL, commit, puis invalidation ou mise à jour du cache. Une panne Redis déclenche un
-fallback PostgreSQL et un état de santé dégradé, pas une erreur « introuvable ».
+Le téléchargement principal d'un dossier repose sur la File System Access API lorsqu'elle
+est disponible :
 
-## Configuration fonctionnelle `.options`
+1. l'API crée un snapshot de manifeste stable et autorisé ;
+2. le navigateur choisit un dossier local ;
+3. il crée les sous-dossiers et télécharge chaque fichier par HTTP Range ;
+4. une concurrence bornée, par défaut faible, protège le serveur ;
+5. pause, reprise et annulation conservent la progression locale et le snapshot serveur ;
+6. les changements de manifeste sont détectés par version/ETag avant reprise.
 
-Le fichier persistant prévu est `/srv/seedbox/.wos-control/.options`, monté dans le
-conteneur via `/data/.wos-control/.options`. Le choix conserve le montage unique de la V1.
-Le fichier réel n’est pas versionné ; `.options.example` le sera dans V2-01.
+Le serveur ne prépare donc pas 10 Go avant l'ouverture de la boîte de dialogue. Le fallback
+est le téléchargement fichier par fichier ; un ZIP streamé, non recompressé et sans fichier
+temporaire n'est proposé que pour les petits dossiers sous un seuil administrable.
 
-Le backend maintient une allowlist d’`OptionSpec`. Chaque entrée décrit : clé, type, valeur
-par défaut, bornes, unité, catégorie, description, éditabilité, sensibilité et besoin de
-redémarrage. Toute clé inconnue ou ressemblant à un secret est rejetée. L’admin manipule des
-champs typés ; aucun textarea brut n’écrit le fichier.
+## C411, secrets et comptes multiples
 
-Le format persistant est `KEY=value`, UTF-8, sans expansion de variable ni exécution. Les
-écritures seront réalisées dans un fichier temporaire du même dossier, synchronisées, puis
-publiées par `os.replace`; une sauvegarde bornée permettra le rollback. Les options
-dynamiques sont appliquées après validation. Les autres sont enregistrées avec
-`restart_required=true` et proposées au redémarrage contrôlé de WOS.
+- Les hosts trackers restent sur allowlist et les URLs sont normalisées sans modifier les
+  octets bruts du dictionnaire `info`.
+- Les passkeys et credentials restent dans des secrets d'infrastructure, jamais dans les
+  options, logs, métriques, erreurs, manifests ou événements `TrackerActivity`.
+- La V2 prépare plusieurs comptes tracker/qB par références opaques. Si des secrets doivent
+  être persistés, ils sont chiffrés par enveloppe avec une clé maître fournie hors base.
+- NewGreedy et qBittorrent ne sont accessibles que par les workers via le réseau interne.
+- Toute mutation qB est limitée aux torrents portant l'identité/catégorie WOS V2.
 
-Les familles prévues sont : téléchargements HTTP, torrents, stockage, rétention, cache,
-performance, sécurité fonctionnelle et interface. Les chemins hôte, URLs internes,
-credentials et commandes restent exclusivement dans la configuration d’infrastructure.
+## Configuration administrative
 
-## Redis et stratégie de cache
+Les options fonctionnelles sûres et modifiables à chaud sont stockées en PostgreSQL avec
+type, bornes, version et audit. Exemples : quotas, concurrence, pondération, rétention,
+seuils disque, délais, retries, TTL de cache et préférences d'interface.
 
-Redis sera ajouté en V2-02 avec une version explicitement épinglée après vérification de la
-documentation officielle. Il n’aura aucun port hôte et ne rejoindra que le réseau Docker
-backend interne. Les clés utilisent le préfixe `wos:v2:` et des TTL obligatoires lorsqu’une
-donnée peut devenir obsolète.
+Les secrets, URLs internes, chemins hôte, ports, UID/GID, clés TLS et clés de chiffrement
+restent dans les variables/secrets du déploiement. L'interface n'offre jamais d'éditeur de
+configuration brute. Les options nécessitant un redémarrage indiquent explicitement leur
+état appliqué et leur état désiré.
 
-Pattern de lecture :
+## API et expérience utilisateur
 
-1. lire le cache ;
-2. sur hit valide, retourner la valeur ;
-3. sur miss, lire PostgreSQL ;
-4. remplir Redis avec un TTL ;
-5. retourner la donnée PostgreSQL.
+- Les listes sont paginées, requêtées en lots et ne déclenchent aucun scan récursif.
+- Les erreurs suivent un contrat stable (`code`, `message`, `field`, `correlation_id`).
+- Les confirmations et notifications sont des composants React internes, accessibles et
+  sans style inline ; aucune dépendance de modal externe n'est requise.
+- Une suppression définitive depuis la corbeille exige une confirmation explicite.
+- Les tableaux utilisent des colonnes bornées, ellipsis et actions sur une ligne.
+- La mise en page réagit aux changements d'orientation sans rechargement, avec tests aux
+  largeurs V1 déjà couvertes et en paysage mobile/tablette.
 
-Les erreurs Redis sont bornées, journalisées sans boucle agressive et n’annulent pas les
-opérations critiques. Après flush ou redémarrage, le cache est reconstruit à la demande et
-par réconciliation depuis PostgreSQL et qBittorrent. Le health expose `healthy`, `degraded`
-ou `unavailable`, avec au plus latence, mémoire et nombre de clés WOS.
+## Observabilité et sécurité opérationnelle
 
-## Domaine torrent
+Chaque requête et job reçoit un identifiant de corrélation. Les métriques portent sur le
+nombre de jobs par état, âge de file, retries, durée des jobs, débit, pression disque,
+latence API/DB/Redis/qB, leases et erreurs expurgées. Les labels n'incluent jamais user ID,
+nom de fichier, infohash complet, tracker ou passkey.
 
-- `ManagedTorrent` représente l’unique torrent physique WOS, identifié par UUID et
-  info-hash unique. Il porte lifecycle, état qB, progression, chemin géré, retry et purge.
-- `TorrentRequest` représente la demande et les droits d’un utilisateur. Le couple
-  `(user_id, managed_torrent_id)` est unique tant que la demande est active.
-- `TorrentFile` conserve le manifeste validé. Il ne contient jamais l’URL complète d’un
-  tracker.
-- Un worker durable traite l’ajout qB, les retries exponentiels, le polling centralisé, la
-  fin de téléchargement, la rétention et la réconciliation.
+Les dashboards couvrent API, workers, scheduler, PostgreSQL, Redis, qBittorrent, stockage,
+hôte et conteneurs. Les alertes minimales portent sur jobs bloqués, file vieillissante,
+stockage critique, erreurs qB, DB/Redis indisponible, redémarrages et saturation CPU/RAM/I/O.
 
-Deux créations concurrentes du même torrent convergent vers un `ManagedTorrent`, deux
-`TorrentRequest` et un seul ajout qB. Une annulation retire uniquement la référence de son
-propriétaire. Le contenu ne devient purgeable qu’après disparition de la dernière référence
-et expiration de la rétention, sans lease de téléchargement active.
+Les sauvegardes PostgreSQL et configurations sont chiffrées et testées par restauration.
+Les données torrent volumineuses ont une politique explicite distincte. Les mises à jour
+d'images sont épinglées ; les scans de dépendances et d'images sont intégrés avant release.
 
-Les états et transitions autorisés sont détaillés dans
-[`state-machines-v2.md`](state-machines-v2.md).
+## Déploiement Rise2, migration et rollback
 
-## API, erreurs et interface
+La procédure détaillée est dans [`deployment-rise2-v2.md`](deployment-rise2-v2.md). La
+première installation V2 ne modifie pas les volumes, réseaux, secrets, base ou qB de la V1.
+Les migrations Alembic s'exécutent contre la base Rise2 uniquement. La bascule d'utilisateurs
+est précédée d'un pilote, d'une sauvegarde restaurée à blanc et d'un test de rollback.
 
-Les nouvelles erreurs métier ont un contrat stable : `code`, `message`, `field` facultatif
-et identifiant de corrélation non sensible. Le frontend affiche une erreur de champ près du
-contrôle concerné et un résumé global lorsque cela aide ; un toast seul n’est pas suffisant
-pour une erreur critique.
-
-Les listes sont paginées et chargées en relations groupées afin d’éviter les N+1. Les
-rafraîchissements du navigateur lisent l’API WOS ; ils ne multiplient pas le polling qB.
-Les mutations restent protégées par session, rôle et CSRF.
-
-## Version et artefact de release
-
-`VERSION` est la source canonique. Les champs nécessaires aux écosystèmes Python, npm et au
-runtime sont des miroirs vérifiés par `scripts/versioning.py`. La commande
-`python3 scripts/versioning.py set X.Y.Z` les met à jour ensemble.
-
-Une release stable suit cet ordre : validation des miroirs et du tag, création d’une release
-en brouillon, construction de l’image depuis le SHA exact, vérification du label OCI
-`org.opencontainers.image.version`, publication de la release, puis déploiement par digest.
-La publication n’a donc pas lieu si le frontend, le backend, le tag ou l’image divergent.
-
-## Déploiement et rollback
-
-Chaque PR vise `develop`. Les releases fusionnent un lot validé vers `master`, créent un tag
-immuable, construisent par SHA et déploient par digest. Les migrations sont compatibles avec
-un redéploiement de l’image précédente tant qu’une PR n’annonce pas explicitement le
-contraire. `.options` et Redis sont introduits par étapes ; la perte complète de Redis ne
-demande aucune restauration de données.
-
-Les invariants, variables, options, clés Redis, migrations, indexes, risques et procédure de
-rollback sont consignés dans chaque PR selon [`roadmap-v2.md`](roadmap-v2.md).
+Le rollback applicatif redéploie le dernier digest compatible. Toute migration destructive
+est précédée d'au moins une release expand/contract. Le passage final de `develop_V2` vers
+une release V2 stable sera défini et validé séparément ; il ne peut pas être assimilé à une
+fusion automatique vers le `master` V1.

@@ -85,20 +85,30 @@ clé Redis peut accélérer la lecture mais ne constitue pas l’unique protecti
 
 ```mermaid
 stateDiagram-v2
-    [*] --> CLAIMABLE
-    CLAIMABLE --> RUNNING: claim atomique
-    RUNNING --> SUCCEEDED
-    RUNNING --> RETRY_WAIT: erreur temporaire
-    RETRY_WAIT --> CLAIMABLE: retry_at atteint
+    [*] --> QUEUED
+    QUEUED --> RUNNING: claim SQL atomique
+    RUNNING --> COMPLETED
+    RUNNING --> QUEUED: erreur temporaire + backoff
     RUNNING --> FAILED: erreur permanente
-    RETRY_WAIT --> FAILED: essais épuisés
-    SUCCEEDED --> [*]
+    RUNNING --> CANCELLED: annulation autorisée
+    QUEUED --> CANCELLED: annulation autorisée
+    QUEUED --> FAILED: essais épuisés
+    COMPLETED --> [*]
     FAILED --> [*]
+    CANCELLED --> [*]
 ```
 
-Le claim durable est garanti en PostgreSQL. Redis peut réduire la contention mais ne peut
-pas être la seule queue d’un travail critique. Un worker interrompu laisse expirer son claim
-et un autre worker peut reprendre l’opération idempotente.
+Les états persistés sont exactement `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED` et
+`CANCELLED`. Une reprise reste `QUEUED` avec `available_at` dans le futur ; elle n'a pas
+besoin d'un état supplémentaire. `attempt_count`, `max_attempts`, `timeout_at`,
+`claimed_by`, `claim_expires_at` et le dernier code d'erreur expurgé portent les détails
+d'exécution.
+
+Le claim durable est garanti en PostgreSQL. Redis peut réveiller les workers et réduire la
+contention, mais ne peut pas être la seule queue d'un travail critique. Un worker interrompu
+laisse expirer son claim ; un autre remet le job en file et reprend l'opération idempotente.
+Une annulation n'interrompt un effet externe que si son point de contrôle le permet sans
+laisser d'état incohérent ; sinon le worker termine la réconciliation avant `CANCELLED`.
 
 ## Redémarrage contrôlé de WOS
 
