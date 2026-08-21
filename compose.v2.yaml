@@ -1,0 +1,105 @@
+name: world-of-seeds-v2
+
+services:
+  api:
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      WOS_ENVIRONMENT: ${WOS_V2_ENVIRONMENT:-development}
+      UVICORN_LOG_LEVEL: ${WOS_V2_LOG_LEVEL:-info}
+      WOS_COOKIE_SECURE: ${WOS_V2_COOKIE_SECURE:-false}
+      WOS_ALLOWED_HOSTS: '${WOS_V2_ALLOWED_HOSTS:-["127.0.0.1","localhost"]}'
+      WOS_DATA_ROOT: /data
+      WOS_POSTGRES_HOST: postgres
+      WOS_POSTGRES_PORT: 5432
+      WOS_POSTGRES_DB: ${WOS_V2_POSTGRES_DB:?set WOS_V2_POSTGRES_DB}
+      WOS_POSTGRES_USER: ${WOS_V2_POSTGRES_USER:?set WOS_V2_POSTGRES_USER}
+      WOS_POSTGRES_PASSWORD: ${WOS_V2_POSTGRES_PASSWORD:?set WOS_V2_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${WOS_V2_API_PORT:-28081}:8000"
+    volumes:
+      - type: bind
+        source: ${WOS_V2_STORAGE_HOST_PATH:?set WOS_V2_STORAGE_HOST_PATH}
+        target: /data
+    networks:
+      - edge
+      - backend
+    user: "${WOS_V2_APP_UID:-1000}:${WOS_V2_APP_GID:-1000}"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=2)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: postgres:17.11-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${WOS_V2_POSTGRES_DB:?set WOS_V2_POSTGRES_DB}
+      POSTGRES_USER: ${WOS_V2_POSTGRES_USER:?set WOS_V2_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${WOS_V2_POSTGRES_PASSWORD:?set WOS_V2_POSTGRES_PASSWORD}
+    volumes:
+      - postgres_v2_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:8.2.9-alpine3.22
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --save
+      - "60"
+      - "1"
+      - --loglevel
+      - warning
+    volumes:
+      - redis_v2_data:/data
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+networks:
+  edge:
+  backend:
+    internal: true
+
+volumes:
+  postgres_v2_data:
+  redis_v2_data:

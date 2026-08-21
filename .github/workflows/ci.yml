@@ -122,6 +122,14 @@ jobs:
         run: >-
           python3 scripts/versioning.py check
           --channel "$WOS_VERSION_CHANNEL" --print-version
+      - name: Validate V2 foundation configuration
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: |
+          mkdir -p "$RUNNER_TEMP/seedbox-v2"
+          WOS_V2_STORAGE_HOST_PATH="$RUNNER_TEMP/seedbox-v2" \
+            docker compose --env-file .env.v2.example \
+              -f compose.v2.yaml config --format json \
+            | python3 scripts/validate_compose_v2.py
       - name: Build and start production stack
         run: |
           cp .env.example .env
@@ -155,3 +163,40 @@ jobs:
       - name: Stop production stack
         if: always()
         run: docker compose down --volumes
+      - name: Build and start V2 foundation
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: |
+          mkdir -p "$RUNNER_TEMP/seedbox-v2"
+          version="$(python3 scripts/versioning.py check \
+            --channel v2 --print-version)"
+          WOS_V2_STORAGE_HOST_PATH="$RUNNER_TEMP/seedbox-v2" \
+            docker compose --env-file .env.v2.example \
+              -f compose.v2.yaml build \
+              --build-arg "WOS_APP_VERSION=$version"
+          WOS_V2_STORAGE_HOST_PATH="$RUNNER_TEMP/seedbox-v2" \
+            docker compose --env-file .env.v2.example \
+              -f compose.v2.yaml up \
+              --detach --no-build --wait --wait-timeout 120
+      - name: Verify V2 service isolation
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: |
+          compose=(docker compose --env-file .env.v2.example -f compose.v2.yaml)
+          curl --fail --silent --show-error \
+            http://127.0.0.1:28081/api/v1/health/live
+          test "$("${compose[@]}" port api 8000)" = "127.0.0.1:28081"
+          if "${compose[@]}" port postgres 5432 >/tmp/v2-postgres-port 2>/dev/null; then
+            echo "V2 PostgreSQL must not publish a host port."
+            cat /tmp/v2-postgres-port
+            exit 1
+          fi
+          if "${compose[@]}" port redis 6379 >/tmp/v2-redis-port 2>/dev/null; then
+            echo "V2 Redis must not publish a host port."
+            cat /tmp/v2-redis-port
+            exit 1
+          fi
+          test "$("${compose[@]}" exec -T redis redis-cli ping)" = "PONG"
+      - name: Stop V2 foundation
+        if: always() && env.WOS_VERSION_CHANNEL == 'v2'
+        run: >-
+          docker compose --env-file .env.v2.example
+          -f compose.v2.yaml down --volumes

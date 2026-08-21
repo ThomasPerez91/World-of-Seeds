@@ -11,8 +11,10 @@
 - Permanent V2 integration branch `develop_V2` was created from the same stable SHA.
 - V2 preparation PR `#52` was merged into `develop_V2` at
   `80a253da7b9fe57ddec39b0dfe92eaa2daca7e6b`.
-- Active task branch: `feat/v2-ci-versioning`, based on that merge commit and targeting
-  `develop_V2`.
+- V2-01 PR `#53` was merged into `develop_V2` at
+  `980b73182806b5604440b51c21f87df49c59b4e6`.
+- Active task branch: `feat/v2-compose-foundation`, based on that merge commit and
+  targeting `develop_V2`.
 
 ## V1 completion state
 
@@ -76,6 +78,28 @@
 - No runtime feature, database migration, dependency, Compose service, or V1 workflow was
   added or changed outside this CI/versioning scope.
 
+## V2-02 — Local Compose foundation
+
+- Added a separate `compose.v2.yaml` project containing only `api`, `postgres`, and
+  `redis`; the V1 Compose files remain unchanged.
+- Added `.env.v2.example` with V2-prefixed variables and a required storage root distinct
+  from V1.
+- Pinned PostgreSQL to `17.11-alpine3.24` and Redis to `8.2.9-alpine3.22`.
+- Kept PostgreSQL and Redis exclusively on the internal backend network with no published
+  host ports and dedicated V2 volumes.
+- Bound the temporary local API entry point to host loopback only and attached it to
+  separate edge/backend networks.
+- Added healthchecks for all three services and made the API wait for healthy PostgreSQL
+  and Redis.
+- Enabled Redis append-only persistence for the local V2 foundation; no Redis business
+  client or queue is introduced before its roadmap task.
+- Added a normalized Compose policy validator and regression tests for network, port,
+  image, volume, healthcheck, dependency, and Docker-socket invariants.
+- Extended only the V2 path of CI to validate, build, start, probe, and remove the local V2
+  foundation. Existing V1 container validation remains in place.
+- No qBittorrent, NewGreedy, worker, scheduler, model, migration, or Rise2 deployment is
+  included in V2-02.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -86,7 +110,13 @@
 - V2-01 targeted Ruff formatting for backend tests: PASS.
 - V2-01 targeted mypy: PASS.
 - V2-01 version mirror and stable-channel rejection checks: PASS.
-- V2-01 final relevant validation and GitHub CI: pending.
+- V2-01 GitHub CI run `32484452856`: PASS; backend, frontend, and container green.
+- V2-02 Compose policy tests: PASS, 7 tests.
+- V2-02 targeted Ruff lint and formatting: PASS.
+- V2-02 targeted mypy: PASS.
+- V2-02 `git diff --check`: PASS.
+- V2-02 real Compose configuration/startup/isolation validation: pending GitHub CI because
+  Docker is unavailable in the local execution environment.
 
 ## Known constraints
 
@@ -101,7 +131,7 @@
 
 ## Next task
 
-- Open and validate the V2-01 PR into `develop_V2`; do not merge it automatically.
-- After V2-01 is reviewed and merged, the next roadmap task is
-  `V2-02 — Compose local V2 minimal api/postgres/redis`.
-- Do not start V2-02 as part of the current task.
+- Open and validate the V2-02 PR into `develop_V2`; do not merge it automatically.
+- After V2-02 is reviewed and merged, the next roadmap task is
+  `V2-03 — ManagedTorrent, TorrentRequest, and TorrentFile schema`.
+- Do not start V2-03 as part of the current task.
