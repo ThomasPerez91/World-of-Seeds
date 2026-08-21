@@ -43,6 +43,8 @@
   `2514ddba888680df2702686d333231741ee64747`.
 - V2-13C PR `#68` was merged into `develop_V2` at
   `86bda53ce4a8d4982b1ec2173f07c60f69017b59`.
+- Local macOS roadmap PR `#69` was merged into `develop_V2` at
+  `d02af28ed268475675b7f51d7a732d9bf4a88354`.
 
 ## V1 completion state
 
@@ -422,6 +424,23 @@
   depends on the successful local validation instead of discovering integration gaps during
   the Rise2 deployment task.
 
+## V2-14 — Shared physical storage
+
+- Added a descriptor-based `SharedContentStore` that derives exactly one physical directory
+  from the server-owned storage UUID under `content/<opaque-uuid-hex>`.
+- Content and managed directories are opened with `O_DIRECTORY`, `O_NOFOLLOW`, and
+  `O_CLOEXEC` when supported; symlinked roots and per-torrent collisions fail closed.
+- The store exposes validated directory descriptors rather than absolute host paths and never
+  accepts a user-provided path or performs a recursive scan.
+- The worker now prepares and validates the shared directory after metainfo validation but
+  before the first qBittorrent effect. Unsafe storage becomes the bounded permanent error
+  `shared_storage_invalid`, and qBittorrent is not called.
+- Empty-directory removal is descriptor-anchored and refuses non-empty content, preserving
+  downloaded data for the later lifecycle task.
+- Production configuration now requires both WOS and qBittorrent to address the shared mount
+  as `/data`; V1 paths, APIs, models, migrations, and `master` are unchanged.
+- V2-14 is implemented on `feat/v2-shared-physical-storage` from the merged PR #69 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -526,6 +545,11 @@
 - V2-13C `git diff --check`: PASS.
 - PR #68 (V2-13C) review and GitHub CI run `32531450774`: PASS; squash-merged into
   `develop_V2` at `86bda53ce4a8d4982b1ec2173f07c60f69017b59`.
+- V2-14 targeted storage, worker-effect, qB gateway, account-routing, and configuration tests:
+  PASS, 56 passed with 1 PostgreSQL-backed test deferred to CI.
+- V2-14 full backend suite: PASS, 335 tests with 6 service-backed tests deferred to CI.
+- V2-14 full backend Ruff lint/format and mypy: PASS.
+- V2-14 `git diff --check` and targeted secret scan: PASS.
 
 ## Known constraints
 
@@ -542,6 +566,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-14 — Shared physical storage`.
-- V2-18A is intentionally deferred until V2-14, V2-17, and V2-18 are complete; do not start it
-  early or fold production deployment responsibilities from V2-29 into it.
+- The next roadmap task is `V2-15 — Logical quotas and disk-pressure admission`.
+- Do not start V2-15 until V2-14 has passed review, required CI is green, and its PR is merged
+  into `develop_V2`.
