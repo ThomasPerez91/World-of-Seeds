@@ -1,3 +1,4 @@
+import json
 import math
 import re
 from contextlib import suppress
@@ -118,9 +119,17 @@ class QBittorrentClient:
         torrents = [_parse_torrent(item) for item in payload[:MAX_TORRENTS]]
         return torrents, truncated
 
-    async def add_torrent(self, content: bytes, *, save_path: str) -> None:
+    async def add_torrent(
+        self,
+        content: bytes,
+        *,
+        save_path: str,
+        expected_info_hash: str,
+    ) -> None:
         if not content:
             raise ValueError("Torrent content must not be empty")
+        if _TORRENT_HASH_RE.fullmatch(expected_info_hash) is None:
+            raise ValueError("Expected torrent hash is invalid")
         logged_in = False
         try:
             if not await self._login():
@@ -136,12 +145,16 @@ class QBittorrentClient:
                 if response.status_code == 401:
                     raise IntegrationAuthenticationError("qBittorrent session expired")
                 response.raise_for_status()
-                result = (
-                    "Ok."
-                    if response.status_code == 204
-                    else (await read_limited_text(response, max_bytes=MAX_VERSION_BYTES)).strip()
-                )
-            if result != "Ok.":
+                if response.status_code == 204:
+                    return
+                result = (await read_limited_text(response, max_bytes=MAX_VERSION_BYTES)).strip()
+            if result == "Ok.":
+                return
+            try:
+                payload = json.loads(result)
+            except json.JSONDecodeError as exc:
+                raise IntegrationRequestError("qBittorrent rejected the torrent") from exc
+            if not _accepted_add_response(payload, expected_info_hash):
                 raise IntegrationRequestError("qBittorrent rejected the torrent")
         except (IntegrationAuthenticationError, IntegrationRequestError):
             raise
@@ -191,6 +204,25 @@ class QBittorrentClient:
 
 def _latency_ms(started_at: float) -> int:
     return max(0, round((perf_counter() - started_at) * 1000))
+
+
+def _accepted_add_response(payload: object, expected_info_hash: str) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    success_count = payload.get("success_count")
+    failure_count = payload.get("failure_count")
+    pending_count = payload.get("pending_count")
+    added_torrent_ids = payload.get("added_torrent_ids")
+    return (
+        type(success_count) is int
+        and success_count == 1
+        and type(failure_count) is int
+        and failure_count == 0
+        and type(pending_count) is int
+        and pending_count == 0
+        and isinstance(added_torrent_ids, list)
+        and added_torrent_ids == [expected_info_hash.lower()]
+    )
 
 
 def _parse_torrent(value: object) -> QBittorrentTorrent:

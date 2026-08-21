@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 from pydantic import SecretStr
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.security import hash_password
@@ -101,10 +102,30 @@ class FakeMonitor:
         self.snapshots: list[QBittorrentTorrent] = []
         self.fail_add = False
 
-    async def add_qbittorrent_torrent(self, content: bytes, *, save_path: str) -> None:
+    async def add_qbittorrent_torrent(
+        self,
+        content: bytes,
+        *,
+        save_path: str,
+        expected_info_hash: str,
+    ) -> None:
         if self.fail_add:
             raise IntegrationRequestError("offline")
         self.added.append((content, save_path))
+        assert (
+            expected_info_hash
+            == hashlib.sha1(
+                bencode(
+                    {
+                        b"length": 5,
+                        b"name": b"Film.mkv",
+                        b"piece length": 16_384,
+                        b"pieces": b"p" * 20,
+                    }
+                ),
+                usedforsecurity=False,
+            ).hexdigest()
+        )
 
     async def qbittorrent_torrents_by_hashes(
         self, hashes: list[str]
@@ -159,6 +180,13 @@ async def test_upload_uses_server_path_and_user_listing_is_isolated(
     assert monitor.added[0][1] == "/data/thomas/downloads"
     assert b"old-user-passkey" not in monitor.added[0][0]
     torrent_hash = uploaded.json()["id"]
+    association = await db_session.scalar(
+        select(UserTorrent).where(
+            UserTorrent.user_id == thomas.id,
+            UserTorrent.info_hash == torrent_hash,
+        )
+    )
+    assert association is not None
     db_session.add(UserTorrent(user_id=alice.id, info_hash="b" * 40, name="Alice.mkv"))
     await db_session.commit()
     monitor.snapshots = [
