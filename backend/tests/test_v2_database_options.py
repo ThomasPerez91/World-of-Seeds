@@ -148,6 +148,13 @@ async def test_noop_update_does_not_create_an_audit_event(db_session: AsyncSessi
             },
             "inconsistent_options",
         ),
+        (
+            {
+                "WOS_SCHEDULER_SMALL_TORRENT_BYTES": 100_000_000,
+                "WOS_SCHEDULER_MEDIUM_TORRENT_BYTES": 50_000_000,
+            },
+            "inconsistent_options",
+        ),
     ],
 )
 async def test_invalid_changes_are_rejected_without_audit(
