@@ -8,10 +8,21 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Literal
 
 import tomllib
 
-SEMVER_PATTERN = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+STABLE_SEMVER_PATTERN = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
+)
+V2_PRERELEASE_PATTERN = re.compile(
+    r"^(?P<major>[2-9]|[1-9][0-9]+)\."
+    r"(0|[1-9][0-9]*)\."
+    r"(0|[1-9][0-9]*)-"
+    r"(alpha|beta|rc)\."
+    r"(0|[1-9][0-9]*)$"
+)
+type VersionChannel = Literal["stable", "v2"]
 
 
 class VersioningError(RuntimeError):
@@ -37,14 +48,25 @@ def _match_one(path: Path, pattern: str) -> str:
     return value
 
 
-def canonical_version(root: Path) -> str:
+def validate_version_format(version: str, channel: VersionChannel) -> None:
+    pattern = STABLE_SEMVER_PATTERN if channel == "stable" else V2_PRERELEASE_PATTERN
+    if pattern.fullmatch(version) is None:
+        if channel == "stable":
+            requirement = "a stable semantic version"
+        else:
+            requirement = "a V2 prerelease such as 2.0.0-alpha.0"
+        raise VersioningError(f"Version {version!r} is not {requirement}")
+
+
+def canonical_version(root: Path, *, channel: VersionChannel = "stable") -> str:
     version = _read_text(root / "VERSION").strip()
-    if SEMVER_PATTERN.fullmatch(version) is None:
-        raise VersioningError(f"VERSION is not a stable semantic version: {version!r}")
+    validate_version_format(version, channel)
     return version
 
 
-def version_sources(root: Path) -> dict[str, str]:
+def version_sources(
+    root: Path, *, channel: VersionChannel = "stable"
+) -> dict[str, str]:
     backend_project = tomllib.loads(_read_text(root / "backend/pyproject.toml"))
     backend_lock = tomllib.loads(_read_text(root / "backend/uv.lock"))
     backend_packages = [
@@ -61,7 +83,7 @@ def version_sources(root: Path) -> dict[str, str]:
     frontend_lock = json.loads(_read_text(root / "frontend/package-lock.json"))
 
     return {
-        "VERSION": canonical_version(root),
+        "VERSION": canonical_version(root, channel=channel),
         "backend/pyproject.toml": str(backend_project["project"]["version"]),
         "backend/app/__init__.py": _match_one(
             root / "backend/app/__init__.py",
@@ -83,10 +105,11 @@ def version_sources(root: Path) -> dict[str, str]:
 def validate(
     root: Path,
     *,
+    channel: VersionChannel = "stable",
     expected_version: str | None = None,
     expected_tag: str | None = None,
 ) -> str:
-    sources = version_sources(root)
+    sources = version_sources(root, channel=channel)
     version = sources["VERSION"]
     mismatches = {name: value for name, value in sources.items() if value != version}
     if mismatches:
@@ -121,9 +144,10 @@ def _write_json(path: Path, value: object) -> None:
     )
 
 
-def set_version(root: Path, version: str) -> None:
-    if SEMVER_PATTERN.fullmatch(version) is None:
-        raise VersioningError(f"Invalid stable semantic version: {version!r}")
+def set_version(
+    root: Path, version: str, *, channel: VersionChannel = "stable"
+) -> None:
+    validate_version_format(version, channel)
 
     (root / "VERSION").write_text(f"{version}\n", encoding="utf-8")
     _replace_one(
@@ -158,7 +182,7 @@ def set_version(root: Path, version: str) -> None:
         r'(^export const APP_VERSION = ")[^"]+((";)$)',
         rf"\g<1>{version}\g<2>",
     )
-    validate(root, expected_version=version)
+    validate(root, channel=channel, expected_version=version)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -172,11 +196,13 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     check = subparsers.add_parser("check", help="validate every version mirror")
+    check.add_argument("--channel", choices=("stable", "v2"), default="stable")
     check.add_argument("--expected-version")
     check.add_argument("--expected-tag")
     check.add_argument("--print-version", action="store_true")
 
     update = subparsers.add_parser("set", help="update every version mirror")
+    update.add_argument("--channel", choices=("stable", "v2"), default="stable")
     update.add_argument("version")
     return parser
 
@@ -186,11 +212,12 @@ def main() -> int:
     root = arguments.root.resolve()
     try:
         if arguments.command == "set":
-            set_version(root, arguments.version)
+            set_version(root, arguments.version, channel=arguments.channel)
             print(arguments.version)
         else:
             version = validate(
                 root,
+                channel=arguments.channel,
                 expected_version=arguments.expected_version,
                 expected_tag=arguments.expected_tag,
             )

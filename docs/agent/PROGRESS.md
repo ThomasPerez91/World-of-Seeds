@@ -9,8 +9,10 @@
 - V1.3.3 feature SHA: `5ffd7fb3dd20f5c7c3d3d9094ec6ca10ec97c459`.
 - `develop` was fast-forwarded to the stable master SHA after release.
 - Permanent V2 integration branch `develop_V2` was created from the same stable SHA.
-- Active documentation branch: `docs/v2-architecture-roadmap`, based on the same V1.3.3
-  tree and intended to target `develop_V2`.
+- V2 preparation PR `#52` was merged into `develop_V2` at
+  `80a253da7b9fe57ddec39b0dfe92eaa2daca7e6b`.
+- Active task branch: `feat/v2-ci-versioning`, based on that merge commit and targeting
+  `develop_V2`.
 
 ## V1 completion state
 
@@ -57,12 +59,34 @@
 - No functional V2 code, database migration, dependency, Compose service, or version bump
   is included in V2-00.
 
+## V2-01 — CI and versioning foundation
+
+- Selected `2.0.0-alpha.N`, then `beta.N` and `rc.N`, as the supported V2 prerelease
+  formats; initialized all application mirrors at `2.0.0-alpha.0`.
+- Kept the versioning tool on the stable channel by default so the unchanged V1 release and
+  deployment workflows reject any V2 prerelease.
+- Added an explicit V2 channel to version checks and synchronized updates.
+- Added `develop_V2` push validation to the existing CI while preserving the same backend,
+  frontend, and container jobs.
+- Added policy regression tests for stable/V2 version separation and workflow isolation.
+- Added a post-CI workflow that publishes only a green `develop_V2` revision to the
+  separate `ghcr.io/thomasperez91/world-of-seeds-v2` package by immutable SHA.
+- The V2 image workflow does not deploy to Rise2 and cannot invoke the V1 release or OVH
+  deployment workflows.
+- No runtime feature, database migration, dependency, Compose service, or V1 workflow was
+  added or changed outside this CI/versioning scope.
+
 ## Current validation
 
-- Documentation links and Markdown structure: pending local validation.
-- `git diff --check`: pending.
-- GitHub CI for the V2-00 documentation PR: pending.
-- Tracked secret/passkey scan for changed files: pending.
+- V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
+  scan: PASS.
+- V2-00 GitHub CI run `32483090455`: PASS; backend, frontend, and container green.
+- V2-01 targeted versioning/policy tests: PASS, 14 tests.
+- V2-01 targeted Ruff lint: PASS.
+- V2-01 targeted Ruff formatting for backend tests: PASS.
+- V2-01 targeted mypy: PASS.
+- V2-01 version mirror and stable-channel rejection checks: PASS.
+- V2-01 final relevant validation and GitHub CI: pending.
 
 ## Known constraints
 
@@ -77,8 +101,7 @@
 
 ## Next task
 
-- Open and validate the V2-00 documentation PR into `develop_V2`.
-- After merge approval, start `V2-01 — Socle CI et versionnement V2` from the latest
-  `develop_V2`.
-- V2-01 must add V2 branch checks and isolated prerelease rules without changing the V1
-  release/deployment behavior.
+- Open and validate the V2-01 PR into `develop_V2`; do not merge it automatically.
+- After V2-01 is reviewed and merged, the next roadmap task is
+  `V2-02 — Compose local V2 minimal api/postgres/redis`.
+- Do not start V2-02 as part of the current task.

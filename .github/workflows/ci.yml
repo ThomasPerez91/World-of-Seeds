@@ -5,9 +5,15 @@ on:
   push:
     branches:
       - master
+      - develop_V2
 
 permissions:
   contents: read
+
+env:
+  WOS_VERSION_CHANNEL: >-
+    ${{ ((github.event_name == 'pull_request' && github.base_ref == 'develop_V2') ||
+    github.ref == 'refs/heads/develop_V2') && 'v2' || 'stable' }}
 
 jobs:
   backend:
@@ -113,12 +119,15 @@ jobs:
             exit 1
           fi
       - name: Validate application version consistency
-        run: python3 scripts/versioning.py check --print-version
+        run: >-
+          python3 scripts/versioning.py check
+          --channel "$WOS_VERSION_CHANNEL" --print-version
       - name: Build and start production stack
         run: |
           cp .env.example .env
           mkdir -p "$RUNNER_TEMP/seedbox"
-          version="$(python3 scripts/versioning.py check --print-version)"
+          version="$(python3 scripts/versioning.py check \
+            --channel "$WOS_VERSION_CHANNEL" --print-version)"
           docker compose build --build-arg "WOS_APP_VERSION=$version"
           SEEDBOX_HOST_PATH="$RUNNER_TEMP/seedbox" docker compose up \
             --detach --no-build --wait --wait-timeout 120
