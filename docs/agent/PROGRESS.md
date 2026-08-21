@@ -45,6 +45,8 @@
   `86bda53ce4a8d4982b1ec2173f07c60f69017b59`.
 - Local macOS roadmap PR `#69` was merged into `develop_V2` at
   `d02af28ed268475675b7f51d7a732d9bf4a88354`.
+- V2-14 PR `#70` was merged into `develop_V2` at
+  `4a72074536b2496723d2fa9af5286744f64babde`.
 
 ## V1 completion state
 
@@ -441,6 +443,26 @@
   as `/data`; V1 paths, APIs, models, migrations, and `master` are unchanged.
 - V2-14 is implemented on `feat/v2-shared-physical-storage` from the merged PR #69 commit.
 
+## V2-15 — Logical quotas and disk-pressure admission
+
+- Added additive `StorageLedger` and per-user `UserStorageUsage` counters with non-negative
+  database constraints and migration backfill from existing managed torrents and active rights.
+- Every deduplicated request now updates logical and physical counters in the same transaction;
+  idempotent replay adds nothing, and shared content counts physically once but logically once
+  for each owner.
+- Added typed admission policy snapshots sourced from the existing PostgreSQL storage options,
+  with user and managed-byte quotas plus projected free-byte/free-percent disk reserves.
+- Disk pressure is normalized to `NORMAL`, `WARNING`, or `CRITICAL`. Warning admits work;
+  critical blocks only new physical content, so an already-downloaded shared torrent can still
+  receive another authorized logical reference.
+- The shared store obtains capacity through `fstatvfs` on a validated data-root descriptor; no
+  web request performs a recursive filesystem scan.
+- Added a bounded SQL reconciler that repairs at most 500 user counters per call, recomputes the
+  physical ledger from PostgreSQL, and records a safe disk snapshot and pressure state.
+- Quota and pressure failures expose only `user_quota_exceeded`, `managed_quota_exceeded`, or
+  `disk_pressure_critical`; no path, option secret, or filesystem detail is returned.
+- V2-15 is implemented on `feat/v2-storage-quotas-pressure` from the merged V2-14 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -550,6 +572,14 @@
 - V2-14 full backend suite: PASS, 335 tests with 6 service-backed tests deferred to CI.
 - V2-14 full backend Ruff lint/format and mypy: PASS.
 - V2-14 `git diff --check` and targeted secret scan: PASS.
+- PR #70 (V2-14) review and GitHub CI run `32533226340`: PASS; squash-merged into
+  `develop_V2` at `4a72074536b2496723d2fa9af5286744f64babde`.
+- V2-15 targeted accounting, deduplication, shared-storage, option, and model tests: PASS,
+  49 passed with 1 PostgreSQL concurrency test deferred to CI.
+- V2-15 full backend suite: PASS, 342 tests with 6 service-backed tests deferred to CI.
+- V2-15 full backend Ruff lint/format and mypy: PASS.
+- V2-15 PostgreSQL upgrade/downgrade SQL generation, `git diff --check`, and targeted secret
+  scan: PASS.
 
 ## Known constraints
 
@@ -566,6 +596,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-15 — Logical quotas and disk-pressure admission`.
-- Do not start V2-15 until V2-14 has passed review, required CI is green, and its PR is merged
+- The next roadmap task is `V2-16 — TorrentFile manifest generation and validation`.
+- Do not start V2-16 until V2-15 has passed review, required CI is green, and its PR is merged
   into `develop_V2`.
