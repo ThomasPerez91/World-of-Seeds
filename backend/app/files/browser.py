@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from app.files.directory_sizes import DirectorySizeBudget, DirectorySizeCalculator
 from app.files.workspaces import (
     DIRECTORY_OPEN_FLAGS,
     RETIRED_WORKSPACE_DIRECTORIES,
@@ -110,17 +109,13 @@ class SandboxedFileBrowser:
     def __init__(
         self,
         workspace_manager: WorkspaceManager,
-        directory_size_calculator: DirectorySizeCalculator | None = None,
         *,
         max_directory_entries: int = MAX_DIRECTORY_ENTRIES,
-        max_size_scan_entries: int = 50_000,
     ) -> None:
-        if max_directory_entries <= 0 or max_size_scan_entries <= 0:
-            raise ValueError("File browser limits must be positive")
+        if max_directory_entries <= 0:
+            raise ValueError("File browser limit must be positive")
         self._workspace_manager = workspace_manager
-        self._directory_size_calculator = directory_size_calculator or DirectorySizeCalculator()
         self._max_directory_entries = max_directory_entries
-        self._max_size_scan_entries = max_size_scan_entries
 
     def list_directory(self, username: str, raw_path: str) -> DirectorySnapshot:
         relative_path = RelativePath.parse(raw_path)
@@ -142,7 +137,6 @@ class SandboxedFileBrowser:
     ) -> tuple[list[FileEntry], bool]:
         entries: list[FileEntry] = []
         truncated = False
-        size_budget = DirectorySizeBudget(remaining_entries=self._max_size_scan_entries)
         try:
             with os.scandir(directory_fd) as iterator:
                 for entry in iterator:
@@ -162,18 +156,10 @@ class SandboxedFileBrowser:
                         FileEntryKind.OTHER,
                     }
                     item_path = "/".join((*relative_path.components, entry.name))
-                    size: int | None
-                    if kind is FileEntryKind.FILE:
-                        size = entry_stat.st_size
-                    elif kind is FileEntryKind.DIRECTORY and not blocked:
-                        size = self._directory_size_calculator.calculate(
-                            directory_fd,
-                            entry.name,
-                            entry_stat,
-                            size_budget,
-                        )
-                    else:
-                        size = None
+                    # Directory sizes require a recursive filesystem walk. Listing a
+                    # directory must remain O(number of direct children), regardless
+                    # of the amount of data stored below it.
+                    size = entry_stat.st_size if kind is FileEntryKind.FILE else None
                     entries.append(
                         FileEntry(
                             name=entry.name,

@@ -11,6 +11,7 @@ from starlette.types import Message, Scope
 
 from app.auth.security import hash_password
 from app.files import WorkspaceManager
+from app.files.archives import ArchiveBusyError, SandboxedFolderArchiver
 from app.files.downloads import (
     DOWNLOAD_CHUNK_SIZE,
     DownloadStreamingResponse,
@@ -511,7 +512,7 @@ async def test_folder_download_returns_stored_zip_with_empty_and_long_names(
         assert archive.read(f"Collection/{long_name}") == b"video"
         assert "Collection/Dossier vide/" in archive.namelist()
         assert all(info.compress_type == zipfile.ZIP_STORED for info in archive.infolist())
-    assert not list((data_root / ".wos-control" / "archives").iterdir())
+    assert not (data_root / ".wos-control" / "archives").exists()
 
 
 @pytest.mark.asyncio
@@ -541,3 +542,91 @@ async def test_folder_download_rejects_traversal_and_symlink_escape(
     assert traversal.status_code == 400
     assert symlink.status_code == 403
     assert b"secret" not in symlink.content
+
+
+def test_folder_archive_streams_before_reading_file_content(
+    data_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = WorkspaceManager(data_root)
+    manager.create("thomas")
+    folder = user_downloads(data_root) / "Collection"
+    folder.mkdir()
+    (folder / "movie.mkv").write_bytes(b"video" * 1024)
+    archiver = SandboxedFolderArchiver(manager)
+    opened = archiver.open(
+        "thomas",
+        "downloads/Collection",
+        max_source_bytes=1024 * 1024,
+    )
+    with pytest.raises(ArchiveBusyError):
+        archiver.open(
+            "thomas",
+            "downloads/Collection",
+            max_source_bytes=1024 * 1024,
+        )
+
+    original_read = os.read
+    reads = 0
+
+    def counted_read(file_descriptor: int, size: int) -> bytes:
+        nonlocal reads
+        reads += 1
+        return original_read(file_descriptor, size)
+
+    monkeypatch.setattr(os, "read", counted_read)
+    stream = archiver.stream(
+        opened,
+        max_source_bytes=1024 * 1024,
+        chunk_size=1024,
+    )
+    first_chunk = next(stream)
+
+    assert first_chunk.startswith(b"PK")
+    assert reads == 0
+    stream.close()
+
+    reopened = archiver.open(
+        "thomas",
+        "downloads/Collection",
+        max_source_bytes=1024 * 1024,
+    )
+    reopened.close()
+
+
+def test_folder_archive_does_not_follow_file_growth_during_stream(
+    data_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = WorkspaceManager(data_root)
+    manager.create("thomas")
+    folder = user_downloads(data_root) / "Collection"
+    folder.mkdir()
+    growing_file = folder / "active.part"
+    growing_file.write_bytes(b"seed")
+    archiver = SandboxedFolderArchiver(manager)
+    opened = archiver.open(
+        "thomas",
+        "downloads/Collection",
+        max_source_bytes=1024,
+    )
+    stream = archiver.stream(opened, max_source_bytes=1024, chunk_size=2)
+    archive_chunks = [next(stream)]
+    original_read = os.read
+    grew = False
+
+    def grow_after_first_read(file_descriptor: int, size: int) -> bytes:
+        nonlocal grew
+        chunk = original_read(file_descriptor, size)
+        if not grew:
+            grew = True
+            with growing_file.open("ab") as file_handle:
+                file_handle.write(b"-still-downloading")
+        return chunk
+
+    monkeypatch.setattr(os, "read", grow_after_first_read)
+    archive_chunks.extend(stream)
+
+    with zipfile.ZipFile(io.BytesIO(b"".join(archive_chunks))) as archive:
+        assert archive.read("Collection/active.part") == b"seed"
+    assert growing_file.stat().st_size > len(b"seed")

@@ -55,6 +55,7 @@ def _integer(
     minimum: int,
     maximum: int,
     unit: str,
+    editable: bool = True,
     restart_required: bool = False,
 ) -> OptionSpec:
     return OptionSpec(
@@ -67,6 +68,7 @@ def _integer(
         unit=unit,
         minimum=minimum,
         maximum=maximum,
+        editable=editable,
         restart_required=restart_required,
     )
 
@@ -316,23 +318,25 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     ),
     _integer(
         "WOS_DIRECTORY_SIZE_MAX_ENTRIES",
-        "Budget de calcul des tailles",
-        "Nombre maximal d’entrées parcourues pour calculer les tailles de dossiers.",
+        "Ancien budget de calcul des tailles",
+        "Option conservée pour compatibilité ; les tailles de dossiers ne sont plus calculées.",
         50_000,
         "performance",
         minimum=1000,
         maximum=250_000,
         unit="count",
+        editable=False,
     ),
     _integer(
         "WOS_DIRECTORY_SIZE_CACHE_SECONDS",
-        "Cache des tailles de dossiers",
-        "Durée du cache mémoire utilisé par le navigateur de fichiers.",
+        "Ancien cache des tailles de dossiers",
+        "Option conservée pour compatibilité ; aucun scan récursif n’est mis en cache.",
         30,
         "performance",
         minimum=1,
         maximum=3600,
         unit="seconds",
+        editable=False,
     ),
     _integer(
         "WOS_HTTP_STREAM_CHUNK_BYTES",

@@ -1,7 +1,6 @@
 from typing import Annotated, Never
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import (
     AuthContext,
@@ -23,7 +22,12 @@ from app.files import (
     RangeNotSatisfiableError,
     WorkspaceError,
 )
-from app.files.archives import ArchiveError, ArchiveStreamingResponse, ArchiveTooLargeError
+from app.files.archives import (
+    ArchiveBusyError,
+    ArchiveError,
+    ArchiveStreamingResponse,
+    ArchiveTooLargeError,
+)
 from app.files.browser_dependencies import FileBrowserDependency
 from app.files.download_dependencies import FileDownloaderDependency, FolderArchiverDependency
 from app.files.downloads import (
@@ -275,8 +279,7 @@ async def download_folder(
     if type(max_source_bytes) is not int or type(chunk_size) is not int:
         raise RuntimeError("Archive options have invalid types")
     try:
-        archive = await run_in_threadpool(
-            archiver.create,
+        archive = archiver.open(
             context.user.username,
             path,
             max_source_bytes=max_source_bytes,
@@ -291,9 +294,20 @@ async def download_folder(
         raise HTTPException(status_code=403, detail="Path is blocked") from exc
     except ArchiveTooLargeError as exc:
         raise HTTPException(status_code=413, detail="Folder is too large to archive") from exc
+    except ArchiveBusyError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Another folder archive is already running",
+            headers={"Retry-After": "30"},
+        ) from exc
     except (ArchiveError, WorkspaceError) as exc:
         raise HTTPException(status_code=503, detail="Folder archive is unavailable") from exc
-    return ArchiveStreamingResponse(archive, chunk_size=chunk_size)
+    return ArchiveStreamingResponse(
+        archive,
+        archiver=archiver,
+        max_source_bytes=max_source_bytes,
+        chunk_size=chunk_size,
+    )
 
 
 @router.get("", response_model=DirectoryListingResponse)

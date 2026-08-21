@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 
 import { api, ApiError, type DirectoryListing, type FileEntry } from "../../api/client";
+import { confirmOperation, showOperationError } from "../../components/alerts";
 import { FolderIcon } from "../../components/icons";
 import { splitDisplayName } from "../../utils/files";
 import { FileDialog } from "./FileDialog";
@@ -49,13 +50,11 @@ function RenameDialog({
 }: Omit<FileMutationDialogProps, "action" | "currentDirectory">) {
   const displayed = splitDisplayName(entry);
   const [name, setName] = useState(displayed.basename);
-  const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
-    setError("");
     try {
       const result = await api.renameFile(entry.path, name);
       onCompleted(`« ${entry.name} » a été renommé en « ${result.name} ».`);
@@ -64,7 +63,7 @@ function RenameDialog({
         onSessionExpired();
         return;
       }
-      setError(mutationErrorMessage(caught));
+      await showOperationError(mutationErrorMessage(caught));
     } finally {
       setSubmitting(false);
     }
@@ -94,9 +93,6 @@ function RenameDialog({
         )}
         <p className="mutation-warning">
           Si qBittorrent utilise encore cet élément, son téléchargement peut passer en erreur.
-        </p>
-        <p className="form-message error-message" role="alert">
-          {error}
         </p>
         <div className="dialog-actions">
           <button
@@ -131,13 +127,11 @@ function MoveDialog({
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [listingError, setListingError] = useState("");
-  const [mutationError, setMutationError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setListingError("");
-    setMutationError("");
     setListing(null);
     void api
       .listFiles(destination, controller.signal)
@@ -163,7 +157,6 @@ function MoveDialog({
 
   async function move() {
     setSubmitting(true);
-    setMutationError("");
     try {
       const result = await api.moveFile(entry.path, destination);
       onCompleted(`« ${entry.name} » a été déplacé vers « ${result.path} ».`);
@@ -172,7 +165,7 @@ function MoveDialog({
         onSessionExpired();
         return;
       }
-      setMutationError(mutationErrorMessage(caught));
+      await showOperationError(mutationErrorMessage(caught));
     } finally {
       setSubmitting(false);
     }
@@ -250,9 +243,6 @@ function MoveDialog({
         {destinationIsSource && (
           <p className="picker-hint error-message">Un dossier ne peut pas être déplacé en lui-même.</p>
         )}
-        <p className="form-message error-message" role="alert">
-          {mutationError}
-        </p>
         <div className="dialog-actions">
           <button
             type="button"
@@ -287,73 +277,49 @@ function TrashDialog({
   onCompleted,
   onSessionExpired,
 }: Omit<FileMutationDialogProps, "action" | "currentDirectory">) {
-  const [error, setError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  async function moveToTrash() {
-    setSubmitting(true);
-    setError("");
-    try {
-      await api.trashFile(entry.path);
-      onCompleted(`« ${entry.name} » a été placé dans la corbeille.`);
-    } catch (caught) {
-      if (caught instanceof ApiError && caught.status === 401) {
-        onSessionExpired();
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const confirmed = await confirmOperation({
+        title: "Placer dans la corbeille ?",
+        message: `« ${entry.name} » pourra être restauré. Un torrent actif peut passer en erreur.`,
+        confirmText: "Placer dans la corbeille",
+        destructive: true,
+      });
+      if (!active) return;
+      if (!confirmed) {
+        onClose();
         return;
       }
-      setError(
-        caught instanceof ApiError
-          ? {
-              400: "Ce chemin n’est pas valide.",
-              403: "Cet élément est protégé ou bloqué.",
-              404: "L’élément n’existe plus.",
-              409: "L’intégrité de cet élément n’a pas pu être confirmée.",
-              500: "L’opération n’a pas pu être annulée en toute sécurité.",
-              503: "La corbeille est temporairement indisponible.",
-            }[caught.status] ?? "L’élément n’a pas pu être placé dans la corbeille."
-          : "L’élément n’a pas pu être placé dans la corbeille.",
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  }
+      try {
+        await api.trashFile(entry.path);
+        if (active) onCompleted(`« ${entry.name} » a été placé dans la corbeille.`);
+      } catch (caught) {
+        if (caught instanceof ApiError && caught.status === 401) {
+          onSessionExpired();
+          return;
+        }
+        const message =
+          caught instanceof ApiError
+            ? {
+                400: "Ce chemin n’est pas valide.",
+                403: "Cet élément est protégé ou bloqué.",
+                404: "L’élément n’existe plus.",
+                409: "L’intégrité de cet élément n’a pas pu être confirmée.",
+                500: "L’opération n’a pas pu être annulée en toute sécurité.",
+                503: "La corbeille est temporairement indisponible.",
+              }[caught.status] ?? "L’élément n’a pas pu être placé dans la corbeille."
+            : "L’élément n’a pas pu être placé dans la corbeille.";
+        await showOperationError(message);
+        if (active) onClose();
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [entry, onClose, onCompleted, onSessionExpired]);
 
-  return (
-    <FileDialog
-      title="Placer dans la corbeille"
-      description={`« ${entry.name} » pourra être restauré à son emplacement actuel.`}
-      onClose={onClose}
-      closeDisabled={submitting}
-    >
-      <div className="confirmation-content">
-        <p className="mutation-warning">
-          Un torrent encore actif dans qBittorrent peut passer en erreur après cette opération.
-        </p>
-        <p className="form-message error-message" role="alert">
-          {error}
-        </p>
-        <div className="dialog-actions">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onClose}
-            disabled={submitting}
-            data-initial-focus
-          >
-            Annuler
-          </button>
-          <button
-            type="button"
-            className="danger-button"
-            onClick={() => void moveToTrash()}
-            disabled={submitting}
-          >
-            {submitting ? "Déplacement…" : "Placer dans la corbeille"}
-          </button>
-        </div>
-      </div>
-    </FileDialog>
-  );
+  return null;
 }
 
 export function FileMutationDialog(props: FileMutationDialogProps) {

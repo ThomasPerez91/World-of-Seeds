@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.security import hash_password
 from app.files import BrowserPathBlockedError, WorkspaceManager
 from app.files.browser import InvalidRelativePathError, RelativePath, SandboxedFileBrowser
-from app.files.directory_sizes import DirectorySizeBudget, DirectorySizeCalculator
 from app.models import User
 
 
@@ -63,11 +62,12 @@ async def test_user_lists_root_and_nested_directory_metadata(
     assert root["breadcrumbs"] == [{"label": "Mes fichiers", "path": ""}]
     assert [entry["name"] for entry in root["entries"]] == ["downloads"]
     assert all(entry["kind"] == "directory" for entry in root["entries"])
-    assert root["entries"][0]["size"] == len(b"video-content") + len(b"hello")
+    assert root["entries"][0]["size"] is None
     assert root["storage"]["total"] > 0
     assert root["storage"]["used"] >= 0
     assert root["storage"]["available"] > 0
     assert root["truncated"] is False
+    assert db_session.in_transaction() is False
 
     nested_response = await client.get("/api/v1/files", params={"path": "downloads"})
     assert nested_response.status_code == 200
@@ -83,7 +83,7 @@ async def test_user_lists_root_and_nested_directory_metadata(
     ]
     movie_entry = next(entry for entry in nested["entries"] if entry["name"] == "movie.mkv")
     folder_entry = next(entry for entry in nested["entries"] if entry["name"] == "Movies")
-    assert folder_entry["size"] == 0
+    assert folder_entry["size"] is None
     assert movie_entry["path"] == "downloads/movie.mkv"
     assert movie_entry["kind"] == "file"
     assert movie_entry["size"] == len(b"video-content")
@@ -277,45 +277,32 @@ def test_storage_metadata_errors_are_reported_as_blocked_paths(
         SandboxedFileBrowser(manager).list_directory("thomas", "")
 
 
-def test_directory_size_scan_is_bounded_and_does_not_follow_symlinks(
+def test_directory_listing_never_opens_or_scans_nested_directories(
     data_root: Path,
-    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manager = WorkspaceManager(data_root)
     manager.create("thomas")
     downloads = data_root / "thomas" / "downloads"
     folder = downloads / "collection"
     folder.mkdir()
-    (folder / "one.bin").write_bytes(b"one")
-    (folder / "two.bin").write_bytes(b"two")
-    outside = tmp_path / "outside-size"
-    outside.mkdir()
-    (outside / "secret.bin").write_bytes(b"secret" * 100)
-    (folder / "outside").symlink_to(outside, target_is_directory=True)
+    (folder / "large.bin").write_bytes(b"data")
+    original_open = os.open
 
-    downloads_fd = os.open(downloads, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        folder_stat = os.stat("collection", dir_fd=downloads_fd, follow_symlinks=False)
-        calculator = DirectorySizeCalculator()
-        assert (
-            calculator.calculate(
-                downloads_fd,
-                "collection",
-                folder_stat,
-                DirectorySizeBudget(remaining_entries=10),
-            )
-            == 6
-        )
+    def reject_nested_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if path == "collection":
+            raise AssertionError("directory listing opened a child directory")
+        return original_open(path, flags, mode, dir_fd=dir_fd)
 
-        uncached_calculator = DirectorySizeCalculator()
-        assert (
-            uncached_calculator.calculate(
-                downloads_fd,
-                "collection",
-                folder_stat,
-                DirectorySizeBudget(remaining_entries=1),
-            )
-            is None
-        )
-    finally:
-        os.close(downloads_fd)
+    monkeypatch.setattr(os, "open", reject_nested_open)
+
+    listing = SandboxedFileBrowser(manager).list_directory("thomas", "downloads")
+
+    collection = next(entry for entry in listing.entries if entry.name == "collection")
+    assert collection.size is None
