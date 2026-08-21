@@ -19,7 +19,7 @@ import {
   RenameIcon,
   VideoFileIcon,
 } from "../../components/icons";
-import { Notice } from "../../components/Notice";
+import { showOperationError, showOperationSuccess } from "../../components/alerts";
 import { formatBytes } from "../../utils/format";
 import { splitDisplayName } from "../../utils/files";
 import {
@@ -42,13 +42,11 @@ function CreateFolderDialog({
   onSessionExpired: () => void;
 }) {
   const [name, setName] = useState("");
-  const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
-    setError("");
     try {
       const result = await api.createDirectory(parent, name);
       onCompleted(`Le dossier « ${result.name} » a été créé.`);
@@ -57,7 +55,7 @@ function CreateFolderDialog({
         onSessionExpired();
         return;
       }
-      setError(
+      await showOperationError(
         caught instanceof ApiError && caught.status === 409
           ? "Un élément porte déjà ce nom dans ce dossier."
           : "Le dossier n’a pas pu être créé.",
@@ -84,7 +82,6 @@ function CreateFolderDialog({
           data-initial-focus
           required
         />
-        <p className="form-message error-message" role="alert">{error}</p>
         <div className="dialog-actions">
           <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>Annuler</button>
           <button type="submit" disabled={submitting || name.length === 0}>
@@ -176,7 +173,6 @@ export function FileBrowser({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
-  const [notice, setNotice] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [mutation, setMutation] = useState<{
     action: FileMutationAction;
@@ -220,12 +216,11 @@ export function FileBrowser({
     else url.searchParams.set("path", nextPath);
     window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
     setPath(nextPath);
-    setNotice("");
   }
 
   function completeMutation(message: string) {
     setMutation(null);
-    setNotice(message);
+    void showOperationSuccess(message);
     setReloadKey((value) => value + 1);
     onFilesChanged();
   }
@@ -269,8 +264,6 @@ export function FileBrowser({
           </button>
         </div>
       </div>
-
-      <Notice message={notice} onDismiss={() => setNotice("")} />
 
       {loading && <LoadingRows />}
 

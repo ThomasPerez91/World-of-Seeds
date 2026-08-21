@@ -88,10 +88,8 @@ describe("FileBrowser", () => {
     expect(document.activeElement).toBe(cancelButton);
     await user.click(screen.getByRole("button", { name: "Placer dans la corbeille" }));
 
-    expect((await screen.findByRole("status")).textContent).toContain(
-      "« movie.mkv » a été placé dans la corbeille.",
-    );
-    await user.click(screen.getByRole("button", { name: "Fermer le message" }));
+    expect(await screen.findByText("« movie.mkv » a été placé dans la corbeille.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Fermer" }));
     expect(screen.queryByText("« movie.mkv » a été placé dans la corbeille.")).toBeNull();
     await waitFor(() => expect(onFilesChanged).toHaveBeenCalledOnce());
   });

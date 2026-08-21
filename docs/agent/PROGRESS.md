@@ -2,7 +2,7 @@
 
 ## Current release
 
-- Version: `1.3.0`.
+- Version prepared locally: `1.3.1`.
 - Product line: V1.
 - Feature PR: `#38`, merged into `develop`.
 - Release PR: `#39`, merged into `master`.
@@ -35,13 +35,24 @@
 - Updated deployment configuration and documentation for shared `/data` mounts.
 - Updated dependency locks and added the multipart dependency.
 
+## Prepared in the V1.3.1 performance hotfix
+
+- Removed recursive folder-size calculation from ordinary file listings.
+- Ended the read-only authentication transaction before route and stream processing.
+- Replaced temporary folder ZIP creation with direct, uncompressed HTTP streaming.
+- Limited folder archive generation to one concurrent request per application process.
+- Kept archive traversal, source-size, entry-count, and symlink protections.
+- Fixed file-table column sizing, truncated long names with an ellipsis, and kept actions on one line.
+- Replaced file mutation, deletion, restoration, and failure notices with SweetAlert2 dialogs.
+- Added regression coverage for SQL transaction release, non-recursive listings, immediate ZIP output, and archive concurrency.
+
 ## Validation
 
 - Local Ruff formatting: PASS.
 - Local Ruff lint: PASS.
 - Local mypy for backend application and tests: PASS.
 - Local backend suite: PASS, 160 tests.
-- Local version consistency check: PASS, `1.3.0`.
+- Local version consistency check: PASS, `1.3.1`.
 - GitHub Actions backend job: PASS.
 - GitHub Actions frontend check: PASS.
 - GitHub Actions frontend tests: PASS.
@@ -73,15 +84,12 @@
 - qBittorrent and the application must share `/srv/seedbox:/data`.
 - User torrent save paths remain `/data/<username>/downloads`.
 - The C411 passkey remains server-side only.
-- Folder archives are temporary, uncompressed, bounded, and symlink-safe.
+- Folder archives are streamed directly, uncompressed, concurrency-bounded, and symlink-safe.
 - PostgreSQL remains unexposed to the host network.
 - No `chmod 777` workaround is acceptable.
 
 ## Next task
 
-- Finish the V1 deployment correction only.
-- Validate and merge the corrective PR into `develop`.
-- Integrate the correction into `master` with green CI.
-- Re-run the `v1.3.0` release path and verify the OVH deployment.
-- Do not start any V2 implementation as part of this release.
-- After V1 is released, the only authorized next product task is `Lot V2-A`.
+- Publish the validated `v1.3.1` hotfix through a feature PR into `develop`.
+- Merge `develop` into `master` only after every required CI check is green.
+- Verify CPU, PostgreSQL pool use, block I/O, readiness, and the first-byte delay of a large folder download on OVH.

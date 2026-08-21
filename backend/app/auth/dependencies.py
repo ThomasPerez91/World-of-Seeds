@@ -44,8 +44,12 @@ async def get_auth_context(
         or ensure_utc(user_session.expires_at) <= now
         or not user_can_login(user_session.user, now)
     ):
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
+    # Authentication is read-only. End its transaction before entering the route so
+    # long filesystem streams never retain a PostgreSQL pool connection.
+    await db.commit()
     return AuthContext(user=user_session.user, session=user_session)
 
 

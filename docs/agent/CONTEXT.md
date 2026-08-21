@@ -13,7 +13,7 @@ It provides authenticated users with a browser-based file manager.
 It also provides controlled torrent submission to a shared qBittorrent service.
 Administrators manage users, storage, and instance-wide functional options.
 The current production line is V1.
-The V1 release documented here is `1.3.0`.
+The V1 maintenance release documented here is `1.3.1`.
 
 ## Repository and branches
 
@@ -79,14 +79,14 @@ The V1 release documented here is `1.3.0`.
 
 - Folder downloads are streamed as ZIP archives.
 - Archives use `ZIP_STORED`; do not recompress user data.
-- Temporary archives belong under `/data/.wos-control/archives`.
-- Temporary archive names must be unpredictable and server controlled.
+- Archive bytes are generated directly into the HTTP response; do not create a temporary ZIP.
+- Admit only one concurrent folder archive per application process.
 - Source traversal must be descriptor based where supported.
 - Use `O_NOFOLLOW` protections where available.
 - Refuse symlinks and path escapes instead of following them.
 - Enforce the configured maximum source size before producing the archive.
-- Remove temporary archives after the response completes or fails.
-- Never store temporary archives inside a user's visible download tree.
+- Release the archive concurrency slot after the response completes, disconnects, or fails.
+- Never write generated archives into a user's visible download tree.
 
 ## Torrent submission
 
@@ -178,7 +178,7 @@ The V1 release documented here is `1.3.0`.
 - Keep all version declarations synchronized.
 - Use `scripts/versioning.py` for version changes and consistency checks.
 - Update dependency locks when dependency declarations change.
-- The V1 completion release version is `1.3.0`.
+- The current V1 maintenance release version is `1.3.1`.
 - The release PR targets `master` from `develop`.
 - Merge the release only after backend, frontend, and container CI are green.
 - Confirm the resulting `master` and `develop` commit identifiers at handoff.
@@ -192,7 +192,7 @@ The V1 release documented here is `1.3.0`.
 - Confirm client input cannot select another user's workspace.
 - Confirm filesystem operations remain beneath the workspace root.
 - Confirm archive traversal refuses symlinks.
-- Confirm archive cleanup happens on success and error.
+- Confirm archive resources and concurrency slots are released on success and error.
 - Confirm torrent upload accepts only the intended file type and tracker.
 - Confirm the database contains ownership metadata but no passkey.
 
