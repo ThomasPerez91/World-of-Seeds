@@ -145,6 +145,16 @@ class ManagedTorrent(Base):
             name="ck_managed_torrents_schedule_values",
         ),
         CheckConstraint(
+            "manifest_version >= 0 AND manifest_file_count >= 0 AND manifest_total_size >= 0",
+            name="ck_managed_torrents_manifest_values",
+        ),
+        CheckConstraint(
+            "(manifest_version = 0 AND manifest_checksum IS NULL "
+            "AND manifest_file_count = 0 AND manifest_total_size = 0) "
+            "OR (manifest_version >= 1 AND length(manifest_checksum) = 64)",
+            name="ck_managed_torrents_manifest_state",
+        ),
+        CheckConstraint(
             "(desired_active AND desired_priority IS NOT NULL AND desired_priority >= 0) "
             "OR (NOT desired_active AND desired_priority IS NULL)",
             name="ck_managed_torrents_schedule_state",
@@ -185,6 +195,10 @@ class ManagedTorrent(Base):
         Uuid(as_uuid=True), nullable=True
     )
     retry_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    manifest_version: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    manifest_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    manifest_file_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    manifest_total_size: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     desired_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     desired_priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
     desired_download_limit: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
