@@ -45,6 +45,7 @@ ou migration additive), **ÉLEVÉ** (concurrence, stockage, sécurité, déploie
 | V2-16 | MOYEN | V2-14 | Génération et validation de manifestes `TorrentFile`; pagination, checksum/version et détection des changements. |
 | V2-17 | MOYEN | V2-03,V2-09 | API de demandes torrent V2 et contrats d'erreur; dépôt idempotent et consultation sans polling qB par navigateur. |
 | V2-18 | MOYEN | V2-17 | Interface « Mes téléchargements » V2 : états durables, progression, pagination, ellipsis, actions sur une ligne et CSP stricte. |
+| V2-18A | ÉLEVÉ | V2-13C,V2-14,V2-18 | Validation locale macOS reproductible : profil Compose développeur avec API, worker, scheduler, PG, Redis et qB, intégration tracker contrôlée sans secret réel, smoke test du dépôt jusqu'à l'état durable visible dans l'UI, et preuves Apple Silicon/Intel. |
 | V2-19 | ÉLEVÉ | V2-16,V2-17 | API de téléchargement par fichier : ownership, HTTP Range, ETag, limite de débit et `DownloadLease`. |
 | V2-20 | ÉLEVÉ | V2-19 | Téléchargement récursif navigateur : File System Access API, snapshot manifeste, concurrence bornée, pause/reprise/annulation. |
 | V2-21 | MOYEN | V2-20 | Fallback compatible : fichiers individuels et ZIP streamé réservé aux petits dossiers, sans archive temporaire. |
@@ -55,7 +56,7 @@ ou migration additive), **ÉLEVÉ** (concurrence, stockage, sécurité, déploie
 | V2-26 | ÉLEVÉ | V2-08,V2-09,V2-14 | Réconciliation admin : DB/qB/filesystem, anomalies actionnables, opérations bornées et torrents externes en lecture seule. |
 | V2-27 | MOYEN | V2-08,V2-15 | Métriques applicatives sans cardinalité/secrets : API, jobs, scheduler, leases, qB, Redis, DB et stockage. |
 | V2-28 | ÉLEVÉ | V2-02,V2-27 | Stack Prometheus/Grafana/node-exporter/cAdvisor, dashboards, alertes, rétention et accès admin isolé. |
-| V2-29 | ÉLEVÉ | V2-09,V2-10,V2-28 | Compose Rise2 complet : ingress, API, workers, PG, Redis, qB, NewGreedy et monitoring sur réseaux/volumes V2 dédiés. |
+| V2-29 | ÉLEVÉ | V2-18A,V2-28 | Compose Rise2 complet : ingress, API, workers, PG, Redis, qB, NewGreedy et monitoring sur réseaux/volumes V2 dédiés. |
 | V2-30 | ÉLEVÉ | V2-29 | Sauvegarde/restauration : PostgreSQL, secrets/configs, qB et politique des données; exercice de restauration documenté. |
 | V2-31 | ÉLEVÉ | V2-22,V2-26,V2-30 | Import V1 optionnel : inventaire, mapping `UserTorrent`, dry-run, idempotence, conflits et rollback sans toucher à V1. |
 | V2-32 | ÉLEVÉ | V2-24,V2-28,V2-29 | Sécurité et charge : 100 comptes, pannes/latences, CPU/RAM/I/O, CSP, OWASP, scan dépendances/images et tests anti-famine. |
@@ -71,13 +72,39 @@ flowchart TD
     Durable --> Torrent["qB + C411 + scheduler"]
     Torrent --> Storage["Stockage + quotas + manifestes"]
     Storage --> UX["API + transferts + UX"]
-    UX --> Operate["Admin + observabilité + Rise2"]
+    UX --> Local["Validation locale Mac"]
+    Local --> Operate["Admin + observabilité + Rise2"]
     Operate --> Release["Import + charge + pilote + release"]
 ```
 
 Les branches parallélisables après le socle sont : options, Redis et domaine torrent ; puis
 UX de lecture, observabilité et préparation Rise2. Le stockage partagé précède impérativement
-les transferts récursifs et le lifecycle. La réconciliation précède l'import V1.
+les transferts récursifs et le lifecycle. Le smoke test local V2-18A doit valider le premier
+parcours utilisateur complet avant la composition Rise2 de V2-29. La réconciliation précède
+l'import V1.
+
+## Jalon de validation locale macOS
+
+V2-18A fournit une pile de développement distincte de la future pile Rise2. Elle étend le
+socle `compose.v2.yaml` sans lui donner les responsabilités de production de V2-29. Sa sortie
+est acceptée uniquement si les points suivants sont reproductibles depuis un clone propre :
+
+1. une commande documentée construit et démarre la pile avec Docker Desktop sur Mac Apple
+   Silicon et Intel, sans imposer l'UID/GID Linux `1000` ni un chemin hôte sous `/srv` ;
+2. seuls l'API et le frontend sont accessibles sur le loopback de l'hôte ; PostgreSQL,
+   Redis, qBittorrent et l'intégration tracker restent sur des réseaux privés ;
+3. les migrations et l'amorçage local sont idempotents, sans identifiant administrateur,
+   passkey C411 ou autre secret réel versionné ;
+4. un scénario automatisé soumet un torrent fixture, observe son job durable, l'exécution du
+   worker et du scheduler, sa présence attendue dans qBittorrent, puis son état dans l'UI ;
+5. le scénario couvre un redémarrage du worker et prouve la reprise sans double ajout ;
+6. une commande de nettoyage documentée supprime uniquement les conteneurs, réseaux et
+   volumes du projet local V2 ;
+7. la CI Linux conserve les invariants Compose et le smoke test, tandis qu'une checklist
+   manuelle consigne les validations macOS `arm64` et `amd64` avec versions de Docker Desktop.
+
+Ce jalon n'embarque ni ingress public, ni monitoring système, ni secrets de production, ni
+import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 
 ## Migrations et ruptures anticipées
 
@@ -117,9 +144,8 @@ les transferts récursifs et le lifecycle. La réconciliation précède l'import
 5. Une seule exécution de la CI complète quand la branche est prête.
 6. `PROGRESS.md` mis à jour avec SHA, PR, validations, risques et prochaine tâche.
 
-## Première tâche proposée
+## Prochaine tâche
 
-`V2-01 — Socle CI et versionnement V2` est la première PR fonctionnelle. Elle doit partir
-de `develop_V2`, ajouter les déclencheurs/checks de cette branche sans modifier les workflows
-de release V1, choisir le format de prérelease V2 et prouver que les artefacts V1 et V2 ne
-peuvent pas être déployés l'un à la place de l'autre.
+`V2-14 — Stockage physique partagé` est la prochaine tâche non terminée. V2-18A sera engagée
+seulement après V2-14, V2-17 et V2-18 ; elle ne doit pas retarder les tâches de stockage,
+manifestes et API dont elle dépend.
