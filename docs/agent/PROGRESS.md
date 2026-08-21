@@ -25,7 +25,11 @@
   `66e122c7ed7a086be5bfe0d1a95098a6525e1647`.
 - V2-07 PR `#59` was merged into `develop_V2` at
   `ab89407eabacadc0fa05c9a5f143a5fa67f3c035`.
-- Active task branch: `feat/v2-durable-worker`, based on that merge commit and targeting
+- V2-08 PR `#60` was merged into `develop_V2` at
+  `7d1ad6141814f4a3a64f5292726a5be9c1a423e8`.
+- V2-09 PR `#61` was merged into `develop_V2` at
+  `51af8185f911d176669b4e7cb4b0b5b4482fd2eb`.
+- Active task branch: `feat/v2-c411-newgreedy`, based on that merge commit and targeting
   `develop_V2`.
 
 ## V1 completion state
@@ -241,6 +245,27 @@
 - No worker job handler, C411/NewGreedy normalization, API, schema, filesystem mutation,
   frontend, V1 client behavior, Compose, or `master` change is included in V2-09.
 
+## V2-10 — C411 and NewGreedy integration
+
+- Added a worker-facing composition gateway that checks NewGreedy readiness before the
+  infrastructure C411 passkey is injected and immediately submits normalized metainfo to
+  the V2 qBittorrent gateway.
+- Reused the strict existing bencode parser and raw `info` preservation path without
+  changing V1 behavior; the expected managed infohash must match before qB is called.
+- C411 `announce` and `announce-list` entries remain restricted to the configured allowlist,
+  are rebuilt as `/announce/<encoded-passkey>`, and user passkeys are absent from outgoing
+  metainfo.
+- The composite returns only the qB add state: it never returns tracker URLs, normalized
+  secret-bearing metainfo, or passkeys to a caller.
+- Added a separate read-only NewGreedy V2 gateway exposing only bounded `/api/health`; its
+  origin must resolve to the internal `newgreedy` service and cannot contain credentials,
+  paths, query strings, or fragments.
+- Added targeted tests for raw-info preservation, both C411 hosts, `announce-list`, user
+  passkey removal, host rejection, infohash mismatch, NewGreedy outage/invalid responses,
+  internal-origin enforcement, secret-safe results/errors, and invalid infrastructure config.
+- No API route, worker registration, tracker activity persistence, multiple-account policy,
+  Compose service, frontend, schema, filesystem, V1 behavior, or `master` change is included.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -297,6 +322,11 @@
 - V2-09 targeted qBittorrent V2 gateway and V1 integration regression tests: PASS, 23 tests.
 - V2-09 complete backend suite: PASS, 265 tests with 4 service-backed tests deferred to CI.
 - V2-09 full backend Ruff lint/format and mypy: PASS.
+- PR #61 (V2-09) review and GitHub CI run `32504351178`: PASS; squash-merged into
+  `develop_V2` at `51af8185f911d176669b4e7cb4b0b5b4482fd2eb`.
+- V2-10 targeted C411/NewGreedy, torrent normalization, and qB V2 tests: PASS, 30 tests.
+- V2-10 complete backend suite: PASS, 279 tests with 4 service-backed tests deferred to CI.
+- V2-10 full backend Ruff lint/format and mypy: PASS.
 
 ## Known constraints
 
@@ -311,6 +341,7 @@
 
 ## Next task
 
-- Open and validate the V2-09 PR into `develop_V2`; do not merge it automatically.
-- After V2-09 is reviewed and merged, continue with `V2-10` from the V2 roadmap.
-- Do not start V2-10 as part of the current task.
+- Open and validate the V2-10 PR into `develop_V2`; do not merge it automatically.
+- After V2-10 is reviewed and merged, continue with `V2-11 — TrackerActivity without
+  secrets and opaque multi-account references`.
+- Do not start V2-11 as part of the current task.
