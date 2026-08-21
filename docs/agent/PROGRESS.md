@@ -31,8 +31,10 @@
   `51af8185f911d176669b4e7cb4b0b5b4482fd2eb`.
 - V2-10 PR `#62` was merged into `develop_V2` at
   `940469426008a51041596b0b9facf906159009ef`.
-- Active task branch: `feat/v2-tracker-activity`, based on that merge commit and targeting
-  `develop_V2`.
+- V2-11 PR `#63` was merged into `develop_V2` at
+  `0eedd65fe20dd91dac3deb49000e2def49aabd9e`.
+- No V2 task branch is active. `develop_V2` is the current integration baseline at that
+  merge commit.
 
 ## V1 completion state
 
@@ -354,6 +356,8 @@
 - V2-11 complete backend suite: PASS, 288 tests with 4 service-backed tests deferred to CI.
 - V2-11 full backend Ruff lint/format and mypy: PASS.
 - V2-11 PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
+- PR #63 (V2-11) review and GitHub CI run `32512486810`: PASS; squash-merged into
+  `develop_V2` at `0eedd65fe20dd91dac3deb49000e2def49aabd9e`.
 
 ## Known constraints
 
@@ -368,6 +372,6 @@
 
 ## Next task
 
-- Open and validate the V2-11 PR into `develop_V2`; do not merge it automatically.
-- After V2-11 is reviewed and merged, continue with `V2-12 — weighted fair scheduler`.
-- Do not start V2-12 as part of the current task.
+- The next roadmap task is `V2-12 — weighted fair scheduler`.
+- V2-12 has not been started; create a dedicated branch from the latest `develop_V2` only
+  after explicit authorization.
