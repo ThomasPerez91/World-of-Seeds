@@ -170,7 +170,11 @@ async def upload_torrent(
             "Ton espace de téléchargement est momentanément indisponible.",
         )
     try:
-        await monitor.add_qbittorrent_torrent(parsed.content, save_path=save_path)
+        await monitor.add_qbittorrent_torrent(
+            parsed.content,
+            save_path=save_path,
+            expected_info_hash=parsed.info_hash,
+        )
     except IntegrationAuthenticationError:
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,

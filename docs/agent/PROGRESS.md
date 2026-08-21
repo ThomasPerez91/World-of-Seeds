@@ -2,14 +2,14 @@
 
 ## Current release
 
-- Production baseline: `1.3.1`.
-- Version prepared locally: `1.3.2`.
+- Production baseline: `1.3.2`.
+- Version prepared locally: `1.3.3`.
 - Product line: V1.
-- Latest feature PR: `#46`, merged into `develop`.
-- Latest release PR: `#47`, merged into `master`.
-- Current hotfix branch: `fix/v1-c411-tracker-csp`.
-- MASTER HEAD before this hotfix: `c5d2e47cc007a399b480316d2615597b3a5c77c5`.
-- DEVELOP HEAD before this hotfix: `35c61f0923d4037f07220ecb918979b3ce613d7b`.
+- Latest feature PR: `#48`, merged into `develop`.
+- Latest release PR: `#49`, merged into `master`.
+- Current hotfix branch: `fix/v1-qbittorrent-5-2-add-response`.
+- MASTER HEAD before this hotfix: `8e20b8d578fdd68f85acdd9feed327afc089df68`.
+- DEVELOP HEAD before this hotfix: `20c4897c3fbba49052123e996e2abfd27170ba72`.
 
 ## Completed in the V1 completion feature
 
@@ -57,15 +57,21 @@
 - Replaces it with a class-only accessible modal without inline styles or CSP relaxation.
 - Verifies torrent progress, notices, and file-operation dialogs render without inline styles.
 
+## Prepared in the V1.3.3 qBittorrent response hotfix
+
+- Accepts the structured success response returned by qBittorrent 5.2.x after torrent upload.
+- Validates the returned counters and exact expected infohash instead of accepting arbitrary 2xx responses.
+- Keeps compatibility with legacy `200 Ok.` and `204 No Content` success responses.
+- Keeps explicit rejections, malformed responses, authentication failures, and mismatched hashes rejected.
+- Persists the `UserTorrent` association after qBittorrent confirms the expected torrent was accepted.
+
 ## Validation
 
 - Local Ruff formatting: PASS.
 - Local Ruff lint: PASS.
 - Local mypy for backend application and tests: PASS.
-- Local backend suite for this hotfix: targeted PASS, 6 tests.
-- Local frontend suite for this hotfix: targeted PASS, 8 tests.
-- Local frontend typecheck and production build: PASS.
-- Local version consistency check: PASS, `1.3.2`.
+- Local backend suite for this hotfix: targeted PASS, 19 tests; complete PASS, 165 tests.
+- Local version consistency check: PASS, `1.3.3`.
 - GitHub Actions backend job: PASS.
 - GitHub Actions frontend check: PASS.
 - GitHub Actions frontend tests: PASS.
@@ -77,7 +83,8 @@
 ## Integration state
 
 - The `1.3.1` performance hotfix is integrated into `develop` and `master` through PRs `#46` and `#47` with green CI.
-- The `1.3.2` tracker/CSP hotfix is implemented and validated locally.
+- The `1.3.2` tracker/CSP hotfix is integrated into `develop` and `master` through PRs `#48` and `#49`.
+- The `1.3.3` qBittorrent response hotfix is implemented and targeted tests are green locally.
 - No V2 code, database migration, or CSP relaxation is included.
 
 ## Known constraints
@@ -91,6 +98,6 @@
 
 ## Next task
 
-- Publish the `1.3.2` hotfix through a PR into `develop`.
+- Publish the `1.3.3` hotfix through a PR into `develop`.
 - Run the complete GitHub CI once and merge only when backend, frontend, and container jobs are green.
-- Open and validate the `1.3.2` release PR from `develop` to `master`.
+- Open and validate the `1.3.3` release PR from `develop` to `master`.
