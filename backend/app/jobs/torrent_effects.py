@@ -48,6 +48,7 @@ from app.models import (
     TrackerActivityOutcome,
     TrackerActivityType,
 )
+from app.storage import SharedContentStore, SharedContentStoreError
 from app.torrents import TorrentValidationError, record_tracker_activity
 
 ADD_TORRENT_JOB = "ADD_TORRENT"
@@ -76,12 +77,14 @@ class TorrentEffectHandlers:
         session_factory: async_sessionmaker[AsyncSession],
         router: _TorrentRouter,
         payloads: TorrentPayloadStore,
+        content: SharedContentStore,
         *,
         clock: Clock = lambda: datetime.now(UTC),
     ) -> None:
         self._session_factory = session_factory
         self._router = router
         self._payloads = payloads
+        self._content = content
         self._clock = clock
 
     @property
@@ -122,6 +125,14 @@ class TorrentEffectHandlers:
                 "torrent_payload_mismatch",
                 torrent_state=ManagedTorrentState.ERROR,
             )
+
+        try:
+            await asyncio.to_thread(self._content.prepare, torrent.storage_key)
+        except SharedContentStoreError as exc:
+            raise PermanentTorrentJobError(
+                "shared_storage_invalid",
+                torrent_state=ManagedTorrentState.ERROR,
+            ) from exc
 
         try:
             await route.adder.add_torrent(
