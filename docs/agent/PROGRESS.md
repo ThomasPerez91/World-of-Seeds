@@ -41,8 +41,8 @@
   `782a7ff41817481a7bf1f929064380560c5cd6b3`.
 - V2-13B PR `#67` was merged into `develop_V2` at
   `2514ddba888680df2702686d333231741ee64747`.
-- V2-13C is implemented on the dedicated `feat/v2-multi-account-routing` branch from that
-  `develop_V2` commit.
+- V2-13C PR `#68` was merged into `develop_V2` at
+  `86bda53ce4a8d4982b1ec2173f07c60f69017b59`.
 
 ## V1 completion state
 
@@ -408,6 +408,20 @@
 - No database migration, encrypted secret database, Compose activation, storage, API, frontend,
   V1 behavior, or `master` change is included in this PR.
 
+## Roadmap amendment — local macOS validation
+
+- Added V2-18A after the shared-storage, request-API, and first V2 UI tasks so a complete local
+  torrent-request smoke path is exercised before the production-oriented Rise2 composition.
+- Required a developer-only Compose profile with active API, worker, scheduler, PostgreSQL,
+  Redis and qBittorrent plus a controlled tracker integration that needs no real passkey.
+- Made clean-clone startup, idempotent migrations/bootstrap, worker crash recovery, private
+  service networks, isolated cleanup, and UI-visible durable state explicit exit criteria.
+- Required evidence on Docker Desktop for both Apple Silicon and Intel Macs without assuming
+  Linux UID/GID `1000` or `/srv` host paths.
+- Kept ingress, monitoring, production secrets and V1 import in V2-28 through V2-31; V2-29 now
+  depends on the successful local validation instead of discovering integration gaps during
+  the Rise2 deployment task.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -510,6 +524,8 @@
 - V2-13C complete backend suite: PASS, 335 tests with 6 service-backed tests deferred to CI.
 - V2-13C full backend Ruff lint/format and mypy: PASS.
 - V2-13C `git diff --check`: PASS.
+- PR #68 (V2-13C) review and GitHub CI run `32531450774`: PASS; squash-merged into
+  `develop_V2` at `86bda53ce4a8d4982b1ec2173f07c60f69017b59`.
 
 ## Known constraints
 
@@ -521,9 +537,11 @@
   remain recoverable.
 - Secrets and complete tracker URLs must never reach logs, metrics, options, DB business
   rows, browser responses, or agent documents.
+- The current V2 Compose remains a foundation stack; the runnable end-to-end macOS developer
+  profile is planned explicitly in V2-18A and must not reuse Rise2 or V1 secrets/data.
 
 ## Next task
 
 - The next roadmap task is `V2-14 — Shared physical storage`.
-- Do not start V2-14 until V2-13C has passed review, required CI is green, its PR is merged into
-  `develop_V2`, and explicit authorization is provided.
+- V2-18A is intentionally deferred until V2-14, V2-17, and V2-18 are complete; do not start it
+  early or fold production deployment responsibilities from V2-29 into it.
