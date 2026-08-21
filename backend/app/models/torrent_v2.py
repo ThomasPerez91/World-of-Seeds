@@ -54,6 +54,12 @@ class TorrentJobState(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class StoragePressureState(StrEnum):
+    NORMAL = "NORMAL"
+    WARNING = "WARNING"
+    CRITICAL = "CRITICAL"
+
+
 class TrackerActivityType(StrEnum):
     ANNOUNCE = "ANNOUNCE"
     SCRAPE = "SCRAPE"
@@ -78,6 +84,52 @@ class TrackerDiagnosticCode(StrEnum):
 
 
 ACTIVE_REQUEST_PREDICATE = text("state IN ('REQUESTED', 'ACTIVE', 'READY')")
+
+
+class StorageLedger(Base):
+    __tablename__ = "storage_ledger"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_storage_ledger_singleton"),
+        CheckConstraint(
+            "managed_bytes >= 0 AND disk_total_bytes >= 0 AND disk_free_bytes >= 0 "
+            "AND disk_free_bytes <= disk_total_bytes",
+            name="ck_storage_ledger_non_negative",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    managed_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    disk_total_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    disk_free_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    pressure: Mapped[StoragePressureState] = mapped_column(
+        Enum(
+            StoragePressureState,
+            name="storage_pressure_state",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+        ),
+        default=StoragePressureState.NORMAL,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class UserStorageUsage(Base):
+    __tablename__ = "user_storage_usage"
+    __table_args__ = (
+        CheckConstraint("logical_bytes >= 0", name="ck_user_storage_usage_non_negative"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    logical_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="storage_usage")
 
 
 class ManagedTorrent(Base):

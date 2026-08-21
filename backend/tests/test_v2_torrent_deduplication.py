@@ -7,7 +7,14 @@ import pytest
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.models import ManagedTorrent, TorrentRequest, TorrentRequestState, User
+from app.models import (
+    ManagedTorrent,
+    StorageLedger,
+    TorrentRequest,
+    TorrentRequestState,
+    User,
+    UserStorageUsage,
+)
 from app.torrents import (
     TorrentDeduplicationError,
     TorrentMetadataConflictError,
@@ -70,6 +77,12 @@ async def test_two_owners_share_one_managed_torrent_and_keep_two_requests(
     assert first.request.user_id != second.request.user_id
     assert managed_count == 1
     assert request_count == 2
+    ledger = await db_session.get(StorageLedger, 1)
+    first_usage = await db_session.get(UserStorageUsage, first_user.id)
+    second_usage = await db_session.get(UserStorageUsage, second_user.id)
+    assert ledger is not None and ledger.managed_bytes == 42
+    assert first_usage is not None and first_usage.logical_bytes == 42
+    assert second_usage is not None and second_usage.logical_bytes == 42
 
 
 @pytest.mark.asyncio
@@ -94,6 +107,10 @@ async def test_same_owner_and_infohash_are_idempotent(db_session: AsyncSession) 
     assert second.request_created is False
     assert first.request.id == second.request.id
     assert await db_session.scalar(select(func.count()).select_from(TorrentRequest)) == 1
+    usage = await db_session.get(UserStorageUsage, user.id)
+    ledger = await db_session.get(StorageLedger, 1)
+    assert usage is not None and usage.logical_bytes == 10
+    assert ledger is not None and ledger.managed_bytes == 10
 
 
 @pytest.mark.asyncio
@@ -293,12 +310,21 @@ async def test_postgresql_concurrent_owners_converge_on_one_managed_torrent() ->
                 )
                 == 2
             )
+            ledger = await verification_session.get(StorageLedger, 1)
+            usages = [
+                await verification_session.get(UserStorageUsage, user_id) for user_id in user_ids
+            ]
+            assert ledger is not None and ledger.managed_bytes >= 100
+            assert all(usage is not None and usage.logical_bytes == 100 for usage in usages)
     finally:
         async with session_factory() as cleanup_session:
             if managed_id is not None:
                 await cleanup_session.execute(
                     delete(ManagedTorrent).where(ManagedTorrent.id == managed_id)
                 )
+                ledger = await cleanup_session.get(StorageLedger, 1, with_for_update=True)
+                if ledger is not None:
+                    ledger.managed_bytes = max(0, ledger.managed_bytes - 100)
             if user_ids:
                 await cleanup_session.execute(delete(User).where(User.id.in_(user_ids)))
             await cleanup_session.commit()

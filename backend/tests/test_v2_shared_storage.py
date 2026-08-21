@@ -29,6 +29,10 @@ def test_store_prepares_one_opaque_directory_idempotently(tmp_path: Path) -> Non
     with pytest.raises(OSError):
         os.fstat(descriptor)
 
+    total_bytes, free_bytes = store.disk_capacity()
+    assert total_bytes > 0
+    assert 0 <= free_bytes <= total_bytes
+
 
 def test_store_rejects_symlinked_content_root(tmp_path: Path) -> None:
     root = tmp_path / "data"

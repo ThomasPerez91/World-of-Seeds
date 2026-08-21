@@ -13,11 +13,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     ManagedTorrent,
     ManagedTorrentState,
+    StoragePressureState,
     TorrentRequest,
     TorrentRequestState,
     User,
 )
 from app.models.base import utc_now
+from app.storage.accounting import (
+    StorageAdmissionPolicy,
+    StorageDiskSnapshot,
+    apply_storage_accounting,
+    prepare_storage_accounting,
+)
 
 _INFO_HASH_RE = re.compile(r"^[0-9a-f]{40}$")
 _ACTIVE_REQUEST_STATES = (
@@ -50,6 +57,7 @@ class ManagedTorrentRequestResult:
     request: TorrentRequest
     managed_torrent_created: bool
     request_created: bool
+    storage_pressure: StoragePressureState
 
 
 async def create_or_get_torrent_request(
@@ -60,6 +68,8 @@ async def create_or_get_torrent_request(
     name: str,
     total_size: int,
     now: datetime | None = None,
+    storage_policy: StorageAdmissionPolicy | None = None,
+    disk_snapshot: StorageDiskSnapshot | None = None,
 ) -> ManagedTorrentRequestResult:
     """Converge one canonical torrent and one active right without committing the transaction."""
 
@@ -71,6 +81,16 @@ async def create_or_get_torrent_request(
     owner = await session.scalar(select(User).where(User.id == user_id).with_for_update())
     if owner is None or not owner.is_active or owner.deleted_at is not None:
         raise TorrentRequestOwnerError("the torrent request owner is missing or inactive")
+
+    accounting = await prepare_storage_accounting(
+        session,
+        user_id=user_id,
+        info_hash=info_hash,
+        total_size=total_size,
+        policy=storage_policy,
+        disk=disk_snapshot,
+        now=timestamp,
+    )
 
     managed_id = uuid.uuid4()
     inserted_managed_id = await _insert_managed_torrent(
@@ -112,11 +132,20 @@ async def create_or_get_torrent_request(
     if request is None:
         raise TorrentDeduplicationRaceError("torrent request upsert did not produce a row")
 
+    apply_storage_accounting(
+        accounting,
+        request_created=inserted_request_id is not None,
+        managed_torrent_created=inserted_managed_id is not None,
+        total_size=total_size,
+        now=timestamp,
+    )
+
     return ManagedTorrentRequestResult(
         managed_torrent=managed_torrent,
         request=request,
         managed_torrent_created=inserted_managed_id is not None,
         request_created=inserted_request_id is not None,
+        storage_pressure=accounting.pressure,
     )
 
 
