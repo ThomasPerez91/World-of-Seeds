@@ -7,6 +7,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
 from app.api.router import api_router
+from app.coordination import RedisCoordinator
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.http_security import SecurityHeadersMiddleware
@@ -18,8 +19,9 @@ from app.options import OptionsStore
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     yield
+    await application.state.redis_coordinator.aclose()
     await engine.dispose()
 
 
@@ -37,6 +39,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.state.external_services_monitor = ExternalServicesMonitor(settings)
+    application.state.redis_coordinator = RedisCoordinator.from_settings(settings)
     application.state.newgreedy_config_store = NewGreedyConfigStore(
         settings.data_root,
         max_bytes=settings.newgreedy_config_max_bytes,

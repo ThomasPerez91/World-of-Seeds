@@ -24,6 +24,7 @@ def _valid_config() -> dict[str, Any]:
                     "redis": {"condition": "service_healthy"},
                 },
                 "healthcheck": healthy,
+                "environment": {"WOS_REDIS_URL": "redis://redis:6379/0"},
                 "networks": {"backend": None, "edge": None},
                 "ports": [{"host_ip": "127.0.0.1", "target": 8000}],
             },
@@ -58,6 +59,9 @@ def test_v2_compose_policy_accepts_the_isolated_foundation() -> None:
         ),
         lambda config: config["services"]["redis"].update({"image": "redis:latest"}),
         lambda config: config["services"]["api"].pop("healthcheck"),
+        lambda config: config["services"]["api"]["environment"].update(
+            {"WOS_REDIS_URL": "redis://outside:6379/0"}
+        ),
         lambda config: config["networks"]["backend"].update({"internal": False}),
         lambda config: config["services"]["api"].update(
             {"volumes": ["/var/run/docker.sock:/var/run/docker.sock"]}
