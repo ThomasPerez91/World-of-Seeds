@@ -49,7 +49,12 @@ from app.models import (
     TrackerActivityType,
 )
 from app.storage import SharedContentStore, SharedContentStoreError
-from app.torrents import TorrentValidationError, record_tracker_activity
+from app.torrents import (
+    TorrentManifestError,
+    TorrentValidationError,
+    record_tracker_activity,
+    replace_torrent_manifest,
+)
 
 ADD_TORRENT_JOB = "ADD_TORRENT"
 SYNC_TORRENT_JOB = "SYNC_TORRENT"
@@ -125,6 +130,15 @@ class TorrentEffectHandlers:
                 "torrent_payload_mismatch",
                 torrent_state=ManagedTorrentState.ERROR,
             )
+
+        try:
+            async with self._session_factory() as session, session.begin():
+                await replace_torrent_manifest(session, torrent.id, parsed.files, now=self._clock())
+        except TorrentManifestError as exc:
+            raise PermanentTorrentJobError(
+                "torrent_manifest_invalid",
+                torrent_state=ManagedTorrentState.ERROR,
+            ) from exc
 
         try:
             await asyncio.to_thread(self._content.prepare, torrent.storage_key)
