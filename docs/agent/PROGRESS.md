@@ -33,8 +33,10 @@
   `940469426008a51041596b0b9facf906159009ef`.
 - V2-11 PR `#63` was merged into `develop_V2` at
   `0eedd65fe20dd91dac3deb49000e2def49aabd9e`.
-- V2-12 is implemented on the dedicated `feat/v2-weighted-fair-scheduler` branch from
-  `develop_V2` commit `c357802d871ab8c6d7fcbf78ae81cbb2991c7b7e`.
+- V2-12 PR `#64` was merged into `develop_V2` at
+  `2b870a52c6c4aeb834e1f883f7bb2675b277562d`.
+- V2-13 is implemented on the dedicated `feat/v2-qbittorrent-control` branch from that
+  `develop_V2` commit.
 
 ## V1 completion state
 
@@ -310,6 +312,28 @@
 - No qBittorrent pause/resume, speed control, scheduler process/lease, API, frontend, schema
   migration, Compose service, V1 runtime behavior, or `master` change is included.
 
+## V2-13 — qBittorrent priority and bandwidth control
+
+- Added a deterministic adapter from the V2-12 scheduler result to a bounded qBittorrent
+  control plan: selected torrents retain scheduler priority order, while the remaining caller-
+  supplied control set is stopped.
+- Added a typed, bounded PostgreSQL-authoritative global qB download-limit option. A configured
+  cap is divided exactly and deterministically across admitted torrents; zero keeps qB unlimited.
+- Added qBittorrent 5 `stop`/`start`, per-torrent `setDownloadLimit`, and relative `topPrio`
+  control through the isolated V2 gateway without changing the V1 integration.
+- Every batch performs one bounded infohash lookup and validates the category, server-derived
+  save path, fixed V2 tag, per-storage identity tag, state, and limit for every torrent before
+  the first mutation. Missing or external torrents therefore cannot cause partial control.
+- Reconciliation compares observed state and download limits before writing, accepts both qB 5
+  stopped states and legacy paused states, and reapplies relative priority from lowest to highest
+  so a fresh process recreates scheduler order after restart.
+- Explicit qB rejections such as disabled torrent queueing remain non-retryable; transport,
+  server, incomplete-snapshot, and missing-torrent failures remain safely retryable.
+- Control operations always carry explicit canonical infohashes, are capped at 200 torrents, and
+  never use qB's `all` selector or mutate global qB limits that could affect external torrents.
+- No scheduler process/lease, periodic reconciliation loop, API, frontend, schema migration,
+  shared-storage implementation, V1 runtime behavior, or `master` change is included.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -385,6 +409,12 @@
 - V2-12 complete backend suite: PASS, 301 tests with 4 service-backed tests deferred to CI.
 - V2-12 full backend Ruff lint/format and mypy: PASS.
 - V2-12 `git diff --check`: PASS.
+- PR #64 (V2-12) review and GitHub CI run `32524918074`: PASS; squash-merged into
+  `develop_V2` at `2b870a52c6c4aeb834e1f883f7bb2675b277562d`.
+- V2-13 targeted qB control, scheduler, database-option, and V2 gateway tests: PASS, 45 tests.
+- V2-13 complete backend suite: PASS, 315 tests with 4 service-backed tests deferred to CI.
+- V2-13 full backend Ruff lint/format and mypy: PASS.
+- V2-13 `git diff --check`: PASS.
 
 ## Known constraints
 
@@ -399,6 +429,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-13 — qBittorrent priority and bandwidth control`.
-- Do not start V2-13 until V2-12 has passed review, required CI is green, its PR is merged into
+- The next roadmap task is `V2-14 — Shared physical storage`.
+- Do not start V2-14 until V2-13 has passed review, required CI is green, its PR is merged into
   `develop_V2`, and explicit authorization is provided.

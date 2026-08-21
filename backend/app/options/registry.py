@@ -148,6 +148,16 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         unit="count",
     ),
     _integer(
+        "WOS_QB_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL",
+        "Débit qBittorrent maximal global",
+        "Plafond réparti entre les torrents V2 admis ; 0 désactive la limite.",
+        0,
+        "torrents",
+        minimum=0,
+        maximum=10_000_000_000,
+        unit="bytes_per_second",
+    ),
+    _integer(
         "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL",
         "Torrents actifs globaux",
         "Nombre maximal de torrents physiques admis simultanément par le scheduler V2.",
