@@ -23,7 +23,9 @@
   `3e518645dc5eded4f9c6280095d27428f5b36385`.
 - V2-06 PR `#58` was merged into `develop_V2` at
   `66e122c7ed7a086be5bfe0d1a95098a6525e1647`.
-- Active task branch: `feat/v2-infohash-dedup`, based on that merge commit and targeting
+- V2-07 PR `#59` was merged into `develop_V2` at
+  `ab89407eabacadc0fa05c9a5f143a5fa67f3c035`.
+- Active task branch: `feat/v2-durable-worker`, based on that merge commit and targeting
   `develop_V2`.
 
 ## V1 completion state
@@ -202,6 +204,25 @@
 - No API endpoint, Redis signal, `TorrentJob`, worker, qBittorrent call, filesystem action,
   schema migration, or frontend change is included in V2-07.
 
+## V2-08 — Separate durable worker process
+
+- Added a dedicated worker runtime using the application image with a separate
+  `python -m app.worker` command and no HTTP port or edge-network access.
+- PostgreSQL remains authoritative: the worker claims only registered job types, renews
+  owned claims in an independent heartbeat transaction, and recovers abandoned claims.
+- Redis wake-up signals shorten the bounded SQL polling delay only; missing or unavailable
+  Redis cannot lose or authorize a job.
+- Added bounded concurrency, exponential retry with jitter, permanent secret-safe failure
+  codes, cooperative cancellation checkpoints, execution deadlines, and clean shutdown.
+- A forced shutdown stops the handler but deliberately leaves its durable `RUNNING` claim
+  for expiry and replay instead of falsely completing or cancelling the external effect.
+- Normalized UTC comparisons at the existing timezone-naive SQL boundary so fresh worker
+  sessions can safely claim, renew, retry, and recover jobs on SQLite and PostgreSQL.
+- Added worker runtime, heartbeat, retry, permanent failure, unsupported type, abandoned
+  claim, graceful/forced stop, polling wake-up, Compose isolation, and real PostgreSQL tests.
+- No qBittorrent/NewGreedy handler, filesystem mutation, API, scheduler, frontend, schema
+  migration, V1 Compose change, or `master` change is included in V2-08.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -245,6 +266,14 @@
   real PostgreSQL concurrency test deferred to PR CI.
 - V2-07 targeted Ruff lint/format and mypy: PASS.
 - V2-07 complete backend suite: PASS, 243 tests with 3 service-backed tests deferred to CI.
+- V2-07 GitHub CI run `32500255919`: PASS; real PostgreSQL concurrency, backend,
+  frontend, container build, and V2 Compose isolation are green.
+- V2-08 targeted worker/job/Redis/Compose tests: PASS, 34 tests with 3 real-service tests
+  deferred to PR CI.
+- V2-08 targeted Ruff lint/format and mypy: PASS.
+- V2-08 complete backend suite: PASS, 255 tests with 4 real-service tests deferred to CI.
+- V2-08 normalized Compose policy and `git diff --check`: PASS; real Docker startup is
+  deferred to PR CI because Docker is unavailable in the development environment.
 
 ## Known constraints
 
@@ -259,7 +288,7 @@
 
 ## Next task
 
-- Open and validate the V2-07 PR into `develop_V2`; do not merge it automatically.
-- After V2-07 is reviewed and merged, the next roadmap task is
-  `V2-08 — separate durable worker process`.
-- Do not start V2-08 as part of the current task.
+- Open and validate the V2-08 PR into `develop_V2`; do not merge it automatically.
+- After V2-08 is reviewed and merged, the next roadmap task is
+  `V2-09 — qBittorrent V2 gateway`.
+- Do not start V2-09 as part of the current task.

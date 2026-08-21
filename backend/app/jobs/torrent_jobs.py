@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timedelta
+from collections.abc import Collection
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,10 +12,23 @@ from app.models import TorrentJob, TorrentJobState
 
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:-]+$")
 _SAFE_ERROR_CODE = re.compile(r"^[a-z0-9_.-]+$")
+_SAFE_JOB_TYPE = re.compile(r"^[A-Z0-9_]+$")
 
 
 class TorrentJobTransitionError(ValueError):
     """Raised when a durable job transition would violate the V2 state machine."""
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _database_timestamp(value: datetime) -> datetime:
+    """Bind UTC consistently to the existing timezone-naive SQL timestamp columns."""
+
+    return _as_utc(value).replace(tzinfo=None)
 
 
 def _validate_worker_id(worker_id: str) -> None:
@@ -25,6 +39,11 @@ def _validate_worker_id(worker_id: str) -> None:
 def _validate_error_code(error_code: str) -> None:
     if not 1 <= len(error_code) <= 64 or _SAFE_ERROR_CODE.fullmatch(error_code) is None:
         raise ValueError("error_code must be a safe diagnostic code")
+
+
+def _validate_job_type(job_type: str) -> None:
+    if not 1 <= len(job_type) <= 64 or _SAFE_JOB_TYPE.fullmatch(job_type) is None:
+        raise ValueError("job_type must be a safe opaque identifier")
 
 
 def _require_claim_owner(job: TorrentJob, worker_id: str) -> None:
@@ -52,6 +71,7 @@ async def claim_next_torrent_job(
     now: datetime,
     claim_ttl: timedelta,
     execution_timeout: timedelta,
+    job_types: Collection[str] | None = None,
 ) -> TorrentJob | None:
     """Claim the oldest available job without waiting on another worker's row lock."""
 
@@ -59,14 +79,24 @@ async def claim_next_torrent_job(
     if claim_ttl <= timedelta(0) or execution_timeout <= timedelta(0):
         raise ValueError("claim and execution timeouts must be positive")
 
+    accepted_job_types: tuple[str, ...] | None = None
+    if job_types is not None:
+        accepted_job_types = tuple(sorted(set(job_types)))
+        for job_type in accepted_job_types:
+            _validate_job_type(job_type)
+        if not accepted_job_types:
+            return None
+
+    statement = select(TorrentJob).where(
+        TorrentJob.state == TorrentJobState.QUEUED,
+        TorrentJob.available_at <= _database_timestamp(now),
+        TorrentJob.attempt_count < TorrentJob.max_attempts,
+    )
+    if accepted_job_types is not None:
+        statement = statement.where(TorrentJob.job_type.in_(accepted_job_types))
+
     job = await session.scalar(
-        select(TorrentJob)
-        .where(
-            TorrentJob.state == TorrentJobState.QUEUED,
-            TorrentJob.available_at <= now,
-            TorrentJob.attempt_count < TorrentJob.max_attempts,
-        )
-        .order_by(TorrentJob.available_at, TorrentJob.created_at, TorrentJob.id)
+        statement.order_by(TorrentJob.available_at, TorrentJob.created_at, TorrentJob.id)
         .with_for_update(skip_locked=True)
         .limit(1)
     )
@@ -112,9 +142,12 @@ async def renew_torrent_job_claim(
     _require_claim_owner(job, worker_id)
     if claim_ttl <= timedelta(0):
         raise ValueError("claim_ttl must be positive")
-    if job.timeout_at is None or now >= job.timeout_at:
+    if job.timeout_at is None or _as_utc(now) >= _as_utc(job.timeout_at):
         raise TorrentJobTransitionError("the job execution timeout has expired")
-    job.claim_expires_at = min(now + claim_ttl, job.timeout_at)
+    renewed_until = now + claim_ttl
+    job.claim_expires_at = (
+        renewed_until if _as_utc(renewed_until) <= _as_utc(job.timeout_at) else job.timeout_at
+    )
     job.updated_at = now
     await session.flush()
 
@@ -130,7 +163,7 @@ async def retry_torrent_job(
 ) -> None:
     _require_claim_owner(job, worker_id)
     _validate_error_code(error_code)
-    if available_at < now:
+    if _as_utc(available_at) < _as_utc(now):
         raise ValueError("available_at cannot be in the past")
 
     job.last_error_code = error_code
@@ -141,6 +174,24 @@ async def retry_torrent_job(
         job.state = TorrentJobState.QUEUED
         job.available_at = available_at
         _release_claim(job)
+    await session.flush()
+
+
+async def fail_torrent_job(
+    session: AsyncSession,
+    job: TorrentJob,
+    *,
+    worker_id: str,
+    now: datetime,
+    error_code: str,
+) -> None:
+    """Finish an owned job after a permanent, secret-safe failure."""
+
+    _require_claim_owner(job, worker_id)
+    _validate_error_code(error_code)
+    job.last_error_code = error_code
+    job.updated_at = now
+    _finish(job, TorrentJobState.FAILED, now)
     await session.flush()
 
 
@@ -199,8 +250,8 @@ async def recover_expired_torrent_jobs(
                 .where(
                     TorrentJob.state == TorrentJobState.RUNNING,
                     or_(
-                        TorrentJob.claim_expires_at <= now,
-                        TorrentJob.timeout_at <= now,
+                        TorrentJob.claim_expires_at <= _database_timestamp(now),
+                        TorrentJob.timeout_at <= _database_timestamp(now),
                     ),
                 )
                 .order_by(TorrentJob.claim_expires_at, TorrentJob.id)
@@ -212,7 +263,7 @@ async def recover_expired_torrent_jobs(
     for job in jobs:
         job.last_error_code = (
             "execution_timeout"
-            if job.timeout_at is not None and job.timeout_at <= now
+            if job.timeout_at is not None and _as_utc(job.timeout_at) <= _as_utc(now)
             else "claim_expired"
         )
         job.updated_at = now
