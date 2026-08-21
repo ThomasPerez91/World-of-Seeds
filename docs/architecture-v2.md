@@ -101,6 +101,17 @@ d'import explicite, idempotente et réversible sera conçue après validation du
 L'ajout qBittorrent est toujours réconcilié par infohash après une réponse ambiguë. Ainsi,
 un timeout survenu après acceptation ne crée ni faux échec ni second torrent.
 
+Le dépôt durable destiné au worker contient uniquement un métainfo tracker assaini : les
+URLs déposées par l'utilisateur sont validées puis réécrites sans passkey avant la première
+écriture disque. Le fichier privé est nommé par la clé de stockage opaque, lu sans suivre de
+symlink, puis supprimé après l'ajout réconcilié. La passkey d'infrastructure n'est injectée
+qu'en mémoire, entre le contrôle NewGreedy et l'appel qBittorrent.
+
+Le worker crée périodiquement des jobs `SYNC_TORRENT` pour un ensemble borné de torrents.
+Un index partiel garantit au plus un sync `QUEUED` ou `RUNNING` par torrent, même avec plusieurs
+workers ou pendant une panne qB. Chaque lecture valide d'abord le chemin, la catégorie et les
+tags WOS de l'infohash avant de normaliser l'état qB vers l'état métier et les demandes actives.
+
 ## Ordonnancement équitable et bande passante
 
 Le scheduler applique une file équitable pondérée par utilisateur, avec vieillissement :

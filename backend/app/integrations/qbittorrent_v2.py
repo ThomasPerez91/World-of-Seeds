@@ -1,4 +1,5 @@
 import json
+import math
 import re
 from collections.abc import Sequence
 from contextlib import suppress
@@ -56,6 +57,19 @@ class QBittorrentV2ControlResult:
     priorities_applied: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class QBittorrentV2ManagedIdentity:
+    info_hash: str
+    storage_key: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class QBittorrentV2TorrentSnapshot:
+    info_hash: str
+    state: str
+    progress: float
+
+
 class QBittorrentV2TransientError(IntegrationRequestError):
     """The operation can be retried without risking a duplicate add."""
 
@@ -82,6 +96,7 @@ class _TorrentRecord:
     tags: frozenset[str]
     state: str | None
     download_limit: int | None
+    progress: float | None
 
 
 class _AmbiguousAdd(Exception):
@@ -254,6 +269,52 @@ class QBittorrentV2Gateway:
                 limits_updated=limits_updated,
                 priorities_applied=running,
             )
+        finally:
+            if logged_in:
+                await self._logout()
+
+    async def inspect_managed_torrents(
+        self,
+        identities: Sequence[QBittorrentV2ManagedIdentity],
+    ) -> tuple[QBittorrentV2TorrentSnapshot, ...]:
+        """Read a bounded exact set after validating every WOS ownership marker."""
+
+        validated = _validate_identities(identities)
+        if not validated:
+            return ()
+        logged_in = False
+        try:
+            try:
+                if not await self._login():
+                    raise IntegrationAuthenticationError("qBittorrent authentication failed")
+                logged_in = True
+                records = await self._lookup_many(tuple(item.info_hash for item in validated))
+            except IntegrationAuthenticationError:
+                raise
+            except (httpx.HTTPError, IntegrationRequestError) as exc:
+                raise QBittorrentV2TransientError("qBittorrent state lookup failed") from exc
+
+            by_hash = {record.info_hash: record for record in records}
+            if set(by_hash) != {item.info_hash for item in validated}:
+                raise QBittorrentV2TransientError("A managed torrent is not visible in qBittorrent")
+            snapshots: list[QBittorrentV2TorrentSnapshot] = []
+            for item in validated:
+                record = by_hash[item.info_hash]
+                self._require_owned(record, self._identity(item.storage_key))
+                if (
+                    record.state is None
+                    or not 1 <= len(record.state) <= 64
+                    or record.progress is None
+                ):
+                    raise QBittorrentV2TransientError("qBittorrent state snapshot is incomplete")
+                snapshots.append(
+                    QBittorrentV2TorrentSnapshot(
+                        info_hash=record.info_hash,
+                        state=record.state,
+                        progress=record.progress,
+                    )
+                )
+            return tuple(snapshots)
         finally:
             if logged_in:
                 await self._logout()
@@ -459,6 +520,12 @@ def _parse_torrent_record(value: object) -> _TorrentRecord:
     tags = value.get("tags")
     state = value.get("state")
     download_limit = value.get("dl_limit")
+    progress = value.get("progress")
+    normalized_progress: float | None = None
+    if isinstance(progress, (int, float)) and not isinstance(progress, bool):
+        candidate_progress = float(progress)
+        if math.isfinite(candidate_progress) and 0 <= candidate_progress <= 1:
+            normalized_progress = candidate_progress
     if not isinstance(info_hash, str) or _SHA1_RE.fullmatch(info_hash.lower()) is None:
         raise IntegrationRequestError("qBittorrent managed torrent hash is invalid")
     if not isinstance(save_path, str) or not 1 <= len(save_path) <= 4096:
@@ -474,7 +541,29 @@ def _parse_torrent_record(value: object) -> _TorrentRecord:
         tags=frozenset(tag.strip() for tag in tags.split(",") if tag.strip()),
         state=state if isinstance(state, str) else None,
         download_limit=download_limit if type(download_limit) is int else None,
+        progress=normalized_progress,
     )
+
+
+def _validate_identities(
+    identities: Sequence[QBittorrentV2ManagedIdentity],
+) -> tuple[QBittorrentV2ManagedIdentity, ...]:
+    if len(identities) > MAX_CONTROL_TORRENTS:
+        raise ValueError("At most 200 torrents may be inspected at once")
+    validated = tuple(identities)
+    hashes: list[str] = []
+    for identity in validated:
+        if not isinstance(identity.storage_key, UUID):
+            raise ValueError("Managed torrent storage key must be a UUID")
+        if (
+            not isinstance(identity.info_hash, str)
+            or _SHA1_RE.fullmatch(identity.info_hash) is None
+        ):
+            raise ValueError("Managed torrent hash must be a canonical SHA-1 hash")
+        hashes.append(identity.info_hash)
+    if len(hashes) != len(set(hashes)):
+        raise ValueError("Each infohash may be inspected only once")
+    return validated
 
 
 def _validate_controls(

@@ -393,6 +393,14 @@ class TorrentJob(Base):
         Index("ix_torrent_jobs_claimable", "state", "available_at", "created_at"),
         Index("ix_torrent_jobs_torrent_created", "managed_torrent_id", "created_at"),
         Index("ix_torrent_jobs_request", "torrent_request_id"),
+        Index(
+            "uq_torrent_jobs_active_sync",
+            "managed_torrent_id",
+            "job_type",
+            unique=True,
+            postgresql_where=text("job_type = 'SYNC_TORRENT' AND state IN ('QUEUED', 'RUNNING')"),
+            sqlite_where=text("job_type = 'SYNC_TORRENT' AND state IN ('QUEUED', 'RUNNING')"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
