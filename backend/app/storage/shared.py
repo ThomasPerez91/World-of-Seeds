@@ -44,6 +44,20 @@ class SharedContentStore:
                 os.close(managed_fd)
             os.close(content_fd)
 
+    def disk_capacity(self) -> tuple[int, int]:
+        """Return total and available bytes from the validated data-root descriptor."""
+        descriptor: int | None = None
+        try:
+            descriptor = self._open_directory(self._data_root)
+            values = os.fstatvfs(descriptor)
+            fragment_size = values.f_frsize or values.f_bsize
+            return values.f_blocks * fragment_size, values.f_bavail * fragment_size
+        except OSError as exc:
+            raise SharedContentStoreError("shared storage capacity is unavailable") from exc
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
     @contextmanager
     def open_directory(self, storage_key: UUID) -> Iterator[int]:
         """Yield a validated directory descriptor without exposing a filesystem path."""
