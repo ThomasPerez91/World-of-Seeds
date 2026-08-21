@@ -35,7 +35,9 @@
   `0eedd65fe20dd91dac3deb49000e2def49aabd9e`.
 - V2-12 PR `#64` was merged into `develop_V2` at
   `2b870a52c6c4aeb834e1f883f7bb2675b277562d`.
-- V2-13 is implemented on the dedicated `feat/v2-qbittorrent-control` branch from that
+- V2-13 PR `#65` was merged into `develop_V2` at
+  `5a1bab12be33681ccb6ad964dda18c40a57482c5`.
+- V2-13A is implemented on the dedicated `feat/v2-scheduler-runtime` branch from that
   `develop_V2` commit.
 
 ## V1 completion state
@@ -334,6 +336,28 @@
 - No scheduler process/lease, periodic reconciliation loop, API, frontend, schema migration,
   shared-storage implementation, V1 runtime behavior, or `master` change is included.
 
+## V2-13A — Durable singleton scheduler runtime
+
+- Added a separately executable scheduler runtime with cooperative shutdown and a PostgreSQL
+  singleton lease that is renewed independently when the configured qB cycle is longer than the
+  lease heartbeat.
+- Added a durable singleton state and per-user deficit rows so weighted-fair rounds, credits, and
+  the round-robin cursor survive process replacement instead of restarting fairness from zero.
+- Persisted a monotonic desired generation plus per-torrent desired admission, priority, and
+  download limit before qB is called; the applied generation advances only after qB success.
+- A failed or interrupted qB call therefore leaves explicit unapplied intent. After lease expiry,
+  another scheduler owner recomputes and safely reconciles the complete bounded control set.
+- Candidate construction is PostgreSQL-authoritative and deterministic: one earliest active
+  beneficiary is selected for each physical torrent, while torrents with no active request are
+  emitted as stopped controls if they were previously admitted.
+- The control set is locked and capped at 200 rows before any external effect. Larger unexpected
+  sets fail closed for later administrative reconciliation instead of partially controlling qB.
+- Added an additive/reversible migration, SQLite recovery tests, and a real PostgreSQL row-lock
+  concurrency test ensuring that only one live scheduler owner can mutate qB.
+- The executable is not activated in Compose before the isolated qB service exists. Worker effect
+  handlers, qB-to-domain state synchronization, multi-account routing, storage, API, frontend,
+  V1 behavior, and `master` remain outside this PR.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -415,6 +439,13 @@
 - V2-13 complete backend suite: PASS, 315 tests with 4 service-backed tests deferred to CI.
 - V2-13 full backend Ruff lint/format and mypy: PASS.
 - V2-13 `git diff --check`: PASS.
+- PR #65 (V2-13) review and GitHub CI run `32526640405`: PASS; squash-merged into
+  `develop_V2` at `5a1bab12be33681ccb6ad964dda18c40a57482c5`.
+- V2-13A targeted scheduler runtime, policy, qB control, database-option, gateway, and model
+  tests: PASS, 60 tests with 1 PostgreSQL concurrency test deferred to CI.
+- V2-13A complete backend suite: PASS, 320 tests with 5 service-backed tests deferred to CI.
+- V2-13A full backend Ruff lint/format and mypy: PASS.
+- V2-13A PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
 
 ## Known constraints
 
@@ -429,6 +460,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-14 — Shared physical storage`.
-- Do not start V2-14 until V2-13 has passed review, required CI is green, its PR is merged into
+- The next roadmap task is `V2-13B — Worker effects and qB state synchronization`.
+- Do not start V2-13B until V2-13A has passed review, required CI is green, its PR is merged into
   `develop_V2`, and explicit authorization is provided.
