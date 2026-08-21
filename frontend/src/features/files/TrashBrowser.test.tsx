@@ -71,6 +71,7 @@ describe("TrashBrowser", () => {
     await user.click(restoreConfirmation);
 
     await screen.findByText("« movie.mkv » a été restauré.");
+    await user.click(screen.getByRole("button", { name: "Fermer" }));
     await waitFor(() => expect(onFilesChanged).toHaveBeenCalledOnce());
   });
 });

@@ -119,14 +119,18 @@ Toutes les API utilisent des chemins relatifs à une racine déjà autorisée. L
 
 Une simple comparaison de chaînes ou un unique `resolve()` n'est pas suffisant face aux changements concurrents. Le gestionnaire ouvre chaque composant demandé depuis un descripteur de la racine avec les primitives Linux `*at` et `O_NOFOLLOW`. Les liens symboliques sont affichés comme bloqués et ne peuvent pas être suivis, parcourus, renommés ou déplacés. Les mutations travaillent à partir des descripteurs des dossiers parents.
 
-La liste expose le nom, le type, la taille des fichiers et des dossiers, la date de
-modification et le type MIME estimé. La taille d'un dossier est calculée sans suivre les
-liens symboliques, avec un budget partagé de 50 000 entrées par réponse, une profondeur
-maximale de 128 et un cache mémoire de 30 secondes. Si une limite ou une frontière de
-système de fichiers est rencontrée, la taille reste inconnue plutôt que de lancer un scan
-non borné. L'utilisation affichée correspond au système de fichiers qui porte `/data`.
-Une réponse est plafonnée à 5 000 éléments afin qu'un dossier anormalement volumineux ne
-sature pas la mémoire de l'application.
+La liste expose le nom, le type, la taille des fichiers, la date de modification et le type
+MIME estimé. La taille des dossiers reste volontairement inconnue : l'affichage ne parcourt
+que les enfants directs et ne déclenche jamais de scan récursif du stockage. L'utilisation
+affichée correspond au système de fichiers qui porte `/data`. Une réponse est plafonnée à
+5 000 éléments afin qu'un dossier anormalement volumineux ne sature pas la mémoire de
+l'application.
+
+Le téléchargement d'un dossier produit un ZIP sans compression directement dans la réponse
+HTTP. Aucune copie temporaire de l'archive n'est écrite puis relue sur `/data`. Une seule
+archive peut être diffusée à la fois afin d'éviter qu'une rafale de téléchargements lourds
+sature le disque ; les demandes concurrentes reçoivent une réponse `429` avec un délai de
+réessai.
 
 Les opérations prévues sont :
 

@@ -797,14 +797,14 @@ button:disabled {
 }
 
 .file-table {
-  min-width: 68rem;
+  min-width: 72rem;
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
 .file-name-column {
-  width: auto;
+  width: 25rem;
 }
 
 .file-type-column {
@@ -829,7 +829,7 @@ button:disabled {
 }
 
 .file-actions-column {
-  width: 11.75rem;
+  width: 13.75rem;
 }
 
 .file-table th {
@@ -913,9 +913,10 @@ button:disabled {
   color: #dbe4de;
   font-size: 0.84rem;
   font-weight: 650;
-  overflow-wrap: anywhere;
+  overflow: hidden;
   text-align: left;
-  white-space: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-name-copy button:hover {
@@ -939,7 +940,27 @@ button:disabled {
   align-items: center;
   justify-content: flex-end;
   gap: 0.4rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.wos-alert-popup {
+  border: 1px solid rgb(174 213 156 / 18%);
+  border-radius: 1rem;
+  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 45%);
+}
+
+.wos-alert-confirm,
+.wos-alert-cancel {
+  min-width: 7rem;
+  border: 1px solid transparent;
+  border-radius: 0.65rem;
+  font: inherit;
+  font-weight: 700;
+}
+
+.wos-alert-confirm.destructive {
+  border-color: rgb(220 155 146 / 52%);
+  background: #7f3935 !important;
 }
 
 .open-folder-button {
@@ -3524,7 +3545,9 @@ select:focus-visible {
   }
 
   .file-actions {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
     justify-content: flex-start;
   }
 

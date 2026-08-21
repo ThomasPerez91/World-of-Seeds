@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 
 import { api, ApiError, type TrashEntry, type TrashListing } from "../../api/client";
+import { confirmOperation, showOperationError, showOperationSuccess } from "../../components/alerts";
 import { FileIcon, FolderIcon } from "../../components/icons";
-import { Notice } from "../../components/Notice";
 import { formatBytes } from "../../utils/format";
-import { FileDialog } from "./FileDialog";
 
 const deletedAtFormatter = new Intl.DateTimeFormat("fr-FR", {
   dateStyle: "medium",
@@ -60,82 +59,47 @@ function TrashActionDialog({
   onCompleted: (message: string) => void;
   onSessionExpired: () => void;
 }) {
-  const [error, setError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const restoring = action === "restore";
 
-  async function submit() {
-    setSubmitting(true);
-    setError("");
-    try {
-      if (restoring) {
-        await api.restoreTrash(entry.id);
-        onCompleted(`« ${entry.name} » a été restauré.`);
-      } else {
-        await api.purgeTrash(entry.id);
-        onCompleted(`« ${entry.name} » a été supprimé définitivement.`);
-      }
-    } catch (caught) {
-      if (caught instanceof ApiError && caught.status === 401) {
-        onSessionExpired();
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const confirmed = await confirmOperation({
+        title: restoring ? "Restaurer cet élément ?" : "Supprimer définitivement ?",
+        message: restoring
+          ? `« ${entry.name} » sera replacé dans « ${entry.original_path} ».`
+          : `« ${entry.name} » et tout son contenu seront irrécupérables.`,
+        confirmText: restoring ? "Restaurer" : "Supprimer définitivement",
+        destructive: !restoring,
+      });
+      if (!active) return;
+      if (!confirmed) {
+        onClose();
         return;
       }
-      setError(trashActionError(caught, action));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <FileDialog
-      eyebrow="Corbeille"
-      title={restoring ? "Restaurer l’élément" : "Supprimer définitivement"}
-      description={
-        restoring
-          ? `« ${entry.name} » sera replacé dans « ${entry.original_path} ».`
-          : `« ${entry.name} » et tout son contenu seront irrécupérables.`
+      try {
+        if (restoring) {
+          await api.restoreTrash(entry.id);
+          if (active) onCompleted(`« ${entry.name} » a été restauré.`);
+        } else {
+          await api.purgeTrash(entry.id);
+          if (active) onCompleted(`« ${entry.name} » a été supprimé définitivement.`);
+        }
+      } catch (caught) {
+        if (caught instanceof ApiError && caught.status === 401) {
+          onSessionExpired();
+          return;
+        }
+        await showOperationError(trashActionError(caught, action));
+        if (active) onClose();
       }
-      onClose={onClose}
-      closeDisabled={submitting}
-    >
-      <div className="confirmation-content">
-        {!restoring && (
-          <p className="permanent-delete-warning">
-            Cette action est définitive. Elle ne peut pas être annulée.
-          </p>
-        )}
-        <p className="form-message error-message" role="alert">
-          {error}
-        </p>
-        <div className="dialog-actions">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onClose}
-            disabled={submitting}
-            data-initial-focus={!restoring ? true : undefined}
-          >
-            Annuler
-          </button>
-          <button
-            type="button"
-            className={restoring ? undefined : "danger-button"}
-            onClick={() => void submit()}
-            disabled={submitting}
-            data-initial-focus={restoring ? true : undefined}
-          >
-            {submitting
-              ? restoring
-                ? "Restauration…"
-                : "Suppression…"
-              : restoring
-                ? "Restaurer"
-                : "Supprimer définitivement"}
-          </button>
-        </div>
-      </div>
-    </FileDialog>
-  );
+    })();
+    return () => {
+      active = false;
+    };
+  }, [action, entry, onClose, onCompleted, onSessionExpired, restoring]);
+
+  return null;
 }
 
 export function TrashBrowser({
@@ -150,7 +114,6 @@ export function TrashBrowser({
   const [listing, setListing] = useState<TrashListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [selectedAction, setSelectedAction] = useState<{
     action: "purge" | "restore";
@@ -181,7 +144,7 @@ export function TrashBrowser({
 
   function completeAction(message: string) {
     setSelectedAction(null);
-    setNotice(message);
+    void showOperationSuccess(message);
     setReloadKey((value) => value + 1);
     onFilesChanged();
   }
@@ -204,8 +167,6 @@ export function TrashBrowser({
           Actualiser
         </button>
       </div>
-
-      <Notice message={notice} onDismiss={() => setNotice("")} />
 
       {loading && (
         <div
