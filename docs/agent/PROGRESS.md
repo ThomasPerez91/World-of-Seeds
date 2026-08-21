@@ -47,6 +47,8 @@
   `d02af28ed268475675b7f51d7a732d9bf4a88354`.
 - V2-14 PR `#70` was merged into `develop_V2` at
   `4a72074536b2496723d2fa9af5286744f64babde`.
+- V2-15 PR `#71` was merged into `develop_V2` at
+  `3a611873e01de8ff156292b170b735483b1d0b0d`.
 
 ## V1 completion state
 
@@ -463,6 +465,24 @@
   `disk_pressure_critical`; no path, option secret, or filesystem detail is returned.
 - V2-15 is implemented on `feat/v2-storage-quotas-pressure` from the merged V2-14 commit.
 
+## V2-16 — Versioned TorrentFile manifests
+
+- Extended strict metainfo parsing to emit one canonical physical relative path per file. A
+  single-file torrent maps to its validated name; a multi-file torrent is rooted under its
+  validated torrent name and rejects duplicate, non-UTF-8, traversal, slash, NUL, or oversized
+  components before persistence.
+- Added deterministic SHA-256 manifest checksums, monotonic versions, file count, and total size
+  metadata to `ManagedTorrent`, with additive constraints and a reversible migration.
+- Manifest replacement locks the managed torrent, verifies contiguous indexes and the exact
+  canonical total size, deletes/reinserts rows in bounded batches, and is a no-op on exact replay.
+- The worker persists the sanitized manifest before shared-directory preparation and before the
+  qBittorrent effect; replay therefore reconstructs the same rows without duplicating versions.
+- Added manifest pagination capped at 500 rows, ordered by file index, with explicit stale-version
+  and incomplete-row detection for future resumable clients.
+- No content-directory scan, user path, tracker URL, passkey, API response, frontend behavior,
+  V1 behavior, or `master` change is included in V2-16.
+- V2-16 is implemented on `feat/v2-torrent-manifests` from the merged V2-15 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -580,6 +600,14 @@
 - V2-15 full backend Ruff lint/format and mypy: PASS.
 - V2-15 PostgreSQL upgrade/downgrade SQL generation, `git diff --check`, and targeted secret
   scan: PASS.
+- PR #71 (V2-15) review and GitHub CI run `32533966814`: PASS; squash-merged into
+  `develop_V2` at `3a611873e01de8ff156292b170b735483b1d0b0d`.
+- V2-16 targeted metainfo, manifest, worker-effect, C411, V1 torrent, and model tests: PASS,
+  47 tests.
+- V2-16 full backend suite: PASS, 353 tests with 6 service-backed tests deferred to CI.
+- V2-16 full backend Ruff lint/format and mypy: PASS.
+- V2-16 PostgreSQL upgrade/downgrade SQL generation, `git diff --check`, and targeted secret
+  scan: PASS.
 
 ## Known constraints
 
@@ -596,6 +624,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-16 — TorrentFile manifest generation and validation`.
-- Do not start V2-16 until V2-15 has passed review, required CI is green, and its PR is merged
+- The next roadmap task is `V2-17 — V2 torrent request API`.
+- Do not start V2-17 until V2-16 has passed review, required CI is green, and its PR is merged
   into `develop_V2`.
