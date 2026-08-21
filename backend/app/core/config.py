@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     qbittorrent_password: SecretStr | None = Field(default=None, repr=False)
     qbittorrent_data_root: Path = Path("/data")
     c411_passkey: SecretStr | None = Field(default=None, repr=False)
+    integration_accounts_json: SecretStr | None = Field(default=None, repr=False)
     c411_tracker_hosts: list[AllowedHost] = Field(
         default_factory=lambda: ["c411.org", "tk.c411.tw"],
         min_length=1,

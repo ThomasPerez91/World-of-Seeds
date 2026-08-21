@@ -12,8 +12,10 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.database import engine, session_factory
+from app.integrations.account_routing import build_deployment_account_router
 from app.integrations.qbittorrent_v2 import QBittorrentV2Gateway
-from app.scheduler.runtime import SchedulerRuntime
+from app.jobs.torrent_payloads import MAX_MANAGED_TORRENT_BYTES
+from app.scheduler.runtime import ManagedControlGateway, SchedulerRuntime
 
 
 def _scheduler_id() -> str:
@@ -23,7 +25,16 @@ def _scheduler_id() -> str:
 
 async def main() -> None:
     settings = get_settings()
-    if (
+    if settings.integration_accounts_json is not None and any(
+        value is not None
+        for value in (
+            settings.qbittorrent_url,
+            settings.qbittorrent_username,
+            settings.qbittorrent_password,
+        )
+    ):
+        raise RuntimeError("V2 scheduler integration configuration is ambiguous")
+    if settings.integration_accounts_json is None and (
         settings.qbittorrent_url is None
         or settings.qbittorrent_username is None
         or settings.qbittorrent_password is None
@@ -36,13 +47,26 @@ async def main() -> None:
         pool=settings.integration_connect_timeout_seconds,
     )
     async with httpx.AsyncClient(timeout=timeout) as client:
-        gateway = QBittorrentV2Gateway(
-            client,
-            str(settings.qbittorrent_url),
-            settings.qbittorrent_username,
-            settings.qbittorrent_password.get_secret_value(),
-            data_root=settings.qbittorrent_data_root,
-        )
+        if settings.integration_accounts_json is not None:
+            gateway: ManagedControlGateway = build_deployment_account_router(
+                settings.integration_accounts_json,
+                client,
+                session_factory,
+                allowed_tracker_hosts=settings.c411_tracker_hosts,
+                data_root=settings.qbittorrent_data_root,
+                max_total_size=MAX_MANAGED_TORRENT_BYTES,
+            )
+        else:
+            assert settings.qbittorrent_url is not None
+            assert settings.qbittorrent_username is not None
+            assert settings.qbittorrent_password is not None
+            gateway = QBittorrentV2Gateway(
+                client,
+                str(settings.qbittorrent_url),
+                settings.qbittorrent_username,
+                settings.qbittorrent_password.get_secret_value(),
+                data_root=settings.qbittorrent_data_root,
+            )
         scheduler = SchedulerRuntime(
             session_factory,
             gateway,

@@ -39,7 +39,9 @@
   `5a1bab12be33681ccb6ad964dda18c40a57482c5`.
 - V2-13A PR `#66` was merged into `develop_V2` at
   `782a7ff41817481a7bf1f929064380560c5cd6b3`.
-- V2-13B is implemented on the dedicated `feat/v2-worker-effects-sync` branch from that
+- V2-13B PR `#67` was merged into `develop_V2` at
+  `2514ddba888680df2702686d333231741ee64747`.
+- V2-13C is implemented on the dedicated `feat/v2-multi-account-routing` branch from that
   `develop_V2` commit.
 
 ## V1 completion state
@@ -384,6 +386,28 @@
 - Multi-account routing, shared content storage, API ingestion, frontend, Compose activation,
   V1 behavior, and `master` remain outside this PR.
 
+## V2-13C — Multi-account tracker/qB routing
+
+- Added a bounded, strict deployment-only account registry whose credentials are held as
+  `SecretStr`; PostgreSQL continues to store only opaque tracker and qB account UUIDs.
+- Each route pairs exactly one tracker account with one qB instance. Duplicate, zero, partial,
+  public-service, malformed, oversized, or unknown routes fail with bounded safe codes that do
+  not echo configuration input.
+- New torrents select a route deterministically from their canonical infohash after sorting by
+  opaque UUIDs. Assignment is protected by the existing row lock, replay is stable, and removing
+  an assigned route fails closed rather than silently moving a live torrent to another account.
+- Worker add and sync effects now resolve the persisted route before any integration call. A
+  successful C411/NewGreedy/qB add records one idempotent, secret-safe proxy health activity for
+  the assigned tracker reference.
+- Scheduler control identities now carry the opaque qB account reference. The deployment router
+  validates the complete bounded set before grouping idempotent controls by qB instance and
+  aggregates their safe results; a failure leaves the scheduler generation unapplied.
+- Added deterministic assignment, removal, concurrent PostgreSQL assignment, secret handling,
+  internal-origin, batch bound, per-account control, worker activity, scheduler plan, and existing
+  tracker/qB regression tests.
+- No database migration, encrypted secret database, Compose activation, storage, API, frontend,
+  V1 behavior, or `master` change is included in this PR.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -479,6 +503,13 @@
 - V2-13B complete backend suite: PASS, 327 tests with 5 service-backed tests deferred to CI.
 - V2-13B full backend Ruff lint/format and mypy: PASS.
 - V2-13B PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
+- PR #67 (V2-13B) review and GitHub CI run `32530495109`: PASS; squash-merged into
+  `develop_V2` at `2514ddba888680df2702686d333231741ee64747`.
+- V2-13C targeted account routing, worker effects, tracker activity, scheduler runtime/control,
+  and qB gateway tests: PASS, 31 tests with 2 PostgreSQL-backed tests deferred to CI.
+- V2-13C complete backend suite: PASS, 335 tests with 6 service-backed tests deferred to CI.
+- V2-13C full backend Ruff lint/format and mypy: PASS.
+- V2-13C `git diff --check`: PASS.
 
 ## Known constraints
 
@@ -493,6 +524,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-13C — Multi-account tracker/qB routing`.
-- Do not start V2-13C until V2-13B has passed review, required CI is green, its PR is merged into
+- The next roadmap task is `V2-14 — Shared physical storage`.
+- Do not start V2-14 until V2-13C has passed review, required CI is green, its PR is merged into
   `develop_V2`, and explicit authorization is provided.

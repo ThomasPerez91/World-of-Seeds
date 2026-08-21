@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql import Executable
 
 from app.coordination import RedisCoordinator
+from app.integrations.account_routing import AccountRoutingError, TorrentEffectRoute
 from app.integrations.c411_v2 import (
     C411V2PayloadError,
     NewGreedyV2UnavailableError,
@@ -44,8 +45,10 @@ from app.models import (
     TorrentJobState,
     TorrentRequest,
     TorrentRequestState,
+    TrackerActivityOutcome,
+    TrackerActivityType,
 )
-from app.torrents import TorrentValidationError
+from app.torrents import TorrentValidationError, record_tracker_activity
 
 ADD_TORRENT_JOB = "ADD_TORRENT"
 SYNC_TORRENT_JOB = "SYNC_TORRENT"
@@ -57,21 +60,12 @@ logger = logging.getLogger(__name__)
 type Clock = Callable[[], datetime]
 
 
-class _TorrentAdder(Protocol):
-    async def add_torrent(
+class _TorrentRouter(Protocol):
+    async def resolve(
         self,
-        content: bytes,
-        *,
-        expected_info_hash: str,
-        storage_key: uuid.UUID,
-    ) -> object: ...
-
-
-class _TorrentInspector(Protocol):
-    async def inspect_managed_torrents(
-        self,
-        identities: tuple[QBittorrentV2ManagedIdentity, ...],
-    ) -> tuple[QBittorrentV2TorrentSnapshot, ...]: ...
+        managed_torrent_id: uuid.UUID,
+        info_hash: str,
+    ) -> TorrentEffectRoute: ...
 
 
 class TorrentEffectHandlers:
@@ -80,15 +74,13 @@ class TorrentEffectHandlers:
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
-        adder: _TorrentAdder,
-        inspector: _TorrentInspector,
+        router: _TorrentRouter,
         payloads: TorrentPayloadStore,
         *,
         clock: Clock = lambda: datetime.now(UTC),
     ) -> None:
         self._session_factory = session_factory
-        self._adder = adder
-        self._inspector = inspector
+        self._router = router
         self._payloads = payloads
         self._clock = clock
 
@@ -108,6 +100,13 @@ class TorrentEffectHandlers:
                 logger.warning("torrent_worker_payload_cleanup_failed")
             return
         try:
+            route = await self._router.resolve(torrent.id, torrent.info_hash)
+        except AccountRoutingError as exc:
+            raise PermanentTorrentJobError(
+                "torrent_account_route_invalid",
+                torrent_state=ManagedTorrentState.ERROR,
+            ) from exc
+        try:
             parsed = await asyncio.to_thread(self._payloads.read, torrent.storage_key)
         except TorrentPayloadStoreError as exc:
             raise PermanentTorrentJobError(
@@ -125,7 +124,7 @@ class TorrentEffectHandlers:
             )
 
         try:
-            await self._adder.add_torrent(
+            await route.adder.add_torrent(
                 parsed.content,
                 expected_info_hash=torrent.info_hash,
                 storage_key=torrent.storage_key,
@@ -179,6 +178,16 @@ class TorrentEffectHandlers:
             for request in requests:
                 request.state = TorrentRequestState.ACTIVE
                 request.updated_at = now
+            await record_tracker_activity(
+                session,
+                managed.id,
+                event_key=snapshot.id,
+                tracker_account_ref=route.tracker_account_ref,
+                event_type=TrackerActivityType.PROXY_HEALTH,
+                outcome=TrackerActivityOutcome.SUCCESS,
+                diagnostic_code=None,
+                occurred_at=now,
+            )
         try:
             await asyncio.to_thread(self._payloads.remove, torrent.storage_key)
         except TorrentPayloadStoreError:
@@ -198,7 +207,15 @@ class TorrentEffectHandlers:
             identity = QBittorrentV2ManagedIdentity(torrent.info_hash, torrent.storage_key)
 
         try:
-            snapshots = await self._inspector.inspect_managed_torrents((identity,))
+            route = await self._router.resolve(torrent.id, torrent.info_hash)
+        except AccountRoutingError as exc:
+            raise PermanentTorrentJobError(
+                "torrent_account_route_invalid",
+                torrent_state=ManagedTorrentState.ERROR,
+            ) from exc
+
+        try:
+            snapshots = await route.inspector.inspect_managed_torrents((identity,))
         except (QBittorrentV2TransientError, IntegrationAuthenticationError) as exc:
             raise TransientTorrentJobError("qbittorrent_sync_unavailable") from exc
         except QBittorrentV2OwnershipError as exc:

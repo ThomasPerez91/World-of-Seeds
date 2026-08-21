@@ -19,6 +19,7 @@ USER_ID = UUID("10000000-0000-0000-0000-000000000001")
 TORRENT_A = UUID("20000000-0000-0000-0000-000000000001")
 TORRENT_B = UUID("20000000-0000-0000-0000-000000000002")
 TORRENT_C = UUID("20000000-0000-0000-0000-000000000003")
+QB_ACCOUNT = UUID("40000000-0000-0000-0000-000000000001")
 
 
 def _result() -> SchedulerResult:
@@ -55,6 +56,7 @@ def _identities() -> tuple[ManagedTorrentControlIdentity, ...]:
             torrent_id=torrent_id,
             info_hash=character * 40,
             storage_key=UUID(f"30000000-0000-0000-0000-00000000000{index}"),
+            qbittorrent_account_ref=QB_ACCOUNT,
         )
         for index, (torrent_id, character) in enumerate(
             ((TORRENT_A, "a"), (TORRENT_B, "b"), (TORRENT_C, "c")), start=1
@@ -77,6 +79,7 @@ def test_plan_preserves_scheduler_priority_and_distributes_global_limit() -> Non
         ("b" * 40, "running", 50),
         ("c" * 40, "stopped", 0),
     ]
+    assert {control.qbittorrent_account_ref for control in plan} == {QB_ACCOUNT}
 
 
 def test_plan_uses_qb_unlimited_value_when_global_limit_is_disabled() -> None:

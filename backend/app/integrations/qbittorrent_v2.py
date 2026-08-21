@@ -47,6 +47,7 @@ class QBittorrentV2DesiredControl:
     storage_key: UUID
     run_state: QBittorrentV2RunState
     download_limit_bytes_per_second: int
+    qbittorrent_account_ref: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

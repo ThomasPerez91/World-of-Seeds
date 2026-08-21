@@ -176,6 +176,15 @@ temporaire n'est proposé que pour les petits dossiers sous un seuil administrab
   options, logs, métriques, erreurs, manifests ou événements `TrackerActivity`.
 - La V2 prépare plusieurs comptes tracker/qB par références opaques. Si des secrets doivent
   être persistés, ils sont chiffrés par enveloppe avec une clé maître fournie hors base.
+- Le registre de déploiement associe explicitement une référence tracker et une référence qB
+  à chaque route. Pour un nouveau torrent, les routes sont triées par UUID puis choisies de
+  façon déterministe à partir de l'infohash ; la paire est verrouillée et persistée une seule
+  fois. Une route retirée échoue fermement et ne provoque jamais de réaffectation silencieuse.
+- Le worker résout la paire avant l'ajout ou le sync. Le scheduler transporte la référence qB
+  opaque dans son plan puis groupe les contrôles par instance ; un échec partiel laisse la
+  génération globale non appliquée pour une réconciliation idempotente.
+- Le JSON du registre est un secret de déploiement borné et strict : les URLs restent des
+  origines de services internes, et PostgreSQL ne reçoit que les deux UUID opaques.
 - NewGreedy et qBittorrent ne sont accessibles que par les workers via le réseau interne.
 - Toute mutation qB est limitée aux torrents portant l'identité/catégorie WOS V2.
 
