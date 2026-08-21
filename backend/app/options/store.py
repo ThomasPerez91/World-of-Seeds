@@ -15,14 +15,19 @@ from app.integrations.newgreedy_config import (
     NewGreedyConfigUnsafeError,
     SecureDirectoryChain,
 )
-from app.options.registry import OPTION_SPECS, OPTION_SPECS_BY_KEY, OptionSpec, OptionValue
+from app.options.registry import (
+    OPTION_SPECS,
+    OPTION_SPECS_BY_KEY,
+    OptionSpec,
+    OptionValue,
+    is_sensitive_option_key,
+)
 
 OPTIONS_FILENAME = ".options"
 BACKUP_FILENAME = ".options.backup"
 MAX_OPTIONS_BYTES = 64 * 1024
 MAX_OPTION_LINES = 256
 _KEY_RE = re.compile(r"^WOS_[A-Z0-9_]{1,96}$")
-_SENSITIVE_FRAGMENTS = ("PASSWORD", "TOKEN", "PASSKEY", "SECRET", "PRIVATE_KEY", "CREDENTIAL")
 
 
 class OptionsError(Exception):
@@ -90,7 +95,7 @@ class OptionsStore:
                 if spec is None:
                     code = (
                         "secret_option_forbidden"
-                        if any(fragment in key.upper() for fragment in _SENSITIVE_FRAGMENTS)
+                        if is_sensitive_option_key(key)
                         else "unknown_option"
                     )
                     raise OptionsValidationError(
@@ -100,12 +105,12 @@ class OptionsStore:
                     raise OptionsValidationError(
                         "Cette option est en lecture seule.", code="readonly_option", field=key
                     )
-                normalized = _normalize_value(spec, candidate)
+                normalized = normalize_option_value(spec, candidate)
                 if values[key] != normalized:
                     values[key] = normalized
                     changed_keys.append(key)
 
-            _validate_cross_options(values)
+            validate_cross_options(values)
             if not changed_keys:
                 return OptionsUpdate(
                     fields=self._fields(values),
@@ -131,7 +136,7 @@ class OptionsStore:
         values = {spec.key: spec.default for spec in OPTION_SPECS}
         if raw is not None:
             values.update(_parse(raw))
-        _validate_cross_options(values)
+        validate_cross_options(values)
         return values
 
     def _read_optional(self) -> tuple[bytes | None, FileIdentity | None]:
@@ -306,7 +311,7 @@ def _parse(raw: bytes) -> dict[str, OptionValue]:
                 code="malformed_options",
                 field=key or None,
             )
-        if any(fragment in key for fragment in _SENSITIVE_FRAGMENTS):
+        if is_sensitive_option_key(key):
             raise OptionsValidationError(
                 "Les secrets sont interdits dans .options.",
                 code="secret_option_forbidden",
@@ -337,13 +342,13 @@ def _parse_value(spec: OptionSpec, raw_value: str) -> OptionValue:
             value = int(raw_value, 10)
         except ValueError as exc:
             raise OptionsValidationError("Un nombre entier est attendu.", field=spec.key) from exc
-        return _normalize_value(spec, value)
+        return normalize_option_value(spec, value)
     if raw_value not in spec.choices:
         raise OptionsValidationError("Cette valeur n’est pas autorisée.", field=spec.key)
     return raw_value
 
 
-def _normalize_value(spec: OptionSpec, value: OptionValue) -> OptionValue:
+def normalize_option_value(spec: OptionSpec, value: OptionValue) -> OptionValue:
     if spec.input_type == "boolean":
         if type(value) is not bool:
             raise OptionsValidationError("Une valeur booléenne est attendue.", field=spec.key)
@@ -361,7 +366,7 @@ def _normalize_value(spec: OptionSpec, value: OptionValue) -> OptionValue:
     return value
 
 
-def _validate_cross_options(values: Mapping[str, OptionValue]) -> None:
+def validate_cross_options(values: Mapping[str, OptionValue]) -> None:
     def integer(key: str) -> int:
         value = values[key]
         if type(value) is not int:

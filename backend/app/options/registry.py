@@ -27,6 +27,19 @@ CATEGORY_LABELS: dict[OptionCategory, str] = {
     "interface": "Interface",
 }
 
+_SENSITIVE_KEY_FRAGMENTS = (
+    "PASSWORD",
+    "TOKEN",
+    "PASSKEY",
+    "SECRET",
+    "PRIVATE_KEY",
+    "CREDENTIAL",
+)
+
+
+def is_sensitive_option_key(key: str) -> bool:
+    return any(fragment in key.upper() for fragment in _SENSITIVE_KEY_FRAGMENTS)
+
 
 @dataclass(frozen=True, slots=True)
 class OptionSpec:

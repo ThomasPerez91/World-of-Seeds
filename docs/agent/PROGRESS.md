@@ -19,8 +19,10 @@
   `8ea43fe1f49ffaa5a898e1f0a12d44e9de702267`.
 - V2-04 PR `#56` was merged into `develop_V2` at
   `3b443ea46932e4aac728d85f3a4e0279ece061f0`.
-- V2-05 draft PR `#57` targets `develop_V2` from `feat/v2-redis-resilience`, based on
-  that merge commit.
+- V2-05 PR `#57` was merged into `develop_V2` at
+  `3e518645dc5eded4f9c6280095d27428f5b36385`.
+- Active task branch: `feat/v2-options-registry`, based on that merge commit and targeting
+  `develop_V2`.
 
 ## V1 completion state
 
@@ -161,6 +163,25 @@
 - No scheduler algorithm, worker process, PostgreSQL domain query cache consumer, API
   mutation, qBittorrent effect, frontend, or Rise2 deployment is included in V2-05.
 
+## V2-06 — Typed and audited PostgreSQL options
+
+- Added PostgreSQL-authoritative `DatabaseOption` rows with explicit boolean, integer, or
+  select storage columns, SQL type invariants, persisted bounds/choices, editability,
+  restart requirements, and monotonic versions.
+- Added append-only option audit events with unique option/version pairs, old/new values,
+  change source, timestamp, and a nullable administrator reference preserved with
+  `ON DELETE SET NULL`.
+- Added idempotent registry initialization from the existing safe functional option specs;
+  defaults receive a version-1 bootstrap audit event without an actor.
+- Added transactional row locking, active-admin attribution, no-op detection, shared type,
+  bounds and cross-option validation, and explicit metadata drift detection.
+- Unknown keys and keys resembling credentials, tokens, passkeys, passwords, or other
+  secrets are rejected before any SQL value or audit event is written.
+- Added an additive and reversible Alembic migration plus targeted default, typing, bounds,
+  actor, version, audit, no-op, drift, secret separation, and SQL constraint tests.
+- The V1 `.options` store remains unchanged as the V1 runtime authority; no V2 admin API,
+  frontend, scheduler consumer, or infrastructure-secret editor is included in V2-06.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -194,6 +215,11 @@
 - V2-05 targeted Ruff lint/format and mypy: PASS.
 - V2-05 GitHub CI run `32497192124`: PASS; real Redis integration, normalized Compose,
   migrations, backend, frontend, and container jobs are green.
+- V2-06 targeted V1/V2 option and model regression tests: PASS, 30 tests.
+- V2-06 targeted Ruff lint/format and mypy: PASS.
+- V2-06 complete backend suite: PASS, 229 tests with 2 service-backed tests deferred to CI.
+- V2-06 PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
+- V2-06 real PostgreSQL migration execution and complete CI: pending PR CI.
 
 ## Known constraints
 
@@ -208,7 +234,7 @@
 
 ## Next task
 
-- Review V2-05 PR `#57` into `develop_V2`; do not merge it automatically.
-- After V2-05 is reviewed and merged, the next roadmap task is
-  `V2-06 — typed and audited PostgreSQL options registry`.
-- Do not start V2-06 as part of the current task.
+- Open and validate the V2-06 PR into `develop_V2`; do not merge it automatically.
+- After V2-06 is reviewed and merged, the next roadmap task is
+  `V2-07 — transactional infohash deduplication service`.
+- Do not start V2-07 as part of the current task.
