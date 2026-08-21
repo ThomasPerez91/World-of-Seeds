@@ -84,6 +84,8 @@ describe("FileBrowser", () => {
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
     await user.click(trashButton);
+    expect(screen.getByRole("dialog").querySelector("[style]")).toBeNull();
+    expect(await auditAccessibility(document.body)).toMatchObject({ violations: [] });
     const cancelButton = screen.getByRole("button", { name: "Annuler" });
     expect(document.activeElement).toBe(cancelButton);
     await user.click(screen.getByRole("button", { name: "Placer dans la corbeille" }));

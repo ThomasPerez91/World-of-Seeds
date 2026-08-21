@@ -31,8 +31,8 @@ def bencode(value: object) -> bytes:
 def torrent_content(
     *,
     name: bytes = b"Film.mkv",
-    tracker: bytes = b"https://tracker.c411.org/user-secret/announce",
-    announce_list: bool = False,
+    tracker: bytes = b"https://c411.org/anything/old-user-passkey",
+    announce_list: list[list[bytes]] | None = None,
 ) -> bytes:
     info = {
         b"length": 5,
@@ -41,13 +41,18 @@ def torrent_content(
         b"pieces": b"p" * 20,
     }
     metainfo: dict[bytes, object] = {b"announce": tracker, b"info": info}
-    if announce_list:
-        metainfo[b"announce-list"] = [[tracker]]
+    if announce_list is not None:
+        metainfo[b"announce-list"] = announce_list
     return bencode(metainfo)
 
 
 def test_torrent_normalization_replaces_passkeys_and_preserves_info_hash() -> None:
-    source = torrent_content(announce_list=True)
+    source = torrent_content(
+        announce_list=[
+            [b"https://c411.org/anything/old-user-passkey"],
+            [b"https://tk.c411.tw/anything/old-user-passkey"],
+        ]
+    )
     info_raw = bencode(
         {
             b"length": 5,
@@ -59,13 +64,14 @@ def test_torrent_normalization_replaces_passkeys_and_preserves_info_hash() -> No
 
     result = normalize_torrent(
         source,
-        passkey="wos-private-passkey",
-        allowed_tracker_hosts=["tracker.c411.org"],
+        passkey="test-passkey-123",
+        allowed_tracker_hosts=["c411.org", "tk.c411.tw"],
         max_total_size=1_000,
     )
 
-    assert b"user-secret" not in result.content
-    assert result.content.count(b"wos-private-passkey") == 2
+    assert b"old-user-passkey" not in result.content
+    assert result.content.count(b"https://c411.org/announce/test-passkey-123") == 2
+    assert b"https://tk.c411.tw/announce/test-passkey-123" in result.content
     assert result.info_hash == hashlib.sha1(info_raw, usedforsecurity=False).hexdigest()
     assert result.name == "Film.mkv"
     assert result.total_size == 5
@@ -75,7 +81,7 @@ def test_torrent_normalization_replaces_passkeys_and_preserves_info_hash() -> No
     "content",
     [
         b"not-bencode",
-        torrent_content(tracker=b"https://evil.example/user-secret/announce"),
+        torrent_content(tracker=b"https://evil.example/anything/old-user-passkey"),
         torrent_content(name=b"../Film.mkv"),
     ],
 )
@@ -83,8 +89,8 @@ def test_torrent_normalization_rejects_invalid_or_unauthorized_files(content: by
     with pytest.raises(TorrentValidationError):
         normalize_torrent(
             content,
-            passkey="wos-private-passkey",
-            allowed_tracker_hosts=["tracker.c411.org"],
+            passkey="test-passkey-123",
+            allowed_tracker_hosts=["c411.org", "tk.c411.tw"],
             max_total_size=1_000,
         )
 
@@ -135,8 +141,8 @@ async def test_upload_uses_server_path_and_user_listing_is_isolated(
     alice = await create_user(db_session, data_root, "alice")
     settings = Settings(
         data_root=data_root,
-        c411_passkey=SecretStr("wos-private-passkey"),
-        c411_tracker_hosts=["tracker.c411.org"],
+        c411_passkey=SecretStr("test-passkey-123"),
+        c411_tracker_hosts=["c411.org", "tk.c411.tw"],
     )
     app.dependency_overrides[get_settings] = lambda: settings
     monitor = FakeMonitor()
@@ -151,7 +157,7 @@ async def test_upload_uses_server_path_and_user_listing_is_isolated(
 
     assert uploaded.status_code == 201, uploaded.text
     assert monitor.added[0][1] == "/data/thomas/downloads"
-    assert b"user-secret" not in monitor.added[0][0]
+    assert b"old-user-passkey" not in monitor.added[0][0]
     torrent_hash = uploaded.json()["id"]
     db_session.add(UserTorrent(user_id=alice.id, info_hash="b" * 40, name="Alice.mkv"))
     await db_session.commit()
@@ -169,7 +175,7 @@ async def test_upload_uses_server_path_and_user_listing_is_isolated(
             ratio=0,
             eta_seconds=3,
             category=None,
-            tracker_host="tracker.c411.org",
+            tracker_host="c411.org",
         )
     ]
 
@@ -190,8 +196,8 @@ async def test_upload_rejects_oversized_invalid_and_offline_requests(
     await create_user(db_session, data_root, "thomas")
     settings = Settings(
         data_root=data_root,
-        c411_passkey=SecretStr("wos-private-passkey"),
-        c411_tracker_hosts=["tracker.c411.org"],
+        c411_passkey=SecretStr("test-passkey-123"),
+        c411_tracker_hosts=["c411.org", "tk.c411.tw"],
     )
     app.dependency_overrides[get_settings] = lambda: settings
     monitor = FakeMonitor()
