@@ -55,6 +55,9 @@ def test_production_data_root_is_fixed_to_the_container_mount() -> None:
     with pytest.raises(ValidationError):
         Settings(environment="production", data_root=Path("/tmp/data"))
 
+    with pytest.raises(ValidationError):
+        Settings(environment="production", qbittorrent_data_root=Path("/seedbox"))
+
 
 def test_redis_url_credentials_are_hidden_from_settings_representation() -> None:
     settings = Settings(redis_url=SecretStr("rediss://user:password@redis:6379/0"))

@@ -141,8 +141,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def require_production_data_mount(self) -> Self:
-        if self.environment == "production" and self.data_root != Path("/data"):
-            raise ValueError("Production data root must be /data")
+        if self.environment == "production" and (
+            self.data_root != Path("/data") or self.qbittorrent_data_root != Path("/data")
+        ):
+            raise ValueError("Production WOS and qBittorrent data roots must be /data")
         return self
 
     @property

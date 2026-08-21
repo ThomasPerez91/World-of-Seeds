@@ -18,6 +18,7 @@ from app.integrations.http import integration_timeout
 from app.jobs.torrent_effects import TorrentEffectHandlers, TorrentSyncEnqueuer
 from app.jobs.torrent_payloads import MAX_MANAGED_TORRENT_BYTES, TorrentPayloadStore
 from app.jobs.worker import TorrentWorker
+from app.storage import SharedContentStore
 
 
 def _worker_id() -> str:
@@ -72,7 +73,12 @@ async def main() -> None:
             settings.data_root,
             allowed_tracker_hosts=settings.c411_tracker_hosts,
         )
-        effects = TorrentEffectHandlers(session_factory, router, payloads)
+        effects = TorrentEffectHandlers(
+            session_factory,
+            router,
+            payloads,
+            SharedContentStore(settings.data_root),
+        )
         worker = TorrentWorker(
             session_factory,
             redis,

@@ -20,7 +20,7 @@ from app.integrations.qbittorrent_v2 import (
 )
 from app.jobs.torrent_effects import TorrentEffectHandlers, TorrentSyncEnqueuer
 from app.jobs.torrent_payloads import TorrentPayloadStore, TorrentPayloadStoreError
-from app.jobs.worker import TorrentJobSnapshot
+from app.jobs.worker import PermanentTorrentJobError, TorrentJobSnapshot
 from app.models import (
     Base,
     ManagedTorrent,
@@ -31,6 +31,7 @@ from app.models import (
     TrackerActivity,
     User,
 )
+from app.storage import SharedContentStore
 
 NOW = datetime(2026, 8, 21, 20, tzinfo=UTC)
 STORAGE_KEY = uuid.UUID("12345678-1234-5678-1234-567812345678")
@@ -82,6 +83,10 @@ def _payloads(tmp_path: Path) -> TorrentPayloadStore:
     root = tmp_path / "data"
     root.mkdir()
     return TorrentPayloadStore(root, allowed_tracker_hosts=["c411.org", "tk.c411.tw"])
+
+
+def _content(tmp_path: Path) -> SharedContentStore:
+    return SharedContentStore(tmp_path / "data")
 
 
 async def _create_domain(
@@ -215,6 +220,7 @@ async def test_add_handler_transitions_requests_and_removes_staged_payload(
             QBittorrentV2TorrentSnapshot(INFO_HASH, "downloading", 0.2),
         ),
         payloads,
+        _content(tmp_path),
         clock=lambda: NOW,
     )
 
@@ -232,9 +238,44 @@ async def test_add_handler_transitions_requests_and_removes_staged_payload(
         assert len(activities) == 1
         assert activities[0].tracker_account_ref == TRACKER_ACCOUNT_REF
     assert len(adder.contents) == 1
+    assert (tmp_path / "data" / "content" / STORAGE_KEY.hex).is_dir()
     assert b"private-user-passkey" not in adder.contents[0]
     with pytest.raises(TorrentPayloadStoreError):
         payloads.read(STORAGE_KEY)
+
+
+@pytest.mark.asyncio
+async def test_add_handler_refuses_symlink_storage_before_qbittorrent(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(sessions)
+    payloads = _payloads(tmp_path)
+    payloads.stage(_torrent(), storage_key=STORAGE_KEY)
+    content_root = tmp_path / "data" / "content"
+    outside = tmp_path / "outside"
+    content_root.mkdir()
+    outside.mkdir()
+    (content_root / STORAGE_KEY.hex).symlink_to(outside, target_is_directory=True)
+    adder = FakeAdder()
+    effects = TorrentEffectHandlers(
+        sessions,
+        _router(
+            sessions,
+            adder,
+            QBittorrentV2TorrentSnapshot(INFO_HASH, "downloading", 0.2),
+        ),
+        payloads,
+        _content(tmp_path),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(PermanentTorrentJobError) as failure:
+        await effects.add_torrent(_snapshot(torrent_id, request_id, "ADD_TORRENT"))
+
+    assert failure.value.error_code == "shared_storage_invalid"
+    assert adder.contents == []
+    assert list(outside.iterdir()) == []
 
 
 @pytest.mark.asyncio
@@ -254,6 +295,7 @@ async def test_sync_handler_marks_completed_torrent_and_request_ready(
             QBittorrentV2TorrentSnapshot(INFO_HASH, "stalledUP", 1.0),
         ),
         _payloads(tmp_path),
+        _content(tmp_path),
         clock=lambda: NOW,
     )
 
