@@ -53,6 +53,29 @@ class TorrentJobState(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class TrackerActivityType(StrEnum):
+    ANNOUNCE = "ANNOUNCE"
+    SCRAPE = "SCRAPE"
+    PROXY_HEALTH = "PROXY_HEALTH"
+    TRACKER_STATUS = "TRACKER_STATUS"
+
+
+class TrackerActivityOutcome(StrEnum):
+    SUCCESS = "SUCCESS"
+    DEGRADED = "DEGRADED"
+    FAILED = "FAILED"
+
+
+class TrackerDiagnosticCode(StrEnum):
+    TIMEOUT = "TIMEOUT"
+    UNAVAILABLE = "UNAVAILABLE"
+    AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
+    TRACKER_REJECTED = "TRACKER_REJECTED"
+    RATE_LIMITED = "RATE_LIMITED"
+    INVALID_RESPONSE = "INVALID_RESPONSE"
+    UNKNOWN_ERROR = "UNKNOWN_ERROR"
+
+
 ACTIVE_REQUEST_PREDICATE = text("state IN ('REQUESTED', 'ACTIVE', 'READY')")
 
 
@@ -64,6 +87,8 @@ class ManagedTorrent(Base):
             name="ck_managed_torrents_info_hash_canonical",
         ),
         CheckConstraint("total_size >= 0", name="ck_managed_torrents_total_size"),
+        Index("ix_managed_torrents_tracker_account", "tracker_account_ref"),
+        Index("ix_managed_torrents_qb_account", "qbittorrent_account_ref"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -85,6 +110,10 @@ class ManagedTorrent(Base):
         nullable=False,
     )
     qb_state: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tracker_account_ref: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    qbittorrent_account_ref: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True
+    )
     retry_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
@@ -100,6 +129,11 @@ class ManagedTorrent(Base):
         passive_deletes=True,
     )
     jobs: Mapped[list[TorrentJob]] = relationship(
+        back_populates="managed_torrent",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    tracker_activities: Mapped[list[TrackerActivity]] = relationship(
         back_populates="managed_torrent",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -194,6 +228,72 @@ class TorrentFile(Base):
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     managed_torrent: Mapped[ManagedTorrent] = relationship(back_populates="files")
+
+
+class TrackerActivity(Base):
+    __tablename__ = "tracker_activities"
+    __table_args__ = (
+        CheckConstraint(
+            "(outcome = 'SUCCESS' AND diagnostic_code IS NULL) "
+            "OR (outcome IN ('DEGRADED', 'FAILED') AND diagnostic_code IS NOT NULL)",
+            name="ck_tracker_activities_diagnostic",
+        ),
+        UniqueConstraint("event_key", name="uq_tracker_activities_event_key"),
+        Index(
+            "ix_tracker_activities_torrent_occurred",
+            "managed_torrent_id",
+            "occurred_at",
+        ),
+        Index(
+            "ix_tracker_activities_account_occurred",
+            "tracker_account_ref",
+            "occurred_at",
+        ),
+        Index("ix_tracker_activities_outcome_occurred", "outcome", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_key: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    managed_torrent_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("managed_torrents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tracker_account_ref: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    event_type: Mapped[TrackerActivityType] = mapped_column(
+        Enum(
+            TrackerActivityType,
+            name="tracker_activity_type",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+        ),
+        nullable=False,
+    )
+    outcome: Mapped[TrackerActivityOutcome] = mapped_column(
+        Enum(
+            TrackerActivityOutcome,
+            name="tracker_activity_outcome",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+        ),
+        nullable=False,
+    )
+    diagnostic_code: Mapped[TrackerDiagnosticCode | None] = mapped_column(
+        Enum(
+            TrackerDiagnosticCode,
+            name="tracker_diagnostic_code",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+        ),
+        nullable=True,
+    )
+    occurred_at: Mapped[datetime] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+    managed_torrent: Mapped[ManagedTorrent] = relationship(back_populates="tracker_activities")
 
 
 class TorrentJob(Base):

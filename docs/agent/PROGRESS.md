@@ -29,7 +29,9 @@
   `7d1ad6141814f4a3a64f5292726a5be9c1a423e8`.
 - V2-09 PR `#61` was merged into `develop_V2` at
   `51af8185f911d176669b4e7cb4b0b5b4482fd2eb`.
-- Active task branch: `feat/v2-c411-newgreedy`, based on that merge commit and targeting
+- V2-10 PR `#62` was merged into `develop_V2` at
+  `940469426008a51041596b0b9facf906159009ef`.
+- Active task branch: `feat/v2-tracker-activity`, based on that merge commit and targeting
   `develop_V2`.
 
 ## V1 completion state
@@ -266,6 +268,24 @@
 - No API route, worker registration, tracker activity persistence, multiple-account policy,
   Compose service, frontend, schema, filesystem, V1 behavior, or `master` change is included.
 
+## V2-11 — Secret-safe tracker activity
+
+- Added append-only `TrackerActivity` rows linked to a managed torrent and an opaque tracker
+  account UUID, with a unique event UUID for idempotent replay.
+- Activity type, outcome, and diagnostic are closed enums rather than arbitrary text; success
+  forbids a diagnostic and degraded/failed outcomes require one of the bounded safe codes.
+- The activity schema deliberately has no URL, response body, message, payload, passkey,
+  credential, or other free-form diagnostic column.
+- Added nullable opaque tracker and qBittorrent account UUID references to `ManagedTorrent`
+  so future account selection can persist identity without putting secrets in PostgreSQL.
+- Added transactional one-time account assignment: identical replay is accepted, while
+  silent reassignment or an activity for another account reference is rejected.
+- Added an additive/reversible migration and targeted tests for persistence, replay,
+  collision detection, immutable assignment, account matching, diagnostic consistency,
+  enum enforcement, and the absence of secret-bearing columns.
+- No account-selection algorithm, encrypted secret storage, TrackerActivity API, scheduler,
+  worker registration, frontend, Compose service, V1 behavior, or `master` change is included.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -327,6 +347,13 @@
 - V2-10 targeted C411/NewGreedy, torrent normalization, and qB V2 tests: PASS, 30 tests.
 - V2-10 complete backend suite: PASS, 279 tests with 4 service-backed tests deferred to CI.
 - V2-10 full backend Ruff lint/format and mypy: PASS.
+- PR #62 (V2-10) review and GitHub CI run `32505303900`: PASS; squash-merged into
+  `develop_V2` at `940469426008a51041596b0b9facf906159009ef`.
+- V2-11 targeted tracker activity, torrent model, and job regression tests: PASS, 28 tests
+  with 1 PostgreSQL-backed test deferred to CI.
+- V2-11 complete backend suite: PASS, 288 tests with 4 service-backed tests deferred to CI.
+- V2-11 full backend Ruff lint/format and mypy: PASS.
+- V2-11 PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
 
 ## Known constraints
 
@@ -341,7 +368,6 @@
 
 ## Next task
 
-- Open and validate the V2-10 PR into `develop_V2`; do not merge it automatically.
-- After V2-10 is reviewed and merged, continue with `V2-11 — TrackerActivity without
-  secrets and opaque multi-account references`.
-- Do not start V2-11 as part of the current task.
+- Open and validate the V2-11 PR into `develop_V2`; do not merge it automatically.
+- After V2-11 is reviewed and merged, continue with `V2-12 — weighted fair scheduler`.
+- Do not start V2-12 as part of the current task.

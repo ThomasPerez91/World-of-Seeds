@@ -9,6 +9,11 @@ from app.torrents.deduplication import (
     create_or_get_torrent_request,
 )
 from app.torrents.metainfo import ParsedTorrent, TorrentValidationError, normalize_torrent
+from app.torrents.tracker_activity import (
+    TrackerActivityError,
+    assign_managed_torrent_account_refs,
+    record_tracker_activity,
+)
 
 __all__ = [
     "ManagedTorrentRequestResult",
@@ -18,6 +23,9 @@ __all__ = [
     "TorrentMetadataConflictError",
     "TorrentRequestOwnerError",
     "TorrentValidationError",
+    "TrackerActivityError",
+    "assign_managed_torrent_account_refs",
     "create_or_get_torrent_request",
     "normalize_torrent",
+    "record_tracker_activity",
 ]
