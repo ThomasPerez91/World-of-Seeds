@@ -7,6 +7,8 @@ from app.models.torrent_v2 import (
     ManagedTorrentState,
     SchedulerDeficit,
     SchedulerState,
+    StorageLedger,
+    StoragePressureState,
     TorrentFile,
     TorrentJob,
     TorrentJobState,
@@ -16,6 +18,7 @@ from app.models.torrent_v2 import (
     TrackerActivityOutcome,
     TrackerActivityType,
     TrackerDiagnosticCode,
+    UserStorageUsage,
 )
 from app.models.trash import TrashEntry
 
@@ -28,10 +31,13 @@ __all__ = [
     "ManagedTorrentState",
     "SchedulerDeficit",
     "SchedulerState",
+    "StorageLedger",
+    "StoragePressureState",
     "TrackerActivity",
     "TrackerActivityOutcome",
     "TrackerActivityType",
     "TrackerDiagnosticCode",
+    "UserStorageUsage",
     "TorrentFile",
     "TorrentJob",
     "TorrentJobState",
