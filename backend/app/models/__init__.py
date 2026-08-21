@@ -5,6 +5,8 @@ from app.models.torrent import UserTorrent
 from app.models.torrent_v2 import (
     ManagedTorrent,
     ManagedTorrentState,
+    SchedulerDeficit,
+    SchedulerState,
     TorrentFile,
     TorrentJob,
     TorrentJobState,
@@ -24,6 +26,8 @@ __all__ = [
     "LoginThrottle",
     "ManagedTorrent",
     "ManagedTorrentState",
+    "SchedulerDeficit",
+    "SchedulerState",
     "TrackerActivity",
     "TrackerActivityOutcome",
     "TrackerActivityType",

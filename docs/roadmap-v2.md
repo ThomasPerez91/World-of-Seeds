@@ -37,7 +37,10 @@ ou migration additive), **ÉLEVÉ** (concurrence, stockage, sécurité, déploie
 | V2-11 | MOYEN | V2-10 | `TrackerActivity` sans secret, diagnostic borné et préparation de références opaques pour plusieurs comptes. |
 | V2-12 | ÉLEVÉ | V2-04,V2-06 | Scheduler équitable pondéré : concurrence globale/par utilisateur, classes de taille, déficit et vieillissement anti-famine. |
 | V2-13 | ÉLEVÉ | V2-09,V2-12 | Pilotage qB des priorités et débits; cohérence entre politique WOS, états qB et reprise après redémarrage. |
-| V2-14 | ÉLEVÉ | V2-03,V2-08 | Stockage physique partagé par `ManagedTorrent`, chemins opaques, accès par descripteurs, aucun symlink ou scan récursif web. |
+| V2-13A | ÉLEVÉ | V2-13 | Runtime scheduler singleton : lease SQL, ledger et état désiré/appliqué persistés, reprise après crash. |
+| V2-13B | ÉLEVÉ | V2-08,V2-10,V2-11,V2-13A | Handlers worker réels : ajout C411/qB, transitions métier et synchronisation périodique bornée des états qB. |
+| V2-13C | ÉLEVÉ | V2-11,V2-13B | Routage multi-comptes tracker/qB par références opaques, affectation stable et secrets limités au déploiement. |
+| V2-14 | ÉLEVÉ | V2-03,V2-08,V2-13B | Stockage physique partagé par `ManagedTorrent`, chemins opaques, accès par descripteurs, aucun symlink ou scan récursif web. |
 | V2-15 | ÉLEVÉ | V2-06,V2-14 | Quotas logiques, compteurs transactionnels, seuils disque et admission `warning/critical`; reconciler borné. |
 | V2-16 | MOYEN | V2-14 | Génération et validation de manifestes `TorrentFile`; pagination, checksum/version et détection des changements. |
 | V2-17 | MOYEN | V2-03,V2-09 | API de demandes torrent V2 et contrats d'erreur; dépôt idempotent et consultation sans polling qB par navigateur. |

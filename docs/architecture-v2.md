@@ -116,6 +116,12 @@ Les poids, plafonds et seuils sont des options administratives typées. Le clien
 ni priorité absolue ni chemin de destination. Les choix algorithmiques et scénarios de
 non-famine sont testés par simulation avant leur connexion à qBittorrent.
 
+Le runtime du scheduler détient une lease singleton en PostgreSQL. Il persiste dans la même
+transaction son ledger d'équité et, pour chaque torrent contrôlé, la génération, l'admission,
+le rang et le débit désirés avant tout appel qBittorrent. L'application de cette génération est
+marquée séparément après succès ; un crash laisse donc un état désiré non appliqué qu'un nouveau
+propriétaire de la lease peut réconcilier sans reconstruire l'équité depuis zéro.
+
 ## Stockage, quotas et pression disque
 
 ```text

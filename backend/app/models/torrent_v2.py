@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Enum,
     ForeignKey,
@@ -87,6 +88,23 @@ class ManagedTorrent(Base):
             name="ck_managed_torrents_info_hash_canonical",
         ),
         CheckConstraint("total_size >= 0", name="ck_managed_torrents_total_size"),
+        CheckConstraint(
+            "desired_download_limit >= 0 AND schedule_generation >= 0",
+            name="ck_managed_torrents_schedule_values",
+        ),
+        CheckConstraint(
+            "(desired_active AND desired_priority IS NOT NULL AND desired_priority >= 0) "
+            "OR (NOT desired_active AND desired_priority IS NULL)",
+            name="ck_managed_torrents_schedule_state",
+        ),
+        Index(
+            "uq_managed_torrents_schedule_priority",
+            "schedule_generation",
+            "desired_priority",
+            unique=True,
+            postgresql_where=text("desired_active"),
+            sqlite_where=text("desired_active = 1"),
+        ),
         Index("ix_managed_torrents_tracker_account", "tracker_account_ref"),
         Index("ix_managed_torrents_qb_account", "qbittorrent_account_ref"),
     )
@@ -115,6 +133,10 @@ class ManagedTorrent(Base):
         Uuid(as_uuid=True), nullable=True
     )
     retry_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    desired_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    desired_priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    desired_download_limit: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    schedule_generation: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
 
@@ -138,6 +160,55 @@ class ManagedTorrent(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+
+
+class SchedulerState(Base):
+    __tablename__ = "scheduler_state"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_scheduler_state_singleton"),
+        CheckConstraint(
+            "(lease_owner IS NULL AND lease_expires_at IS NULL) "
+            "OR (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)",
+            name="ck_scheduler_state_lease",
+        ),
+        CheckConstraint(
+            "desired_generation >= 0 AND applied_generation >= 0 "
+            "AND applied_generation <= desired_generation",
+            name="ck_scheduler_state_generations",
+        ),
+        CheckConstraint("rounds >= 0", name="ck_scheduler_state_rounds"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    desired_generation: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    applied_generation: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    rounds: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    cursor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class SchedulerDeficit(Base):
+    __tablename__ = "scheduler_deficits"
+    __table_args__ = (
+        CheckConstraint("scheduler_state_id = 1", name="ck_scheduler_deficits_singleton"),
+        CheckConstraint("credit >= 0", name="ck_scheduler_deficits_credit"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    scheduler_state_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("scheduler_state.id", ondelete="CASCADE"),
+        default=1,
+        nullable=False,
+    )
+    credit: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
 
 
 class TorrentRequest(Base):
