@@ -21,7 +21,9 @@
   `3b443ea46932e4aac728d85f3a4e0279ece061f0`.
 - V2-05 PR `#57` was merged into `develop_V2` at
   `3e518645dc5eded4f9c6280095d27428f5b36385`.
-- Active task branch: `feat/v2-options-registry`, based on that merge commit and targeting
+- V2-06 PR `#58` was merged into `develop_V2` at
+  `66e122c7ed7a086be5bfe0d1a95098a6525e1647`.
+- Active task branch: `feat/v2-infohash-dedup`, based on that merge commit and targeting
   `develop_V2`.
 
 ## V1 completion state
@@ -182,6 +184,24 @@
 - The V1 `.options` store remains unchanged as the V1 runtime authority; no V2 admin API,
   frontend, scheduler consumer, or infrastructure-secret editor is included in V2-06.
 
+## V2-07 — Transactional infohash deduplication
+
+- Added a transaction-scoped service that validates a canonical lowercase SHA-1 infohash,
+  bounded torrent name, signed 64-bit size, timezone-aware timestamp, and active owner
+  before writing torrent state.
+- Added PostgreSQL and SQLite conflict-safe inserts that converge concurrent uploads on
+  the SQL-unique `ManagedTorrent.info_hash` without deriving or accepting a storage path.
+- A first owner creates the physical managed torrent and its request; later owners reuse
+  the same managed row and receive independent `TorrentRequest` ownership rows.
+- Repeating an active request for the same owner is idempotent, while a prior terminal
+  request permits a new active right under the existing partial unique index.
+- Existing canonical name/size conflicts are rejected instead of overwriting managed
+  metadata, and the service leaves commit or rollback entirely to its caller.
+- Added targeted validation, ownership, rollback, metadata-conflict, repeated-request,
+  terminal-request, two-owner, and real PostgreSQL concurrency tests.
+- No API endpoint, Redis signal, `TorrentJob`, worker, qBittorrent call, filesystem action,
+  schema migration, or frontend change is included in V2-07.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -219,7 +239,12 @@
 - V2-06 targeted Ruff lint/format and mypy: PASS.
 - V2-06 complete backend suite: PASS, 229 tests with 2 service-backed tests deferred to CI.
 - V2-06 PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
-- V2-06 real PostgreSQL migration execution and complete CI: pending PR CI.
+- V2-06 GitHub CI run `32499070361`: PASS; PostgreSQL migrations, backend, frontend,
+  container build, and V2 Compose isolation are green.
+- V2-07 targeted deduplication/model/V1 torrent regression tests: PASS, 30 tests with the
+  real PostgreSQL concurrency test deferred to PR CI.
+- V2-07 targeted Ruff lint/format and mypy: PASS.
+- V2-07 complete backend suite: PASS, 243 tests with 3 service-backed tests deferred to CI.
 
 ## Known constraints
 
@@ -234,7 +259,7 @@
 
 ## Next task
 
-- Open and validate the V2-06 PR into `develop_V2`; do not merge it automatically.
-- After V2-06 is reviewed and merged, the next roadmap task is
-  `V2-07 — transactional infohash deduplication service`.
-- Do not start V2-07 as part of the current task.
+- Open and validate the V2-07 PR into `develop_V2`; do not merge it automatically.
+- After V2-07 is reviewed and merged, the next roadmap task is
+  `V2-08 — separate durable worker process`.
+- Do not start V2-08 as part of the current task.
