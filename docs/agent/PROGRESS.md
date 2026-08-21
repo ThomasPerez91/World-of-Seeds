@@ -1,103 +1,84 @@
 # World of Seeds — Progress
 
-## Current release
+## Current release and branches
 
-- Production baseline: `1.3.2`.
-- Version prepared locally: `1.3.3`.
-- Product line: V1.
-- Latest feature PR: `#48`, merged into `develop`.
-- Latest release PR: `#49`, merged into `master`.
-- Current hotfix branch: `fix/v1-qbittorrent-5-2-add-response`.
-- MASTER HEAD before this hotfix: `8e20b8d578fdd68f85acdd9feed327afc089df68`.
-- DEVELOP HEAD before this hotfix: `20c4897c3fbba49052123e996e2abfd27170ba72`.
+- Stable production release: `1.3.3` (V1).
+- V1.3.3 feature PR: `#50`, merged into `develop`.
+- V1.3.3 release PR: `#51`, merged into `master`.
+- Stable master SHA: `7ea5ff06f9fdefa59545ac33c1aecf6d9db596ae`.
+- V1.3.3 feature SHA: `5ffd7fb3dd20f5c7c3d3d9094ec6ca10ec97c459`.
+- `develop` was fast-forwarded to the stable master SHA after release.
+- Permanent V2 integration branch `develop_V2` was created from the same stable SHA.
+- Active documentation branch: `docs/v2-architecture-roadmap`, based on the same V1.3.3
+  tree and intended to target `develop_V2`.
 
-## Completed in the V1 completion feature
+## V1 completion state
 
-- Bumped and synchronized the application version to `1.3.0`.
-- Added authenticated `.torrent` multipart upload.
-- Added strict bencode parsing and raw `info` hash preservation.
-- Added the C411 tracker allowlist and server-side announce rewrite.
-- Moved the WOS passkey exclusively to `WOS_C411_PASSKEY`.
-- Prevented passkey persistence, response, logging, and option exposure.
-- Derived qBittorrent save paths exclusively on the server.
-- Added qBittorrent login response compatibility and error handling.
-- Added the `user_torrents` persistence model and Alembic migration.
-- Added per-user torrent listing and normalized status polling.
-- Added drag-and-drop torrent upload with an accessible file selector.
-- Added success, error, warning, information, and progress notices.
-- Changed rename input to a basename and preserved protected extensions.
-- Covered compound extensions, hidden files, and files without extensions.
-- Split file-manager display into Name and Extension columns.
-- Added secure folder downloads as uncompressed ZIP archives.
-- Added controlled temporary archive storage and automatic cleanup.
-- Added traversal, symlink, and archive-size protections.
-- Added single-level new-folder creation and user feedback.
-- Hardened mobile layout for breadcrumbs and long names.
-- Updated deployment configuration and documentation for shared `/data` mounts.
-- Updated dependency locks and added the multipart dependency.
+- V1.3.1 removed recursive size calculation from file listings, released SQL connections
+  before streams, replaced temporary archives with bounded direct ZIP streaming, and fixed
+  file-table layout.
+- V1.3.2 corrected C411 tracker paths/hosts while preserving the raw infohash, removed
+  SweetAlert2 inline-style CSP violations, and restored class-only accessible dialogs.
+- V1.3.3 accepts and validates qBittorrent 5.2 structured add responses, keeps legacy
+  `Ok.`/204 compatibility, rejects malformed/mismatched responses, and persists
+  `UserTorrent` only after verified acceptance.
+- Release `v1.3.3` is published and the immutable image was deployed successfully to OVH.
+- Release CI: run `32474358488`, green.
+- Master CI: run `32474472325`, green.
+- Deployment: run `32474912048`, green.
+- An earlier publish run `32474472346` hit release-list eventual consistency; its targeted
+  rerun succeeded. No application rollback was required.
 
-## Prepared in the V1.3.1 performance hotfix
+## V2 preparation completed in V2-00
 
-- Removed recursive folder-size calculation from ordinary file listings.
-- Ended the read-only authentication transaction before route and stream processing.
-- Replaced temporary folder ZIP creation with direct, uncompressed HTTP streaming.
-- Limited folder archive generation to one concurrent request per application process.
-- Kept archive traversal, source-size, entry-count, and symlink protections.
-- Fixed file-table column sizing, truncated long names with an ellipsis, and kept actions on one line.
-- Replaced file mutation, deletion, restoration, and failure notices with SweetAlert2 dialogs.
-- Added regression coverage for SQL transaction release, non-recursive listings, immediate ZIP output, and archive concurrency.
+- Synchronized `develop` to the stable V1.3.3 master commit.
+- Created the permanent `develop_V2` integration branch from that exact commit.
+- Replaced the obsolete workflow that sent V2 work through `develop`/`master`.
+- Defined the target stack: API, durable scheduler/workers, PostgreSQL, Redis,
+  qBittorrent, NewGreedy, ingress, Prometheus, Grafana, node-exporter, and cAdvisor.
+- Defined PostgreSQL-authoritative models: `ManagedTorrent`, `TorrentRequest`,
+  `TorrentFile`, `TrackerActivity`, `TorrentJob`, and `DownloadLease`.
+- Defined durable job states `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`,
+  including claims, retries, timeouts, idempotence, and crash recovery.
+- Defined infohash deduplication and one physical torrent shared by multiple user requests.
+- Defined weighted fair scheduling with bounded small-job preference and anti-starvation
+  aging, plus global/per-user concurrency and bandwidth limits.
+- Defined shared-storage quotas, disk-pressure admission, manifest accounting, leases, and
+  reconciled purges without recursive scans in web requests.
+- Defined recursive browser-side folder transfer with manifest, HTTP Range,
+  pause/resume/cancel, controlled concurrency, and only a small-folder ZIP fallback.
+- Preserved the V1 filesystem security invariants, strict CSP, React-native confirmations,
+  definite-delete confirmation, and responsive orientation requirements.
+- Defined central SQL options versus deployment secrets and prepared opaque multi-account
+  references without persisting plaintext passkeys.
+- Added the isolated Rise2 deployment, backup, pilot, and rollback plan.
+- Produced an ordered V2 roadmap from V2-01 through V2-35 with dependencies, Work levels,
+  migrations, breakages, risks, and exit criteria.
+- No functional V2 code, database migration, dependency, Compose service, or version bump
+  is included in V2-00.
 
-## Prepared in the V1.3.2 tracker and CSP hotfix
+## Current validation
 
-- Rewrites authorized C411 announces to `/announce/{URL-encoded WOS passkey}`.
-- Uses `c411.org` and `tk.c411.tw` as the default tracker allowlist.
-- Preserves raw `info` bytes and the original info hash while removing uploaded passkeys.
-- Keeps unauthorized tracker hosts rejected for `announce` and `announce-list`.
-- Removes SweetAlert2, whose runtime `background` and `color` styles violated the strict CSP.
-- Replaces it with a class-only accessible modal without inline styles or CSP relaxation.
-- Verifies torrent progress, notices, and file-operation dialogs render without inline styles.
-
-## Prepared in the V1.3.3 qBittorrent response hotfix
-
-- Accepts the structured success response returned by qBittorrent 5.2.x after torrent upload.
-- Validates the returned counters and exact expected infohash instead of accepting arbitrary 2xx responses.
-- Keeps compatibility with legacy `200 Ok.` and `204 No Content` success responses.
-- Keeps explicit rejections, malformed responses, authentication failures, and mismatched hashes rejected.
-- Persists the `UserTorrent` association after qBittorrent confirms the expected torrent was accepted.
-
-## Validation
-
-- Local Ruff formatting: PASS.
-- Local Ruff lint: PASS.
-- Local mypy for backend application and tests: PASS.
-- Local backend suite for this hotfix: targeted PASS, 19 tests; complete PASS, 165 tests.
-- Local version consistency check: PASS, `1.3.3`.
-- GitHub Actions backend job: PASS.
-- GitHub Actions frontend check: PASS.
-- GitHub Actions frontend tests: PASS.
-- GitHub Actions frontend build: PASS.
-- GitHub Actions production container job: PASS.
-- GitHub Actions corrected run: `32406721805`.
-- Real credentials present in tracked changes: none found.
-
-## Integration state
-
-- The `1.3.1` performance hotfix is integrated into `develop` and `master` through PRs `#46` and `#47` with green CI.
-- The `1.3.2` tracker/CSP hotfix is integrated into `develop` and `master` through PRs `#48` and `#49`.
-- The `1.3.3` qBittorrent response hotfix is implemented and targeted tests are green locally.
-- No V2 code, database migration, or CSP relaxation is included.
+- Documentation links and Markdown structure: pending local validation.
+- `git diff --check`: pending.
+- GitHub CI for the V2-00 documentation PR: pending.
+- Tracked secret/passkey scan for changed files: pending.
 
 ## Known constraints
 
-- qBittorrent and the application must share `/srv/seedbox:/data`.
-- User torrent save paths remain `/data/<username>/downloads`.
-- The C411 passkey remains server-side only.
-- Folder archives are streamed directly, uncompressed, concurrency-bounded, and symlink-safe.
-- PostgreSQL remains unexposed to the host network.
-- No `chmod 777` workaround is acceptable.
+- `master` and `develop` remain V1-only; V2 branches and PRs target `develop_V2`.
+- V1 qBittorrent remains external and shares `/srv/seedbox:/data` with WOS.
+- Rise2 V2 must not reuse V1 secrets, networks, volumes, database, qB profile, or storage
+  before an explicitly approved import.
+- PostgreSQL is authoritative for durable jobs and destructive decisions; Redis loss must
+  remain recoverable.
+- Secrets and complete tracker URLs must never reach logs, metrics, options, DB business
+  rows, browser responses, or agent documents.
 
 ## Next task
 
-- Publish the `1.3.3` hotfix through a PR into `develop`.
-- Run the complete GitHub CI once and merge only when backend, frontend, and container jobs are green.
-- Open and validate the `1.3.3` release PR from `develop` to `master`.
+- Open and validate the V2-00 documentation PR into `develop_V2`.
+- After merge approval, start `V2-01 — Socle CI et versionnement V2` from the latest
+  `develop_V2`.
+- V2-01 must add V2 branch checks and isolated prerelease rules without changing the V1
+  release/deployment behavior.
