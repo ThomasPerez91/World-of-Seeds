@@ -405,6 +405,14 @@ def validate_cross_options(values: Mapping[str, OptionValue]) -> None:
             code="inconsistent_options",
             field="WOS_STORAGE_USER_MAX_BYTES",
         )
+    small_torrent = integer("WOS_SCHEDULER_SMALL_TORRENT_BYTES")
+    medium_torrent = integer("WOS_SCHEDULER_MEDIUM_TORRENT_BYTES")
+    if small_torrent >= medium_torrent:
+        raise OptionsValidationError(
+            "Le seuil des petits torrents doit être inférieur au seuil moyen.",
+            code="inconsistent_options",
+            field="WOS_SCHEDULER_SMALL_TORRENT_BYTES",
+        )
 
 
 def _serialize(values: Mapping[str, OptionValue]) -> bytes:

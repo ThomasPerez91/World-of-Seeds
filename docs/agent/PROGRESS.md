@@ -33,8 +33,8 @@
   `940469426008a51041596b0b9facf906159009ef`.
 - V2-11 PR `#63` was merged into `develop_V2` at
   `0eedd65fe20dd91dac3deb49000e2def49aabd9e`.
-- No V2 task branch is active. `develop_V2` is the current integration baseline at that
-  merge commit.
+- V2-12 is implemented on the dedicated `feat/v2-weighted-fair-scheduler` branch from
+  `develop_V2` commit `c357802d871ab8c6d7fcbf78ae81cbb2991c7b7e`.
 
 ## V1 completion state
 
@@ -288,6 +288,28 @@
 - No account-selection algorithm, encrypted secret storage, TrackerActivity API, scheduler,
   worker registration, frontend, Compose service, V1 behavior, or `master` change is included.
 
+## V2-12 — Weighted fair scheduler
+
+- Added a deterministic, side-effect-free weighted deficit round-robin policy that returns an
+  explicit ledger for later transactional persistence by the singleton scheduler.
+- Added small, medium, and large remaining-size classes with bounded costs, so several small
+  downloads can complete quickly while large downloads accumulate enough credit to progress.
+- Added bounded wait-time aging that can reduce, but never eliminate, a torrent's scheduling
+  cost and combines with accumulated deficit to prevent starvation.
+- Added global and per-user active limits, deterministic per-user queue order, and one explicit
+  beneficiary per physical torrent so a user's queue cannot silently duplicate shared content.
+- Added future-compatible per-user weights; weighted users receive a larger share while the
+  round-robin cursor preserves service for standard-weight users.
+- Stalled torrents are reported separately and do not consume scarce active slots until a later
+  health snapshot marks them eligible again.
+- Added seven typed, bounded, PostgreSQL-authoritative scheduler options, including cross-option
+  validation for ordered size thresholds.
+- Added deterministic simulations covering small-job preference, continuous-arrival
+  anti-starvation, aging, weighted shares, global/per-user limits, stalled torrents, duplicate
+  physical torrents, and input-order independence.
+- No qBittorrent pause/resume, speed control, scheduler process/lease, API, frontend, schema
+  migration, Compose service, V1 runtime behavior, or `master` change is included.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -358,6 +380,11 @@
 - V2-11 PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
 - PR #63 (V2-11) review and GitHub CI run `32512486810`: PASS; squash-merged into
   `develop_V2` at `0eedd65fe20dd91dac3deb49000e2def49aabd9e`.
+- V2-12 targeted scheduler, database-option, durable-job, worker, and V1 option regression
+  tests: PASS, 51 tests with 2 service-backed tests deferred to CI.
+- V2-12 complete backend suite: PASS, 301 tests with 4 service-backed tests deferred to CI.
+- V2-12 full backend Ruff lint/format and mypy: PASS.
+- V2-12 `git diff --check`: PASS.
 
 ## Known constraints
 
@@ -372,6 +399,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-12 — weighted fair scheduler`.
-- V2-12 has not been started; create a dedicated branch from the latest `develop_V2` only
-  after explicit authorization.
+- The next roadmap task is `V2-13 — qBittorrent priority and bandwidth control`.
+- Do not start V2-13 until V2-12 has passed review, required CI is green, its PR is merged into
+  `develop_V2`, and explicit authorization is provided.
