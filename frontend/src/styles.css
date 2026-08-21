@@ -943,14 +943,72 @@ button:disabled {
   flex-wrap: nowrap;
 }
 
-.wos-alert-popup {
+.wos-modal-overlay {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  padding: 1rem;
+  place-items: center;
+  background: rgb(0 0 0 / 62%);
+}
+
+.wos-modal {
+  display: grid;
+  width: min(100%, 30rem);
+  justify-items: center;
+  padding: 1.5rem;
   border: 1px solid rgb(174 213 156 / 18%);
   border-radius: 1rem;
+  color: #dfe8e2;
+  background: #101d18;
   box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 45%);
+  text-align: center;
+}
+
+.wos-modal h2 {
+  margin: 0.8rem 0 0;
+  font-size: 1.3rem;
+}
+
+.wos-modal p {
+  margin: 0.65rem 0 0;
+  color: #aebbb4;
+  line-height: 1.5;
+}
+
+.wos-modal-icon {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border: 0.15rem solid currentcolor;
+  border-radius: 50%;
+  color: #a9d39c;
+  font-size: 1.55rem;
+  font-weight: 800;
+}
+
+.wos-modal-icon.error,
+.wos-modal-icon.warning {
+  color: #dc9b92;
+}
+
+.wos-modal-icon.question {
+  color: #d7bc83;
+}
+
+.wos-modal-actions {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  gap: 0.7rem;
+  margin-top: 1.25rem;
 }
 
 .wos-alert-confirm,
 .wos-alert-cancel {
+  width: auto;
   min-width: 7rem;
   border: 1px solid transparent;
   border-radius: 0.65rem;
@@ -958,9 +1016,18 @@ button:disabled {
   font-weight: 700;
 }
 
+.wos-alert-confirm {
+  background: #6f9b62;
+}
+
+.wos-alert-cancel {
+  color: #dfe8e2;
+  background: #405047;
+}
+
 .wos-alert-confirm.destructive {
   border-color: rgb(220 155 146 / 52%);
-  background: #7f3935 !important;
+  background: #7f3935;
 }
 
 .open-folder-button {

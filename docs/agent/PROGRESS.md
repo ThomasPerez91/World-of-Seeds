@@ -2,13 +2,14 @@
 
 ## Current release
 
-- Version prepared locally: `1.3.1`.
+- Production baseline: `1.3.1`.
+- Version prepared locally: `1.3.2`.
 - Product line: V1.
-- Feature PR: `#38`, merged into `develop`.
-- Release PR: `#39`, merged into `master`.
-- Corrective branch: `fix/release-draft-verification`.
-- MASTER HEAD after the V1 merge: `3d54e623b91e69409d3e84563de07a2f67e79b12`.
-- DEVELOP HEAD before the deployment fix: `c5e8ae9e55f4688e2bd75c42dd146fc2aaaf7f92`.
+- Latest feature PR: `#46`, merged into `develop`.
+- Latest release PR: `#47`, merged into `master`.
+- Current hotfix branch: `fix/v1-c411-tracker-csp`.
+- MASTER HEAD before this hotfix: `c5d2e47cc007a399b480316d2615597b3a5c77c5`.
+- DEVELOP HEAD before this hotfix: `35c61f0923d4037f07220ecb918979b3ce613d7b`.
 
 ## Completed in the V1 completion feature
 
@@ -46,13 +47,25 @@
 - Replaced file mutation, deletion, restoration, and failure notices with SweetAlert2 dialogs.
 - Added regression coverage for SQL transaction release, non-recursive listings, immediate ZIP output, and archive concurrency.
 
+## Prepared in the V1.3.2 tracker and CSP hotfix
+
+- Rewrites authorized C411 announces to `/announce/{URL-encoded WOS passkey}`.
+- Uses `c411.org` and `tk.c411.tw` as the default tracker allowlist.
+- Preserves raw `info` bytes and the original info hash while removing uploaded passkeys.
+- Keeps unauthorized tracker hosts rejected for `announce` and `announce-list`.
+- Removes SweetAlert2, whose runtime `background` and `color` styles violated the strict CSP.
+- Replaces it with a class-only accessible modal without inline styles or CSP relaxation.
+- Verifies torrent progress, notices, and file-operation dialogs render without inline styles.
+
 ## Validation
 
 - Local Ruff formatting: PASS.
 - Local Ruff lint: PASS.
 - Local mypy for backend application and tests: PASS.
-- Local backend suite: PASS, 160 tests.
-- Local version consistency check: PASS, `1.3.1`.
+- Local backend suite for this hotfix: targeted PASS, 6 tests.
+- Local frontend suite for this hotfix: targeted PASS, 8 tests.
+- Local frontend typecheck and production build: PASS.
+- Local version consistency check: PASS, `1.3.2`.
 - GitHub Actions backend job: PASS.
 - GitHub Actions frontend check: PASS.
 - GitHub Actions frontend tests: PASS.
@@ -63,21 +76,9 @@
 
 ## Integration state
 
-- Feature implementation is complete.
-- The initial frontend run found one missing accessible label.
-- The minimal `aria-label` correction is published.
-- The corrected feature CI run is fully green.
-- Agent handoff documentation is integrated into `develop` and `master`.
-- PR `#38` is merged into `develop` with green CI.
-- PR `#39` is merged into `master` with green PR CI.
-- The first post-merge deployment stopped before the image build.
-- Root cause: a read-only build token could not see the prepared draft release.
-- The corrective workflow isolates draft verification in a write-scoped job.
-- The build job retains read-only repository access.
-- The first retry exposed an existing draft pinned to the previous master SHA.
-- Draft retries now retarget only unpublished releases to the current master SHA.
-- Release publication passes the repository explicitly when no checkout exists.
-- Corrective CI, integration, release, and OVH deployment remain to complete.
+- The `1.3.1` performance hotfix is integrated into `develop` and `master` through PRs `#46` and `#47` with green CI.
+- The `1.3.2` tracker/CSP hotfix is implemented and validated locally.
+- No V2 code, database migration, or CSP relaxation is included.
 
 ## Known constraints
 
@@ -90,6 +91,6 @@
 
 ## Next task
 
-- Publish the validated `v1.3.1` hotfix through a feature PR into `develop`.
-- Merge `develop` into `master` only after every required CI check is green.
-- Verify CPU, PostgreSQL pool use, block I/O, readiness, and the first-byte delay of a large folder download on OVH.
+- Publish the `1.3.2` hotfix through a PR into `develop`.
+- Run the complete GitHub CI once and merge only when backend, frontend, and container jobs are green.
+- Open and validate the `1.3.2` release PR from `develop` to `master`.

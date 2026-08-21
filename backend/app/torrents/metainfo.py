@@ -143,7 +143,7 @@ def _tracker_url(raw: bytes, *, passkey: str, allowed_hosts: frozenset[str]) -> 
     ):
         raise TorrentValidationError("Ce torrent n’utilise pas un tracker C411 autorisé.")
     netloc = hostname if port is None else f"{hostname}:{port}"
-    path = f"/{quote(passkey, safe='')}/announce"
+    path = f"/announce/{quote(passkey, safe='')}"
     return urlunsplit((parsed.scheme, netloc, path, "", "")).encode("ascii")
 
 
