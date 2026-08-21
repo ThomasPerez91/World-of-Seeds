@@ -6,6 +6,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 MAX_BENCODE_DEPTH = 64
 MAX_BENCODE_ITEMS = 200_000
+MAX_TORRENT_FILES = 100_000
 
 BValue = int | bytes | list["BValue"] | dict[bytes, "BValue"]
 
@@ -20,6 +21,14 @@ class ParsedTorrent:
     info_hash: str
     name: str
     total_size: int
+    files: tuple[TorrentContentFile, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TorrentContentFile:
+    file_index: int
+    relative_path: str
+    size: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,34 +214,52 @@ def _torrent_name(info: dict[bytes, BValue]) -> str:
     return name
 
 
-def _torrent_size(info: dict[bytes, BValue]) -> int:
+def _torrent_files(
+    info: dict[bytes, BValue],
+    *,
+    torrent_name: str,
+) -> tuple[TorrentContentFile, ...]:
     single_length = info.get(b"length")
     files = info.get(b"files")
-    if isinstance(single_length, int) and files is None:
-        total = single_length
+    if isinstance(single_length, int) and single_length >= 0 and files is None:
+        return (TorrentContentFile(0, torrent_name, single_length),)
     elif isinstance(files, list) and single_length is None and files:
-        total = 0
-        for raw_file in files:
+        if len(files) > MAX_TORRENT_FILES:
+            raise TorrentValidationError("Le torrent contient trop de fichiers.")
+        entries: list[TorrentContentFile] = []
+        paths: set[str] = set()
+        for file_index, raw_file in enumerate(files):
             file_entry = _required_dictionary(raw_file, "files")
             length = file_entry.get(b"length")
             path = file_entry.get(b"path.utf-8", file_entry.get(b"path"))
             if not isinstance(length, int) or length < 0 or not isinstance(path, list) or not path:
                 raise TorrentValidationError("La liste des fichiers du torrent est invalide.")
-            if not all(
-                isinstance(component, bytes)
-                and component not in {b"", b".", b".."}
-                and b"/" not in component
-                and b"\\" not in component
-                and b"\x00" not in component
-                for component in path
-            ):
+            components: list[str] = []
+            for component in path:
+                if (
+                    not isinstance(component, bytes)
+                    or component in {b"", b".", b".."}
+                    or b"/" in component
+                    or b"\\" in component
+                    or b"\x00" in component
+                ):
+                    raise TorrentValidationError("Un chemin du torrent est invalide.")
+                try:
+                    components.append(component.decode("utf-8"))
+                except UnicodeDecodeError as exc:
+                    raise TorrentValidationError(
+                        "Un chemin du torrent n’est pas en UTF-8."
+                    ) from exc
+            if any(component in {"", ".", ".."} for component in components):
                 raise TorrentValidationError("Un chemin du torrent est invalide.")
-            total += length
+            relative_path = "/".join((torrent_name, *components))
+            if len(relative_path) > 4096 or relative_path in paths:
+                raise TorrentValidationError("Un chemin du torrent est invalide.")
+            paths.add(relative_path)
+            entries.append(TorrentContentFile(file_index, relative_path, length))
+        return tuple(entries)
     else:
         raise TorrentValidationError("La taille du torrent est invalide.")
-    if total < 0:
-        raise TorrentValidationError("La taille du torrent est invalide.")
-    return total
 
 
 def _rewrite_torrent(
@@ -273,7 +300,8 @@ def _rewrite_torrent(
         raise TorrentValidationError("La taille des pièces du torrent est invalide.")
 
     name = _torrent_name(info)
-    total_size = _torrent_size(info)
+    files = _torrent_files(info, torrent_name=name)
+    total_size = sum(file.size for file in files)
     if total_size > max_total_size:
         raise TorrentValidationError("Le contenu demandé dépasse la taille autorisée.")
 
@@ -292,6 +320,7 @@ def _rewrite_torrent(
         info_hash=hashlib.sha1(info_raw, usedforsecurity=False).hexdigest(),
         name=name,
         total_size=total_size,
+        files=files,
     )
 
 
