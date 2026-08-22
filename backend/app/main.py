@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
-from app.api.router import api_router
+from app.api.router import api_router, api_v2_router
 from app.coordination import RedisCoordinator
 from app.core.config import get_settings
 from app.core.database import engine
@@ -53,6 +53,7 @@ def create_app() -> FastAPI:
         enable_hsts=settings.cookie_secure,
     )
     application.include_router(api_router, prefix="/api/v1")
+    application.include_router(api_v2_router, prefix="/api/v2")
 
     if settings.static_root.is_dir():
         application.mount(
