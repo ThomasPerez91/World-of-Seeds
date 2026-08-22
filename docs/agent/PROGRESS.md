@@ -49,6 +49,8 @@
   `4a72074536b2496723d2fa9af5286744f64babde`.
 - V2-15 PR `#71` was merged into `develop_V2` at
   `3a611873e01de8ff156292b170b735483b1d0b0d`.
+- V2-16 PR `#72` was merged into `develop_V2` at
+  `13188b63cf5ab185233b9926282ebe018586ca2a`.
 
 ## V1 completion state
 
@@ -483,6 +485,23 @@
   V1 behavior, or `master` change is included in V2-16.
 - V2-16 is implemented on `feat/v2-torrent-manifests` from the merged V2-15 commit.
 
+## V2-17 — V2 torrent request API
+
+- Added a separate authenticated `/api/v2/torrents` contract without changing the V1 API.
+- Multipart submission validates the filename and bounded payload, removes uploaded tracker
+  credentials in memory, and never accepts a client path, owner, qB option, or account ref.
+- Each accepted new physical torrent writes its managed row, owner request, and idempotent
+  `ADD_TORRENT` job in one PostgreSQL transaction, then signals Redis only after commit.
+- A secret-free staged payload is removed if the SQL transaction fails; repeated active
+  submissions return the existing request and never create another physical torrent or job.
+- Admission applies PostgreSQL-authoritative upload/size/active limits, logical and managed
+  quotas, and a descriptor-derived disk-pressure snapshot with bounded API error codes.
+- Added an owner-filtered, bounded, paginated PostgreSQL listing. It does not query qBittorrent
+  and exposes no infohash, storage key, path, tracker URL, account reference, or secret.
+- Added durable normalized progress on `ManagedTorrent`; worker synchronization persists it
+  for the API and the upcoming interface, with an additive reversible migration.
+- V2-17 is implemented on `feat/v2-torrent-request-api` from the merged V2-16 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -608,6 +627,13 @@
 - V2-16 full backend Ruff lint/format and mypy: PASS.
 - V2-16 PostgreSQL upgrade/downgrade SQL generation, `git diff --check`, and targeted secret
   scan: PASS.
+- PR #72 (V2-16) review and GitHub CI run `32534547798`: PASS; squash-merged into
+  `develop_V2` at `13188b63cf5ab185233b9926282ebe018586ca2a`.
+- V2-17 targeted API, worker-effect, deduplication, storage, manifest, and V1 torrent tests:
+  PASS, with 1 PostgreSQL concurrency test deferred to CI.
+- V2-17 complete backend suite: PASS, 357 tests with 6 service-backed tests deferred to CI.
+- V2-17 full backend Ruff lint/format and mypy: PASS.
+- V2-17 PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
 
 ## Known constraints
 
@@ -624,6 +650,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-17 — V2 torrent request API`.
-- Do not start V2-17 until V2-16 has passed review, required CI is green, and its PR is merged
+- The next roadmap task is `V2-18 — My downloads V2 interface`.
+- Do not start V2-18 until V2-17 has passed review, required CI is green, and its PR is merged
   into `develop_V2`.
