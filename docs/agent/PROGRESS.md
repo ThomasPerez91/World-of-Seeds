@@ -656,6 +656,13 @@
 - V2-17 PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
 - PR #73 (V2-17) review and GitHub CI run `32562416237`: PASS; squash-merged into
   `develop_V2` at `a7dafce1258d822ffea073918f8d5c072fa4abdb`.
+- V2-18 focused torrent UI interaction, pagination, durable-state, ellipsis, keyboard, and axe
+  accessibility tests: PASS.
+- V2-18 complete frontend TypeScript check, Vitest suite, and production build: PASS.
+- V2-18 complete backend and container regression jobs: PASS.
+- V2-18 `git diff --check` and targeted CSP/internal-identifier scan: PASS.
+- PR #74 (V2-18) initial GitHub CI run `32562851301`: PASS; final documentation-only head is
+  validated again before merge.
 
 ## Known constraints
 
