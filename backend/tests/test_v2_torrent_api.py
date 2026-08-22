@@ -1,0 +1,188 @@
+from pathlib import Path
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth.security import hash_password
+from app.models import (
+    ManagedTorrent,
+    ManagedTorrentState,
+    TorrentJob,
+    TorrentRequest,
+    User,
+)
+from app.options import PostgresOptionsRegistry
+
+
+def _encode(value: object) -> bytes:
+    if isinstance(value, bytes):
+        return str(len(value)).encode() + b":" + value
+    if isinstance(value, int):
+        return b"i" + str(value).encode() + b"e"
+    if isinstance(value, list):
+        return b"l" + b"".join(_encode(item) for item in value) + b"e"
+    assert isinstance(value, dict)
+    return b"d" + b"".join(_encode(key) + _encode(value[key]) for key in sorted(value)) + b"e"
+
+
+def torrent_content(name: bytes = b"Film.mkv", size: int = 5) -> bytes:
+    return _encode(
+        {
+            b"announce": b"https://c411.org/announce/old-user-passkey",
+            b"info": {
+                b"length": size,
+                b"name": name,
+                b"piece length": 16_384,
+                b"pieces": b"p" * 20,
+            },
+        }
+    )
+
+
+async def prepare_user(db: AsyncSession, username: str = "thomas") -> User:
+    user = User(username=username, password_hash=hash_password("correct-horse-battery"))
+    db.add(user)
+    await PostgresOptionsRegistry().initialize(db)
+    await db.commit()
+    return user
+
+
+async def login(client: AsyncClient, username: str = "thomas") -> dict[str, str]:
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"username": username, "password": "correct-horse-battery"},
+    )
+    assert response.status_code == 200
+    token = client.cookies.get("wos_csrf")
+    assert token is not None
+    return {"X-CSRF-Token": token}
+
+
+@pytest.mark.asyncio
+async def test_v2_upload_is_durable_idempotent_and_secret_free(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    user = await prepare_user(db_session)
+    headers = await login(client)
+
+    first = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+    second = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+
+    assert first.status_code == 201, first.text
+    assert first.json()["created"] is True
+    assert first.json()["state"] == "requested"
+    assert second.status_code == 201, second.text
+    assert second.json()["created"] is False
+    assert second.json()["id"] == first.json()["id"]
+    assert await db_session.scalar(select(func.count()).select_from(ManagedTorrent)) == 1
+    assert await db_session.scalar(select(func.count()).select_from(TorrentRequest)) == 1
+    assert await db_session.scalar(select(func.count()).select_from(TorrentJob)) == 1
+    managed = await db_session.scalar(select(ManagedTorrent))
+    assert managed is not None
+    staged = data_root / "control" / "torrent-input" / f"{managed.storage_key.hex}.torrent"
+    assert staged.is_file()
+    assert b"old-user-passkey" not in staged.read_bytes()
+    assert user.id == (await db_session.scalar(select(TorrentRequest.user_id)))
+
+
+@pytest.mark.asyncio
+async def test_v2_listing_is_owned_paginated_and_database_only(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    other = User(username="alice", password_hash=hash_password("correct-horse-battery"))
+    db_session.add(other)
+    await db_session.commit()
+    first_torrent = ManagedTorrent(info_hash="a" * 40, name="Owned", total_size=100)
+    other_torrent = ManagedTorrent(info_hash="b" * 40, name="Hidden", total_size=200)
+    first_torrent.state = ManagedTorrentState.DOWNLOADING
+    first_torrent.progress = 0.42
+    db_session.add_all(
+        [
+            first_torrent,
+            other_torrent,
+            TorrentRequest(user_id=owner.id, managed_torrent=first_torrent),
+            TorrentRequest(user_id=other.id, managed_torrent=other_torrent),
+        ]
+    )
+    await db_session.commit()
+    await login(client)
+
+    response = await client.get("/api/v2/torrents?offset=0&limit=1")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["offset"] == 0
+    assert response.json()["limit"] == 1
+    assert [item["name"] for item in response.json()["items"]] == ["Owned"]
+    assert response.json()["items"][0]["progress"] == pytest.approx(0.42)
+
+
+@pytest.mark.asyncio
+async def test_v2_api_requires_authentication_csrf_and_valid_torrent(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await prepare_user(db_session)
+    unauthenticated = await client.get("/api/v2/torrents")
+    headers = await login(client)
+    no_csrf = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+    )
+    invalid = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("bad.torrent", b"invalid", "application/x-bittorrent")},
+        headers=headers,
+    )
+    wrong_name = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("bad.txt", torrent_content(), "text/plain")},
+        headers=headers,
+    )
+
+    assert unauthenticated.status_code == 401
+    assert no_csrf.status_code == 403
+    assert invalid.status_code == 422
+    assert invalid.json()["detail"]["code"] == "torrent_invalid"
+    assert wrong_name.status_code == 422
+    assert wrong_name.json()["detail"]["code"] == "torrent_filename_invalid"
+
+
+@pytest.mark.asyncio
+async def test_v2_listing_exposes_only_bounded_error_code(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    managed = ManagedTorrent(
+        info_hash="c" * 40,
+        name="Failed",
+        total_size=100,
+        state=ManagedTorrentState.ERROR,
+    )
+    request = TorrentRequest(user_id=owner.id, managed_torrent=managed)
+    db_session.add_all([managed, request])
+    await db_session.commit()
+    await login(client)
+
+    response = await client.get("/api/v2/torrents")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["state"] == "error"
+    assert response.json()["items"][0]["error_code"] == "torrent_failed"
+    assert "info_hash" not in response.json()["items"][0]
+    assert "storage" not in response.text.lower()
