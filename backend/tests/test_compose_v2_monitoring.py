@@ -30,11 +30,15 @@ def _valid_config() -> dict[str, Any]:
             "grafana": {
                 **monitoring,
                 "image": "grafana/grafana:13.2.0",
+                "networks": {"monitoring": None, "monitoring-edge": None},
                 "ports": [{"host_ip": "127.0.0.1", "target": 3000}],
                 "environment": {
                     "GF_AUTH_ANONYMOUS_ENABLED": "false",
                     "GF_SECURITY_ADMIN_USER": "admin",
                     "GF_SECURITY_ADMIN_PASSWORD": "not-a-real-secret",
+                    "GF_ANALYTICS_REPORTING_ENABLED": "false",
+                    "GF_ANALYTICS_CHECK_FOR_UPDATES": "false",
+                    "GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES": "false",
                 },
                 "volumes": [bind],
             },
@@ -52,7 +56,12 @@ def _valid_config() -> dict[str, Any]:
                 ],
             },
         },
-        "networks": {"backend": {"internal": True}, "edge": {}, "monitoring": {"internal": True}},
+        "networks": {
+            "backend": {"internal": True},
+            "edge": {},
+            "monitoring": {"internal": True},
+            "monitoring-edge": {},
+        },
     }
 
 
@@ -68,6 +77,7 @@ def test_monitoring_policy_accepts_isolated_pinned_stack() -> None:
             {"ports": [{"host_ip": "0.0.0.0", "target": 3000}]}
         ),
         lambda config: config["networks"]["monitoring"].update({"internal": False}),
+        lambda config: config["networks"]["monitoring-edge"].update({"internal": True}),
         lambda config: config["services"]["prometheus"].update({"image": "prom/prometheus:latest"}),
         lambda config: config["services"]["prometheus"].update({"command": []}),
         lambda config: config["services"]["node-exporter"].update(

@@ -28,8 +28,9 @@ scripts/local_v2.sh monitoring-smoke
 
 L'interface est ensuite disponible sur <http://127.0.0.1:28081>. Seul ce port API/frontend
 est publié sur la boucle locale. Grafana est disponible sur <http://127.0.0.1:23000> avec les
-identifiants jetables de `.env.v2.local`. PostgreSQL, Redis, qBittorrent, NewGreedy, Prometheus
-et les exporters restent sur des réseaux Compose internes.
+identifiants jetables de `.env.v2.local`. Son réseau d'accès dédié n'est partagé avec aucun
+service applicatif. PostgreSQL, Redis, qBittorrent, NewGreedy, Prometheus et les exporters restent
+sur des réseaux Compose internes.
 Le hostname Compose `api` est autorisé uniquement dans ce profil afin que Prometheus puisse
 collecter `/api/v2/metrics`; il n'est ni publié ni ajouté à la configuration de production.
 

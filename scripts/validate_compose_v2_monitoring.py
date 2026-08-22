@@ -36,9 +36,7 @@ def _mounts(service: Mapping[str, Any]) -> Sequence[object]:
 
 def validate_config(config: Mapping[str, Any]) -> None:
     if config.get("name") != "world-of-seeds-v2-local":
-        raise ComposeMonitoringPolicyError(
-            "monitoring must use the isolated local project"
-        )
+        raise ComposeMonitoringPolicyError("monitoring must use the isolated local project")
     services = _mapping(config.get("services"), "services")
     if not MONITORING_SERVICES.issubset(services):
         raise ComposeMonitoringPolicyError("monitoring service set is incomplete")
@@ -46,70 +44,71 @@ def validate_config(config: Mapping[str, Any]) -> None:
     for name, image in IMAGES.items():
         service = _mapping(services[name], f"services.{name}")
         if service.get("image") != image:
-            raise ComposeMonitoringPolicyError(
-                f"{name} must use the approved immutable tag"
-            )
+            raise ComposeMonitoringPolicyError(f"{name} must use the approved immutable tag")
         if service.get("profiles") != ["monitoring"]:
-            raise ComposeMonitoringPolicyError(
-                f"{name} must require the monitoring profile"
-            )
+            raise ComposeMonitoringPolicyError(f"{name} must require the monitoring profile")
 
     networks = _mapping(config.get("networks"), "networks")
     monitoring = _mapping(networks.get("monitoring"), "networks.monitoring")
     if monitoring.get("internal") is not True:
         raise ComposeMonitoringPolicyError("monitoring network must be internal")
+    monitoring_edge = _mapping(networks.get("monitoring-edge"), "networks.monitoring-edge")
+    if monitoring_edge.get("internal") is True:
+        raise ComposeMonitoringPolicyError("Grafana loopback access network must not be internal")
 
     prometheus = _mapping(services["prometheus"], "services.prometheus")
     if set(_mapping(prometheus.get("networks"), "prometheus.networks")) != {
         "backend",
         "monitoring",
     }:
-        raise ComposeMonitoringPolicyError(
-            "only Prometheus may bridge backend and monitoring"
-        )
+        raise ComposeMonitoringPolicyError("only Prometheus may bridge backend and monitoring")
     command = prometheus.get("command", [])
     if not isinstance(command, list) or not any(
         str(item).startswith("--storage.tsdb.retention.time=") for item in command
     ):
         raise ComposeMonitoringPolicyError("Prometheus retention must be explicit")
 
-    for name in ("grafana", "node-exporter", "cadvisor"):
+    for name in ("node-exporter", "cadvisor"):
         service = _mapping(services[name], f"services.{name}")
-        if set(_mapping(service.get("networks"), f"services.{name}.networks")) != {
-            "monitoring"
-        }:
+        if set(_mapping(service.get("networks"), f"services.{name}.networks")) != {"monitoring"}:
             raise ComposeMonitoringPolicyError(f"{name} must use only monitoring")
-        if name != "grafana" and service.get("ports"):
+        if service.get("ports"):
             raise ComposeMonitoringPolicyError(f"{name} must not publish a host port")
 
     grafana = _mapping(services["grafana"], "services.grafana")
+    if set(_mapping(grafana.get("networks"), "services.grafana.networks")) != {
+        "monitoring",
+        "monitoring-edge",
+    }:
+        raise ComposeMonitoringPolicyError("Grafana must use only its monitoring networks")
     ports = grafana.get("ports")
     if not isinstance(ports, list) or len(ports) != 1:
         raise ComposeMonitoringPolicyError("Grafana must publish exactly one port")
     port = _mapping(ports[0], "services.grafana.ports[0]")
     if port.get("host_ip") != "127.0.0.1" or port.get("target") != 3000:
-        raise ComposeMonitoringPolicyError(
-            "Grafana must bind target 3000 to host loopback"
-        )
+        raise ComposeMonitoringPolicyError("Grafana must bind target 3000 to host loopback")
     environment = _mapping(grafana.get("environment"), "grafana.environment")
     if environment.get("GF_AUTH_ANONYMOUS_ENABLED") != "false":
         raise ComposeMonitoringPolicyError("Grafana anonymous access must be disabled")
     for key in ("GF_SECURITY_ADMIN_USER", "GF_SECURITY_ADMIN_PASSWORD"):
         if not environment.get(key):
             raise ComposeMonitoringPolicyError(f"Grafana requires {key}")
+    for key in (
+        "GF_ANALYTICS_REPORTING_ENABLED",
+        "GF_ANALYTICS_CHECK_FOR_UPDATES",
+        "GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES",
+    ):
+        if environment.get(key) != "false":
+            raise ComposeMonitoringPolicyError(f"Grafana must disable {key}")
 
     for name in MONITORING_SERVICES:
         for raw_mount in _mounts(_mapping(services[name], name)):
             mount = _mapping(raw_mount, f"services.{name}.volume")
             if mount.get("type") == "bind" and mount.get("read_only") is not True:
-                raise ComposeMonitoringPolicyError(
-                    f"{name} bind mounts must be read-only"
-                )
+                raise ComposeMonitoringPolicyError(f"{name} bind mounts must be read-only")
             source = str(mount.get("source", ""))
             if name != "cadvisor" and source in {"/var/run", "/var/run/docker.sock"}:
-                raise ComposeMonitoringPolicyError(
-                    "only cAdvisor may inspect the runtime"
-                )
+                raise ComposeMonitoringPolicyError("only cAdvisor may inspect the runtime")
 
     monitoring_payload = json.dumps(
         {name: services[name] for name in MONITORING_SERVICES}, sort_keys=True
@@ -120,9 +119,7 @@ def validate_config(config: Mapping[str, Any]) -> None:
         "/downloads",
     ):
         if forbidden in monitoring_payload:
-            raise ComposeMonitoringPolicyError(
-                f"monitoring contains application data: {forbidden}"
-            )
+            raise ComposeMonitoringPolicyError(f"monitoring contains application data: {forbidden}")
 
 
 def main() -> int:
