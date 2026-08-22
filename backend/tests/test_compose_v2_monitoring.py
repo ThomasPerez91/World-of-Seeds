@@ -45,7 +45,7 @@ def _valid_config() -> dict[str, Any]:
             },
             "cadvisor": {
                 **monitoring,
-                "image": "gcr.io/cadvisor/cadvisor:v0.60.0",
+                "image": "ghcr.io/google/cadvisor:v0.60.5",
                 "privileged": True,
                 "volumes": [
                     {**bind, "source": "/var/run", "target": "/var/run"},

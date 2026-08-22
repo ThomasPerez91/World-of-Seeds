@@ -12,7 +12,7 @@ IMAGES = {
     "prometheus": "prom/prometheus:v3.14.0",
     "grafana": "grafana/grafana:13.2.0",
     "node-exporter": "prom/node-exporter:v1.12.1",
-    "cadvisor": "gcr.io/cadvisor/cadvisor:v0.60.0",
+    "cadvisor": "ghcr.io/google/cadvisor:v0.60.5",
 }
 MONITORING_SERVICES = set(IMAGES)
 

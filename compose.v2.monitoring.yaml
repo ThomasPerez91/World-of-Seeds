@@ -103,7 +103,7 @@ services:
     pids_limit: 64
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.60.0
+    image: ghcr.io/google/cadvisor:v0.60.5
     profiles: [monitoring]
     restart: unless-stopped
     privileged: true
