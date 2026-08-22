@@ -34,6 +34,20 @@ class DownloadConcurrencyError(RuntimeError):
     """The durable per-user concurrent download limit was reached."""
 
 
+def download_snapshot_id(
+    torrent_request_id: uuid.UUID,
+    manifest_checksum: str,
+    manifest_version: int,
+) -> str:
+    source = (
+        b"world-of-seeds-v2-download-snapshot\x00"
+        + torrent_request_id.bytes
+        + manifest_version.to_bytes(8, "big")
+        + manifest_checksum.encode("ascii")
+    )
+    return hashlib.sha256(source).hexdigest()
+
+
 class ManagedFileDownloader:
     def __init__(self, store: SharedContentStore) -> None:
         self._store = store

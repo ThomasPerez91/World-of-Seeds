@@ -57,6 +57,8 @@
   `7fc48c73b00e8be95c3c46dac285456070fa15b7`.
 - V2-18A PR `#75` was merged into `develop_V2` at
   `2f1787b1039c112b6aee0901ae18f816618a9b30`.
+- V2-19 PR `#76` was merged into `develop_V2` at
+  `f728471529d84ee43907101f819acba53eac65c9`.
 
 ## V1 completion state
 
@@ -570,6 +572,28 @@
 - Added focused ownership, readiness, Range/ETag, mutation, symlink, lease, and rate-limit tests.
 - V2-19 is implemented on `feat/v2-file-download-api` from the merged V2-18A commit.
 
+## V2-20 — Recursive browser download
+
+- Added an owner-only paginated download-manifest endpoint that locks the ready managed torrent
+  while building each page and derives an opaque snapshot identifier from the request UUID,
+  manifest checksum, and manifest version.
+- Every browser-managed file request presents that snapshot identifier. A changed request or
+  manifest fails with the bounded `download_snapshot_changed` contract before a lease or file is
+  opened.
+- Added the primary File System Access API workflow to the ready-download action: the browser
+  selects a local directory, safely recreates manifest subdirectories, and streams each file
+  directly without preparing a server archive or buffering the complete content.
+- Transfers use at most two concurrent HTTP streams, validate the manifest-version and resumed
+  `Content-Range` response, write incrementally, and expose aggregate byte/file progress.
+- Pause aborts current HTTP streams after retaining committed local offsets; resume reopens those
+  files with `keepExistingData` and requests only the remaining Range. Cancel aborts every active
+  stream and leaves the explicit partial local files under user control.
+- Unsupported browsers receive an explicit bounded notice. Individual-file and small-folder ZIP
+  fallbacks remain intentionally reserved for V2-21.
+- Added focused snapshot API, ownership/change, directory recreation, concurrency, Range resume,
+  React interaction, CSP, and accessibility coverage.
+- V2-20 is implemented on `feat/v2-recursive-browser-download` from the merged V2-19 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -727,6 +751,15 @@
 - V2-19 `git diff --check`: PASS. Real PostgreSQL migration rollback/re-upgrade remains required
   in PR CI; Docker is unavailable and the local Alembic package copy is corrupted in this
   disposable development environment.
+- PR #76 (V2-19) review and GitHub CI run `32565856568`: PASS; PostgreSQL migration
+  rollback/re-upgrade, backend, frontend, container, and complete local-profile smoke jobs are
+  green; squash-merged into `develop_V2` at `f728471529d84ee43907101f819acba53eac65c9`.
+- V2-20 focused snapshot/download backend tests: PASS, 8 tests.
+- V2-20 complete backend suite: PASS, 377 tests with 6 service-backed tests deferred to CI.
+- V2-20 full backend Ruff lint/format and mypy: PASS.
+- V2-20 `git diff --check`: PASS. The workspace has no installed Node dependencies, so complete
+  TypeScript, Vitest, axe, build, container, and local-profile smoke validation remains required
+  in PR CI before merge.
 
 ## Known constraints
 
@@ -743,6 +776,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-20 — Recursive browser download`.
-- Do not start V2-20 until V2-19 has passed review, required CI including PostgreSQL migration
-  rollback/re-upgrade is green, and its PR is merged into `develop_V2`.
+- The next roadmap task is `V2-21 — Compatible download fallback`.
+- Do not start V2-21 until V2-20 has passed review, required frontend and complete local-profile
+  CI is green, and its PR is merged into `develop_V2`.

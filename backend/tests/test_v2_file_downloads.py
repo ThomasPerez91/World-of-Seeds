@@ -255,3 +255,59 @@ async def test_rate_limiter_reserves_user_and_global_capacity_from_same_deadline
         per_user_bytes_per_second=100,
         global_bytes_per_second=100,
     ) == pytest.approx(2.0)
+
+
+@pytest.mark.asyncio
+async def test_download_manifest_is_owned_paginated_and_stable(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    _, _, request, torrent_file, _ = await _ready_file(db_session, data_root)
+    torrent_file_id = torrent_file.id
+    await _login(client)
+    base = f"/api/v2/torrents/{request.id}/download-manifest"
+
+    first = await client.get(base, params={"offset": 0, "limit": 1})
+    assert first.status_code == 200
+    manifest = first.json()
+    assert manifest["manifest_version"] == 1
+    assert manifest["file_count"] == 1
+    assert manifest["total_size"] == len(CONTENT)
+    assert manifest["items"] == [
+        {
+            "id": str(torrent_file_id),
+            "file_index": 0,
+            "relative_path": "folder/seed.txt",
+            "size": len(CONTENT),
+        }
+    ]
+    assert len(manifest["snapshot_id"]) == 64
+
+    replay = await client.get(base, params={"snapshot": manifest["snapshot_id"]})
+    assert replay.status_code == 200
+    assert replay.json()["snapshot_id"] == manifest["snapshot_id"]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_change_is_rejected_by_manifest_and_file_endpoints(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    _, _, request, torrent_file, _ = await _ready_file(db_session, data_root)
+    file_url = _url(request, torrent_file)
+    await _login(client)
+    manifest_url = f"/api/v2/torrents/{request.id}/download-manifest"
+
+    changed_manifest = await client.get(manifest_url, params={"snapshot": "0" * 64})
+    changed_file = await client.get(
+        file_url,
+        headers={"X-WOS-Download-Snapshot": "0" * 64},
+    )
+
+    assert changed_manifest.status_code == 409
+    assert changed_manifest.json()["detail"]["code"] == "download_snapshot_changed"
+    assert changed_file.status_code == 409
+    assert changed_file.json()["detail"]["code"] == "download_snapshot_changed"
+    assert await db_session.scalar(select(func.count()).select_from(DownloadLease)) == 0

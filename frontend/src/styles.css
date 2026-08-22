@@ -1246,6 +1246,52 @@ button:disabled {
   border-radius: 0.9rem;
 }
 
+.recursive-transfer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(8rem, 18rem) auto;
+  align-items: center;
+  gap: 0.9rem;
+  margin: 0 clamp(1rem, 4vw, 2rem) 1rem;
+  padding: 0.85rem;
+  border: 1px solid rgb(143 189 130 / 25%);
+  border-radius: 0.85rem;
+  background: rgb(143 189 130 / 6%);
+}
+
+.recursive-transfer > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.recursive-transfer > div:first-child strong,
+.recursive-transfer > div:first-child span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recursive-transfer > div:first-child span {
+  color: #91a097;
+  font-size: 0.65rem;
+}
+
+.recursive-transfer progress {
+  width: 100%;
+}
+
+.recursive-transfer-actions {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.recursive-transfer-actions button {
+  width: auto;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.65rem;
+}
+
 .torrent-table {
   width: 100%;
   min-width: 54rem;
@@ -3632,6 +3678,14 @@ select:focus-visible {
   .torrent-pagination {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .recursive-transfer {
+    grid-template-columns: 1fr;
+  }
+
+  .recursive-transfer-actions button {
+    flex: 1 1 0;
   }
 
   .torrent-pagination button {
