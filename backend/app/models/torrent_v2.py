@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -141,6 +142,10 @@ class ManagedTorrent(Base):
         ),
         CheckConstraint("total_size >= 0", name="ck_managed_torrents_total_size"),
         CheckConstraint(
+            "progress >= 0 AND progress <= 1",
+            name="ck_managed_torrents_progress",
+        ),
+        CheckConstraint(
             "desired_download_limit >= 0 AND schedule_generation >= 0",
             name="ck_managed_torrents_schedule_values",
         ),
@@ -190,6 +195,7 @@ class ManagedTorrent(Base):
         nullable=False,
     )
     qb_state: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    progress: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     tracker_account_ref: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     qbittorrent_account_ref: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), nullable=True
