@@ -4,7 +4,17 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Literal, Never, cast
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
@@ -17,11 +27,18 @@ from app.auth.dependencies import (
 )
 from app.coordination.dependencies import RedisCoordinatorDependency
 from app.core.config import Settings, get_settings
+from app.files.downloads import (
+    ByteRange,
+    RangeNotSatisfiableError,
+    if_range_matches,
+    parse_range_header,
+)
 from app.jobs.torrent_effects import ADD_TORRENT_JOB
 from app.jobs.torrent_payloads import TorrentPayloadStore, TorrentPayloadStoreError
 from app.models import (
     ManagedTorrent,
     ManagedTorrentState,
+    TorrentFile,
     TorrentJob,
     TorrentJobState,
     TorrentRequest,
@@ -47,6 +64,14 @@ from app.torrents import (
     create_or_get_torrent_request,
     sanitize_torrent,
 )
+from app.torrents.downloads import (
+    DownloadConcurrencyError,
+    DownloadLeaseManager,
+    DownloadRateLimiter,
+    ManagedDownloadError,
+    ManagedDownloadStreamingResponse,
+    ManagedFileDownloader,
+)
 
 router = APIRouter()
 UPLOAD_READ_CHUNK = 64 * 1024
@@ -58,6 +83,13 @@ ACTIVE_REQUEST_STATES = (
 )
 RequestState = Literal["requested", "active", "ready", "cancelled", "expired", "error"]
 PressureState = Literal["normal", "warning", "critical"]
+
+
+def _download_rate_limiter(request: Request) -> DownloadRateLimiter:
+    limiter = request.app.state.download_rate_limiter
+    if not isinstance(limiter, DownloadRateLimiter):
+        raise RuntimeError("download rate limiter is unavailable")
+    return limiter
 
 
 def _detail(code: str, message: str, field: str | None = None) -> dict[str, str | None]:
@@ -112,6 +144,171 @@ def _response(
         error_code=(error_code or "torrent_failed") if state == "error" else None,
         created_at=request.created_at,
         updated_at=max(request.updated_at, torrent.updated_at),
+    )
+
+
+@router.get(
+    "/{torrent_request_id}/files/{torrent_file_id}/download",
+    response_model=None,
+    operation_id="download_v2_torrent_file",
+)
+@router.head(
+    "/{torrent_request_id}/files/{torrent_file_id}/download",
+    response_model=None,
+    operation_id="head_v2_torrent_file",
+)
+async def download_torrent_file(
+    request: Request,
+    db: DbSession,
+    settings: Annotated[Settings, Depends(get_settings)],
+    context: Annotated[AuthContext, Depends(require_current_credentials)],
+    torrent_request_id: uuid.UUID,
+    torrent_file_id: uuid.UUID,
+) -> Response:
+    owner_id = context.user.id
+    row = (
+        await db.execute(
+            select(TorrentRequest, ManagedTorrent, TorrentFile)
+            .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
+            .join(TorrentFile, TorrentFile.managed_torrent_id == ManagedTorrent.id)
+            .where(
+                TorrentRequest.id == torrent_request_id,
+                TorrentRequest.user_id == owner_id,
+                TorrentRequest.state == TorrentRequestState.READY,
+                ManagedTorrent.state == ManagedTorrentState.READY,
+                TorrentFile.id == torrent_file_id,
+            )
+        )
+    ).one_or_none()
+    if row is None:
+        await db.rollback()
+        _fail(status.HTTP_404_NOT_FOUND, "torrent_file_not_found", "Ce fichier est indisponible.")
+    torrent_request, managed_torrent, torrent_file = row
+    if managed_torrent.manifest_version < 1 or managed_torrent.manifest_checksum is None:
+        await db.rollback()
+        _fail(
+            status.HTTP_409_CONFLICT,
+            "torrent_manifest_unavailable",
+            "Le manifeste du téléchargement est indisponible.",
+        )
+    managed_torrent_id = managed_torrent.id
+    torrent_request_id = torrent_request.id
+    torrent_file_id = torrent_file.id
+    storage_key = managed_torrent.storage_key
+    relative_path = torrent_file.relative_path
+    file_size = torrent_file.size
+    file_index = torrent_file.file_index
+    manifest_checksum = managed_torrent.manifest_checksum
+    manifest_version = managed_torrent.manifest_version
+    try:
+        options = await PostgresOptionsRegistry().snapshot(db)
+        chunk_size = _integer_option(options, "WOS_HTTP_STREAM_CHUNK_BYTES")
+        lease_seconds = _integer_option(options, "WOS_DOWNLOAD_LEASE_SECONDS")
+        max_concurrent = _integer_option(options, "WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER")
+        per_user_rate = _integer_option(
+            options,
+            "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
+        )
+        global_rate = _integer_option(options, "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL")
+    except (DatabaseOptionsDriftError, ValueError):
+        await db.rollback()
+        _fail(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "download_options_unavailable",
+            "Le téléchargement est momentanément indisponible.",
+        )
+    await db.rollback()
+
+    leases = DownloadLeaseManager(db, lease_seconds=lease_seconds)
+    lease = None
+    if request.method != "HEAD":
+        try:
+            lease = await leases.acquire(
+                user_id=owner_id,
+                managed_torrent_id=managed_torrent_id,
+                torrent_request_id=torrent_request_id,
+                torrent_file_id=torrent_file_id,
+                max_concurrent=max_concurrent,
+            )
+        except DownloadConcurrencyError:
+            _fail(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                "download_concurrency_reached",
+                "Trop de téléchargements sont déjà actifs.",
+            )
+
+    try:
+        download = await run_in_threadpool(
+            ManagedFileDownloader(SharedContentStore(settings.data_root)).open,
+            storage_key,
+            relative_path,
+            expected_size=file_size,
+            manifest_checksum=manifest_checksum,
+            manifest_version=manifest_version,
+            file_index=file_index,
+        )
+    except (ManagedDownloadError, SharedContentStoreError):
+        if lease is not None:
+            await leases.release(lease.id)
+        _fail(
+            status.HTTP_409_CONFLICT,
+            "torrent_file_changed",
+            "Le fichier ne correspond plus au manifeste.",
+        )
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "private, no-cache",
+        "Content-Disposition": download.content_disposition,
+        "Content-Type": download.media_type,
+        "ETag": download.etag,
+        "Last-Modified": download.last_modified,
+        "X-WOS-Manifest-Version": str(manifest_version),
+    }
+    selected_range: ByteRange | None = None
+    range_header = request.headers.get("range")
+    if range_header is not None and if_range_matches(request.headers.get("if-range"), download):
+        try:
+            selected_range = parse_range_header(range_header, download.size)
+        except RangeNotSatisfiableError:
+            download.close()
+            if lease is not None:
+                await leases.release(lease.id)
+            headers.update({"Content-Length": "0", "Content-Range": f"bytes */{download.size}"})
+            return Response(
+                status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
+                headers=headers,
+            )
+
+    if selected_range is None:
+        response_status = status.HTTP_200_OK
+        start = 0
+        length = download.size
+    else:
+        response_status = status.HTTP_206_PARTIAL_CONTENT
+        start = selected_range.start
+        length = selected_range.length
+        headers["Content-Range"] = (
+            f"bytes {selected_range.start}-{selected_range.end}/{download.size}"
+        )
+    headers["Content-Length"] = str(length)
+    if request.method == "HEAD":
+        download.close()
+        return Response(status_code=response_status, headers=headers)
+    assert lease is not None
+    return ManagedDownloadStreamingResponse(
+        download,
+        start=start,
+        length=length,
+        status_code=response_status,
+        headers=headers,
+        chunk_size=chunk_size,
+        user_id=owner_id,
+        lease=lease,
+        leases=leases,
+        limiter=_download_rate_limiter(request),
+        per_user_bytes_per_second=per_user_rate,
+        global_bytes_per_second=global_rate,
     )
 
 

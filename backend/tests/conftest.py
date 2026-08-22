@@ -18,6 +18,7 @@ from app.integrations.wos_restart import WosRestartStore
 from app.main import app
 from app.models import Base
 from app.options import OptionsStore
+from app.torrents.downloads import DownloadRateLimiter
 
 
 @pytest.fixture
@@ -71,6 +72,7 @@ async def client(db_session: AsyncSession, data_root: Path) -> AsyncIterator[Asy
         status_owner_uid=os.geteuid(),
     )
     app.state.options_store = OptionsStore(test_settings.data_root)
+    app.state.download_rate_limiter = DownloadRateLimiter()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as test_client:
         yield test_client

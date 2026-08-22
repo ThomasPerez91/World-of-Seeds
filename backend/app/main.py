@@ -16,6 +16,7 @@ from app.integrations.newgreedy_config import NewGreedyConfigStore
 from app.integrations.newgreedy_restart import NewGreedyRestartStore
 from app.integrations.wos_restart import WosRestartStore
 from app.options import OptionsStore
+from app.torrents.downloads import DownloadRateLimiter
 
 
 @asynccontextmanager
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
     application.state.newgreedy_restart_store = NewGreedyRestartStore(settings.data_root)
     application.state.wos_restart_store = WosRestartStore(settings.data_root)
     application.state.options_store = OptionsStore(settings.data_root)
+    application.state.download_rate_limiter = DownloadRateLimiter()
     application.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     application.add_middleware(
         SecurityHeadersMiddleware,
