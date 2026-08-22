@@ -69,6 +69,8 @@
   `145d0d3b2fd4df4536e16107f8c2511804faa7f8`.
 - V2-24 PR `#81` was merged into `develop_V2` at
   `129dcce13feb120ceb6ddac9cdbc93f3fb162ccb`.
+- V2-25 PR `#82` was merged into `develop_V2` at
+  `13e8e43b2c40c245ca111b4b573872f7c1cdebbf`.
 
 ## V1 completion state
 
@@ -696,6 +698,23 @@
   accessibility regression coverage.
 - V2-25 is implemented on `feat/v2-central-admin` from the merged V2-24 commit.
 
+## V2-26 — Administrative reconciliation
+
+- Added an admin-only bounded reconciliation report across PostgreSQL managed torrents, the
+  qBittorrent inventory, and opaque top-level shared-content directories.
+- qB inventory is capped at 200 records and classifies WOS identity from category, save path, and
+  opaque tags. External torrents are counted and reported read-only; no control/delete method is
+  reachable from the reconciliation path.
+- Shared storage inventory opens the content root by descriptor, never follows symlinks, never
+  descends recursively, and reports unsafe entries or truncation instead of mutating them.
+- Classified missing qB/storage content, identity mismatch, orphan WOS qB records, orphan storage,
+  unavailable integrations, and unsafe entries with bounded severity and action codes.
+- Added the report to the admin storage screen with explicit external read-only wording and a
+  visible truncation notice.
+- Added focused authorization, degradation, mismatch, external-read-only, symlink, bounds, React,
+  CSP, and accessibility coverage.
+- V2-26 is implemented on `feat/v2-admin-reconciliation` from the merged V2-25 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -902,6 +921,13 @@
   React tests, production build, and `git diff --check`: PASS.
 - V2-25 complete backend/frontend/container and local-profile smoke validation remain required in
   PR CI before merge.
+- PR #82 (V2-25) GitHub CI run `32570408433`: PASS; backend, frontend, container, migrations, and
+  complete local-profile smoke are green; squash-merged into `develop_V2` at
+  `13e8e43b2c40c245ca111b4b573872f7c1cdebbf`.
+- V2-26 targeted reconciliation/qB/shared-storage/admin backend tests, Ruff lint/format, mypy,
+  TypeScript, React/axe tests, production build, and `git diff --check`: PASS.
+- V2-26 complete backend/frontend/container and local-profile smoke validation remain required in
+  PR CI before merge.
 
 ## Known constraints
 
@@ -918,6 +944,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-26 — Administrative reconciliation`.
-- Do not start V2-26 until V2-25 has passed review, complete CI and the local-profile smoke are
+- The next roadmap task is `V2-27 — Application metrics`.
+- Do not start V2-27 until V2-26 has passed review, complete CI and the local-profile smoke are
   green, and its PR is merged into `develop_V2`.

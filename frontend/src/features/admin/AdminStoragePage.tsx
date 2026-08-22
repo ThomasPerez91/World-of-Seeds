@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 
-import { api, ApiError, type AdminStorageOverview } from "../../api/client";
+import {
+  api,
+  ApiError,
+  type AdminReconciliationReport,
+  type AdminStorageOverview,
+} from "../../api/client";
 import { formatBytes } from "../../utils/format";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 
@@ -14,6 +19,7 @@ export function AdminStoragePage({
   onSessionExpired: () => void;
 }) {
   const [overview, setOverview] = useState<AdminStorageOverview | null>(null);
+  const [reconciliation, setReconciliation] = useState<AdminReconciliationReport | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
@@ -22,10 +28,12 @@ export function AdminStoragePage({
     let active = true;
     setLoading(true);
     setError("");
-    void api
-      .getAdminStorage()
-      .then((result) => {
-        if (active) setOverview(result);
+    void Promise.all([api.getAdminStorage(), api.getAdminReconciliation()])
+      .then(([storage, report]) => {
+        if (active) {
+          setOverview(storage);
+          setReconciliation(report);
+        }
       })
       .catch((caught: unknown) => {
         if (!active) return;
@@ -123,6 +131,37 @@ export function AdminStoragePage({
               récursivement afin de préserver les performances du serveur.
             </p>
           </>
+        )}
+        {reconciliation !== null && (
+          <section className="reconciliation-panel" aria-labelledby="reconciliation-title">
+            <div>
+              <h3 id="reconciliation-title">Réconciliation V2</h3>
+              <p>
+                {reconciliation.database_scanned} DB · {reconciliation.qbittorrent_scanned} qB ·{" "}
+                {reconciliation.storage_scanned} stockage
+              </p>
+            </div>
+            <p>
+              {reconciliation.external_torrents} torrent
+              {reconciliation.external_torrents > 1 ? "s externes observés" : " externe observé"}
+              , toujours en lecture seule.
+            </p>
+            {reconciliation.anomalies.length === 0 ? (
+              <strong className="reconciliation-ok">Aucune anomalie détectée.</strong>
+            ) : (
+              <ul>
+                {reconciliation.anomalies.map((anomaly, index) => (
+                  <li className={anomaly.severity} key={`${anomaly.code}-${anomaly.resource_id}-${index}`}>
+                    <strong>{anomaly.code}</strong>
+                    <span>{anomaly.action === "none" ? "Aucune action" : anomaly.action}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {reconciliation.truncated && (
+              <p className="truncated-notice">Inventaire borné : relancer par lots pour poursuivre.</p>
+            )}
+          </section>
         )}
       </section>
     </AdminPageShell>
