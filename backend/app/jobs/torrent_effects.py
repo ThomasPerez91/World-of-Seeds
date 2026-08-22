@@ -303,6 +303,7 @@ class TorrentEffectHandlers:
                 return
             torrent.state = state
             torrent.qb_state = safe_qb_state
+            torrent.progress = snapshot.progress
             torrent.retry_at = None
             torrent.updated_at = now
             requests = list(
