@@ -33,6 +33,10 @@ def _valid_config() -> dict[str, Any]:
                 **wos,
                 "networks": {"backend": None, "edge": None},
                 "ports": [{"host_ip": "127.0.0.1", "target": 8000}],
+                "environment": {
+                    **environment,
+                    "WOS_ALLOWED_HOSTS": '["127.0.0.1","localhost","api"]',
+                },
             },
             "worker": {**wos, "command": ["python", "-m", "app.worker"]},
             "scheduler": {
@@ -73,6 +77,9 @@ def test_local_compose_policy_accepts_complete_private_stack() -> None:
         lambda config: config["services"]["worker"].update({"user": "1000:1000"}),
         lambda config: config["services"]["api"].update(
             {"volumes": [{"type": "bind", "source": "/srv/wos", "target": "/data"}]}
+        ),
+        lambda config: config["services"]["api"]["environment"].update(
+            {"WOS_ALLOWED_HOSTS": '["127.0.0.1","localhost","api","public.example"]'}
         ),
         lambda config: config["services"]["qbittorrent"].update(
             {"image": "qbittorrentofficial/qbittorrent-nox:latest"}
