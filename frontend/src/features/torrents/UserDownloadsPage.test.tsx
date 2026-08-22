@@ -3,10 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { auditAccessibility } from "../../test/accessibility";
+import { FeedbackProvider } from "../../components/Feedback";
 import { UserDownloadsPage } from "./UserDownloadsPage";
 
 function response(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
+  return new Response(status === 204 ? null : JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
   });
@@ -24,6 +25,14 @@ function torrent(overrides: Record<string, unknown> = {}) {
     updated_at: "2026-08-20T10:05:00Z",
     ...overrides,
   };
+}
+
+function renderPage() {
+  return render(
+    <FeedbackProvider>
+      <UserDownloadsPage onSessionExpired={vi.fn()} />
+    </FeedbackProvider>,
+  );
 }
 
 describe("UserDownloadsPage", () => {
@@ -71,7 +80,7 @@ describe("UserDownloadsPage", () => {
         });
       }),
     );
-    const view = render(<UserDownloadsPage onSessionExpired={vi.fn()} />);
+    const view = renderPage();
 
     await user.click(await screen.findByRole("button", { name: "Télécharger" }));
 
@@ -106,7 +115,7 @@ describe("UserDownloadsPage", () => {
         });
       }),
     );
-    const view = render(<UserDownloadsPage onSessionExpired={vi.fn()} />);
+    const view = renderPage();
 
     await user.click(await screen.findByRole("button", { name: "Télécharger" }));
 
@@ -146,7 +155,7 @@ describe("UserDownloadsPage", () => {
         });
       }),
     );
-    const view = render(<UserDownloadsPage onSessionExpired={vi.fn()} />);
+    const view = renderPage();
     await screen.findByText("Aucun téléchargement pour le moment.");
 
     const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
@@ -190,7 +199,7 @@ describe("UserDownloadsPage", () => {
         });
       }),
     );
-    const view = render(<UserDownloadsPage onSessionExpired={vi.fn()} />);
+    const view = renderPage();
 
     expect(await screen.findByTitle(longName)).toBeTruthy();
     expect(view.container.querySelector(".torrent-name-cell > span")).toBeTruthy();
@@ -221,7 +230,7 @@ describe("UserDownloadsPage", () => {
             }),
       ),
     );
-    const view = render(<UserDownloadsPage onSessionExpired={vi.fn()} />);
+    const view = renderPage();
     const zone = screen.getByTestId("torrent-drop-zone");
     const selectButton = screen.getByRole("button", { name: "Ajouter un torrent" });
     selectButton.focus();
@@ -235,5 +244,43 @@ describe("UserDownloadsPage", () => {
     await waitFor(() => expect(screen.getByText(new RegExp(longName))).toBeTruthy());
     expect(await screen.findByText("Erreur")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("intervention");
+  });
+
+  it("confirme et annule une demande via l’API V2", async () => {
+    const user = userEvent.setup();
+    let cancelled = false;
+    const calls: Array<{ method: string; url: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        calls.push({ method, url });
+        if (method === "DELETE") {
+          cancelled = true;
+          return response(null, 204);
+        }
+        return response({
+          items: [torrent({ state: cancelled ? "cancelled" : "active" })],
+          offset: 0,
+          limit: 10,
+          total: 1,
+        });
+      }),
+    );
+    const view = renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Annuler la demande Film.mkv" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Annuler" }));
+    expect(await auditAccessibility(document.body)).toMatchObject({ violations: [] });
+    await user.click(screen.getByRole("button", { name: "Annuler la demande" }));
+
+    expect(await screen.findByText("La demande « Film.mkv » a été annulée.")).toBeTruthy();
+    expect(await screen.findByText("Annulé")).toBeTruthy();
+    expect(calls).toContainEqual({
+      method: "DELETE",
+      url: "/api/v2/torrents/d86528f5-bc01-4a8b-86a1-74fe3404864b",
+    });
+    expect(view.container.querySelector("[style]")).toBeNull();
   });
 });

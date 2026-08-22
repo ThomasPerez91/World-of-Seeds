@@ -19,7 +19,7 @@ import {
   RenameIcon,
   VideoFileIcon,
 } from "../../components/icons";
-import { showOperationError, showOperationSuccess } from "../../components/alerts";
+import { useFeedback } from "../../components/Feedback";
 import { formatBytes } from "../../utils/format";
 import { splitDisplayName } from "../../utils/files";
 import {
@@ -41,6 +41,7 @@ function CreateFolderDialog({
   onCompleted: (message: string) => void;
   onSessionExpired: () => void;
 }) {
+  const feedback = useFeedback();
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -55,11 +56,13 @@ function CreateFolderDialog({
         onSessionExpired();
         return;
       }
-      await showOperationError(
-        caught instanceof ApiError && caught.status === 409
-          ? "Un élément porte déjà ce nom dans ce dossier."
-          : "Le dossier n’a pas pu être créé.",
-      );
+      feedback.toast({
+        tone: "error",
+        message:
+          caught instanceof ApiError && caught.status === 409
+            ? "Un élément porte déjà ce nom dans ce dossier."
+            : "Le dossier n’a pas pu être créé.",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -168,6 +171,7 @@ export function FileBrowser({
   onStorageChanged: (storage: StorageUsage) => void;
   revision: number;
 }) {
+  const feedback = useFeedback();
   const [path, setPath] = useState(initialPath);
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(true);
@@ -220,7 +224,7 @@ export function FileBrowser({
 
   function completeMutation(message: string) {
     setMutation(null);
-    void showOperationSuccess(message);
+    feedback.toast({ tone: "success", message });
     setReloadKey((value) => value + 1);
     onFilesChanged();
   }

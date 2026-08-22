@@ -7,7 +7,8 @@ import {
   type TorrentRequestV2State,
   type TorrentDownloadSnapshotV2,
 } from "../../api/client";
-import { DownloadIcon, RefreshIcon } from "../../components/icons";
+import { useFeedback } from "../../components/Feedback";
+import { DeleteIcon, DownloadIcon, RefreshIcon } from "../../components/icons";
 import { Notice, type NoticeTone } from "../../components/Notice";
 import { formatBytes } from "../../utils/format";
 import {
@@ -50,11 +51,15 @@ function TorrentRow({
   torrent,
   onRefresh,
   onDownload,
+  onCancel,
+  cancelBusy,
   downloadBusy,
 }: {
   torrent: TorrentRequestV2;
   onRefresh: () => void;
   onDownload: () => void;
+  onCancel: () => void;
+  cancelBusy: boolean;
   downloadBusy: boolean;
 }) {
   const percent = Math.round(torrent.progress * 100);
@@ -83,23 +88,38 @@ function TorrentRow({
       </td>
       <td className="torrent-date-cell">{formatDate(torrent.updated_at)}</td>
       <td className="torrent-row-actions">
-        {torrent.state === "ready" ? (
-          <button type="button" disabled={downloadBusy} onClick={onDownload}>
-            <DownloadIcon />
-            <span>Télécharger</span>
-          </button>
-        ) : (
-          <button type="button" className="secondary-button" onClick={onRefresh}>
-            <RefreshIcon />
-            <span>Actualiser</span>
-          </button>
-        )}
+        <div className="torrent-row-action-group">
+          {torrent.state === "ready" ? (
+            <button type="button" disabled={downloadBusy} onClick={onDownload}>
+              <DownloadIcon />
+              <span>Télécharger</span>
+            </button>
+          ) : (
+            <button type="button" className="secondary-button" onClick={onRefresh}>
+              <RefreshIcon />
+              <span>Actualiser</span>
+            </button>
+          )}
+          {!(["cancelled", "expired"] as TorrentRequestV2State[]).includes(torrent.state) && (
+            <button
+              type="button"
+              className="danger-button"
+              disabled={cancelBusy}
+              onClick={onCancel}
+              aria-label={`Annuler la demande ${torrent.name}`}
+            >
+              <DeleteIcon />
+              <span>{cancelBusy ? "Annulation…" : "Annuler"}</span>
+            </button>
+          )}
+        </div>
       </td>
     </tr>
   );
 }
 
 export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () => void }) {
+  const feedback = useFeedback();
   const inputRef = useRef<HTMLInputElement>(null);
   const [torrents, setTorrents] = useState<TorrentRequestV2[]>([]);
   const [total, setTotal] = useState(0);
@@ -108,6 +128,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
   const [refreshing, setRefreshing] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ message: string; tone: NoticeTone } | null>(null);
   const controllerRef = useRef<RecursiveDownloadController | null>(null);
   const [transfer, setTransfer] = useState<(
@@ -267,6 +288,37 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
   function cancelTransfer() {
     controllerRef.current?.cancel();
     controllerRef.current = null;
+  }
+
+  async function cancelTorrentRequest(torrent: TorrentRequestV2) {
+    const confirmed = await feedback.confirm({
+      title: "Annuler cette demande ?",
+      message: `« ${torrent.name} » disparaîtra de tes téléchargements actifs. Le contenu partagé sera conservé pendant la rétention prévue.`,
+      confirmText: "Annuler la demande",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    setCancellingId(torrent.id);
+    try {
+      await api.cancelTorrentRequestV2(torrent.id);
+      feedback.toast({
+        tone: "success",
+        message: `La demande « ${torrent.name} » a été annulée.`,
+      });
+      if (fallback?.torrentId === torrent.id) setFallback(null);
+      await load(offset);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      feedback.toast({
+        tone: "error",
+        message: caught instanceof ApiError ? caught.message : "La demande n’a pas pu être annulée.",
+      });
+    } finally {
+      setCancellingId(null);
+    }
   }
 
   const page = Math.floor(offset / PAGE_SIZE) + 1;
@@ -458,6 +510,8 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
                     torrent={torrent}
                     onRefresh={() => void load(offset)}
                     onDownload={() => void startRecursiveDownload(torrent)}
+                    onCancel={() => void cancelTorrentRequest(torrent)}
+                    cancelBusy={cancellingId === torrent.id}
                     downloadBusy={transfer?.status === "running" || transfer?.status === "paused"}
                   />
                 ))}
