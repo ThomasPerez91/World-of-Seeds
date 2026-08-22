@@ -53,6 +53,8 @@
   `13188b63cf5ab185233b9926282ebe018586ca2a`.
 - V2-17 PR `#73` was merged into `develop_V2` at
   `a7dafce1258d822ffea073918f8d5c072fa4abdb`.
+- V2-18 PR `#74` was merged into `develop_V2` at
+  `7fc48c73b00e8be95c3c46dac285456070fa15b7`.
 
 ## V1 completion state
 
@@ -522,6 +524,31 @@
   accessibility regression coverage.
 - V2-18 is implemented on `feat/v2-my-downloads-ui` from the merged V2-17 commit.
 
+## V2-18A — Reproducible local macOS validation
+
+- Added a complete developer Compose override with API/frontend, durable worker, scheduler,
+  PostgreSQL, Redis, pinned multi-architecture qBittorrent, and a development-only controlled
+  NewGreedy health fixture.
+- The local profile uses the isolated `world-of-seeds-v2-local` project, private backend
+  network, and four named volumes. Only the API/frontend port is published to host loopback;
+  it has no `/srv` bind mount, Docker socket, host UID/GID, or forced architecture.
+- API startup applies Alembic migrations idempotently. A development-only seed helper creates
+  or rotates a disposable non-administrator account and initializes PostgreSQL-authoritative
+  V2 options without versioning a real identity or credential.
+- Added a single launcher for validated build/start, status, smoke, and project-scoped cleanup.
+  Cleanup removes only local V2 containers, networks, and volumes.
+- Added an end-to-end smoke scenario that stops the worker, uploads a generated C411 fixture,
+  proves the durable queued job, resumes processing, verifies the authenticated API/UI state,
+  exact qB infohash presence, applied scheduler generation, and no duplicate add after worker
+  restart.
+- Added a normalized Compose policy validator with regression tests for the service set,
+  loopback/private exposure, fixed container identity, named storage, multi-arch qB pin, and
+  forbidden bind/socket paths.
+- Added the macOS clean-clone guide and explicit Docker Desktop checklist for Apple Silicon
+  `arm64` and Intel `amd64`; those two host checks remain manual while Linux CI runs the same
+  profile and smoke scenario.
+- V2-18A is implemented on `feat/v2-local-macos-validation` from the merged V2-18 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -662,7 +689,16 @@
 - V2-18 complete backend and container regression jobs: PASS.
 - V2-18 `git diff --check` and targeted CSP/internal-identifier scan: PASS.
 - PR #74 (V2-18) initial GitHub CI run `32562851301`: PASS; final documentation-only head is
-  validated again before merge.
+  validated by run `32562947647`: PASS; squash-merged into `develop_V2` at
+  `7fc48c73b00e8be95c3c46dac285456070fa15b7`.
+- V2-18A targeted Compose-policy, development-helper, foundation-regression, and generated
+  torrent-fixture tests: PASS.
+- V2-18A complete backend suite: PASS, 369 tests with 6 service-backed tests deferred to CI.
+- V2-18A full backend Ruff lint/format and mypy: PASS.
+- V2-18A shell/Python/YAML syntax and `git diff --check`: PASS.
+- Docker is unavailable in the development environment; normalized Compose validation,
+  complete Linux startup/smoke, and the unchanged frontend suite/build are required in PR CI
+  before merge.
 
 ## Known constraints
 
@@ -674,11 +710,11 @@
   remain recoverable.
 - Secrets and complete tracker URLs must never reach logs, metrics, options, DB business
   rows, browser responses, or agent documents.
-- The current V2 Compose remains a foundation stack; the runnable end-to-end macOS developer
-  profile is planned explicitly in V2-18A and must not reuse Rise2 or V1 secrets/data.
+- The base V2 Compose remains a foundation stack. The separate runnable local profile uses
+  only disposable local data and must not reuse Rise2 or V1 secrets/data.
 
 ## Next task
 
-- The next roadmap task is `V2-18A — Reproducible local macOS validation`.
-- Do not start V2-18A until V2-18 has passed review, required CI is green, and its PR is merged
-  into `develop_V2`.
+- The next roadmap task is `V2-19 — Per-file download API`.
+- Do not start V2-19 until V2-18A has passed review, required CI including the complete local
+  Linux smoke is green, and its PR is merged into `develop_V2`.
