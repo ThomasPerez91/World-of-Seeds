@@ -232,6 +232,11 @@ class ManagedTorrent(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    download_leases: Mapped[list[DownloadLease]] = relationship(
+        back_populates="managed_torrent",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class SchedulerState(Base):
@@ -371,6 +376,42 @@ class TorrentFile(Base):
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     managed_torrent: Mapped[ManagedTorrent] = relationship(back_populates="files")
+
+
+class DownloadLease(Base):
+    __tablename__ = "download_leases"
+    __table_args__ = (
+        Index("ix_download_leases_user_expiry", "user_id", "expires_at"),
+        Index("ix_download_leases_torrent_expiry", "managed_torrent_id", "expires_at"),
+        Index("ix_download_leases_request", "torrent_request_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    managed_torrent_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("managed_torrents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    torrent_request_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("torrent_requests.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    torrent_file_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("torrent_files.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    renewed_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+    managed_torrent: Mapped[ManagedTorrent] = relationship(back_populates="download_leases")
 
 
 class TrackerActivity(Base):

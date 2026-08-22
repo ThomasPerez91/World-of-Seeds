@@ -55,6 +55,8 @@
   `a7dafce1258d822ffea073918f8d5c072fa4abdb`.
 - V2-18 PR `#74` was merged into `develop_V2` at
   `7fc48c73b00e8be95c3c46dac285456070fa15b7`.
+- V2-18A PR `#75` was merged into `develop_V2` at
+  `2f1787b1039c112b6aee0901ae18f816618a9b30`.
 
 ## V1 completion state
 
@@ -549,6 +551,25 @@
   profile and smoke scenario.
 - V2-18A is implemented on `feat/v2-local-macos-validation` from the merged V2-18 commit.
 
+## V2-19 — Per-file download API
+
+- Added authenticated owner-only `GET` and `HEAD` download endpoints addressed exclusively by
+  the durable request and manifest-file UUIDs; no client path, storage key, infohash, or qB
+  identifier is accepted or exposed.
+- A file is downloadable only while both its owner request and managed torrent are `READY`, with
+  the persisted manifest version/checksum and file size treated as authoritative.
+- Physical traversal starts from the opaque shared-content descriptor and opens every component
+  with no-follow semantics. Missing, resized, non-regular, or symlinked content fails closed.
+- Added strong manifest-derived ETags, `Last-Modified`, `If-Range`, single HTTP byte ranges,
+  `HEAD`, safe content disposition, bounded chunks, and explicit `416` responses.
+- Added durable SQL `DownloadLease` rows with transactional per-user concurrency enforcement,
+  expired-lease reclamation, periodic renewal during slow/back-pressured streams, and guaranteed
+  release on completion, disconnect, invalid range, or open failure.
+- Added configurable per-user/global byte pacing using the existing PostgreSQL-authoritative
+  download options. The limiter is process-local, matching the single-API-process V2 topology.
+- Added focused ownership, readiness, Range/ETag, mutation, symlink, lease, and rate-limit tests.
+- V2-19 is implemented on `feat/v2-file-download-api` from the merged V2-18A commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -696,9 +717,16 @@
 - V2-18A complete backend suite: PASS, 369 tests with 6 service-backed tests deferred to CI.
 - V2-18A full backend Ruff lint/format and mypy: PASS.
 - V2-18A shell/Python/YAML syntax and `git diff --check`: PASS.
-- Docker is unavailable in the development environment; normalized Compose validation,
-  complete Linux startup/smoke, and the unchanged frontend suite/build are required in PR CI
-  before merge.
+- PR #75 (V2-18A) review and GitHub CI run `32564395448`: PASS; complete Linux local-profile
+  startup/smoke, backend, frontend, migrations, and container jobs are green; squash-merged into
+  `develop_V2` at `2f1787b1039c112b6aee0901ae18f816618a9b30`.
+- V2-19 focused download ownership/readiness, Range/ETag, mutation, symlink, lease, and rate-limit
+  tests: PASS, 6 tests.
+- V2-19 complete backend suite: PASS, 375 tests with 6 service-backed tests deferred to CI.
+- V2-19 full backend Ruff lint/format and mypy: PASS.
+- V2-19 `git diff --check`: PASS. Real PostgreSQL migration rollback/re-upgrade remains required
+  in PR CI; Docker is unavailable and the local Alembic package copy is corrupted in this
+  disposable development environment.
 
 ## Known constraints
 
@@ -715,6 +743,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-19 — Per-file download API`.
-- Do not start V2-19 until V2-18A has passed review, required CI including the complete local
-  Linux smoke is green, and its PR is merged into `develop_V2`.
+- The next roadmap task is `V2-20 — Recursive browser download`.
+- Do not start V2-20 until V2-19 has passed review, required CI including PostgreSQL migration
+  rollback/re-upgrade is green, and its PR is merged into `develop_V2`.
