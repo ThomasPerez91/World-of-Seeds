@@ -60,10 +60,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(
-        sa.text(
-            "UPDATE managed_torrents SET state = 'PURGE_PENDING' "
-            "WHERE state = 'PURGING'"
-        )
+        sa.text("UPDATE managed_torrents SET state = 'PURGE_PENDING' WHERE state = 'PURGING'")
     )
     op.drop_constraint("ck_managed_torrents_lifecycle", "managed_torrents", type_="check")
     op.drop_column("managed_torrents", "lifecycle_generation")
