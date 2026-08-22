@@ -311,6 +311,7 @@ async def test_sync_handler_marks_completed_torrent_and_request_ready(
         request = await session.get(TorrentRequest, request_id)
         assert torrent is not None and torrent.state is ManagedTorrentState.READY
         assert torrent.qb_state == "stalledup"
+        assert torrent.progress == 1.0
         assert request is not None and request.state is TorrentRequestState.READY
         assert request.ready_at is not None
 
