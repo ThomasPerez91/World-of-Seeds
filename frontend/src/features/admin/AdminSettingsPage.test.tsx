@@ -30,6 +30,33 @@ const options = {
   ],
   changed_keys: [],
   restart_required: false,
+  scheduler: {
+    desired_generation: 4,
+    applied_generation: 3,
+    synchronized: false,
+    rounds: 9,
+    lease_active: true,
+  },
+  storage: {
+    managed_bytes: 100,
+    logical_bytes: 150,
+    disk_total_bytes: 1000,
+    disk_free_bytes: 600,
+    pressure: "warning",
+    managed_quota_bytes: 0,
+    user_quota_bytes: 0,
+  },
+  audit: [
+    {
+      key: "WOS_TORRENT_MAX_ACTIVE_PER_USER",
+      version: 1,
+      old_value: null,
+      new_value: 5,
+      actor: null,
+      source: "bootstrap",
+      changed_at: "2026-08-22T10:00:00Z",
+    },
+  ],
 } as const;
 
 function response(body: unknown, status = 200): Response {
@@ -44,10 +71,10 @@ describe("AdminSettingsPage", () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const url = String(input);
-        if (url === "/api/v1/admin/options" && init?.method === undefined) {
+        if (url === "/api/v2/admin/overview" && init?.method === undefined) {
           return response(options);
         }
-        if (url === "/api/v1/admin/options" && init?.method === "PATCH") {
+        if (url === "/api/v2/admin/options" && init?.method === "PATCH") {
           return response(
             {
               detail: {
@@ -91,7 +118,7 @@ describe("AdminSettingsPage", () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const url = String(input);
-        if (url === "/api/v1/admin/options") return response(options);
+        if (url === "/api/v2/admin/overview") return response(options);
         if (url === "/api/v1/admin/services/wos/restart" && init?.method === "POST") {
           return response({
             state: "pending",

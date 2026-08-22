@@ -67,6 +67,8 @@
   `eaa436581a3ab449b33790e90c6dc0f8ea052177`.
 - V2-23 PR `#80` was merged into `develop_V2` at
   `145d0d3b2fd4df4536e16107f8c2511804faa7f8`.
+- V2-24 PR `#81` was merged into `develop_V2` at
+  `129dcce13feb120ceb6ddac9cdbc93f3fb162ccb`.
 
 ## V1 completion state
 
@@ -678,6 +680,22 @@
   table cards, and the absence of reload-driven layout behavior.
 - V2-24 is implemented on `feat/v2-responsive` from the merged V2-23 commit.
 
+## V2-25 — Central administration
+
+- Added an admin-only V2 overview backed by the PostgreSQL option registry, scheduler singleton,
+  storage ledger, logical usage counters, and immutable option audit records.
+- Exposed typed/versioned safe options grouped by category while keeping secrets, infrastructure
+  URLs, paths, ports, and credentials outside the response and editable contract.
+- Added CSRF-protected option updates through `PostgresOptionsRegistry`; the authenticated admin
+  is persisted as audit actor and validation remains atomic and cross-option aware.
+- Exposed scheduler desired/applied generations, synchronization and lease state, rounds, managed
+  and logical bytes, disk pressure, and central/user quotas without filesystem or qB scans.
+- Migrated the administration settings screen to the V2 source of truth and added bounded status
+  cards plus the ten most recent audit entries while preserving restart handling and accessibility.
+- Added focused authorization, CSRF, audit attribution, scheduler/storage, TypeScript, React, and
+  accessibility regression coverage.
+- V2-25 is implemented on `feat/v2-central-admin` from the merged V2-24 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -877,6 +895,13 @@
   build, and `git diff --check`: PASS.
 - V2-24 complete backend/frontend/container and local-profile smoke validation remain required in
   PR CI before merge.
+- PR #81 (V2-24) final GitHub CI run `32569989613`: PASS; backend, frontend, container, and
+  complete local-profile smoke jobs are green; squash-merged into `develop_V2` at
+  `129dcce13feb120ceb6ddac9cdbc93f3fb162ccb`.
+- V2-25 targeted admin/options/scheduler/storage backend tests, Ruff lint/format, mypy, TypeScript,
+  React tests, production build, and `git diff --check`: PASS.
+- V2-25 complete backend/frontend/container and local-profile smoke validation remain required in
+  PR CI before merge.
 
 ## Known constraints
 
@@ -893,6 +918,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-25 — Central administration`.
-- Do not start V2-25 until V2-24 has passed review, complete CI and the local-profile smoke are
+- The next roadmap task is `V2-26 — Administrative reconciliation`.
+- Do not start V2-26 until V2-25 has passed review, complete CI and the local-profile smoke are
   green, and its PR is merged into `develop_V2`.

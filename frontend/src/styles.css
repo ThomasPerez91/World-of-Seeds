@@ -2016,6 +2016,63 @@ button:disabled {
   padding: 0.85rem;
 }
 
+.central-admin-status {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.central-admin-status article {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.9rem;
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 0.8rem;
+  background: rgb(5 12 10 / 24%);
+}
+
+.central-admin-status span,
+.central-admin-status small,
+.options-audit li span {
+  color: #89978f;
+}
+
+.central-admin-status strong {
+  color: #dce9df;
+}
+
+.options-audit {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgb(255 255 255 / 7%);
+}
+
+.options-audit h3 {
+  font-size: 0.9rem;
+}
+
+.options-audit ol {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.options-audit li {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.68rem;
+}
+
+.options-audit li strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .option-field {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(9rem, 0.7fr);
@@ -3610,6 +3667,9 @@ select:focus-visible {
 }
 
 @media (max-width: 820px) {
+  .central-admin-status {
+    grid-template-columns: 1fr;
+  }
   .options-fields {
     grid-template-columns: 1fr;
   }
