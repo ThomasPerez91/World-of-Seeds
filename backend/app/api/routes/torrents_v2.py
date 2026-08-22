@@ -8,6 +8,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Header,
     HTTPException,
     Query,
     Request,
@@ -46,6 +47,8 @@ from app.models import (
 )
 from app.options import DatabaseOptionsDriftError, PostgresOptionsRegistry
 from app.schemas.torrents_v2 import (
+    TorrentDownloadFileResponse,
+    TorrentDownloadManifestResponse,
     TorrentRequestV2CreateResponse,
     TorrentRequestV2ListingResponse,
     TorrentRequestV2Response,
@@ -71,11 +74,13 @@ from app.torrents.downloads import (
     ManagedDownloadError,
     ManagedDownloadStreamingResponse,
     ManagedFileDownloader,
+    download_snapshot_id,
 )
 
 router = APIRouter()
 UPLOAD_READ_CHUNK = 64 * 1024
 MAX_PAGE_SIZE = 100
+MAX_MANIFEST_PAGE_SIZE = 500
 ACTIVE_REQUEST_STATES = (
     TorrentRequestState.REQUESTED,
     TorrentRequestState.ACTIVE,
@@ -148,6 +153,97 @@ def _response(
 
 
 @router.get(
+    "/{torrent_request_id}/download-manifest",
+    response_model=TorrentDownloadManifestResponse,
+)
+async def get_torrent_download_manifest(
+    db: DbSession,
+    context: Annotated[AuthContext, Depends(require_current_credentials)],
+    torrent_request_id: uuid.UUID,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=MAX_MANIFEST_PAGE_SIZE)] = MAX_MANIFEST_PAGE_SIZE,
+    snapshot: Annotated[str | None, Query(min_length=64, max_length=64)] = None,
+) -> TorrentDownloadManifestResponse:
+    row = (
+        await db.execute(
+            select(TorrentRequest, ManagedTorrent)
+            .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
+            .where(
+                TorrentRequest.id == torrent_request_id,
+                TorrentRequest.user_id == context.user.id,
+                TorrentRequest.state == TorrentRequestState.READY,
+                ManagedTorrent.state == ManagedTorrentState.READY,
+            )
+            .with_for_update()
+        )
+    ).one_or_none()
+    if row is None:
+        await db.rollback()
+        _fail(
+            status.HTTP_404_NOT_FOUND, "torrent_manifest_not_found", "Ce contenu est indisponible."
+        )
+    torrent_request, managed_torrent = row
+    checksum = managed_torrent.manifest_checksum
+    if managed_torrent.manifest_version < 1 or checksum is None:
+        await db.rollback()
+        _fail(
+            status.HTTP_409_CONFLICT,
+            "torrent_manifest_unavailable",
+            "Le manifeste du téléchargement est indisponible.",
+        )
+    snapshot_id = download_snapshot_id(
+        torrent_request.id,
+        checksum,
+        managed_torrent.manifest_version,
+    )
+    if snapshot is not None and snapshot != snapshot_id:
+        await db.rollback()
+        _fail(
+            status.HTTP_409_CONFLICT,
+            "download_snapshot_changed",
+            "Le contenu a changé. Relance le téléchargement.",
+        )
+    files = tuple(
+        (
+            await db.scalars(
+                select(TorrentFile)
+                .where(TorrentFile.managed_torrent_id == managed_torrent.id)
+                .order_by(TorrentFile.file_index)
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+    )
+    expected_count = min(limit, max(0, managed_torrent.manifest_file_count - offset))
+    if len(files) != expected_count:
+        await db.rollback()
+        _fail(
+            status.HTTP_409_CONFLICT,
+            "download_snapshot_changed",
+            "Le contenu a changé. Relance le téléchargement.",
+        )
+    response = TorrentDownloadManifestResponse(
+        snapshot_id=snapshot_id,
+        manifest_version=managed_torrent.manifest_version,
+        file_count=managed_torrent.manifest_file_count,
+        total_size=managed_torrent.manifest_total_size,
+        offset=offset,
+        limit=limit,
+        items=[
+            TorrentDownloadFileResponse(
+                id=item.id,
+                file_index=item.file_index,
+                relative_path=item.relative_path,
+                size=item.size,
+            )
+            for item in files
+        ],
+    )
+    await db.rollback()
+    return response
+
+
+@router.get(
     "/{torrent_request_id}/files/{torrent_file_id}/download",
     response_model=None,
     operation_id="download_v2_torrent_file",
@@ -164,6 +260,7 @@ async def download_torrent_file(
     context: Annotated[AuthContext, Depends(require_current_credentials)],
     torrent_request_id: uuid.UUID,
     torrent_file_id: uuid.UUID,
+    download_snapshot: Annotated[str | None, Header(alias="X-WOS-Download-Snapshot")] = None,
 ) -> Response:
     owner_id = context.user.id
     row = (
@@ -200,6 +297,17 @@ async def download_torrent_file(
     file_index = torrent_file.file_index
     manifest_checksum = managed_torrent.manifest_checksum
     manifest_version = managed_torrent.manifest_version
+    if download_snapshot is not None and download_snapshot != download_snapshot_id(
+        torrent_request_id,
+        manifest_checksum,
+        manifest_version,
+    ):
+        await db.rollback()
+        _fail(
+            status.HTTP_409_CONFLICT,
+            "download_snapshot_changed",
+            "Le contenu a changé. Relance le téléchargement.",
+        )
     try:
         options = await PostgresOptionsRegistry().snapshot(db)
         chunk_size = _integer_option(options, "WOS_HTTP_STREAM_CHUNK_BYTES")

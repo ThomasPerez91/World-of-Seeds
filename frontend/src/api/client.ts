@@ -125,6 +125,27 @@ export interface TorrentRequestV2CreateResult extends TorrentRequestV2 {
   storage_pressure: "normal" | "warning" | "critical";
 }
 
+export interface TorrentDownloadFileV2 {
+  id: string;
+  file_index: number;
+  relative_path: string;
+  size: number;
+}
+
+export interface TorrentDownloadManifestPageV2 {
+  snapshot_id: string;
+  manifest_version: number;
+  file_count: number;
+  total_size: number;
+  offset: number;
+  limit: number;
+  items: TorrentDownloadFileV2[];
+}
+
+export interface TorrentDownloadSnapshotV2 extends Omit<TorrentDownloadManifestPageV2, "items"> {
+  items: TorrentDownloadFileV2[];
+}
+
 export interface TrashEntry {
   id: string;
   original_path: string;
@@ -621,6 +642,43 @@ export const api = {
   ): Promise<TorrentRequestV2Listing> {
     const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
     return requestV2<TorrentRequestV2Listing>(`/torrents?${search.toString()}`, { signal });
+  },
+
+  async getTorrentDownloadSnapshotV2(
+    torrentRequestId: string,
+    signal?: AbortSignal,
+  ): Promise<TorrentDownloadSnapshotV2> {
+    const items: TorrentDownloadFileV2[] = [];
+    let offset = 0;
+    let snapshot: string | null = null;
+    let firstPage: TorrentDownloadManifestPageV2 | null = null;
+    do {
+      const search = new URLSearchParams({ offset: String(offset), limit: "500" });
+      if (snapshot !== null) search.set("snapshot", snapshot);
+      const page = await requestV2<TorrentDownloadManifestPageV2>(
+        `/torrents/${encodeURIComponent(torrentRequestId)}/download-manifest?${search.toString()}`,
+        { signal },
+      );
+      firstPage ??= page;
+      snapshot ??= page.snapshot_id;
+      if (
+        page.snapshot_id !== snapshot ||
+        page.offset !== offset ||
+        page.file_count !== firstPage.file_count ||
+        page.total_size !== firstPage.total_size
+      ) {
+        throw new ApiError(409, "Le contenu a changé. Relance le téléchargement.", "download_snapshot_changed");
+      }
+      items.push(...page.items);
+      if (page.items.length === 0 && offset < page.file_count) {
+        throw new ApiError(409, "Le manifeste est incomplet.", "download_snapshot_changed");
+      }
+      offset += page.items.length;
+    } while (firstPage !== null && offset < firstPage.file_count);
+    if (firstPage === null || items.length !== firstPage.file_count) {
+      throw new ApiError(409, "Le manifeste est incomplet.", "download_snapshot_changed");
+    }
+    return { ...firstPage, items };
   },
 
   moveFile(path: string, destinationDirectory: string): Promise<FileMutation> {

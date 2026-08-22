@@ -27,6 +27,59 @@ function torrent(overrides: Record<string, unknown> = {}) {
 }
 
 describe("UserDownloadsPage", () => {
+  it("télécharge récursivement un manifeste READY via le sélecteur de dossier", async () => {
+    const user = userEvent.setup();
+    const writes: number[] = [];
+    const fileHandle = {
+      createWritable: vi.fn(async () => ({
+        seek: vi.fn(),
+        write: vi.fn(async (value: Uint8Array) => writes.push(...value)),
+        close: vi.fn(),
+      })),
+    };
+    const directory = {
+      getDirectoryHandle: vi.fn(async () => directory),
+      getFileHandle: vi.fn(async () => fileHandle),
+    };
+    vi.stubGlobal("showDirectoryPicker", vi.fn(async () => directory));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("download-manifest")) {
+          return response({
+            snapshot_id: "a".repeat(64),
+            manifest_version: 1,
+            file_count: 1,
+            total_size: 3,
+            offset: 0,
+            limit: 500,
+            items: [{ id: "file-id", file_index: 0, relative_path: "Film/file.bin", size: 3 }],
+          });
+        }
+        if (url.includes("/files/file-id/download")) {
+          return new Response(new Uint8Array([1, 2, 3]).buffer, {
+            headers: { "X-WOS-Manifest-Version": "1" },
+          });
+        }
+        return response({
+          items: [torrent({ state: "ready", progress: 1 })],
+          offset: 0,
+          limit: 10,
+          total: 1,
+        });
+      }),
+    );
+    const view = render(<UserDownloadsPage onSessionExpired={vi.fn()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Télécharger" }));
+
+    expect(await screen.findByText("« Film.mkv » a été téléchargé.")).toBeTruthy();
+    expect(screen.getByText("1/1 fichiers · 3 o sur 3 o")).toBeTruthy();
+    expect(writes).toEqual([1, 2, 3]);
+    expect(view.container.querySelector("[style]")).toBeNull();
+  });
+
   it("utilise l’API V2 et affiche les états durables sans style inline", async () => {
     const user = userEvent.setup();
     let uploaded = false;
