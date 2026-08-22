@@ -36,6 +36,7 @@ class ManagedTorrentState(StrEnum):
     ERROR = "ERROR"
     READY = "READY"
     PURGE_PENDING = "PURGE_PENDING"
+    PURGING = "PURGING"
     PURGED = "PURGED"
 
 
@@ -150,6 +151,12 @@ class ManagedTorrent(Base):
             name="ck_managed_torrents_schedule_values",
         ),
         CheckConstraint(
+            "lifecycle_generation >= 0 AND "
+            "((state IN ('PURGE_PENDING', 'PURGING') AND purge_after IS NOT NULL) "
+            "OR (state NOT IN ('PURGE_PENDING', 'PURGING') AND purge_after IS NULL))",
+            name="ck_managed_torrents_lifecycle",
+        ),
+        CheckConstraint(
             "manifest_version >= 0 AND manifest_file_count >= 0 AND manifest_total_size >= 0",
             name="ck_managed_torrents_manifest_values",
         ),
@@ -201,6 +208,8 @@ class ManagedTorrent(Base):
         Uuid(as_uuid=True), nullable=True
     )
     retry_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    purge_after: Mapped[datetime | None] = mapped_column(nullable=True)
+    lifecycle_generation: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     manifest_version: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     manifest_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
     manifest_file_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

@@ -21,7 +21,8 @@ stateDiagram-v2
     ERROR --> PENDING: relance admin
     READY --> PURGE_PENDING: aucune référence + rétention
     PURGE_PENDING --> READY: nouvelle demande ou lease
-    PURGE_PENDING --> PURGED: suppression confirmée
+    PURGE_PENDING --> PURGING: rétention échue, aucune référence/lease
+    PURGING --> PURGED: suppression confirmée
     PURGED --> [*]
 ```
 
@@ -35,6 +36,7 @@ stateDiagram-v2
 | `ERROR` | Échec durable ou incohérence nécessitant action | Worker/admin |
 | `READY` | Données complètes et manifeste disponible | Sync qB |
 | `PURGE_PENDING` | Plus de référence, rétention échue | Lifecycle |
+| `PURGING` | Suppression physique verrouillée ; nouvelles demandes temporairement refusées | Worker |
 | `PURGED` | Torrent WOS et données supprimés, audit conservé | Worker |
 
 `qb_state` reste séparé de `state` afin de conserver la valeur opérationnelle normalisée

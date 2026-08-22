@@ -47,6 +47,8 @@ class _TorrentAdder(Protocol):
 
 
 class _TorrentInspector(Protocol):
+    async def remove_managed_torrent(self, identity: QBittorrentV2ManagedIdentity) -> None: ...
+
     async def inspect_managed_torrents(
         self,
         identities: Sequence[QBittorrentV2ManagedIdentity],

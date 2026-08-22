@@ -14,6 +14,8 @@ from app.models import (
     ManagedTorrent,
     ManagedTorrentState,
     StoragePressureState,
+    TorrentJob,
+    TorrentJobState,
     TorrentRequest,
     TorrentRequestState,
     User,
@@ -51,12 +53,17 @@ class TorrentDeduplicationRaceError(RuntimeError):
     """Raised if a successful SQL upsert cannot be reconciled to its authoritative row."""
 
 
+class TorrentPurgeInProgressError(TorrentDeduplicationError):
+    """A physical purge already owns the managed torrent lifecycle."""
+
+
 @dataclass(frozen=True, slots=True)
 class ManagedTorrentRequestResult:
     managed_torrent: ManagedTorrent
     request: TorrentRequest
     managed_torrent_created: bool
     request_created: bool
+    managed_torrent_reactivated: bool
     storage_pressure: StoragePressureState
 
 
@@ -111,6 +118,43 @@ async def create_or_get_torrent_request(
         raise TorrentMetadataConflictError(
             "the canonical torrent metadata conflicts with the existing infohash"
         )
+    if managed_torrent.state is ManagedTorrentState.PURGING:
+        raise TorrentPurgeInProgressError("managed torrent purge is in progress")
+    reactivated = managed_torrent.state is ManagedTorrentState.PURGED
+    if reactivated:
+        managed_torrent.state = ManagedTorrentState.PENDING
+        managed_torrent.progress = 0
+        managed_torrent.qb_state = None
+        managed_torrent.retry_at = None
+        managed_torrent.purge_after = None
+        managed_torrent.updated_at = timestamp
+    elif managed_torrent.state is ManagedTorrentState.PURGE_PENDING:
+        managed_torrent.state = (
+            ManagedTorrentState.READY
+            if managed_torrent.progress >= 1
+            else ManagedTorrentState.DOWNLOADING
+        )
+        managed_torrent.purge_after = None
+        managed_torrent.updated_at = timestamp
+        purge_jobs = list(
+            (
+                await session.scalars(
+                    select(TorrentJob)
+                    .where(
+                        TorrentJob.managed_torrent_id == managed_torrent.id,
+                        TorrentJob.job_type == "PURGE_TORRENT",
+                        TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
+                    )
+                    .with_for_update()
+                )
+            ).all()
+        )
+        for job in purge_jobs:
+            job.cancel_requested_at = timestamp
+            job.updated_at = timestamp
+            if job.state is TorrentJobState.QUEUED:
+                job.state = TorrentJobState.CANCELLED
+                job.finished_at = timestamp
 
     request_id = uuid.uuid4()
     inserted_request_id = await _insert_torrent_request(
@@ -131,11 +175,21 @@ async def create_or_get_torrent_request(
     )
     if request is None:
         raise TorrentDeduplicationRaceError("torrent request upsert did not produce a row")
+    if inserted_request_id is not None:
+        if managed_torrent.state is ManagedTorrentState.READY:
+            request.state = TorrentRequestState.READY
+            request.ready_at = timestamp
+        elif managed_torrent.state not in {
+            ManagedTorrentState.PENDING,
+            ManagedTorrentState.ADDING,
+        }:
+            request.state = TorrentRequestState.ACTIVE
+        await session.flush()
 
     apply_storage_accounting(
         accounting,
         request_created=inserted_request_id is not None,
-        managed_torrent_created=inserted_managed_id is not None,
+        managed_torrent_created=(inserted_managed_id is not None or reactivated),
         total_size=total_size,
         now=timestamp,
     )
@@ -145,6 +199,7 @@ async def create_or_get_torrent_request(
         request=request,
         managed_torrent_created=inserted_managed_id is not None,
         request_created=inserted_request_id is not None,
+        managed_torrent_reactivated=reactivated,
         storage_pressure=accounting.pressure,
     )
 

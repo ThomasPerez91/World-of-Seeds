@@ -320,6 +320,46 @@ class QBittorrentV2Gateway:
             if logged_in:
                 await self._logout()
 
+    async def remove_managed_torrent(self, identity: QBittorrentV2ManagedIdentity) -> None:
+        """Remove exactly one WOS-owned torrent and its files, idempotently."""
+        validated = _validate_identities((identity,))[0]
+        owned_identity = self._identity(validated.storage_key)
+        logged_in = False
+        try:
+            try:
+                if not await self._login():
+                    raise IntegrationAuthenticationError("qBittorrent authentication failed")
+                logged_in = True
+                existing = await self._lookup(validated.info_hash)
+            except IntegrationAuthenticationError:
+                raise
+            except (httpx.HTTPError, IntegrationRequestError) as exc:
+                raise QBittorrentV2TransientError("qBittorrent purge preflight failed") from exc
+            if existing is None:
+                return
+            self._require_owned(existing, owned_identity)
+            try:
+                await self._post_control(
+                    "delete",
+                    {"hashes": validated.info_hash, "deleteFiles": "true"},
+                )
+            except QBittorrentV2RejectedError:
+                raise
+            except (httpx.HTTPError, IntegrationRequestError) as exc:
+                try:
+                    remaining = await self._lookup(validated.info_hash)
+                except (httpx.HTTPError, IntegrationRequestError) as lookup_exc:
+                    raise QBittorrentV2TransientError(
+                        "qBittorrent purge result could not be reconciled"
+                    ) from lookup_exc
+                if remaining is None:
+                    return
+                self._require_owned(remaining, owned_identity)
+                raise QBittorrentV2TransientError("qBittorrent purge result is ambiguous") from exc
+        finally:
+            if logged_in:
+                await self._logout()
+
     async def _post_add(
         self,
         content: bytes,

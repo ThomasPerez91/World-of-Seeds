@@ -9,7 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.models import (
     ManagedTorrent,
+    ManagedTorrentState,
     StorageLedger,
+    TorrentJob,
+    TorrentJobState,
     TorrentRequest,
     TorrentRequestState,
     User,
@@ -18,7 +21,9 @@ from app.models import (
 from app.torrents import (
     TorrentDeduplicationError,
     TorrentMetadataConflictError,
+    TorrentPurgeInProgressError,
     TorrentRequestOwnerError,
+    cancel_owned_torrent_request,
     create_or_get_torrent_request,
 )
 
@@ -142,6 +147,140 @@ async def test_terminal_request_allows_a_new_active_right(db_session: AsyncSessi
     assert second.managed_torrent.id == first.managed_torrent.id
     assert await db_session.scalar(select(func.count()).select_from(ManagedTorrent)) == 1
     assert await db_session.scalar(select(func.count()).select_from(TorrentRequest)) == 2
+
+
+@pytest.mark.asyncio
+async def test_last_cancellation_schedules_purge_and_new_owner_revokes_it(
+    db_session: AsyncSession,
+) -> None:
+    first_user = await create_user(db_session, "lifecycle-first")
+    second_user = await create_user(db_session, "lifecycle-second")
+    first = await create_or_get_torrent_request(
+        db_session,
+        user_id=first_user.id,
+        info_hash=INFO_HASH,
+        name="Lifecycle torrent",
+        total_size=10,
+        now=NOW,
+    )
+    second = await create_or_get_torrent_request(
+        db_session,
+        user_id=second_user.id,
+        info_hash=INFO_HASH,
+        name="Lifecycle torrent",
+        total_size=10,
+        now=NOW,
+    )
+    first.managed_torrent.state = ManagedTorrentState.READY
+    first.managed_torrent.progress = 1
+    first.request.state = second.request.state = TorrentRequestState.READY
+    await db_session.flush()
+
+    first_cancelled = await cancel_owned_torrent_request(
+        db_session,
+        user_id=first_user.id,
+        torrent_request_id=first.request.id,
+        retention_hours=48,
+        now=NOW,
+    )
+    second_cancelled = await cancel_owned_torrent_request(
+        db_session,
+        user_id=second_user.id,
+        torrent_request_id=second.request.id,
+        retention_hours=48,
+        now=NOW,
+    )
+
+    assert first_cancelled is not None and first_cancelled.purge_scheduled is False
+    assert second_cancelled is not None and second_cancelled.purge_scheduled is True
+    assert first.managed_torrent.state is ManagedTorrentState.PURGE_PENDING
+    purge = await db_session.scalar(
+        select(TorrentJob).where(TorrentJob.job_type == "PURGE_TORRENT")
+    )
+    assert purge is not None and purge.state is TorrentJobState.QUEUED
+    purge_id = purge.id
+
+    renewed = await create_or_get_torrent_request(
+        db_session,
+        user_id=first_user.id,
+        info_hash=INFO_HASH,
+        name="Lifecycle torrent",
+        total_size=10,
+        now=NOW,
+    )
+
+    assert renewed.request_created is True
+    assert renewed.request.state is TorrentRequestState.READY
+    assert renewed.managed_torrent.state is ManagedTorrentState.READY
+    assert renewed.managed_torrent.purge_after is None
+    purge_state = await db_session.scalar(select(TorrentJob.state).where(TorrentJob.id == purge_id))
+    assert purge_state is TorrentJobState.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_new_request_is_rejected_while_physical_purge_owns_lifecycle(
+    db_session: AsyncSession,
+) -> None:
+    first_user = await create_user(db_session, "purging-first")
+    second_user = await create_user(db_session, "purging-second")
+    first = await create_or_get_torrent_request(
+        db_session,
+        user_id=first_user.id,
+        info_hash=INFO_HASH,
+        name="Purging torrent",
+        total_size=10,
+        now=NOW,
+    )
+    first.request.state = TorrentRequestState.CANCELLED
+    first.managed_torrent.state = ManagedTorrentState.PURGING
+    first.managed_torrent.purge_after = NOW
+    await db_session.flush()
+
+    with pytest.raises(TorrentPurgeInProgressError):
+        await create_or_get_torrent_request(
+            db_session,
+            user_id=second_user.id,
+            info_hash=INFO_HASH,
+            name="Purging torrent",
+            total_size=10,
+            now=NOW,
+        )
+
+
+@pytest.mark.asyncio
+async def test_purged_content_can_be_reactivated_as_one_new_physical_copy(
+    db_session: AsyncSession,
+) -> None:
+    owner = await create_user(db_session, "purged-owner")
+    first = await create_or_get_torrent_request(
+        db_session,
+        user_id=owner.id,
+        info_hash=INFO_HASH,
+        name="Purged torrent",
+        total_size=10,
+        now=NOW,
+    )
+    first.request.state = TorrentRequestState.CANCELLED
+    first.managed_torrent.state = ManagedTorrentState.PURGED
+    ledger = await db_session.get(StorageLedger, 1)
+    assert ledger is not None
+    ledger.managed_bytes = 0
+    await db_session.flush()
+
+    renewed = await create_or_get_torrent_request(
+        db_session,
+        user_id=owner.id,
+        info_hash=INFO_HASH,
+        name="Purged torrent",
+        total_size=10,
+        now=NOW,
+    )
+
+    assert renewed.managed_torrent_created is False
+    assert renewed.managed_torrent_reactivated is True
+    assert renewed.managed_torrent.state is ManagedTorrentState.PENDING
+    assert renewed.request.state is TorrentRequestState.REQUESTED
+    assert ledger.managed_bytes == 10
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,7 @@ from app.torrents.downloads import (
     DownloadConcurrencyError,
     DownloadLeaseManager,
     DownloadRateLimiter,
+    ManagedDownloadError,
 )
 
 PASSWORD = "correct-horse-battery"
@@ -229,6 +230,30 @@ async def test_download_lease_limit_reclaims_expired_entries(
         max_concurrent=1,
     )
     assert replacement.id != lease.id
+
+
+@pytest.mark.asyncio
+async def test_download_lease_cannot_renew_after_lifecycle_revocation(
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    owner, torrent, request, torrent_file, _ = await _ready_file(db_session, data_root)
+    now = datetime(2026, 8, 22, tzinfo=UTC)
+    manager = DownloadLeaseManager(db_session, lease_seconds=60, clock=lambda: now)
+    lease = await manager.acquire(
+        user_id=owner.id,
+        managed_torrent_id=torrent.id,
+        torrent_request_id=request.id,
+        torrent_file_id=torrent_file.id,
+        max_concurrent=1,
+    )
+    torrent.state = ManagedTorrentState.PURGING
+    torrent.purge_after = now
+    request.state = TorrentRequestState.CANCELLED
+    await db_session.commit()
+
+    with pytest.raises(ManagedDownloadError):
+        await manager.renew(lease.id)
 
 
 @pytest.mark.asyncio

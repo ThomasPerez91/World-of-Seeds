@@ -41,6 +41,7 @@ def test_v2_torrent_states_match_the_normative_state_machines() -> None:
         "ERROR",
         "READY",
         "PURGE_PENDING",
+        "PURGING",
         "PURGED",
     }
     assert {state.value for state in TorrentRequestState} == {

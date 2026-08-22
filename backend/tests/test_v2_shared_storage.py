@@ -78,6 +78,24 @@ def test_store_removes_only_empty_managed_directory(tmp_path: Path) -> None:
     assert not managed.exists()
 
 
+def test_store_purges_nested_content_without_following_symlinks(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.prepare(STORAGE_KEY)
+    managed = tmp_path / "data" / "content" / STORAGE_KEY.hex
+    nested = managed / "season"
+    nested.mkdir()
+    (nested / "episode.mkv").write_bytes(b"content")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep")
+    (managed / "outside-link").symlink_to(outside, target_is_directory=True)
+
+    assert store.purge(STORAGE_KEY) == 3
+    assert not managed.exists()
+    assert (outside / "keep.txt").read_text() == "keep"
+    assert store.purge(STORAGE_KEY) == 0
+
+
 def test_store_rejects_non_uuid_and_zero_uuid(tmp_path: Path) -> None:
     store = _store(tmp_path)
     with pytest.raises(ValueError):

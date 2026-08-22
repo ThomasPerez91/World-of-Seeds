@@ -5,8 +5,14 @@ from app.torrents.deduplication import (
     TorrentDeduplicationError,
     TorrentDeduplicationRaceError,
     TorrentMetadataConflictError,
+    TorrentPurgeInProgressError,
     TorrentRequestOwnerError,
     create_or_get_torrent_request,
+)
+from app.torrents.lifecycle import (
+    PURGE_TORRENT_JOB,
+    TorrentCancellationResult,
+    cancel_owned_torrent_request,
 )
 from app.torrents.manifest import (
     TorrentManifestChangedError,
@@ -33,10 +39,13 @@ from app.torrents.tracker_activity import (
 __all__ = [
     "ManagedTorrentRequestResult",
     "ParsedTorrent",
+    "PURGE_TORRENT_JOB",
     "TorrentContentFile",
+    "TorrentCancellationResult",
     "TorrentDeduplicationError",
     "TorrentDeduplicationRaceError",
     "TorrentMetadataConflictError",
+    "TorrentPurgeInProgressError",
     "TorrentManifestChangedError",
     "TorrentManifestError",
     "TorrentManifestPage",
@@ -46,6 +55,7 @@ __all__ = [
     "TorrentValidationError",
     "TrackerActivityError",
     "assign_managed_torrent_account_refs",
+    "cancel_owned_torrent_request",
     "create_or_get_torrent_request",
     "list_torrent_manifest",
     "normalize_torrent",
