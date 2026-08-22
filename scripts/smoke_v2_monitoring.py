@@ -113,8 +113,18 @@ def main() -> int:
     if not ALERTS.issubset(alert_names):
         raise RuntimeError(f"missing alert rules: {sorted(ALERTS - alert_names)}")
 
-    health = _request(f"http://127.0.0.1:{port}/api/health")
-    if health.get("database") != "ok":
+    deadline = time.monotonic() + 60
+    health: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        try:
+            health = _request(f"http://127.0.0.1:{port}/api/health")
+        except (OSError, json.JSONDecodeError):
+            time.sleep(2)
+            continue
+        if health.get("database") == "ok":
+            break
+        time.sleep(2)
+    else:
         raise RuntimeError(f"Grafana database is not healthy: {health}")
     dashboards = _request(
         f"http://127.0.0.1:{port}/api/search?query=World%20of%20Seeds",

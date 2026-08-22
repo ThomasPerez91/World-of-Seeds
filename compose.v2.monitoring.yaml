@@ -64,13 +64,6 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 128
-    healthcheck:
-      test: [CMD-SHELL, wget -q -O /dev/null http://127.0.0.1:3000/api/health]
-      interval: 10s
-      timeout: 5s
-      retries: 18
-      start_period: 20s
-
   node-exporter:
     image: prom/node-exporter:v1.12.1
     profiles: [monitoring]
