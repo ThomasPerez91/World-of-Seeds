@@ -65,6 +65,8 @@
   `5dba6977a4956b127c6c5a25428e522b78254eba`.
 - V2-22 PR `#79` was merged into `develop_V2` at
   `eaa436581a3ab449b33790e90c6dc0f8ea052177`.
+- V2-23 PR `#80` was merged into `develop_V2` at
+  `145d0d3b2fd4df4536e16107f8c2511804faa7f8`.
 
 ## V1 completion state
 
@@ -660,6 +662,22 @@
   local-smoke contract assertions.
 - V2-23 is implemented on `feat/v2-common-feedback` from the merged V2-22 commit.
 
+## V2-24 — Complete responsive behavior
+
+- Added explicit portrait and landscape layout contracts through CSS media queries, so an
+  orientation change applies without reloading React state.
+- Converted the V2 downloads table to labelled cards on mobile/tablet portrait while preserving
+  the bounded horizontally scrollable table in landscape and desktop layouts.
+- Made administration navigation horizontally scrollable at constrained widths and prevented
+  tabs from shrinking below their touch target.
+- Bounded common and mutation dialogs against the dynamic viewport, included safe-area insets,
+  and converted destructive confirmation actions to a mobile bottom-sheet layout.
+- Kept internal toasts within the mobile viewport and existing file/browser actions usable at
+  the supported 320, 375, 390, and 430 pixel widths.
+- Added source-policy regression tests for breakpoints, orientation rules, safe areas, labelled
+  table cards, and the absence of reload-driven layout behavior.
+- V2-24 is implemented on `feat/v2-responsive` from the merged V2-23 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -852,6 +870,13 @@
   `git diff --check`: PASS.
 - V2-23 container build and enhanced complete local-profile smoke remain required in PR CI before
   merge.
+- PR #80 (V2-23) GitHub CI run `32568965095`: PASS; backend, frontend, migrations, container,
+  and enhanced complete local-profile smoke jobs are green; squash-merged into `develop_V2` at
+  `145d0d3b2fd4df4536e16107f8c2511804faa7f8`.
+- V2-24 targeted responsive policy, downloads, feedback, file-browser, TypeScript, production
+  build, and `git diff --check`: PASS.
+- V2-24 complete backend/frontend/container and local-profile smoke validation remain required in
+  PR CI before merge.
 
 ## Known constraints
 
@@ -868,6 +893,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-24 — Complete responsive behavior`.
-- Do not start V2-24 until V2-23 has passed review, the enhanced complete local-profile smoke is
+- The next roadmap task is `V2-25 — Central administration`.
+- Do not start V2-25 until V2-24 has passed review, complete CI and the local-profile smoke are
   green, and its PR is merged into `develop_V2`.
