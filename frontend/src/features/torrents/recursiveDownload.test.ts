@@ -133,8 +133,12 @@ describe("RecursiveDownloadController", () => {
       }), { status: 200, headers: { "X-WOS-Manifest-Version": "3" } });
     });
     let pauseAfterChunk: RecursiveDownloadController | null = null;
+    let paused = false;
     const progress = vi.fn((update: RecursiveTransferProgress) => {
-      if (update.downloadedBytes === 2 && update.status === "running") pauseAfterChunk?.pause();
+      if (!paused && update.downloadedBytes === 2 && update.status === "running") {
+        paused = true;
+        pauseAfterChunk?.pause();
+      }
     });
     pauseAfterChunk = new RecursiveDownloadController({
       torrentRequestId: "request",
