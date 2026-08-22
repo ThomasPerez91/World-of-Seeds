@@ -70,6 +70,13 @@ def validate_config(config: Mapping[str, Any]) -> None:
     port = _mapping(ports[0], "services.api.ports[0]")
     if port.get("host_ip") != "127.0.0.1" or port.get("target") != 8000:
         raise ComposeLocalPolicyError("api must bind target 8000 to host loopback")
+    api_environment = _mapping(api.get("environment"), "services.api.environment")
+    try:
+        allowed_hosts = set(json.loads(str(api_environment.get("WOS_ALLOWED_HOSTS"))))
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ComposeLocalPolicyError("api allowed hosts must be valid JSON") from exc
+    if allowed_hosts != {"127.0.0.1", "localhost", "api"}:
+        raise ComposeLocalPolicyError("api must allow only local and internal scrape hosts")
 
     for name in ("api", "worker", "scheduler"):
         service = _mapping(services[name], f"services.{name}")

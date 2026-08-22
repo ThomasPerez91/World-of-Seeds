@@ -1,0 +1,79 @@
+groups:
+  - name: world-of-seeds-v2
+    rules:
+      - alert: WOSMetricsTargetDown
+        expr: up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Une cible de supervision V2 est indisponible
+      - alert: WOSJobQueueStalled
+        expr: wos_job_queue_oldest_age_seconds > 900
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: La plus ancienne tâche V2 attend depuis plus de 15 minutes
+      - alert: WOSJobFailures
+        expr: delta(wos_jobs{state="failed"}[5m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: De nouvelles tâches durables V2 ont échoué
+      - alert: WOSStorageCritical
+        expr: wos_storage_pressure{state="critical"} == 1
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Le stockage partagé V2 est en pression critique
+      - alert: WOSQbittorrentUnavailable
+        expr: wos_qbittorrent_up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: qBittorrent ne répond plus à World of Seeds V2
+      - alert: WOSRedisUnavailable
+        expr: wos_redis_up == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Redis est indisponible et le mode de repli SQL est actif
+      - alert: WOSApiServerErrors
+        expr: sum(rate(wos_api_requests_total{status_class="5xx"}[5m])) > 0.1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Le taux d'erreurs HTTP V2 dépasse le seuil
+      - alert: WOSDatabaseUnavailable
+        expr: up{job="wos-api"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: L'API ou sa base PostgreSQL autoritaire ne répond plus
+      - alert: WOSHostCpuSaturated
+        expr: 100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 90
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Le CPU de l'hôte Docker est saturé
+      - alert: WOSHostMemorySaturated
+        expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: La mémoire de l'hôte Docker est saturée
+      - alert: WOSHostDiskFilling
+        expr: 100 * (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) > 90
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: Un système de fichiers de l'hôte Docker dépasse 90 pour cent
+      - alert: WOSHostIoSaturated
+        expr: max(rate(node_disk_io_time_seconds_total[5m])) > 0.9
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Les entrées-sorties disque de l'hôte Docker sont saturées
+      - alert: WOSContainerRestarting
+        expr: changes(container_start_time_seconds{name!=""}[15m]) > 2
+        labels: {severity: warning}
+        annotations:
+          summary: Un conteneur redémarre de manière répétée

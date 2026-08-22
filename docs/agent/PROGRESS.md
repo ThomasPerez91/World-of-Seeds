@@ -73,6 +73,8 @@
   `13e8e43b2c40c245ca111b4b573872f7c1cdebbf`.
 - V2-26 PR `#83` was merged into `develop_V2` at
   `0f43d18c04f755270309e3df48e356a8c73f803d`.
+- V2-27 PR `#84` was merged into `develop_V2` at
+  `cfc847d0aa2c0ef64e7d2b7f98a801d8edbe7987`.
 
 ## V1 completion state
 
@@ -733,6 +735,28 @@
   local-helper, Ruff, mypy, and syntax coverage.
 - V2-27 is implemented on `feat/v2-application-metrics` from the merged V2-26 commit.
 
+## V2-28 — Monitoring stack
+
+- Added an opt-in Compose monitoring profile with pinned Prometheus, Grafana, node-exporter, and
+  cAdvisor images, dedicated named data volumes, an internal monitoring network, and explicit
+  Prometheus retention.
+- Kept Prometheus, node-exporter, and cAdvisor without host ports; Grafana alone binds to host
+  loopback with anonymous access and self-registration disabled.
+- Prometheus is the sole bridge to the private application backend and scrapes the secret-safe V2
+  metrics endpoint; monitoring containers do not mount application storage, qB data, or integration
+  credentials.
+- Provisioned a versioned Grafana datasource and operational dashboard for API traffic/latency,
+  durable jobs, queue age, storage, dependencies, host CPU/RAM, and container CPU.
+- Added alert rules for missing targets, blocked/failed jobs, storage pressure, qBittorrent, Redis,
+  API/server errors, PostgreSQL/API availability, host CPU/RAM/disk/I/O pressure, and repeated
+  container restarts.
+- Added normalized Compose-policy regression coverage and a real monitoring smoke that requires all
+  four Prometheus targets, all alert rules, Grafana health, authenticated search, and the provisioned
+  dashboard.
+- Extended the macOS helper and checklist with `monitoring-up` and `monitoring-smoke`; Docker Desktop
+  metrics intentionally describe its Linux VM and the profile remains disposable and V1-isolated.
+- V2-28 is implemented on `feat/v2-monitoring-stack` from the merged V2-27 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -953,6 +977,16 @@
   and `git diff --check`: PASS.
 - V2-27 complete backend/frontend/container and metrics-aware local-profile smoke validation remain
   required in PR CI before merge.
+- PR #84 (V2-27) GitHub CI run `32571270725`: PASS; backend, frontend, container, and
+  metrics-aware complete local-profile smoke are green; squash-merged into `develop_V2` at
+  `cfc847d0aa2c0ef64e7d2b7f98a801d8edbe7987`.
+- V2-28 targeted monitoring/local Compose-policy tests: PASS, 21 tests.
+- V2-28 complete backend regression suite: PASS, with 6 service-backed tests deferred to CI.
+- V2-28 targeted Ruff lint/format, mypy, Python/shell syntax, YAML/JSON parsing, and
+  `git diff --check`: PASS.
+- V2-28 real image startup, Prometheus target/rule checks, Grafana provisioning, complete
+  backend/frontend/container regressions, and local-profile smoke remain required in PR CI before
+  merge because Docker is unavailable in the development workspace.
 
 ## Known constraints
 
@@ -969,7 +1003,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-28 — Monitoring stack`.
-- Do not start V2-28 until V2-27 has passed review, complete CI and the metrics-aware local-profile
-  smoke are
-  green, and its PR is merged into `develop_V2`.
+- The next roadmap task is `V2-29 — Complete Rise2 Compose`.
+- Do not start V2-29 until V2-28 has passed review, complete CI, real monitoring smoke, and its PR
+  is merged into `develop_V2`.
