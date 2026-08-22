@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import os
 import uuid
+import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -43,18 +45,20 @@ async def _login(client: AsyncClient, username: str = "thomas") -> None:
 async def _ready_file(
     db: AsyncSession,
     data_root: Path,
+    *,
+    content: bytes = CONTENT,
 ) -> tuple[User, ManagedTorrent, TorrentRequest, TorrentFile, Path]:
     owner = User(username="thomas", password_hash=hash_password(PASSWORD))
     torrent = ManagedTorrent(
         info_hash="d" * 40,
         name="Example",
-        total_size=len(CONTENT),
+        total_size=len(content),
         state=ManagedTorrentState.READY,
         progress=1.0,
         manifest_version=1,
         manifest_checksum="e" * 64,
         manifest_file_count=1,
-        manifest_total_size=len(CONTENT),
+        manifest_total_size=len(content),
     )
     request = TorrentRequest(
         user=owner,
@@ -65,7 +69,7 @@ async def _ready_file(
         managed_torrent=torrent,
         file_index=0,
         relative_path="folder/seed.txt",
-        size=len(CONTENT),
+        size=len(content),
     )
     db.add_all([owner, torrent, request, torrent_file])
     await PostgresOptionsRegistry().initialize(db)
@@ -74,7 +78,7 @@ async def _ready_file(
     SharedContentStore(data_root).prepare(torrent.storage_key)
     physical_file = data_root / "content" / torrent.storage_key.hex / "folder" / "seed.txt"
     physical_file.parent.mkdir()
-    physical_file.write_bytes(CONTENT)
+    physical_file.write_bytes(content)
     return owner, torrent, request, torrent_file, physical_file
 
 
@@ -274,6 +278,7 @@ async def test_download_manifest_is_owned_paginated_and_stable(
     assert manifest["manifest_version"] == 1
     assert manifest["file_count"] == 1
     assert manifest["total_size"] == len(CONTENT)
+    assert manifest["archive_available"] is True
     assert manifest["items"] == [
         {
             "id": str(torrent_file_id),
@@ -310,4 +315,36 @@ async def test_snapshot_change_is_rejected_by_manifest_and_file_endpoints(
     assert changed_manifest.json()["detail"]["code"] == "download_snapshot_changed"
     assert changed_file.status_code == 409
     assert changed_file.json()["detail"]["code"] == "download_snapshot_changed"
+    assert await db_session.scalar(select(func.count()).select_from(DownloadLease)) == 0
+
+
+@pytest.mark.asyncio
+async def test_compatible_fallback_exposes_individual_file_and_streamed_stored_zip(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    _, _, request, torrent_file, _ = await _ready_file(db_session, data_root)
+    file_url = _url(request, torrent_file)
+    manifest_url = f"/api/v2/torrents/{request.id}/download-manifest"
+    archive_url = f"/api/v2/torrents/{request.id}/download-archive"
+    await _login(client)
+    manifest = (await client.get(manifest_url)).json()
+    snapshot = manifest["snapshot_id"]
+
+    individual = await client.get(file_url, params={"snapshot": snapshot})
+    archive = await client.get(
+        archive_url,
+        params={"snapshot": snapshot},
+    )
+
+    assert individual.status_code == 200
+    assert individual.content == CONTENT
+    assert archive.status_code == 200
+    assert archive.headers["content-type"].startswith("application/zip")
+    assert ".zip" in archive.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(archive.content)) as opened:
+        assert opened.namelist() == ["folder/seed.txt"]
+        assert opened.read("folder/seed.txt") == CONTENT
+        assert opened.getinfo("folder/seed.txt").compress_type == zipfile.ZIP_STORED
     assert await db_session.scalar(select(func.count()).select_from(DownloadLease)) == 0

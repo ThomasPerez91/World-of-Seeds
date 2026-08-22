@@ -137,6 +137,7 @@ export interface TorrentDownloadManifestPageV2 {
   manifest_version: number;
   file_count: number;
   total_size: number;
+  archive_available: boolean;
   offset: number;
   limit: number;
   items: TorrentDownloadFileV2[];
@@ -679,6 +680,20 @@ export const api = {
       throw new ApiError(409, "Le manifeste est incomplet.", "download_snapshot_changed");
     }
     return { ...firstPage, items };
+  },
+
+  torrentFileDownloadUrlV2(
+    torrentRequestId: string,
+    torrentFileId: string,
+    snapshotId: string,
+  ): string {
+    const snapshot = new URLSearchParams({ snapshot: snapshotId });
+    return `/api/v2/torrents/${encodeURIComponent(torrentRequestId)}/files/${encodeURIComponent(torrentFileId)}/download?${snapshot.toString()}`;
+  },
+
+  torrentArchiveDownloadUrlV2(torrentRequestId: string, snapshotId: string): string {
+    const snapshot = new URLSearchParams({ snapshot: snapshotId });
+    return `/api/v2/torrents/${encodeURIComponent(torrentRequestId)}/download-archive?${snapshot.toString()}`;
   },
 
   moveFile(path: string, destinationDirectory: string): Promise<FileMutation> {

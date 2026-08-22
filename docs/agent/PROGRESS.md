@@ -59,6 +59,8 @@
   `2f1787b1039c112b6aee0901ae18f816618a9b30`.
 - V2-19 PR `#76` was merged into `develop_V2` at
   `f728471529d84ee43907101f819acba53eac65c9`.
+- V2-20 PR `#77` was merged into `develop_V2` at
+  `5e624f7e9094ea9441b10dd57690a9a68460b337`.
 
 ## V1 completion state
 
@@ -594,6 +596,23 @@
   React interaction, CSP, and accessibility coverage.
 - V2-20 is implemented on `feat/v2-recursive-browser-download` from the merged V2-19 commit.
 
+## V2-21 — Compatible download fallbacks
+
+- Extended stable download snapshots with a server-authoritative ZIP-availability flag derived
+  from the PostgreSQL archive-size option and a bounded 50,000-entry ceiling.
+- Added snapshot-bound individual-file URLs for browsers without File System Access API; the UI
+  paginates at 50 links and never renders an unbounded manifest page at once.
+- Added a streamed ZIP endpoint available only to the request owner while content remains ready
+  and unchanged. It reads the existing manifest rows rather than recursively scanning storage.
+- ZIP entries use `ZIP_STORED`, descriptor-safe no-follow file opens, bounded chunks, Zip64, one
+  process-wide archive slot, the existing per-user download concurrency/rate controls, and a
+  durable renewable lease. No temporary archive or complete in-memory ZIP is created.
+- Oversized/many-file content omits the ZIP action and is rejected server-side with the bounded
+  `torrent_archive_too_large` contract; users retain the individual-file fallback.
+- Added focused individual-link, snapshot-query, streamed-ZIP content/mode, lease cleanup, React
+  compatibility-mode, CSP, pagination, and accessibility coverage.
+- V2-21 is implemented on `feat/v2-download-fallbacks` from the merged V2-20 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -760,6 +779,14 @@
 - V2-20 `git diff --check`: PASS. The workspace has no installed Node dependencies, so complete
   TypeScript, Vitest, axe, build, container, and local-profile smoke validation remains required
   in PR CI before merge.
+- PR #77 (V2-20) final GitHub CI run `32566565031`: PASS; TypeScript, 22 frontend tests, axe,
+  production build, backend, migrations, container, and complete local-profile smoke jobs are
+  green; squash-merged into `develop_V2` at `5e624f7e9094ea9441b10dd57690a9a68460b337`.
+- V2-21 focused download fallback backend tests: PASS, 9 tests.
+- V2-21 complete backend suite: PASS, 378 tests with 6 service-backed tests deferred to CI.
+- V2-21 full backend Ruff lint/format and mypy: PASS.
+- V2-21 `git diff --check`: PASS. TypeScript, Vitest/axe, production build, container, and local
+  profile remain required in PR CI before merge.
 
 ## Known constraints
 
@@ -776,6 +803,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-21 — Compatible download fallback`.
-- Do not start V2-21 until V2-20 has passed review, required frontend and complete local-profile
+- The next roadmap task is `V2-22 — Shared-content lifecycle`.
+- Do not start V2-22 until V2-21 has passed review, required frontend and complete local-profile
   CI is green, and its PR is merged into `develop_V2`.

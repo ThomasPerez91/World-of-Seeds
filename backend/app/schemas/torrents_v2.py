@@ -40,6 +40,7 @@ class TorrentDownloadManifestResponse(BaseModel):
     manifest_version: int = Field(ge=1)
     file_count: int = Field(ge=1)
     total_size: int = Field(ge=0)
+    archive_available: bool
     offset: int = Field(ge=0)
     limit: int = Field(ge=1, le=500)
     items: list[TorrentDownloadFileResponse]

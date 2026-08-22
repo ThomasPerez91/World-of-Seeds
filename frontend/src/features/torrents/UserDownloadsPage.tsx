@@ -5,6 +5,7 @@ import {
   ApiError,
   type TorrentRequestV2,
   type TorrentRequestV2State,
+  type TorrentDownloadSnapshotV2,
 } from "../../api/client";
 import { DownloadIcon, RefreshIcon } from "../../components/icons";
 import { Notice, type NoticeTone } from "../../components/Notice";
@@ -17,6 +18,7 @@ import {
 } from "./recursiveDownload";
 
 const PAGE_SIZE = 10;
+const FALLBACK_PAGE_SIZE = 50;
 
 const stateLabels: Record<TorrentRequestV2State, string> = {
   requested: "Demandé",
@@ -115,6 +117,12 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       fileCount: number;
     }
   ) | null>(null);
+  const [fallback, setFallback] = useState<{
+    torrentId: string;
+    name: string;
+    snapshot: TorrentDownloadSnapshotV2;
+  } | null>(null);
+  const [fallbackOffset, setFallbackOffset] = useState(0);
 
   useEffect(() => () => controllerRef.current?.cancel(), []);
 
@@ -192,10 +200,25 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
 
   async function startRecursiveDownload(torrent: TorrentRequestV2) {
     if (!supportsRecursiveDirectoryDownload()) {
-      setNotice({
-        tone: "warning",
-        message: "Ce navigateur ne permet pas encore le téléchargement récursif. Le fallback arrive à l’étape suivante.",
-      });
+      setNotice({ tone: "progress", message: "Préparation du mode compatible…" });
+      try {
+        const snapshot = await api.getTorrentDownloadSnapshotV2(torrent.id);
+        setFallback({ torrentId: torrent.id, name: torrent.name, snapshot });
+        setFallbackOffset(0);
+        setNotice({
+          tone: "warning",
+          message: "Le mode compatible propose les fichiers séparément et, si sa taille le permet, un ZIP streamé.",
+        });
+      } catch (caught) {
+        if (caught instanceof ApiError && caught.status === 401) {
+          onSessionExpired();
+          return;
+        }
+        setNotice({
+          tone: "error",
+          message: caught instanceof Error ? caught.message : "Le manifeste est indisponible.",
+        });
+      }
       return;
     }
     setNotice({ tone: "progress", message: `Préparation de « ${torrent.name} »…` });
@@ -341,6 +364,71 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
               </button>
             )}
           </div>
+        </section>
+      )}
+
+      {fallback !== null && (
+        <section className="download-fallback" aria-labelledby="download-fallback-title">
+          <header>
+            <div>
+              <strong id="download-fallback-title" title={fallback.name}>{fallback.name}</strong>
+              <span>{fallback.snapshot.file_count} fichier{fallback.snapshot.file_count > 1 ? "s" : ""}</span>
+            </div>
+            <button type="button" className="secondary-button" onClick={() => setFallback(null)}>
+              Fermer
+            </button>
+          </header>
+          {fallback.snapshot.archive_available && (
+            <a
+              className="download-fallback-archive"
+              href={api.torrentArchiveDownloadUrlV2(fallback.torrentId, fallback.snapshot.snapshot_id)}
+              download={`${fallback.name}.zip`}
+            >
+              <DownloadIcon />
+              Télécharger le petit dossier en ZIP
+            </a>
+          )}
+          <ul>
+            {fallback.snapshot.items
+              .slice(fallbackOffset, fallbackOffset + FALLBACK_PAGE_SIZE)
+              .map((file) => (
+                <li key={file.id}>
+                  <span title={file.relative_path}>{file.relative_path}</span>
+                  <span>{formatBytes(file.size)}</span>
+                  <a
+                    href={api.torrentFileDownloadUrlV2(
+                      fallback.torrentId,
+                      file.id,
+                      fallback.snapshot.snapshot_id,
+                    )}
+                    download={file.relative_path.split("/").at(-1)}
+                  >
+                    Télécharger
+                  </a>
+                </li>
+              ))}
+          </ul>
+          {fallback.snapshot.file_count > FALLBACK_PAGE_SIZE && (
+            <nav aria-label="Pagination des fichiers compatibles">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={fallbackOffset === 0}
+                onClick={() => setFallbackOffset(Math.max(0, fallbackOffset - FALLBACK_PAGE_SIZE))}
+              >
+                Précédent
+              </button>
+              <span>{Math.floor(fallbackOffset / FALLBACK_PAGE_SIZE) + 1} / {Math.ceil(fallback.snapshot.file_count / FALLBACK_PAGE_SIZE)}</span>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={fallbackOffset + FALLBACK_PAGE_SIZE >= fallback.snapshot.file_count}
+                onClick={() => setFallbackOffset(fallbackOffset + FALLBACK_PAGE_SIZE)}
+              >
+                Suivant
+              </button>
+            </nav>
+          )}
         </section>
       )}
 

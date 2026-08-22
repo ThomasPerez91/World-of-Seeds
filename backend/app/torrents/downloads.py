@@ -8,9 +8,14 @@ import os
 import stat
 import time
 import uuid
-from collections.abc import AsyncGenerator, Callable
+import zipfile
+from collections.abc import AsyncGenerator, Callable, Generator, Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
+from threading import BoundedSemaphore
+from typing import IO, cast
+from urllib.parse import quote
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +29,7 @@ from app.storage import SharedContentStore
 
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_NONBLOCK", 0)
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0)
+_managed_archive_slot = BoundedSemaphore(value=1)
 
 
 class ManagedDownloadError(RuntimeError):
@@ -32,6 +38,49 @@ class ManagedDownloadError(RuntimeError):
 
 class DownloadConcurrencyError(RuntimeError):
     """The durable per-user concurrent download limit was reached."""
+
+
+class ManagedArchiveBusyError(RuntimeError):
+    """The bounded managed ZIP slot is already in use."""
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedArchiveEntry:
+    relative_path: str
+    size: int
+    file_index: int
+
+
+class _StreamingZipBuffer:
+    def __init__(self) -> None:
+        self._chunks: list[bytes] = []
+        self._position = 0
+
+    def write(self, data: bytes | bytearray | memoryview) -> int:
+        chunk = bytes(data)
+        if chunk:
+            self._chunks.append(chunk)
+            self._position += len(chunk)
+        return len(chunk)
+
+    def tell(self) -> int:
+        return self._position
+
+    @staticmethod
+    def seekable() -> bool:
+        return False
+
+    @staticmethod
+    def seek(*_: object) -> int:
+        raise OSError("streaming ZIP output is not seekable")
+
+    @staticmethod
+    def flush() -> None:
+        return None
+
+    def drain(self) -> tuple[bytes, ...]:
+        chunks, self._chunks = tuple(self._chunks), []
+        return chunks
 
 
 def download_snapshot_id(
@@ -134,6 +183,98 @@ class ManagedFileDownloader:
             if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
                 raise ManagedDownloadError("managed file is unsafe") from exc
             raise ManagedDownloadError("managed file cannot be opened") from exc
+
+
+class ManagedFolderArchiver:
+    def __init__(
+        self,
+        downloader: ManagedFileDownloader,
+        *,
+        storage_key: uuid.UUID,
+        entries: tuple[ManagedArchiveEntry, ...],
+        manifest_checksum: str,
+        manifest_version: int,
+        download_name: str,
+    ) -> None:
+        self._downloader = downloader
+        self._storage_key = storage_key
+        self._entries = entries
+        self._manifest_checksum = manifest_checksum
+        self._manifest_version = manifest_version
+        self._download_name = download_name
+        self._acquired = False
+
+    def acquire(self) -> None:
+        if not _managed_archive_slot.acquire(blocking=False):
+            raise ManagedArchiveBusyError("another managed archive is already running")
+        self._acquired = True
+
+    def release(self) -> None:
+        if not self._acquired:
+            return
+        self._acquired = False
+        _managed_archive_slot.release()
+
+    @property
+    def content_disposition(self) -> str:
+        fallback = (
+            "".join(
+                character
+                for character in self._download_name
+                if character.isascii() and character.isprintable() and character not in {'"', "\\"}
+            ).strip()
+            or "download.zip"
+        )
+        return (
+            f'attachment; filename="{fallback}"; '
+            f"filename*=UTF-8''{quote(self._download_name, safe='')}"
+        )
+
+    def iter_chunks(self, *, chunk_size: int) -> Generator[bytes, None, None]:
+        return self._iter_chunks(chunk_size=chunk_size)
+
+    def _iter_chunks(self, *, chunk_size: int) -> Generator[bytes, None, None]:
+        writer = _StreamingZipBuffer()
+        try:
+            with zipfile.ZipFile(
+                cast("IO[bytes]", writer),
+                mode="w",
+                compression=zipfile.ZIP_STORED,
+                allowZip64=True,
+            ) as archive:
+                for entry in self._entries:
+                    opened = self._downloader.open(
+                        self._storage_key,
+                        entry.relative_path,
+                        expected_size=entry.size,
+                        manifest_checksum=self._manifest_checksum,
+                        manifest_version=self._manifest_version,
+                        file_index=entry.file_index,
+                    )
+                    try:
+                        info = zipfile.ZipInfo(
+                            entry.relative_path,
+                            opened.modified_at.timetuple()[:6],
+                        )
+                        info.compress_type = zipfile.ZIP_STORED
+                        info.external_attr = 0o100640 << 16
+                        remaining = entry.size
+                        with archive.open(info, mode="w", force_zip64=True) as target:
+                            while remaining > 0:
+                                chunk = os.read(opened.file_descriptor, min(chunk_size, remaining))
+                                if not chunk:
+                                    raise ManagedDownloadError(
+                                        "managed archive file ended before manifest size"
+                                    )
+                                target.write(chunk)
+                                remaining -= len(chunk)
+                                yield from writer.drain()
+                        yield from writer.drain()
+                    finally:
+                        opened.close()
+            yield from writer.drain()
+        finally:
+            self.release()
 
 
 class DownloadLeaseManager:
@@ -317,6 +458,49 @@ async def stream_managed_download(
         download.close()
 
 
+def _next_archive_chunk(iterator: Iterator[bytes]) -> bytes | None:
+    return next(iterator, None)
+
+
+async def stream_managed_archive(
+    archiver: ManagedFolderArchiver,
+    *,
+    chunk_size: int,
+    user_id: uuid.UUID,
+    lease: DownloadLease,
+    leases: DownloadLeaseManager,
+    limiter: DownloadRateLimiter,
+    per_user_bytes_per_second: int,
+    global_bytes_per_second: int,
+) -> AsyncGenerator[bytes, None]:
+    chunks = archiver.iter_chunks(chunk_size=chunk_size)
+    next_renewal = time.monotonic() + leases.heartbeat_seconds
+    try:
+        while True:
+            chunk = await run_in_threadpool(_next_archive_chunk, chunks)
+            if chunk is None:
+                return
+            if time.monotonic() >= next_renewal:
+                await leases.renew(lease.id)
+                next_renewal = time.monotonic() + leases.heartbeat_seconds
+            delay = await limiter.reserve(
+                user_id,
+                len(chunk),
+                per_user_bytes_per_second=per_user_bytes_per_second,
+                global_bytes_per_second=global_bytes_per_second,
+            )
+            while delay > 0:
+                interval = min(delay, leases.heartbeat_seconds)
+                await asyncio.sleep(interval)
+                delay -= interval
+                await leases.renew(lease.id)
+                next_renewal = time.monotonic() + leases.heartbeat_seconds
+            yield chunk
+    finally:
+        await run_in_threadpool(chunks.close)
+        archiver.release()
+
+
 class ManagedDownloadStreamingResponse(StreamingResponse):
     def __init__(
         self,
@@ -359,4 +543,46 @@ class ManagedDownloadStreamingResponse(StreamingResponse):
             await super().__call__(scope, receive, send)
         finally:
             self._download.close()
+            await self._leases.release(self._lease.id)
+
+
+class ManagedArchiveStreamingResponse(StreamingResponse):
+    def __init__(
+        self,
+        archiver: ManagedFolderArchiver,
+        *,
+        chunk_size: int,
+        user_id: uuid.UUID,
+        lease: DownloadLease,
+        leases: DownloadLeaseManager,
+        limiter: DownloadRateLimiter,
+        per_user_bytes_per_second: int,
+        global_bytes_per_second: int,
+    ) -> None:
+        self._archiver = archiver
+        self._lease = lease
+        self._leases = leases
+        super().__init__(
+            stream_managed_archive(
+                archiver,
+                chunk_size=chunk_size,
+                user_id=user_id,
+                lease=lease,
+                leases=leases,
+                limiter=limiter,
+                per_user_bytes_per_second=per_user_bytes_per_second,
+                global_bytes_per_second=global_bytes_per_second,
+            ),
+            headers={
+                "Cache-Control": "private, no-store",
+                "Content-Disposition": archiver.content_disposition,
+            },
+            media_type="application/zip",
+        )
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self._archiver.release()
             await self._leases.release(self._lease.id)

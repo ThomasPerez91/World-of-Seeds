@@ -53,6 +53,7 @@ function snapshot(): TorrentDownloadSnapshotV2 {
     manifest_version: 3,
     file_count: 2,
     total_size: 6,
+    archive_available: true,
     offset: 0,
     limit: 500,
     items: [
