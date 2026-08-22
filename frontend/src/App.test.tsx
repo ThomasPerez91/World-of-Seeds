@@ -512,6 +512,26 @@ describe("App", () => {
             200,
           );
         }
+        if (url === "/api/v2/admin/reconciliation?limit=100") {
+          return response(
+            {
+              database_scanned: 0,
+              qbittorrent_scanned: 1,
+              storage_scanned: 0,
+              external_torrents: 1,
+              anomalies: [
+                {
+                  code: "external_torrents_read_only",
+                  severity: "info",
+                  resource_id: null,
+                  action: "none",
+                },
+              ],
+              truncated: false,
+            },
+            200,
+          );
+        }
         if (url === "/api/v1/admin/trash" && init?.method === "DELETE") {
           trashPurged = true;
           return response({ purged: 1, remaining: 0 }, 200);
