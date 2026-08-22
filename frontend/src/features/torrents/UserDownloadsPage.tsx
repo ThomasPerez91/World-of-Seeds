@@ -68,17 +68,17 @@ function TorrentRow({
     : errorLabels[torrent.error_code] ?? "Le téléchargement est en erreur.";
   return (
     <tr>
-      <td className="torrent-name-cell">
+      <td className="torrent-name-cell" data-label="Nom">
         <span title={torrent.name}>{torrent.name}</span>
         {error !== null && <small role="alert">{error}</small>}
       </td>
-      <td>
+      <td data-label="État">
         <span className={`torrent-primary-state ${torrent.state}`}>
           {stateLabels[torrent.state]}
         </span>
       </td>
-      <td className="torrent-size-cell">{formatBytes(torrent.total_size)}</td>
-      <td className="torrent-progress-cell">
+      <td className="torrent-size-cell" data-label="Taille">{formatBytes(torrent.total_size)}</td>
+      <td className="torrent-progress-cell" data-label="Progression">
         <div>
           <progress value={torrent.progress} max={1} aria-label={`Progression de ${torrent.name}`}>
             {percent} %
@@ -86,8 +86,8 @@ function TorrentRow({
           <strong>{percent} %</strong>
         </div>
       </td>
-      <td className="torrent-date-cell">{formatDate(torrent.updated_at)}</td>
-      <td className="torrent-row-actions">
+      <td className="torrent-date-cell" data-label="Mise à jour">{formatDate(torrent.updated_at)}</td>
+      <td className="torrent-row-actions" data-label="Actions">
         <div className="torrent-row-action-group">
           {torrent.state === "ready" ? (
             <button type="button" disabled={downloadBusy} onClick={onDownload}>
