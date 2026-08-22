@@ -94,6 +94,37 @@ export interface TorrentUploadResult {
   total_size: number;
 }
 
+export type TorrentRequestV2State =
+  | "requested"
+  | "active"
+  | "ready"
+  | "cancelled"
+  | "expired"
+  | "error";
+
+export interface TorrentRequestV2 {
+  id: string;
+  name: string;
+  total_size: number;
+  state: TorrentRequestV2State;
+  progress: number;
+  error_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TorrentRequestV2Listing {
+  items: TorrentRequestV2[];
+  offset: number;
+  limit: number;
+  total: number;
+}
+
+export interface TorrentRequestV2CreateResult extends TorrentRequestV2 {
+  created: boolean;
+  storage_pressure: "normal" | "warning" | "critical";
+}
+
 export interface TrashEntry {
   id: string;
   original_path: string;
@@ -309,6 +340,14 @@ function readCookie(name: string): string | null {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return requestAt<T>("/api/v1", path, init);
+}
+
+async function requestV2<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return requestAt<T>("/api/v2", path, init);
+}
+
+async function requestAt<T>(prefix: string, path: string, init: RequestInit = {}): Promise<T> {
   const method = init.method?.toUpperCase() ?? "GET";
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
@@ -322,7 +361,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
   }
 
-  const response = await fetch(`/api/v1${path}`, {
+  const response = await fetch(`${prefix}${path}`, {
     ...init,
     headers,
     credentials: "same-origin",
@@ -564,6 +603,24 @@ export const api = {
 
   listUserTorrents(signal?: AbortSignal): Promise<UserTorrentListing> {
     return request<UserTorrentListing>("/torrents", { signal });
+  },
+
+  createTorrentRequestV2(file: File): Promise<TorrentRequestV2CreateResult> {
+    const form = new FormData();
+    form.set("torrent", file, file.name);
+    return requestV2<TorrentRequestV2CreateResult>("/torrents", {
+      method: "POST",
+      body: form,
+    });
+  },
+
+  listTorrentRequestsV2(
+    offset: number,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<TorrentRequestV2Listing> {
+    const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    return requestV2<TorrentRequestV2Listing>(`/torrents?${search.toString()}`, { signal });
   },
 
   moveFile(path: string, destinationDirectory: string): Promise<FileMutation> {

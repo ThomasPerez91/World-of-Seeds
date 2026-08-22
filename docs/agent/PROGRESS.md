@@ -51,6 +51,8 @@
   `3a611873e01de8ff156292b170b735483b1d0b0d`.
 - V2-16 PR `#72` was merged into `develop_V2` at
   `13188b63cf5ab185233b9926282ebe018586ca2a`.
+- V2-17 PR `#73` was merged into `develop_V2` at
+  `a7dafce1258d822ffea073918f8d5c072fa4abdb`.
 
 ## V1 completion state
 
@@ -502,6 +504,24 @@
   for the API and the upcoming interface, with an additive reversible migration.
 - V2-17 is implemented on `feat/v2-torrent-request-api` from the merged V2-16 commit.
 
+## V2-18 — My downloads V2 interface
+
+- Reconnected the personal downloads page to the authenticated `/api/v2/torrents` contract;
+  the browser reads durable PostgreSQL states and never receives qBittorrent identifiers.
+- Added the exact durable request states, normalized progress, bounded error presentation,
+  idempotent-submission feedback, and storage-pressure warning feedback.
+- Added server-side pagination with a fixed 10-row page, previous/next controls, total count,
+  and deterministic refresh of the current page.
+- Replaced unbounded cards with a fixed-layout table contained in its own scroll region; long
+  names and errors use ellipsis while their full torrent name remains available as a title.
+- Upload and refresh controls remain on one action line, and every row keeps its bounded action
+  in a non-wrapping cell.
+- Kept CSP compatibility by using React events and CSS classes only: no inline style, script,
+  dynamic HTML, server path, tracker URL, storage key, or infohash was added to the UI.
+- Added focused interaction, pagination, durable-state, long-name, error, keyboard, and axe
+  accessibility regression coverage.
+- V2-18 is implemented on `feat/v2-my-downloads-ui` from the merged V2-17 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -634,6 +654,15 @@
 - V2-17 complete backend suite: PASS, 357 tests with 6 service-backed tests deferred to CI.
 - V2-17 full backend Ruff lint/format and mypy: PASS.
 - V2-17 PostgreSQL upgrade/downgrade SQL generation and `git diff --check`: PASS.
+- PR #73 (V2-17) review and GitHub CI run `32562416237`: PASS; squash-merged into
+  `develop_V2` at `a7dafce1258d822ffea073918f8d5c072fa4abdb`.
+- V2-18 focused torrent UI interaction, pagination, durable-state, ellipsis, keyboard, and axe
+  accessibility tests: PASS.
+- V2-18 complete frontend TypeScript check, Vitest suite, and production build: PASS.
+- V2-18 complete backend and container regression jobs: PASS.
+- V2-18 `git diff --check` and targeted CSP/internal-identifier scan: PASS.
+- PR #74 (V2-18) initial GitHub CI run `32562851301`: PASS; final documentation-only head is
+  validated again before merge.
 
 ## Known constraints
 
@@ -650,6 +679,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-18 — My downloads V2 interface`.
-- Do not start V2-18 until V2-17 has passed review, required CI is green, and its PR is merged
+- The next roadmap task is `V2-18A — Reproducible local macOS validation`.
+- Do not start V2-18A until V2-18 has passed review, required CI is green, and its PR is merged
   into `develop_V2`.
