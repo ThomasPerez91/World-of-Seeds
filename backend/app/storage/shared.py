@@ -4,8 +4,16 @@ import os
 import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
+
+
+@dataclass(frozen=True, slots=True)
+class SharedContentInventory:
+    keys: tuple[UUID, ...]
+    invalid_entries: int
+    truncated: bool
 
 
 class SharedContentStoreError(RuntimeError):
@@ -57,6 +65,35 @@ class SharedContentStore:
         finally:
             if descriptor is not None:
                 os.close(descriptor)
+
+    def inventory(self, *, limit: int = 200) -> SharedContentInventory:
+        """List only opaque top-level managed directories without traversing their contents."""
+        if not 1 <= limit <= 1000:
+            raise ValueError("shared content inventory limit is invalid")
+        content_fd = self._open_content_root(create=False)
+        try:
+            names = sorted(os.listdir(content_fd))
+            keys: list[UUID] = []
+            invalid = 0
+            truncated = False
+            for name in names:
+                if len(keys) >= limit:
+                    truncated = True
+                    break
+                try:
+                    key = UUID(hex=name) if len(name) == 32 else None
+                    metadata = os.stat(name, dir_fd=content_fd, follow_symlinks=False)
+                    if key is None or not stat.S_ISDIR(metadata.st_mode):
+                        invalid += 1
+                        continue
+                    keys.append(key)
+                except (OSError, ValueError):
+                    invalid += 1
+            return SharedContentInventory(tuple(keys), invalid, truncated)
+        except OSError as exc:
+            raise SharedContentStoreError("shared content inventory is unavailable") from exc
+        finally:
+            os.close(content_fd)
 
     @contextmanager
     def open_directory(self, storage_key: UUID) -> Iterator[int]:

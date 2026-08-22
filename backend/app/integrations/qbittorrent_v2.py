@@ -71,6 +71,19 @@ class QBittorrentV2TorrentSnapshot:
     progress: float
 
 
+@dataclass(frozen=True, slots=True)
+class QBittorrentV2InventoryItem:
+    info_hash: str
+    storage_key: UUID | None
+    claims_wos_identity: bool
+
+
+@dataclass(frozen=True, slots=True)
+class QBittorrentV2Inventory:
+    items: tuple[QBittorrentV2InventoryItem, ...]
+    truncated: bool
+
+
 class QBittorrentV2TransientError(IntegrationRequestError):
     """The operation can be retried without risking a duplicate add."""
 
@@ -316,6 +329,49 @@ class QBittorrentV2Gateway:
                     )
                 )
             return tuple(snapshots)
+        finally:
+            if logged_in:
+                await self._logout()
+
+    async def inventory_torrents(self, *, limit: int = 200) -> QBittorrentV2Inventory:
+        """Read a bounded inventory; external torrents are classified but never mutated."""
+        if not 1 <= limit <= MAX_CONTROL_TORRENTS:
+            raise ValueError("qBittorrent inventory limit must be between 1 and 200")
+        logged_in = False
+        try:
+            if not await self._login():
+                raise IntegrationAuthenticationError("qBittorrent authentication failed")
+            logged_in = True
+            async with self._client.stream(
+                "GET",
+                f"{self._base_url}/api/v2/torrents/info",
+                params={"limit": str(limit + 1), "offset": "0"},
+                headers=self._browser_headers(),
+            ) as response:
+                if response.status_code == 401:
+                    raise IntegrationAuthenticationError("qBittorrent session expired")
+                response.raise_for_status()
+                payload = await read_limited_json(response, max_bytes=MAX_LOOKUP_RESPONSE_BYTES)
+            if not isinstance(payload, list) or len(payload) > limit + 1:
+                raise IntegrationRequestError("qBittorrent inventory is invalid")
+            records = tuple(_parse_torrent_record(value) for value in payload)
+            items: list[QBittorrentV2InventoryItem] = []
+            for record in records[:limit]:
+                storage_key = _inventory_storage_key(record, data_root=self._data_root)
+                items.append(
+                    QBittorrentV2InventoryItem(
+                        info_hash=record.info_hash,
+                        storage_key=storage_key,
+                        claims_wos_identity=(
+                            record.category == WOS_V2_CATEGORY or WOS_V2_TAG in record.tags
+                        ),
+                    )
+                )
+            return QBittorrentV2Inventory(tuple(items), len(records) > limit)
+        except IntegrationAuthenticationError:
+            raise
+        except (httpx.HTTPError, IntegrationRequestError) as exc:
+            raise QBittorrentV2TransientError("qBittorrent inventory failed") from exc
         finally:
             if logged_in:
                 await self._logout()
@@ -584,6 +640,17 @@ def _parse_torrent_record(value: object) -> _TorrentRecord:
         download_limit=download_limit if type(download_limit) is int else None,
         progress=normalized_progress,
     )
+
+
+def _inventory_storage_key(record: _TorrentRecord, *, data_root: Path) -> UUID | None:
+    prefixes = [tag.removeprefix("wos-v2-") for tag in record.tags if tag.startswith("wos-v2-")]
+    if len(prefixes) != 1 or not re.fullmatch(r"[0-9a-f]{32}", prefixes[0]):
+        return None
+    storage_key = UUID(hex=prefixes[0])
+    expected_path = (data_root / "content" / storage_key.hex).as_posix()
+    if record.category != WOS_V2_CATEGORY or record.save_path != expected_path:
+        return None
+    return storage_key
 
 
 def _validate_identities(

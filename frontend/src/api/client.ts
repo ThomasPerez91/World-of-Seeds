@@ -353,6 +353,20 @@ export interface CentralAdminOverview extends OptionsResponse {
   }>;
 }
 
+export interface AdminReconciliationReport {
+  database_scanned: number;
+  qbittorrent_scanned: number;
+  storage_scanned: number;
+  external_torrents: number;
+  anomalies: Array<{
+    code: string;
+    severity: "info" | "warning" | "critical";
+    resource_id: string | null;
+    action: string;
+  }>;
+  truncated: boolean;
+}
+
 interface BusinessErrorDetail {
   code: string;
   message: string;
@@ -594,6 +608,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ changes }),
     });
+  },
+
+  getAdminReconciliation(limit = 100): Promise<AdminReconciliationReport> {
+    return requestV2<AdminReconciliationReport>(`/admin/reconciliation?limit=${limit}`);
   },
 
   getWosRestartStatus(): Promise<WosRestartStatus> {

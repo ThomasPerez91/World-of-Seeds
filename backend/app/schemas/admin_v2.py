@@ -70,3 +70,19 @@ class AdminV2OptionsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     changes: Annotated[dict[str, AdminOptionRequestValue], Field(min_length=1, max_length=64)]
+
+
+class AdminV2ReconciliationAnomaly(BaseModel):
+    code: str
+    severity: Literal["info", "warning", "critical"]
+    resource_id: str | None
+    action: str
+
+
+class AdminV2ReconciliationReport(BaseModel):
+    database_scanned: int
+    qbittorrent_scanned: int
+    storage_scanned: int
+    external_torrents: int
+    anomalies: list[AdminV2ReconciliationAnomaly]
+    truncated: bool
