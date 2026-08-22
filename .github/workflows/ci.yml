@@ -151,6 +151,12 @@ jobs:
             -f compose.v2.yaml -f compose.v2.local.yaml \
             config --format json \
             | python3 scripts/validate_compose_v2_local.py
+          docker compose --project-name world-of-seeds-v2-local \
+            --env-file .env.v2.local.example \
+            -f compose.v2.yaml -f compose.v2.local.yaml \
+            -f compose.v2.monitoring.yaml --profile monitoring \
+            config --format json \
+            | python3 scripts/validate_compose_v2_monitoring.py
       - name: Build and start production stack
         run: |
           cp .env.example .env
@@ -228,6 +234,12 @@ jobs:
       - name: Run complete local V2 smoke
         if: env.WOS_VERSION_CHANNEL == 'v2'
         run: scripts/local_v2.sh smoke
+      - name: Start isolated V2 monitoring
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: scripts/local_v2.sh monitoring-up
+      - name: Run V2 monitoring smoke
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: scripts/local_v2.sh monitoring-smoke
       - name: Stop complete local V2 profile
         if: always() && env.WOS_VERSION_CHANNEL == 'v2'
         run: scripts/local_v2.sh down
