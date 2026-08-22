@@ -98,6 +98,67 @@ class SharedContentStore:
                 os.close(managed_fd)
             os.close(content_fd)
 
+    def purge(self, storage_key: UUID, *, max_entries: int = 200_000) -> int:
+        """Recursively unlink one opaque managed tree without following any symlink."""
+        if not 1 <= max_entries <= 1_000_000:
+            raise ValueError("shared purge entry limit is invalid")
+        name = self._name(storage_key)
+        content_fd = self._open_content_root(create=False)
+        managed_fd: int | None = None
+        try:
+            try:
+                managed_fd = self._open_directory(name, dir_fd=content_fd)
+            except FileNotFoundError:
+                return 0
+            removed = self._purge_directory(managed_fd, max_entries=max_entries)
+            os.close(managed_fd)
+            managed_fd = None
+            os.rmdir(name, dir_fd=content_fd)
+            os.fsync(content_fd)
+            return removed
+        except SharedContentStoreError:
+            raise
+        except OSError as exc:
+            raise SharedContentStoreError("managed content purge failed safely") from exc
+        finally:
+            if managed_fd is not None:
+                os.close(managed_fd)
+            os.close(content_fd)
+
+    def _purge_directory(self, directory_fd: int, *, max_entries: int) -> int:
+        removed = 0
+        try:
+            names = sorted(os.listdir(directory_fd))
+        except OSError as exc:
+            raise SharedContentStoreError("managed content cannot be listed safely") from exc
+        for name in names:
+            if name in {".", ".."} or "/" in name or "\x00" in name:
+                raise SharedContentStoreError("managed content contains an unsafe entry")
+            removed += 1
+            if removed > max_entries:
+                raise SharedContentStoreError("managed content purge entry limit reached")
+            try:
+                metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if stat.S_ISDIR(metadata.st_mode):
+                    child_fd = self._open_directory(name, dir_fd=directory_fd)
+                    try:
+                        child_removed = self._purge_directory(
+                            child_fd,
+                            max_entries=max_entries - removed,
+                        )
+                    finally:
+                        os.close(child_fd)
+                    removed += child_removed
+                    os.rmdir(name, dir_fd=directory_fd)
+                else:
+                    os.unlink(name, dir_fd=directory_fd)
+            except SharedContentStoreError:
+                raise
+            except OSError as exc:
+                raise SharedContentStoreError("managed content entry changed during purge") from exc
+        os.fsync(directory_fd)
+        return removed
+
     def _open_content_root(self, *, create: bool) -> int:
         data_fd: int | None = None
         try:

@@ -61,6 +61,8 @@
   `f728471529d84ee43907101f819acba53eac65c9`.
 - V2-20 PR `#77` was merged into `develop_V2` at
   `5e624f7e9094ea9441b10dd57690a9a68460b337`.
+- V2-21 PR `#78` was merged into `develop_V2` at
+  `5dba6977a4956b127c6c5a25428e522b78254eba`.
 
 ## V1 completion state
 
@@ -613,6 +615,30 @@
   compatibility-mode, CSP, pagination, and accessibility coverage.
 - V2-21 is implemented on `feat/v2-download-fallbacks` from the merged V2-20 commit.
 
+## V2-22 — Shared-content lifecycle
+
+- Added an owner-only CSRF-protected cancellation endpoint. Cancelling one shared reference
+  decrements only that user's logical usage; the physical torrent remains available while any
+  other active request exists.
+- Cancelling the final reference moves the managed torrent to `PURGE_PENDING`, records the
+  configurable retention deadline, cancels obsolete active effects, and queues one durable,
+  generation-keyed `PURGE_TORRENT` job.
+- A new request during retention atomically cancels the pending purge and restores the existing
+  physical copy. A request during `PURGING` receives a bounded conflict; a fully purged torrent
+  is safely reactivated through a new staged add while retaining the canonical managed row.
+- The worker rechecks active requests, retention, and renewable download leases before deletion,
+  marks the lifecycle `PURGING` across external effects, and retries qBittorrent/filesystem
+  ambiguity idempotently.
+- qBittorrent deletion validates the WOS category, opaque save path, and identity tags before
+  requesting `deleteFiles=true`; external torrents are never mutated. The shared-content purge
+  is descriptor-based, bounded, recursive, symlink-safe, and idempotent.
+- Successful purge clears the SQL manifest, decrements physical managed accounting, and preserves
+  cancelled request history. Lease acquisition/renewal now locks and revalidates ready ownership
+  so a stream cannot renew after lifecycle revocation.
+- Added an additive reversible lifecycle migration and focused cancellation, shared-owner,
+  retention/reactivation, race, lease, qB ownership, filesystem, API, and worker tests.
+- V2-22 is implemented on `feat/v2-shared-content-lifecycle` from the merged V2-21 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -787,6 +813,15 @@
 - V2-21 full backend Ruff lint/format and mypy: PASS.
 - V2-21 `git diff --check`: PASS. TypeScript, Vitest/axe, production build, container, and local
   profile remain required in PR CI before merge.
+- PR #78 (V2-21) review and GitHub CI run `32567007096`: PASS; TypeScript, frontend tests/axe,
+  production build, backend, migrations, container, and complete local-profile smoke jobs are
+  green; squash-merged into `develop_V2` at `5dba6977a4956b127c6c5a25428e522b78254eba`.
+- V2-22 focused lifecycle, qBittorrent, shared-storage, download-lease, API, accounting, and model
+  tests: PASS.
+- V2-22 complete backend suite: PASS, 395 tests with 6 service-backed tests deferred to CI.
+- V2-22 full backend Ruff lint/format and mypy: PASS.
+- V2-22 `git diff --check`: PASS. Real PostgreSQL migration rollback/re-upgrade, frontend,
+  container, and complete local-profile smoke validation remain required in PR CI before merge.
 
 ## Known constraints
 
@@ -803,6 +838,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-22 — Shared-content lifecycle`.
-- Do not start V2-22 until V2-21 has passed review, required frontend and complete local-profile
-  CI is green, and its PR is merged into `develop_V2`.
+- The next roadmap task is `V2-23 — Common accessible React confirmations and toasts`.
+- Do not start V2-23 until V2-22 has passed review, required PostgreSQL migration and complete
+  local-profile CI is green, and its PR is merged into `develop_V2`.

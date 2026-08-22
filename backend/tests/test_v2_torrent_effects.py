@@ -2,7 +2,7 @@ import hashlib
 import os
 import uuid
 from collections.abc import AsyncIterator, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -20,11 +20,13 @@ from app.integrations.qbittorrent_v2 import (
 )
 from app.jobs.torrent_effects import TorrentEffectHandlers, TorrentSyncEnqueuer
 from app.jobs.torrent_payloads import TorrentPayloadStore, TorrentPayloadStoreError
-from app.jobs.worker import PermanentTorrentJobError, TorrentJobSnapshot
+from app.jobs.worker import PermanentTorrentJobError, TorrentJobSnapshot, TransientTorrentJobError
 from app.models import (
     Base,
+    DownloadLease,
     ManagedTorrent,
     ManagedTorrentState,
+    StorageLedger,
     TorrentFile,
     TorrentJob,
     TorrentRequest,
@@ -149,6 +151,10 @@ class FakeAdder:
 class FakeInspector:
     def __init__(self, snapshot: QBittorrentV2TorrentSnapshot) -> None:
         self.snapshot = snapshot
+        self.removed: list[QBittorrentV2ManagedIdentity] = []
+
+    async def remove_managed_torrent(self, identity: QBittorrentV2ManagedIdentity) -> None:
+        self.removed.append(identity)
 
     async def inspect_managed_torrents(
         self,
@@ -281,6 +287,121 @@ async def test_add_handler_refuses_symlink_storage_before_qbittorrent(
     assert failure.value.error_code == "shared_storage_invalid"
     assert adder.contents == []
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_purge_handler_removes_content_manifest_and_accounting(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(
+        sessions,
+        state=ManagedTorrentState.READY,
+    )
+    payloads = _payloads(tmp_path)
+    content = _content(tmp_path)
+    content.prepare(STORAGE_KEY)
+    managed_path = tmp_path / "data" / "content" / STORAGE_KEY.hex
+    (managed_path / "Film.mkv").write_bytes(b"hello")
+    async with sessions() as session, session.begin():
+        torrent = await session.get(ManagedTorrent, torrent_id)
+        request = await session.get(TorrentRequest, request_id)
+        assert torrent is not None and request is not None
+        torrent.state = ManagedTorrentState.PURGE_PENDING
+        torrent.progress = 1
+        torrent.purge_after = NOW - timedelta(hours=1)
+        request.state = TorrentRequestState.CANCELLED
+        session.add(
+            TorrentFile(
+                managed_torrent_id=torrent_id,
+                file_index=0,
+                relative_path="Film.mkv",
+                size=5,
+            )
+        )
+        session.add(StorageLedger(id=1, managed_bytes=5, disk_total_bytes=100, disk_free_bytes=50))
+    adder = FakeAdder()
+    effects = TorrentEffectHandlers(
+        sessions,
+        _router(
+            sessions,
+            adder,
+            QBittorrentV2TorrentSnapshot(INFO_HASH, "uploading", 1),
+        ),
+        payloads,
+        content,
+        clock=lambda: NOW,
+    )
+
+    await effects.purge_torrent(_snapshot(torrent_id, request_id, "PURGE_TORRENT"))
+
+    async with sessions() as session:
+        torrent = await session.get(ManagedTorrent, torrent_id)
+        ledger = await session.get(StorageLedger, 1)
+        assert torrent is not None and torrent.state is ManagedTorrentState.PURGED
+        assert torrent.purge_after is None
+        assert torrent.manifest_version == 0
+        assert ledger is not None and ledger.managed_bytes == 0
+        assert await session.scalar(select(func.count()).select_from(TorrentFile)) == 0
+    assert not managed_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_purge_handler_waits_for_active_download_lease(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(
+        sessions,
+        state=ManagedTorrentState.READY,
+    )
+    payloads = _payloads(tmp_path)
+    content = _content(tmp_path)
+    content.prepare(STORAGE_KEY)
+    managed_path = tmp_path / "data" / "content" / STORAGE_KEY.hex
+    (managed_path / "Film.mkv").write_bytes(b"hello")
+    async with sessions() as session, session.begin():
+        torrent = await session.get(ManagedTorrent, torrent_id)
+        request = await session.get(TorrentRequest, request_id)
+        assert torrent is not None and request is not None
+        torrent.state = ManagedTorrentState.PURGE_PENDING
+        torrent.progress = 1
+        torrent.purge_after = NOW - timedelta(hours=1)
+        request.state = TorrentRequestState.CANCELLED
+        file = TorrentFile(
+            managed_torrent_id=torrent_id,
+            file_index=0,
+            relative_path="Film.mkv",
+            size=5,
+        )
+        session.add(file)
+        await session.flush()
+        session.add(
+            DownloadLease(
+                user_id=request.user_id,
+                managed_torrent_id=torrent_id,
+                torrent_request_id=request_id,
+                torrent_file_id=file.id,
+                expires_at=NOW + timedelta(minutes=1),
+            )
+        )
+    effects = TorrentEffectHandlers(
+        sessions,
+        _router(
+            sessions,
+            FakeAdder(),
+            QBittorrentV2TorrentSnapshot(INFO_HASH, "uploading", 1),
+        ),
+        payloads,
+        content,
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(TransientTorrentJobError) as failure:
+        await effects.purge_torrent(_snapshot(torrent_id, request_id, "PURGE_TORRENT"))
+
+    assert failure.value.error_code == "torrent_download_active"
+    assert managed_path.is_dir()
 
 
 @pytest.mark.asyncio

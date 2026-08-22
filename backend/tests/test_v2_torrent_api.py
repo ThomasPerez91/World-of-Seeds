@@ -10,7 +10,9 @@ from app.models import (
     ManagedTorrent,
     ManagedTorrentState,
     TorrentJob,
+    TorrentJobState,
     TorrentRequest,
+    TorrentRequestState,
     User,
 )
 from app.options import PostgresOptionsRegistry
@@ -186,3 +188,64 @@ async def test_v2_listing_exposes_only_bounded_error_code(
     assert response.json()["items"][0]["error_code"] == "torrent_failed"
     assert "info_hash" not in response.json()["items"][0]
     assert "storage" not in response.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_v2_cancellation_schedules_retained_purge_and_is_idempotent(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    managed = ManagedTorrent(
+        info_hash="d" * 40,
+        name="Cancelled",
+        total_size=100,
+        state=ManagedTorrentState.READY,
+        progress=1,
+    )
+    request = TorrentRequest(
+        user_id=owner.id,
+        managed_torrent=managed,
+        state=TorrentRequestState.READY,
+    )
+    db_session.add(request)
+    await db_session.commit()
+    request_id = request.id
+    headers = await login(client)
+
+    first = await client.delete(f"/api/v2/torrents/{request_id}", headers=headers)
+    second = await client.delete(f"/api/v2/torrents/{request_id}", headers=headers)
+
+    assert first.status_code == second.status_code == 204, (first.text, second.text)
+    await db_session.refresh(request)
+    await db_session.refresh(managed)
+    assert request.state is TorrentRequestState.CANCELLED
+    assert managed.state is ManagedTorrentState.PURGE_PENDING
+    assert managed.purge_after is not None
+    jobs = list(
+        (
+            await db_session.scalars(
+                select(TorrentJob).where(TorrentJob.job_type == "PURGE_TORRENT")
+            )
+        ).all()
+    )
+    assert len(jobs) == 1
+    assert jobs[0].state is TorrentJobState.QUEUED
+
+
+@pytest.mark.asyncio
+async def test_v2_cancellation_cannot_cross_owner_boundary(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    other = User(username="other-owner", password_hash=hash_password("correct-horse-battery"))
+    managed = ManagedTorrent(info_hash="e" * 40, name="Private", total_size=1)
+    request = TorrentRequest(user=other, managed_torrent=managed)
+    db_session.add_all([other, request])
+    await db_session.commit()
+    headers = await login(client, owner.username)
+
+    response = await client.delete(f"/api/v2/torrents/{request.id}", headers=headers)
+
+    assert response.status_code == 404

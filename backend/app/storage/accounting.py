@@ -136,9 +136,12 @@ async def prepare_storage_accounting(
             )
         )
 
+    physical_content_missing = (
+        existing_torrent is None or existing_torrent.state is ManagedTorrentState.PURGED
+    )
     pressure = ledger.pressure
     if disk is not None:
-        projected_free = disk.free_bytes - (0 if existing_torrent is not None else total_size)
+        projected_free = disk.free_bytes - (total_size if physical_content_missing else 0)
         pressure = classify_storage_pressure(
             StorageDiskSnapshot(disk.total_bytes, max(0, projected_free)),
             policy=_require_policy(policy),
@@ -155,7 +158,7 @@ async def prepare_storage_accounting(
             and usage.logical_bytes + total_size > policy.user_max_bytes
         ):
             raise StorageAdmissionError("user_quota_exceeded", pressure)
-        if existing_torrent is None:
+        if physical_content_missing:
             if (
                 policy.managed_max_bytes
                 and ledger.managed_bytes + total_size > policy.managed_max_bytes
@@ -166,7 +169,11 @@ async def prepare_storage_accounting(
             if pressure is StoragePressureState.CRITICAL:
                 raise StorageAdmissionError("disk_pressure_critical", pressure)
 
-    return StorageAccountingContext(usage=usage, ledger=ledger, pressure=pressure)
+    return StorageAccountingContext(
+        usage=usage,
+        ledger=ledger,
+        pressure=pressure,
+    )
 
 
 def apply_storage_accounting(

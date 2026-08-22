@@ -63,7 +63,9 @@ from app.storage import (
 from app.torrents import (
     TorrentDeduplicationError,
     TorrentMetadataConflictError,
+    TorrentPurgeInProgressError,
     TorrentValidationError,
+    cancel_owned_torrent_request,
     create_or_get_torrent_request,
     sanitize_torrent,
 )
@@ -685,7 +687,7 @@ async def create_torrent_request(
                         "torrent_limit_reached",
                         "Tu as atteint le nombre maximal de téléchargements actifs.",
                     )
-            if result.managed_torrent_created:
+            if result.managed_torrent_created or result.managed_torrent_reactivated:
                 staged_key = result.managed_torrent.storage_key
                 staged = await run_in_threadpool(
                     payload_store.stage,
@@ -700,7 +702,14 @@ async def create_torrent_request(
                         managed_torrent_id=result.managed_torrent.id,
                         torrent_request_id=result.request.id,
                         job_type=ADD_TORRENT_JOB,
-                        idempotency_key=f"add:{result.managed_torrent.id}",
+                        idempotency_key=(
+                            f"add:{result.managed_torrent.id}"
+                            if result.managed_torrent_created
+                            else (
+                                f"add:{result.managed_torrent.id}:"
+                                f"reactivate:{result.managed_torrent.lifecycle_generation}"
+                            )
+                        ),
                         state=TorrentJobState.QUEUED,
                         available_at=datetime.now(UTC),
                     )
@@ -724,6 +733,12 @@ async def create_torrent_request(
             status.HTTP_409_CONFLICT,
             "torrent_metadata_conflict",
             "Les métadonnées de ce torrent sont incompatibles avec la copie existante.",
+        )
+    except TorrentPurgeInProgressError:
+        _fail(
+            status.HTTP_409_CONFLICT,
+            "torrent_purge_in_progress",
+            "Ce contenu est en cours de purge. Réessaie dans quelques instants.",
         )
     except TorrentDeduplicationError:
         _fail(
@@ -779,3 +794,43 @@ async def list_torrent_requests(
         limit=limit,
         total=total or 0,
     )
+
+
+@router.delete("/{torrent_request_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_torrent_request(
+    db: DbSession,
+    redis: RedisCoordinatorDependency,
+    context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
+    torrent_request_id: uuid.UUID,
+) -> Response:
+    user_id = context.user.id
+    try:
+        options = await PostgresOptionsRegistry().snapshot(db)
+        retention_hours = _integer_option(options, "WOS_TORRENT_RETENTION_HOURS")
+        await db.rollback()
+        async with db.begin():
+            result = await cancel_owned_torrent_request(
+                db,
+                user_id=user_id,
+                torrent_request_id=torrent_request_id,
+                retention_hours=retention_hours,
+            )
+    except (DatabaseOptionsDriftError, ValueError):
+        await db.rollback()
+        _fail(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "torrent_options_unavailable",
+            "L’annulation est momentanément indisponible.",
+        )
+    except SQLAlchemyError:
+        await db.rollback()
+        _fail(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "torrent_cancellation_unavailable",
+            "La demande n’a pas pu être annulée.",
+        )
+    if result is None:
+        _fail(status.HTTP_404_NOT_FOUND, "torrent_request_not_found", "Demande introuvable.")
+    if result.purge_scheduled:
+        await redis.signal_job_available()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

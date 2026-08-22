@@ -58,6 +58,9 @@ class FakeQBittorrent:
     def __init__(self) -> None:
         self.control_calls: list[tuple[QBittorrentV2DesiredControl, ...]] = []
 
+    async def remove_managed_torrent(self, _identity: QBittorrentV2ManagedIdentity) -> None:
+        return None
+
     async def inspect_managed_torrents(
         self,
         identities: Sequence[QBittorrentV2ManagedIdentity],

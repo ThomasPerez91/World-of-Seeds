@@ -164,6 +164,57 @@ async def test_gateway_is_idempotent_when_owned_torrent_already_exists() -> None
 
 
 @pytest.mark.asyncio
+async def test_gateway_removes_only_owned_torrent_and_files_idempotently() -> None:
+    requests: list[tuple[str, bytes]] = []
+    lookup_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal lookup_count
+        requests.append((request.url.path, request.content))
+        if request.url.path == "/api/v2/auth/login":
+            return _login_response()
+        if request.url.path == "/api/v2/torrents/info":
+            lookup_count += 1
+            return httpx.Response(200, json=[_managed_torrent()] if lookup_count == 1 else [])
+        if request.url.path == "/api/v2/torrents/delete":
+            assert request.content == f"hashes={INFO_HASH}&deleteFiles=true".encode()
+            return httpx.Response(200)
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError(request.url.path)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        gateway = _gateway(client)
+        await gateway.remove_managed_torrent(QBittorrentV2ManagedIdentity(INFO_HASH, STORAGE_KEY))
+        await gateway.remove_managed_torrent(QBittorrentV2ManagedIdentity(INFO_HASH, STORAGE_KEY))
+
+    assert [path for path, _ in requests].count("/api/v2/torrents/delete") == 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_refuses_to_purge_external_torrent() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        if request.url.path == "/api/v2/auth/login":
+            return _login_response()
+        if request.url.path == "/api/v2/torrents/info":
+            return httpx.Response(200, json=[_managed_torrent(category="external")])
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError(request.url.path)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(QBittorrentV2OwnershipError):
+            await _gateway(client).remove_managed_torrent(
+                QBittorrentV2ManagedIdentity(INFO_HASH, STORAGE_KEY)
+            )
+
+    assert "/api/v2/torrents/delete" not in requests
+
+
+@pytest.mark.asyncio
 async def test_gateway_reads_bounded_owned_torrent_state_snapshot() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v2/auth/login":

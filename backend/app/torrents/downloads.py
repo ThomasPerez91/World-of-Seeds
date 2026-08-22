@@ -17,14 +17,22 @@ from threading import BoundedSemaphore
 from typing import IO, cast
 from urllib.parse import quote
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import StreamingResponse
 from starlette.types import Receive, Scope, Send
 
 from app.files.downloads import OpenedDownload
-from app.models import DownloadLease, User
+from app.models import (
+    DownloadLease,
+    ManagedTorrent,
+    ManagedTorrentState,
+    TorrentFile,
+    TorrentRequest,
+    TorrentRequestState,
+    User,
+)
 from app.storage import SharedContentStore
 
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_NONBLOCK", 0)
@@ -313,6 +321,28 @@ class DownloadLeaseManager:
             )
             if user is None:
                 raise ManagedDownloadError("download owner is missing")
+            managed = await self._session.get(
+                ManagedTorrent,
+                managed_torrent_id,
+                with_for_update=True,
+            )
+            request = await self._session.get(
+                TorrentRequest,
+                torrent_request_id,
+                with_for_update=True,
+            )
+            file = await self._session.get(TorrentFile, torrent_file_id)
+            if (
+                managed is None
+                or managed.state is not ManagedTorrentState.READY
+                or request is None
+                or request.user_id != user_id
+                or request.managed_torrent_id != managed_torrent_id
+                or request.state is not TorrentRequestState.READY
+                or file is None
+                or file.managed_torrent_id != managed_torrent_id
+            ):
+                raise ManagedDownloadError("download right is no longer ready")
             await self._session.execute(
                 delete(DownloadLease).where(
                     DownloadLease.user_id == user_id,
@@ -345,16 +375,36 @@ class DownloadLeaseManager:
     async def renew(self, lease_id: uuid.UUID) -> None:
         now = self._clock()
         async with self._session.begin():
-            result = await self._session.execute(
-                update(DownloadLease)
-                .where(DownloadLease.id == lease_id)
-                .values(
-                    renewed_at=now,
-                    expires_at=now + timedelta(seconds=self._lease_seconds),
-                )
-            )
-            if result.rowcount != 1:  # type: ignore[attr-defined]
+            candidate = await self._session.get(DownloadLease, lease_id)
+            if candidate is None:
                 raise ManagedDownloadError("download lease was lost")
+            user = await self._session.get(User, candidate.user_id, with_for_update=True)
+            managed = await self._session.get(
+                ManagedTorrent,
+                candidate.managed_torrent_id,
+                with_for_update=True,
+            )
+            lease = await self._session.get(DownloadLease, lease_id, with_for_update=True)
+            request = (
+                await self._session.get(
+                    TorrentRequest,
+                    candidate.torrent_request_id,
+                    with_for_update=True,
+                )
+                if lease is not None
+                else None
+            )
+            if (
+                user is None
+                or managed is None
+                or managed.state is not ManagedTorrentState.READY
+                or lease is None
+                or request is None
+                or request.state is not TorrentRequestState.READY
+            ):
+                raise ManagedDownloadError("download lease was lost")
+            lease.renewed_at = now
+            lease.expires_at = now + timedelta(seconds=self._lease_seconds)
 
     async def release(self, lease_id: uuid.UUID) -> None:
         await self._session.rollback()
