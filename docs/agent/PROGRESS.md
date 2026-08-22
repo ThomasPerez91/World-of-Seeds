@@ -63,6 +63,8 @@
   `5e624f7e9094ea9441b10dd57690a9a68460b337`.
 - V2-21 PR `#78` was merged into `develop_V2` at
   `5dba6977a4956b127c6c5a25428e522b78254eba`.
+- V2-22 PR `#79` was merged into `develop_V2` at
+  `eaa436581a3ab449b33790e90c6dc0f8ea052177`.
 
 ## V1 completion state
 
@@ -639,6 +641,25 @@
   retention/reactivation, race, lease, qB ownership, filesystem, API, and worker tests.
 - V2-22 is implemented on `feat/v2-shared-content-lifecycle` from the merged V2-21 commit.
 
+## V2-23 — Common accessible React confirmations and toasts
+
+- Replaced the remaining imperative DOM alert implementation with one application-level React
+  feedback provider. Confirmations are queued, focus-trapped, Escape/backdrop cancellable, restore
+  focus to their trigger, and focus the safe action first for destructive operations.
+- Added a bounded internal toast region with polite/assertive live semantics, explicit dismissal,
+  automatic expiry, at most three visible messages, and no inline style or dynamic HTML.
+- Migrated file creation/mutation, personal trash restore/permanent deletion, and their success or
+  error feedback to the common React contract. Permanent deletion remains explicitly confirmed.
+- Exposed V2-22 cancellation in the downloads table for every non-terminal request, with a
+  destructive confirmation, per-row busy state, bounded API errors, success toast, and refresh of
+  the durable SQL state.
+- Extended the reproducible local profile smoke beyond upload/worker/scheduler checks: it creates a
+  controlled READY file, validates the authenticated manifest, one-byte HTTP Range response,
+  streamed ZIP fallback, CSRF cancellation, and retained `PURGE_PENDING|CANCELLED|QUEUED` state.
+- Added focused confirmation queue/focus/CSP/axe coverage, cancellation interaction coverage, and
+  local-smoke contract assertions.
+- V2-23 is implemented on `feat/v2-common-feedback` from the merged V2-22 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -822,6 +843,15 @@
 - V2-22 full backend Ruff lint/format and mypy: PASS.
 - V2-22 `git diff --check`: PASS. Real PostgreSQL migration rollback/re-upgrade, frontend,
   container, and complete local-profile smoke validation remain required in PR CI before merge.
+- PR #79 (V2-22) final GitHub CI run `32568201009`: PASS; PostgreSQL migration downgrade/re-upgrade,
+  backend, frontend, container, and complete local-profile smoke jobs are green; squash-merged into
+  `develop_V2` at `eaa436581a3ab449b33790e90c6dc0f8ea052177`.
+- V2-23 TypeScript checks, 25 frontend tests including focused axe audits, and production build:
+  PASS.
+- V2-23 complete backend regression, Ruff lint/format, mypy, Python syntax, CSP scan, and
+  `git diff --check`: PASS.
+- V2-23 container build and enhanced complete local-profile smoke remain required in PR CI before
+  merge.
 
 ## Known constraints
 
@@ -838,6 +868,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-23 — Common accessible React confirmations and toasts`.
-- Do not start V2-23 until V2-22 has passed review, required PostgreSQL migration and complete
-  local-profile CI is green, and its PR is merged into `develop_V2`.
+- The next roadmap task is `V2-24 — Complete responsive behavior`.
+- Do not start V2-24 until V2-23 has passed review, the enhanced complete local-profile smoke is
+  green, and its PR is merged into `develop_V2`.

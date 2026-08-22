@@ -24,6 +24,7 @@ import {
 } from "./components/LegalPage";
 import { formatBytes } from "./utils/format";
 import { APP_VERSION } from "./version";
+import { FeedbackProvider } from "./components/Feedback";
 
 type AuthState =
   | { status: "loading" }
@@ -793,7 +794,7 @@ function UnavailableScreen({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-export function App() {
+function AppContent() {
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
   const [legalDocument, setLegalDocument] = useState<LegalDocument | null>(null);
   const handleSessionExpired = useCallback(() => {
@@ -870,5 +871,13 @@ export function App() {
       onOpenLegal={setLegalDocument}
       onSessionExpired={handleSessionExpired}
     />
+  );
+}
+
+export function App() {
+  return (
+    <FeedbackProvider>
+      <AppContent />
+    </FeedbackProvider>
   );
 }

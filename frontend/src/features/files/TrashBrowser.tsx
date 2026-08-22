@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api, ApiError, type TrashEntry, type TrashListing } from "../../api/client";
-import { confirmOperation, showOperationError, showOperationSuccess } from "../../components/alerts";
+import { ConfirmDialog, useFeedback } from "../../components/Feedback";
 import { FileIcon, FolderIcon } from "../../components/icons";
 import { formatBytes } from "../../utils/format";
 
@@ -60,46 +60,48 @@ function TrashActionDialog({
   onSessionExpired: () => void;
 }) {
   const restoring = action === "restore";
+  const feedback = useFeedback();
+  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      const confirmed = await confirmOperation({
+  async function submit() {
+    setSubmitting(true);
+    try {
+      if (restoring) {
+        await api.restoreTrash(entry.id);
+        onCompleted(`« ${entry.name} » a été restauré.`);
+      } else {
+        await api.purgeTrash(entry.id);
+        onCompleted(`« ${entry.name} » a été supprimé définitivement.`);
+      }
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      feedback.toast({ tone: "error", message: trashActionError(caught, action) });
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <ConfirmDialog
+      options={{
         title: restoring ? "Restaurer cet élément ?" : "Supprimer définitivement ?",
         message: restoring
           ? `« ${entry.name} » sera replacé dans « ${entry.original_path} ».`
           : `« ${entry.name} » et tout son contenu seront irrécupérables.`,
         confirmText: restoring ? "Restaurer" : "Supprimer définitivement",
         destructive: !restoring,
-      });
-      if (!active) return;
-      if (!confirmed) {
-        onClose();
-        return;
-      }
-      try {
-        if (restoring) {
-          await api.restoreTrash(entry.id);
-          if (active) onCompleted(`« ${entry.name} » a été restauré.`);
-        } else {
-          await api.purgeTrash(entry.id);
-          if (active) onCompleted(`« ${entry.name} » a été supprimé définitivement.`);
-        }
-      } catch (caught) {
-        if (caught instanceof ApiError && caught.status === 401) {
-          onSessionExpired();
-          return;
-        }
-        await showOperationError(trashActionError(caught, action));
-        if (active) onClose();
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [action, entry, onClose, onCompleted, onSessionExpired, restoring]);
-
-  return null;
+      }}
+      closeDisabled={submitting}
+      onClose={(confirmed) => {
+        if (confirmed) void submit();
+        else onClose();
+      }}
+    />
+  );
 }
 
 export function TrashBrowser({
@@ -111,6 +113,7 @@ export function TrashBrowser({
   onSessionExpired: () => void;
   revision: number;
 }) {
+  const feedback = useFeedback();
   const [listing, setListing] = useState<TrashListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -144,7 +147,7 @@ export function TrashBrowser({
 
   function completeAction(message: string) {
     setSelectedAction(null);
-    void showOperationSuccess(message);
+    feedback.toast({ tone: "success", message });
     setReloadKey((value) => value + 1);
     onFilesChanged();
   }

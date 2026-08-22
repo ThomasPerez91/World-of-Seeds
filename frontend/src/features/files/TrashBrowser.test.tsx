@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { TrashEntry, TrashListing } from "../../api/client";
+import { FeedbackProvider } from "../../components/Feedback";
 import { auditAccessibility } from "../../test/accessibility";
 import { TrashBrowser } from "./TrashBrowser";
 
@@ -44,11 +45,13 @@ describe("TrashBrowser", () => {
     );
 
     const view = render(
-      <TrashBrowser
-        onFilesChanged={onFilesChanged}
-        onSessionExpired={vi.fn()}
-        revision={0}
-      />,
+      <FeedbackProvider>
+        <TrashBrowser
+          onFilesChanged={onFilesChanged}
+          onSessionExpired={vi.fn()}
+          revision={0}
+        />
+      </FeedbackProvider>,
     );
     await screen.findByRole("heading", { name: "movie.mkv" });
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
@@ -71,7 +74,7 @@ describe("TrashBrowser", () => {
     await user.click(restoreConfirmation);
 
     await screen.findByText("« movie.mkv » a été restauré.");
-    await user.click(screen.getByRole("button", { name: "Fermer" }));
+    await user.click(screen.getByRole("button", { name: "Fermer le message" }));
     await waitFor(() => expect(onFilesChanged).toHaveBeenCalledOnce());
   });
 });

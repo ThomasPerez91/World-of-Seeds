@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import http.cookiejar
+import io
 import json
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +59,7 @@ def sql(statement: str) -> str:
     )
 
 
-def fixture() -> tuple[bytes, str]:
+def fixture() -> tuple[bytes, str, str]:
     unique = uuid.uuid4().hex.encode()
     name = b"wos-local-smoke-" + unique + b".txt"
     info = (
@@ -70,7 +72,7 @@ def fixture() -> tuple[bytes, str]:
         + b"e"
     )
     metainfo = b"d8:announce30:https://c411.org/announce/test4:info" + info + b"e"
-    return metainfo, hashlib.sha1(info).hexdigest()
+    return metainfo, hashlib.sha1(info).hexdigest(), name.decode()
 
 
 def request_json(
@@ -91,6 +93,38 @@ def request_json(
     if not isinstance(value, dict):
         raise RuntimeError(f"unexpected JSON response from {url}")
     return value
+
+
+def request_bytes(
+    opener: urllib.request.OpenerDirector,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, Any, bytes]:
+    request = urllib.request.Request(url, headers=headers or {})
+    try:
+        with opener.open(request, timeout=10) as response:
+            return response.status, response.headers, response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read(4096).decode("utf-8", "replace")
+        raise RuntimeError(f"HTTP {exc.code} for {url}: {detail}") from exc
+
+
+def request_empty(
+    opener: urllib.request.OpenerDirector,
+    url: str,
+    *,
+    method: str,
+    headers: dict[str, str],
+) -> int:
+    request = urllib.request.Request(url, headers=headers, method=method)
+    try:
+        with opener.open(request, timeout=10) as response:
+            response.read()
+            return response.status
+    except urllib.error.HTTPError as exc:
+        detail = exc.read(4096).decode("utf-8", "replace")
+        raise RuntimeError(f"HTTP {exc.code} for {url}: {detail}") from exc
 
 
 def wait_for(description: str, probe: Any, *, timeout: float = 60) -> Any:
@@ -124,7 +158,7 @@ def main() -> int:
     if csrf is None:
         raise RuntimeError("login did not return a CSRF cookie")
 
-    content, info_hash = fixture()
+    content, info_hash, file_name = fixture()
     boundary = f"wos-{uuid.uuid4().hex}"
     multipart = (
         (
@@ -217,6 +251,79 @@ def main() -> int:
     if len(records_after_restart) != 1 or job_count != "1":
         raise RuntimeError("worker restart duplicated a qB torrent or durable add job")
 
+    compose("stop", "worker")
+    storage_key = sql(f"SELECT storage_key FROM managed_torrents WHERE info_hash = '{info_hash}';")
+    if len(storage_key) != 36:
+        raise RuntimeError("managed storage key is unavailable")
+    compose(
+        "exec",
+        "-T",
+        "api",
+        "python",
+        "-c",
+        (
+            "from pathlib import Path; import sys; "
+            "path=Path('/data/content')/sys.argv[1].replace('-', '')/sys.argv[2]; "
+            "path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'x')"
+        ),
+        storage_key,
+        file_name,
+    )
+    sql(
+        "UPDATE managed_torrents SET state = 'READY', progress = 1, updated_at = now() "
+        f"WHERE info_hash = '{info_hash}'; "
+        "UPDATE torrent_requests SET state = 'READY', ready_at = now(), updated_at = now() "
+        f"WHERE id = '{request_id}'::uuid;"
+    )
+    snapshot = request_json(
+        opener,
+        f"{base}/api/v2/torrents/{request_id}/download-manifest",
+    )
+    items = snapshot.get("items")
+    if not isinstance(items, list) or len(items) != 1:
+        raise RuntimeError("ready download manifest is incomplete")
+    file_id = str(items[0]["id"])
+    snapshot_id = str(snapshot["snapshot_id"])
+    download_url = (
+        f"{base}/api/v2/torrents/{request_id}/files/{file_id}/download?snapshot={snapshot_id}"
+    )
+    range_status, range_headers, range_body = request_bytes(
+        opener,
+        download_url,
+        headers={"Range": "bytes=0-0"},
+    )
+    if (
+        range_status != 206
+        or range_body != b"x"
+        or range_headers.get("Content-Range") != "bytes 0-0/1"
+    ):
+        raise RuntimeError("ready Range download is invalid")
+    archive_status, _, archive_body = request_bytes(
+        opener,
+        f"{base}/api/v2/torrents/{request_id}/download-archive?snapshot={snapshot_id}",
+    )
+    with zipfile.ZipFile(io.BytesIO(archive_body)) as archive:
+        if archive_status != 200 or archive.read(file_name) != b"x":
+            raise RuntimeError("ready ZIP fallback is invalid")
+
+    cancellation_status = request_empty(
+        opener,
+        f"{base}/api/v2/torrents/{request_id}",
+        method="DELETE",
+        headers={"X-CSRF-Token": csrf},
+    )
+    retained = sql(
+        "SELECT mt.state || '|' || tr.state || '|' || tj.state "
+        "FROM torrent_requests tr "
+        "JOIN managed_torrents mt ON mt.id = tr.managed_torrent_id "
+        "JOIN torrent_jobs tj ON tj.torrent_request_id = tr.id "
+        "AND tj.job_type = 'PURGE_TORRENT' "
+        f"WHERE tr.id = '{request_id}'::uuid;"
+    )
+    if cancellation_status != 204 or retained != "PURGE_PENDING|CANCELLED|QUEUED":
+        raise RuntimeError(f"retained cancellation is invalid: {retained}")
+    compose("start", "worker")
+
     with opener.open(f"{base}/", timeout=10) as response:
         index = response.read().decode("utf-8")
     asset_start = index.find('src="/assets/')
@@ -240,6 +347,9 @@ def main() -> int:
                 "qbittorrent_matches": 1,
                 "worker_restart_duplicates": 0,
                 "scheduler_applied": True,
+                "range_download_checked": True,
+                "zip_fallback_checked": True,
+                "retained_cancellation_checked": True,
                 "ui_bundle_checked": True,
             },
             indent=2,

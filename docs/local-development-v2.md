@@ -37,6 +37,8 @@ et vérifie :
 - la présence unique de l'infohash dans qBittorrent ;
 - une génération appliquée par le scheduler ;
 - l'absence de doublon après redémarrage du worker ;
+- un contenu `READY` contrôlé, son manifeste, une reprise HTTP Range et le ZIP streamé ;
+- l'annulation CSRF de la dernière référence et sa purge durable mise en attente de rétention ;
 - la présence de la vue « Mes téléchargements » dans le bundle frontend servi.
 
 Le scénario peut être relancé : chaque exécution produit une fixture distincte, tout en

@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 
 import { api, ApiError, type DirectoryListing, type FileEntry } from "../../api/client";
-import { confirmOperation, showOperationError } from "../../components/alerts";
+import { ConfirmDialog, useFeedback } from "../../components/Feedback";
 import { FolderIcon } from "../../components/icons";
 import { splitDisplayName } from "../../utils/files";
 import { FileDialog } from "./FileDialog";
@@ -48,6 +48,7 @@ function RenameDialog({
   onCompleted,
   onSessionExpired,
 }: Omit<FileMutationDialogProps, "action" | "currentDirectory">) {
+  const feedback = useFeedback();
   const displayed = splitDisplayName(entry);
   const [name, setName] = useState(displayed.basename);
   const [submitting, setSubmitting] = useState(false);
@@ -63,7 +64,7 @@ function RenameDialog({
         onSessionExpired();
         return;
       }
-      await showOperationError(mutationErrorMessage(caught));
+      feedback.toast({ tone: "error", message: mutationErrorMessage(caught) });
     } finally {
       setSubmitting(false);
     }
@@ -122,6 +123,7 @@ function MoveDialog({
   onCompleted,
   onSessionExpired,
 }: Omit<FileMutationDialogProps, "action">) {
+  const feedback = useFeedback();
   const [destination, setDestination] = useState(currentDirectory);
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(true);
@@ -165,7 +167,7 @@ function MoveDialog({
         onSessionExpired();
         return;
       }
-      await showOperationError(mutationErrorMessage(caught));
+      feedback.toast({ tone: "error", message: mutationErrorMessage(caught) });
     } finally {
       setSubmitting(false);
     }
@@ -277,49 +279,52 @@ function TrashDialog({
   onCompleted,
   onSessionExpired,
 }: Omit<FileMutationDialogProps, "action" | "currentDirectory">) {
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      const confirmed = await confirmOperation({
+  const feedback = useFeedback();
+  const [submitting, setSubmitting] = useState(false);
+
+  async function trash() {
+    setSubmitting(true);
+    try {
+      await api.trashFile(entry.path);
+      onCompleted(`« ${entry.name} » a été placé dans la corbeille.`);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      const message =
+        caught instanceof ApiError
+          ? {
+              400: "Ce chemin n’est pas valide.",
+              403: "Cet élément est protégé ou bloqué.",
+              404: "L’élément n’existe plus.",
+              409: "L’intégrité de cet élément n’a pas pu être confirmée.",
+              500: "L’opération n’a pas pu être annulée en toute sécurité.",
+              503: "La corbeille est temporairement indisponible.",
+            }[caught.status] ?? "L’élément n’a pas pu être placé dans la corbeille."
+          : "L’élément n’a pas pu être placé dans la corbeille.";
+      feedback.toast({ tone: "error", message });
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <ConfirmDialog
+      options={{
         title: "Placer dans la corbeille ?",
         message: `« ${entry.name} » pourra être restauré. Un torrent actif peut passer en erreur.`,
         confirmText: "Placer dans la corbeille",
         destructive: true,
-      });
-      if (!active) return;
-      if (!confirmed) {
-        onClose();
-        return;
-      }
-      try {
-        await api.trashFile(entry.path);
-        if (active) onCompleted(`« ${entry.name} » a été placé dans la corbeille.`);
-      } catch (caught) {
-        if (caught instanceof ApiError && caught.status === 401) {
-          onSessionExpired();
-          return;
-        }
-        const message =
-          caught instanceof ApiError
-            ? {
-                400: "Ce chemin n’est pas valide.",
-                403: "Cet élément est protégé ou bloqué.",
-                404: "L’élément n’existe plus.",
-                409: "L’intégrité de cet élément n’a pas pu être confirmée.",
-                500: "L’opération n’a pas pu être annulée en toute sécurité.",
-                503: "La corbeille est temporairement indisponible.",
-              }[caught.status] ?? "L’élément n’a pas pu être placé dans la corbeille."
-            : "L’élément n’a pas pu être placé dans la corbeille.";
-        await showOperationError(message);
-        if (active) onClose();
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [entry, onClose, onCompleted, onSessionExpired]);
-
-  return null;
+      }}
+      closeDisabled={submitting}
+      onClose={(confirmed) => {
+        if (confirmed) void trash();
+        else onClose();
+      }}
+    />
+  );
 }
 
 export function FileMutationDialog(props: FileMutationDialogProps) {

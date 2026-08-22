@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DirectoryListing, TrashEntry } from "../../api/client";
+import { FeedbackProvider } from "../../components/Feedback";
 import { auditAccessibility } from "../../test/accessibility";
 import { FileBrowser } from "./FileBrowser";
 
@@ -61,12 +62,14 @@ describe("FileBrowser", () => {
 
     window.history.replaceState({}, "", "/?path=downloads");
     const view = render(
-      <FileBrowser
-        onFilesChanged={onFilesChanged}
-        onSessionExpired={vi.fn()}
-        onStorageChanged={vi.fn()}
-        revision={0}
-      />,
+      <FeedbackProvider>
+        <FileBrowser
+          onFilesChanged={onFilesChanged}
+          onSessionExpired={vi.fn()}
+          onStorageChanged={vi.fn()}
+          revision={0}
+        />
+      </FeedbackProvider>,
     );
 
     const trashButton = await screen.findByRole("button", {
@@ -91,7 +94,7 @@ describe("FileBrowser", () => {
     await user.click(screen.getByRole("button", { name: "Placer dans la corbeille" }));
 
     expect(await screen.findByText("« movie.mkv » a été placé dans la corbeille.")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Fermer" }));
+    await user.click(screen.getByRole("button", { name: "Fermer le message" }));
     expect(screen.queryByText("« movie.mkv » a été placé dans la corbeille.")).toBeNull();
     await waitFor(() => expect(onFilesChanged).toHaveBeenCalledOnce());
   });
@@ -120,12 +123,14 @@ describe("FileBrowser", () => {
       window.history.replaceState({}, "", "/?path=downloads");
 
       render(
-        <FileBrowser
-          onFilesChanged={vi.fn()}
-          onSessionExpired={vi.fn()}
-          onStorageChanged={vi.fn()}
-          revision={0}
-        />,
+        <FeedbackProvider>
+          <FileBrowser
+            onFilesChanged={vi.fn()}
+            onSessionExpired={vi.fn()}
+            onStorageChanged={vi.fn()}
+            revision={0}
+          />
+        </FeedbackProvider>,
       );
 
       expect(await screen.findByText(longName.slice(0, -4))).toBeTruthy();

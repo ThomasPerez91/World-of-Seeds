@@ -645,6 +645,12 @@ export const api = {
     return requestV2<TorrentRequestV2Listing>(`/torrents?${search.toString()}`, { signal });
   },
 
+  cancelTorrentRequestV2(torrentRequestId: string): Promise<void> {
+    return requestV2<void>(`/torrents/${encodeURIComponent(torrentRequestId)}`, {
+      method: "DELETE",
+    });
+  },
+
   async getTorrentDownloadSnapshotV2(
     torrentRequestId: string,
     signal?: AbortSignal,
