@@ -71,6 +71,8 @@
   `129dcce13feb120ceb6ddac9cdbc93f3fb162ccb`.
 - V2-25 PR `#82` was merged into `develop_V2` at
   `13e8e43b2c40c245ca111b4b573872f7c1cdebbf`.
+- V2-26 PR `#83` was merged into `develop_V2` at
+  `0f43d18c04f755270309e3df48e356a8c73f803d`.
 
 ## V1 completion state
 
@@ -715,6 +717,22 @@
   CSP, and accessibility coverage.
 - V2-26 is implemented on `feat/v2-admin-reconciliation` from the merged V2-25 commit.
 
+## V2-27 — Application metrics
+
+- Added a Prometheus text endpoint and in-process API middleware with bounded method, route-template,
+  status-class, and fixed-duration-bucket dimensions.
+- Exposed durable job counts by fixed state, oldest queue age, retry attempts, bounded recent job
+  duration, scheduler desired/applied generations, and active download leases.
+- Exposed database scrape latency, Redis and qBittorrent health/latency, shared storage byte gauges,
+  and one-hot pressure state without user, filename, infohash, tracker, or secret labels.
+- Kept PostgreSQL authoritative: scrape-time metrics aggregate existing rows and never mutate jobs,
+  scheduler state, leases, or storage accounting.
+- Extended the complete local-profile smoke to assert the required metric families and reject the
+  fixture name or infohash in exposition output.
+- Added focused route-cardinality, operational-family, identifier-redaction, health, job, Redis,
+  local-helper, Ruff, mypy, and syntax coverage.
+- V2-27 is implemented on `feat/v2-application-metrics` from the merged V2-26 commit.
+
 ## Current validation
 
 - V2-00 documentation links, Markdown structure, `git diff --check`, and targeted secret
@@ -928,6 +946,13 @@
   TypeScript, React/axe tests, production build, and `git diff --check`: PASS.
 - V2-26 complete backend/frontend/container and local-profile smoke validation remain required in
   PR CI before merge.
+- PR #83 (V2-26) final GitHub CI run `32570921393`: PASS; backend, frontend, container, and complete
+  local-profile smoke are green; squash-merged into `develop_V2` at
+  `0f43d18c04f755270309e3df48e356a8c73f803d`.
+- V2-27 targeted metrics/health/jobs/Redis/local-helper tests, Ruff lint/format, mypy, Python syntax,
+  and `git diff --check`: PASS.
+- V2-27 complete backend/frontend/container and metrics-aware local-profile smoke validation remain
+  required in PR CI before merge.
 
 ## Known constraints
 
@@ -944,6 +969,7 @@
 
 ## Next task
 
-- The next roadmap task is `V2-27 — Application metrics`.
-- Do not start V2-27 until V2-26 has passed review, complete CI and the local-profile smoke are
+- The next roadmap task is `V2-28 — Monitoring stack`.
+- Do not start V2-28 until V2-27 has passed review, complete CI and the metrics-aware local-profile
+  smoke are
   green, and its PR is merged into `develop_V2`.
