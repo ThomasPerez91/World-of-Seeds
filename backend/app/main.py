@@ -15,6 +15,7 @@ from app.integrations import ExternalServicesMonitor
 from app.integrations.newgreedy_config import NewGreedyConfigStore
 from app.integrations.newgreedy_restart import NewGreedyRestartStore
 from app.integrations.wos_restart import WosRestartStore
+from app.observability import MetricsRegistry, RequestMetricsMiddleware
 from app.options import OptionsStore
 from app.torrents.downloads import DownloadRateLimiter
 
@@ -49,10 +50,15 @@ def create_app() -> FastAPI:
     application.state.wos_restart_store = WosRestartStore(settings.data_root)
     application.state.options_store = OptionsStore(settings.data_root)
     application.state.download_rate_limiter = DownloadRateLimiter()
+    application.state.metrics_registry = MetricsRegistry()
     application.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     application.add_middleware(
         SecurityHeadersMiddleware,
         enable_hsts=settings.cookie_secure,
+    )
+    application.add_middleware(
+        RequestMetricsMiddleware,
+        registry=application.state.metrics_registry,
     )
     application.include_router(api_router, prefix="/api/v1")
     application.include_router(api_v2_router, prefix="/api/v2")

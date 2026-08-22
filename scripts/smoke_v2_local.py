@@ -324,6 +324,22 @@ def main() -> int:
         raise RuntimeError(f"retained cancellation is invalid: {retained}")
     compose("start", "worker")
 
+    metrics_status, _, metrics_body = request_bytes(opener, f"{base}/api/v2/metrics")
+    metrics = metrics_body.decode("utf-8")
+    required_metrics = (
+        "wos_api_requests_total",
+        "wos_jobs",
+        "wos_scheduler_generation",
+        "wos_download_leases_active",
+        "wos_redis_up",
+        "wos_qbittorrent_up",
+        "wos_storage_bytes",
+    )
+    if metrics_status != 200 or any(name not in metrics for name in required_metrics):
+        raise RuntimeError("application metrics are incomplete")
+    if info_hash in metrics or file_name in metrics:
+        raise RuntimeError("application metrics contain a business identifier")
+
     with opener.open(f"{base}/", timeout=10) as response:
         index = response.read().decode("utf-8")
     asset_start = index.find('src="/assets/')
@@ -350,6 +366,7 @@ def main() -> int:
                 "range_download_checked": True,
                 "zip_fallback_checked": True,
                 "retained_cancellation_checked": True,
+                "secret_safe_metrics_checked": True,
                 "ui_bundle_checked": True,
             },
             indent=2,
