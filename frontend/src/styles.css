@@ -1292,6 +1292,96 @@ button:disabled {
   font-size: 0.65rem;
 }
 
+.download-fallback {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0 clamp(1rem, 4vw, 2rem) 1rem;
+  padding: 0.9rem;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 0.85rem;
+  background: rgb(5 12 10 / 28%);
+}
+
+.download-fallback > header,
+.download-fallback > header > div,
+.download-fallback li,
+.download-fallback nav {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.download-fallback > header {
+  justify-content: space-between;
+}
+
+.download-fallback > header > div {
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+}
+
+.download-fallback > header strong,
+.download-fallback li > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-fallback > header span,
+.download-fallback li > span:nth-child(2),
+.download-fallback nav span {
+  color: #8c9991;
+  font-size: 0.65rem;
+}
+
+.download-fallback > header button,
+.download-fallback nav button {
+  width: auto;
+}
+
+.download-fallback-archive {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.download-fallback-archive svg {
+  width: 0.9rem;
+}
+
+.download-fallback ul {
+  display: grid;
+  max-height: 18rem;
+  padding: 0;
+  overflow-y: auto;
+  border-top: 1px solid rgb(255 255 255 / 5%);
+  list-style: none;
+}
+
+.download-fallback li {
+  min-width: 0;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgb(255 255 255 / 5%);
+  font-size: 0.68rem;
+}
+
+.download-fallback li > span:first-child {
+  flex: 1 1 auto;
+}
+
+.download-fallback li > span:nth-child(2),
+.download-fallback li > a {
+  flex: 0 0 auto;
+}
+
+.download-fallback nav {
+  justify-content: flex-end;
+}
+
 .torrent-table {
   width: 100%;
   min-width: 54rem;
@@ -3686,6 +3776,16 @@ select:focus-visible {
 
   .recursive-transfer-actions button {
     flex: 1 1 0;
+  }
+
+  .download-fallback li {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .download-fallback li > span:first-child {
+    width: 100%;
+    flex-basis: 100%;
   }
 
   .torrent-pagination button {

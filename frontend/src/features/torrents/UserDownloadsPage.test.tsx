@@ -52,6 +52,7 @@ describe("UserDownloadsPage", () => {
             manifest_version: 1,
             file_count: 1,
             total_size: 3,
+            archive_available: true,
             offset: 0,
             limit: 500,
             items: [{ id: "file-id", file_index: 0, relative_path: "Film/file.bin", size: 3 }],
@@ -78,6 +79,46 @@ describe("UserDownloadsPage", () => {
     expect(screen.getByText("1/1 fichiers · 3 o sur 3 o")).toBeTruthy();
     expect(writes).toEqual([1, 2, 3]);
     expect(view.container.querySelector("[style]")).toBeNull();
+  });
+
+  it("propose les fichiers et le ZIP streamé sans File System Access API", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("download-manifest")) {
+          return response({
+            snapshot_id: "b".repeat(64),
+            manifest_version: 1,
+            file_count: 1,
+            total_size: 3,
+            archive_available: true,
+            offset: 0,
+            limit: 500,
+            items: [{ id: "file-id", file_index: 0, relative_path: "Film/file.bin", size: 3 }],
+          });
+        }
+        return response({
+          items: [torrent({ state: "ready", progress: 1 })],
+          offset: 0,
+          limit: 10,
+          total: 1,
+        });
+      }),
+    );
+    const view = render(<UserDownloadsPage onSessionExpired={vi.fn()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Télécharger" }));
+
+    const archive = await screen.findByRole("link", {
+      name: "Télécharger le petit dossier en ZIP",
+    });
+    const individual = screen.getByRole("link", { name: "Télécharger" });
+    expect(archive.getAttribute("href")).toContain("download-archive?snapshot=");
+    expect(individual.getAttribute("href")).toContain("/files/file-id/download?snapshot=");
+    expect(screen.getByText("Film/file.bin")).toBeTruthy();
+    expect(view.container.querySelector("[style]")).toBeNull();
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
   it("utilise l’API V2 et affiche les états durables sans style inline", async () => {
