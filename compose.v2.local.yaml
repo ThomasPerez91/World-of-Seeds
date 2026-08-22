@@ -1,0 +1,155 @@
+name: world-of-seeds-v2-local
+
+x-wos-local-environment: &wos-local-environment
+  WOS_ENVIRONMENT: development
+  WOS_DATA_ROOT: /data
+  WOS_QBITTORRENT_DATA_ROOT: /downloads
+  WOS_INTEGRATION_ACCOUNTS_JSON: '{"routes":[{"tracker_account_ref":"11111111-1111-4111-8111-111111111111","qbittorrent_account_ref":"22222222-2222-4222-8222-222222222222","newgreedy_url":"http://newgreedy:8080","c411_passkey":"local-test-passkey","qbittorrent_url":"http://qbittorrent:8080","qbittorrent_username":"local","qbittorrent_password":"local-test-password"}]}'
+
+services:
+  api:
+    command:
+      - /bin/sh
+      - -ec
+      - cd /app/backend && alembic -c alembic.ini upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      <<: *wos-local-environment
+    volumes:
+      - storage_v2_local:/data
+    user: "10001:10001"
+
+  worker:
+    environment:
+      <<: *wos-local-environment
+    volumes:
+      - storage_v2_local:/data
+      - storage_v2_local:/downloads
+    user: "10001:10001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qbittorrent:
+        condition: service_healthy
+      newgreedy:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: .
+    command: ["python", "-m", "app.scheduler_service"]
+    restart: unless-stopped
+    stop_grace_period: 35s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qbittorrent:
+        condition: service_healthy
+    environment:
+      <<: *wos-local-environment
+      WOS_POSTGRES_HOST: postgres
+      WOS_POSTGRES_PORT: 5432
+      WOS_POSTGRES_DB: ${WOS_V2_POSTGRES_DB:?set WOS_V2_POSTGRES_DB}
+      WOS_POSTGRES_USER: ${WOS_V2_POSTGRES_USER:?set WOS_V2_POSTGRES_USER}
+      WOS_POSTGRES_PASSWORD: ${WOS_V2_POSTGRES_PASSWORD:?set WOS_V2_POSTGRES_PASSWORD}
+    volumes:
+      - storage_v2_local:/downloads
+    networks:
+      - backend
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+
+  newgreedy:
+    build:
+      context: .
+    command: ["python", "-m", "app.local_tracker_fixture"]
+    restart: unless-stopped
+    environment:
+      WOS_ENVIRONMENT: development
+    networks:
+      - backend
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  qbittorrent-init:
+    image: qbittorrentofficial/qbittorrent-nox:5.2.3-1
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mkdir -p /config/qBittorrent/config
+        cat > /config/qBittorrent/config/qBittorrent.conf <<'EOF'
+        [LegalNotice]
+        Accepted=true
+        [Preferences]
+        Downloads\SavePath=/downloads
+        WebUI\AuthSubnetWhitelist=0.0.0.0/0
+        WebUI\AuthSubnetWhitelistEnabled=true
+        WebUI\HostHeaderValidation=false
+        WebUI\LocalHostAuth=false
+        WebUI\ServerDomains=*
+        EOF
+        chown -R 10001:10001 /config
+        chown -R 10001:10001 /downloads
+    volumes:
+      - qbittorrent_v2_local_config:/config
+      - storage_v2_local:/downloads
+    networks:
+      - backend
+    user: "0:0"
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  qbittorrent:
+    image: qbittorrentofficial/qbittorrent-nox:5.2.3-1
+    restart: unless-stopped
+    stop_grace_period: 30m
+    depends_on:
+      qbittorrent-init:
+        condition: service_completed_successfully
+    environment:
+      PUID: "10001"
+      PGID: "10001"
+      QBT_LEGAL_NOTICE: confirm
+      QBT_WEBUI_PORT: "8080"
+    volumes:
+      - qbittorrent_v2_local_config:/config
+      - storage_v2_local:/downloads
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/api/v2/app/version"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+
+volumes:
+  storage_v2_local:
+  qbittorrent_v2_local_config:

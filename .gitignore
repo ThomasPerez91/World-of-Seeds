@@ -1,6 +1,7 @@
 .DS_Store
 .env
 .env.v2
+.env.v2.local
 .options
 .options.backup
 .idea/
