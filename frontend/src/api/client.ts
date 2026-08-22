@@ -325,6 +325,34 @@ export interface OptionsResponse {
   restart_required: boolean;
 }
 
+export interface CentralAdminOverview extends OptionsResponse {
+  scheduler: {
+    desired_generation: number;
+    applied_generation: number;
+    synchronized: boolean;
+    rounds: number;
+    lease_active: boolean;
+  };
+  storage: {
+    managed_bytes: number;
+    logical_bytes: number;
+    disk_total_bytes: number;
+    disk_free_bytes: number;
+    pressure: "normal" | "warning" | "critical";
+    managed_quota_bytes: number;
+    user_quota_bytes: number;
+  };
+  audit: Array<{
+    key: string;
+    version: number;
+    old_value: unknown;
+    new_value: unknown;
+    actor: string | null;
+    source: string;
+    changed_at: string;
+  }>;
+}
+
 interface BusinessErrorDetail {
   code: string;
   message: string;
@@ -550,6 +578,19 @@ export const api = {
 
   updateOptions(changes: Record<string, OptionValue>): Promise<OptionsResponse> {
     return request<OptionsResponse>("/admin/options", {
+      method: "PATCH",
+      body: JSON.stringify({ changes }),
+    });
+  },
+
+  getCentralAdminOverview(): Promise<CentralAdminOverview> {
+    return requestV2<CentralAdminOverview>("/admin/overview");
+  },
+
+  updateCentralAdminOptions(
+    changes: Record<string, OptionValue>,
+  ): Promise<CentralAdminOverview> {
+    return requestV2<CentralAdminOverview>("/admin/options", {
       method: "PATCH",
       body: JSON.stringify({ changes }),
     });

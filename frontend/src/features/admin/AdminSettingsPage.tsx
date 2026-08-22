@@ -3,12 +3,14 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from "react"
 import {
   api,
   ApiError,
+  type CentralAdminOverview,
   type OptionField,
   type OptionValue,
   type OptionsResponse,
 } from "../../api/client";
 import { Notice, type NoticeTone } from "../../components/Notice";
 import { RestartIcon, SaveIcon } from "../../components/icons";
+import { formatBytes } from "../../utils/format";
 import { FileDialog } from "../files/FileDialog";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 
@@ -75,7 +77,7 @@ export function AdminSettingsPage({
   onNavigate: (view: AdminView) => void;
   onSessionExpired: () => void;
 }) {
-  const [options, setOptions] = useState<OptionsResponse | null>(null);
+  const [options, setOptions] = useState<CentralAdminOverview | null>(null);
   const [draft, setDraft] = useState<Record<string, DraftValue>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -89,7 +91,7 @@ export function AdminSettingsPage({
     setLoading(true);
     setNotice(null);
     try {
-      const result = await api.getOptions();
+      const result = await api.getCentralAdminOverview();
       if (!mounted.current) return;
       setOptions(result);
       setDraft(createDraft(result));
@@ -159,7 +161,7 @@ export function AdminSettingsPage({
     setSaving(true);
     setNotice(null);
     try {
-      const result = await api.updateOptions(changes);
+      const result = await api.updateCentralAdminOptions(changes);
       if (!mounted.current) return;
       setOptions(result);
       setDraft(createDraft(result));
@@ -324,7 +326,35 @@ export function AdminSettingsPage({
             Lecture de la configuration…
           </p>
         ) : options !== null ? (
-          <form className="options-form" noValidate onSubmit={(event) => void save(event)}>
+          <>
+            <div className="central-admin-status" aria-label="État opérationnel V2">
+              <article>
+                <span>Scheduler</span>
+                <strong>{options.scheduler.synchronized ? "Synchronisé" : "À réconcilier"}</strong>
+                <small>
+                  Génération désirée {options.scheduler.desired_generation} · appliquée{" "}
+                  {options.scheduler.applied_generation}
+                </small>
+              </article>
+              <article>
+                <span>Stockage partagé</span>
+                <strong>{formatBytes(options.storage.managed_bytes)}</strong>
+                <small>
+                  {formatBytes(options.storage.logical_bytes)} logiques · pression{" "}
+                  {options.storage.pressure}
+                </small>
+              </article>
+              <article>
+                <span>Quota par utilisateur</span>
+                <strong>
+                  {options.storage.user_quota_bytes === 0
+                    ? "Sans plafond"
+                    : formatBytes(options.storage.user_quota_bytes)}
+                </strong>
+                <small>{options.scheduler.rounds} tours de scheduler</small>
+              </article>
+            </div>
+            <form className="options-form" noValidate onSubmit={(event) => void save(event)}>
             <div className="options-sections">
               {options.sections.map((section, sectionIndex) => (
                 <details key={section.id} open={sectionIndex === 0}>
@@ -410,7 +440,27 @@ export function AdminSettingsPage({
                 {saving ? "Enregistrement…" : "Enregistrer"}
               </button>
             </div>
-          </form>
+            </form>
+            <section className="options-audit" aria-labelledby="options-audit-title">
+              <h3 id="options-audit-title">Dernières modifications auditées</h3>
+              <ol>
+                {options.audit.slice(0, 10).map((event) => (
+                  <li key={`${event.key}-${event.version}`}>
+                    <strong>{event.key}</strong>
+                    <span>
+                      version {event.version} · {event.actor ?? "système"} ·{" "}
+                      <time dateTime={event.changed_at}>
+                        {new Intl.DateTimeFormat("fr-FR", {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        }).format(new Date(event.changed_at))}
+                      </time>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          </>
         ) : null}
       </section>
 
