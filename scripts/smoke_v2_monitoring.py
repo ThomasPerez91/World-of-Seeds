@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import json
 import subprocess
+import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -115,17 +116,38 @@ def main() -> int:
 
     deadline = time.monotonic() + 60
     health: dict[str, Any] = {}
+    health_error = "no response"
     while time.monotonic() < deadline:
         try:
-            health = _request(f"http://127.0.0.1:{port}/api/health")
-        except (OSError, json.JSONDecodeError):
+            health = _request(
+                f"http://127.0.0.1:{port}/api/health",
+                authorization=authorization,
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            health_error = f"{type(exc).__name__}: {exc}"
             time.sleep(2)
             continue
         if health.get("database") == "ok":
             break
         time.sleep(2)
     else:
-        raise RuntimeError(f"Grafana database is not healthy: {health}")
+        diagnostics = subprocess.run(
+            [*COMPOSE, "ps", "--all", "grafana"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        logs = subprocess.run(
+            [*COMPOSE, "logs", "--no-color", "--tail", "100", "grafana"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        print(diagnostics.stdout, file=sys.stderr)
+        print(logs.stdout, file=sys.stderr)
+        raise RuntimeError(
+            f"Grafana database is not healthy: {health}; last error: {health_error}"
+        )
     dashboards = _request(
         f"http://127.0.0.1:{port}/api/search?query=World%20of%20Seeds",
         authorization=authorization,
