@@ -21,6 +21,7 @@ from app.integrations.qbittorrent_v2 import (
 )
 from app.models import (
     Base,
+    DatabaseOption,
     ManagedTorrent,
     ManagedTorrentState,
     SchedulerDeficit,
@@ -31,7 +32,7 @@ from app.models import (
 )
 from app.options import PostgresOptionsRegistry
 from app.scheduler.persistence import acquire_scheduler_lease
-from app.scheduler.runtime import SchedulerRuntime
+from app.scheduler.runtime import SchedulerRuntime, _remaining_bytes
 
 NOW = datetime(2026, 8, 21, 22, tzinfo=UTC)
 
@@ -70,6 +71,8 @@ async def _torrent(
     info_hash: str,
     size: int,
     created_at: datetime = NOW,
+    progress: float = 0,
+    state: ManagedTorrentState = ManagedTorrentState.PAUSED,
 ) -> ManagedTorrent:
     async with sessions() as session, session.begin():
         user = User(username=username, password_hash="test-password-hash")
@@ -77,7 +80,8 @@ async def _torrent(
             info_hash=info_hash,
             name=username,
             total_size=size,
-            state=ManagedTorrentState.DOWNLOADING,
+            progress=progress,
+            state=state,
             created_at=created_at,
             updated_at=created_at,
         )
@@ -153,7 +157,7 @@ async def test_previously_admitted_torrent_without_active_request_is_stopped(
             info_hash="e" * 40,
             name="orphaned-reference",
             total_size=10,
-            state=ManagedTorrentState.READY,
+            state=ManagedTorrentState.DOWNLOADING,
             desired_active=True,
             desired_priority=0,
         )
@@ -173,6 +177,89 @@ async def test_previously_admitted_torrent_without_active_request_is_stopped(
     assert stored.desired_active is False
     assert stored.desired_priority is None
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ready_seeding_torrent_is_outside_download_slot_control(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    async with sessions() as session, session.begin():
+        torrent = ManagedTorrent(
+            info_hash="f" * 40,
+            name="seeding",
+            total_size=10,
+            progress=1,
+            state=ManagedTorrentState.READY,
+        )
+        session.add(torrent)
+    gateway = FakeGateway()
+
+    result = await SchedulerRuntime(
+        sessions, gateway, scheduler_id="scheduler-seeding", clock=lambda: NOW
+    ).run_once()
+
+    assert result.selected_torrent_ids == ()
+    assert gateway.calls == [()]
+    async with sessions() as session:
+        stored = await session.get(ManagedTorrent, torrent.id)
+    assert stored is not None
+    assert stored.state is ManagedTorrentState.READY
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_global_active_limit_is_reloaded_between_cycles_with_ten_queued(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    for index in range(10):
+        await _torrent(
+            sessions,
+            username=f"queued-{index}",
+            info_hash=f"{index:040x}",
+            size=10 + index,
+        )
+    async with sessions() as session, session.begin():
+        option = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+        assert option is not None
+        option.integer_value = 1
+
+    runtime = SchedulerRuntime(
+        sessions, FakeGateway(), scheduler_id="scheduler-dynamic-limit", clock=lambda: NOW
+    )
+    first = await runtime.run_once()
+
+    async with sessions() as session, session.begin():
+        option = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+        assert option is not None
+        option.integer_value = 2
+    second = await runtime.run_once()
+
+    assert len(first.selected_torrent_ids) == 1
+    assert len(second.selected_torrent_ids) == 2
+    await engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("total_size", "progress", "expected"),
+    [
+        (0, 0.5, None),
+        (100, None, 100),
+        (100, float("nan"), 100),
+        (100, -0.1, 100),
+        (100, 0, 100),
+        (100, 0.5, 50),
+        (100, 0.99, 1),
+        (1, 0.99, 1),
+        (100, 1, 0),
+        (100, 1.1, 0),
+    ],
+)
+def test_remaining_bytes_is_bounded_for_unknown_and_edge_progress(
+    total_size: int,
+    progress: float | None,
+    expected: int | None,
+) -> None:
+    assert _remaining_bytes(total_size, progress) == expected
 
 
 @pytest.mark.asyncio

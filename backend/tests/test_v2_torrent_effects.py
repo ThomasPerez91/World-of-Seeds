@@ -236,8 +236,8 @@ async def test_add_handler_transitions_requests_and_removes_staged_payload(
     async with sessions() as session:
         torrent = await session.get(ManagedTorrent, torrent_id)
         request = await session.get(TorrentRequest, request_id)
-        assert torrent is not None and torrent.state is ManagedTorrentState.DOWNLOADING
-        assert torrent.qb_state == "added"
+        assert torrent is not None and torrent.state is ManagedTorrentState.PAUSED
+        assert torrent.qb_state == "stoppeddl"
         assert torrent.tracker_account_ref == TRACKER_ACCOUNT_REF
         assert torrent.qbittorrent_account_ref == QBITTORRENT_ACCOUNT_REF
         assert request is not None and request.state is TorrentRequestState.ACTIVE
@@ -433,6 +433,9 @@ async def test_sync_handler_marks_completed_torrent_and_request_ready(
         assert torrent is not None and torrent.state is ManagedTorrentState.READY
         assert torrent.qb_state == "stalledup"
         assert torrent.progress == 1.0
+        assert torrent.desired_active is False
+        assert torrent.desired_priority is None
+        assert torrent.desired_download_limit == 0
         assert request is not None and request.state is TorrentRequestState.READY
         assert request.ready_at is not None
 

@@ -199,8 +199,8 @@ class TorrentEffectHandlers:
                 except TorrentPayloadStoreError:
                     logger.warning("torrent_worker_payload_cleanup_failed")
                 return
-            managed.state = ManagedTorrentState.DOWNLOADING
-            managed.qb_state = "added"
+            managed.state = ManagedTorrentState.PAUSED
+            managed.qb_state = "stoppeddl"
             managed.retry_at = None
             managed.updated_at = now
             requests = list(
@@ -455,6 +455,10 @@ class TorrentEffectHandlers:
             torrent.qb_state = safe_qb_state
             torrent.progress = snapshot.progress
             torrent.retry_at = None
+            if state is ManagedTorrentState.READY:
+                torrent.desired_active = False
+                torrent.desired_priority = None
+                torrent.desired_download_limit = 0
             torrent.updated_at = now
             requests = list(
                 (

@@ -60,7 +60,7 @@ def test_policy_is_built_from_the_typed_v2_option_registry() -> None:
 
     configured = SchedulerPolicy.from_options(options)
 
-    assert configured.max_active_global == 8
+    assert configured.max_active_global == 2
     assert configured.max_active_per_user == 2
     assert configured.small_torrent_bytes == 10 * GIB
     assert configured.medium_torrent_bytes == 50 * GIB

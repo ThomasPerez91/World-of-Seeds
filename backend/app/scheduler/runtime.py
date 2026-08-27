@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.integrations.qbittorrent_v2 import (
@@ -187,11 +188,8 @@ class SchedulerRuntime:
                 await session.scalars(
                     select(ManagedTorrent)
                     .where(
-                        or_(
-                            ManagedTorrent.state.in_(
-                                (ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED)
-                            ),
-                            ManagedTorrent.desired_active.is_(True),
+                        ManagedTorrent.state.in_(
+                            (ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED)
                         )
                     )
                     .order_by(ManagedTorrent.created_at, ManagedTorrent.id)
@@ -238,18 +236,36 @@ def _scheduler_candidates(
     beneficiary: dict[uuid.UUID, TorrentRequest] = {}
     for request in requests:
         beneficiary.setdefault(request.managed_torrent_id, request)
-    return tuple(
-        SchedulerCandidate(
-            torrent_id=torrent.id,
-            user_id=beneficiary[torrent.id].user_id,
-            remaining_bytes=torrent.total_size,
-            queued_at=_utc(beneficiary[torrent.id].created_at),
+    candidates: list[SchedulerCandidate] = []
+    for torrent in torrents:
+        candidate_request = beneficiary.get(torrent.id)
+        if candidate_request is None:
+            continue
+        remaining_bytes = _remaining_bytes(torrent.total_size, torrent.progress)
+        if remaining_bytes is None or remaining_bytes <= 0:
+            continue
+        candidates.append(
+            SchedulerCandidate(
+                torrent_id=torrent.id,
+                user_id=candidate_request.user_id,
+                remaining_bytes=remaining_bytes,
+                queued_at=_utc(candidate_request.created_at),
+            )
         )
-        for torrent in torrents
-        if torrent.state in {ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED}
-        and torrent.total_size > 0
-        and torrent.id in beneficiary
-    )
+    return tuple(candidates)
+
+
+def _remaining_bytes(total_size: int, progress: float | None) -> int | None:
+    """Return a conservative bounded cost for an incomplete torrent."""
+    if total_size <= 0:
+        return None
+    if progress is None or not math.isfinite(progress):
+        return total_size
+    if progress <= 0:
+        return total_size
+    if progress >= 1:
+        return 0
+    return max(1, min(total_size, total_size - math.floor(total_size * progress)))
 
 
 def _utc(value: datetime) -> datetime:
