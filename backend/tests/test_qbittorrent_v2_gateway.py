@@ -229,6 +229,7 @@ async def test_gateway_reads_bounded_owned_torrent_state_snapshot() -> None:
                         **_managed_torrent(),
                         "state": "stalledDL",
                         "progress": 0.25,
+                        "downloaded": 123,
                     }
                 ],
             )
@@ -241,9 +242,9 @@ async def test_gateway_reads_bounded_owned_torrent_state_snapshot() -> None:
             (QBittorrentV2ManagedIdentity(INFO_HASH, STORAGE_KEY),)
         )
 
-    assert [(item.info_hash, item.state, item.progress) for item in snapshots] == [
-        (INFO_HASH, "stalledDL", 0.25)
-    ]
+    assert [
+        (item.info_hash, item.state, item.progress, item.downloaded_bytes) for item in snapshots
+    ] == [(INFO_HASH, "stalledDL", 0.25, 123)]
 
 
 @pytest.mark.asyncio

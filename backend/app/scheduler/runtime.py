@@ -107,7 +107,7 @@ class SchedulerRuntime:
             torrents = await self._load_control_set(session)
             requests = await self._load_active_requests(session, torrents)
             ledger = await load_scheduler_ledger(session, state)
-            candidates = _scheduler_candidates(torrents, requests)
+            candidates = _scheduler_candidates(torrents, requests, now=now)
             selection = select_torrents(
                 candidates,
                 policy=policy,
@@ -232,6 +232,8 @@ class SchedulerRuntime:
 def _scheduler_candidates(
     torrents: Sequence[ManagedTorrent],
     requests: Sequence[TorrentRequest],
+    *,
+    now: datetime,
 ) -> tuple[SchedulerCandidate, ...]:
     beneficiary: dict[uuid.UUID, TorrentRequest] = {}
     for request in requests:
@@ -240,6 +242,8 @@ def _scheduler_candidates(
     for torrent in torrents:
         candidate_request = beneficiary.get(torrent.id)
         if candidate_request is None:
+            continue
+        if torrent.scheduler_retry_at is not None and _utc(torrent.scheduler_retry_at) > _utc(now):
             continue
         remaining_bytes = _remaining_bytes(torrent.total_size, torrent.progress)
         if remaining_bytes is None or remaining_bytes <= 0:

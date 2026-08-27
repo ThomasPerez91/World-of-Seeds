@@ -5,7 +5,7 @@ import logging
 import uuid
 from collections.abc import Callable, Mapping
 from contextlib import suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast
 
 from sqlalchemy import delete, func, select
@@ -64,6 +64,13 @@ ADD_TORRENT_JOB = "ADD_TORRENT"
 SYNC_TORRENT_JOB = "SYNC_TORRENT"
 MAX_SYNC_BATCH = 200
 SYNC_INTERVAL_OPTION = "WOS_QB_SYNC_INTERVAL_SECONDS"
+STALL_TIMEOUT = timedelta(seconds=60)
+STALL_COOLDOWNS = (
+    timedelta(minutes=3),
+    timedelta(minutes=5),
+    timedelta(minutes=10),
+)
+STALL_EVALUATED_QB_STATES = frozenset({"downloading", "forceddl", "metadl", "stalleddl"})
 
 logger = logging.getLogger(__name__)
 
@@ -396,6 +403,10 @@ class TorrentEffectHandlers:
             torrent.manifest_total_size = 0
             torrent.desired_active = False
             torrent.desired_priority = None
+            torrent.last_progress_at = None
+            torrent.last_downloaded_bytes = None
+            torrent.stall_count = 0
+            torrent.scheduler_retry_at = None
             torrent.updated_at = now
 
     async def _mark_adding(self, snapshot: TorrentJobSnapshot) -> tuple[ManagedTorrent, bool]:
@@ -451,8 +462,16 @@ class TorrentEffectHandlers:
                 ManagedTorrentState.PURGED,
             }:
                 return
-            torrent.state = state
+            previous_qb_state = torrent.qb_state
+            state = _apply_stall_observation(
+                torrent,
+                snapshot,
+                state=state,
+                previous_qb_state=previous_qb_state,
+                now=now,
+            )
             torrent.qb_state = safe_qb_state
+            torrent.state = state
             torrent.progress = snapshot.progress
             torrent.retry_at = None
             if state is ManagedTorrentState.READY:
@@ -604,6 +623,72 @@ def _domain_state(
     }:
         return ManagedTorrentState.DOWNLOADING, normalized
     return ManagedTorrentState.ERROR, "unknown"
+
+
+def _apply_stall_observation(
+    torrent: ManagedTorrent,
+    snapshot: QBittorrentV2TorrentSnapshot,
+    *,
+    state: ManagedTorrentState,
+    previous_qb_state: str | None,
+    now: datetime,
+) -> ManagedTorrentState:
+    previous_downloaded = torrent.last_downloaded_bytes
+    useful_progress = snapshot.progress > torrent.progress or (
+        previous_downloaded is not None and snapshot.downloaded_bytes > previous_downloaded
+    )
+    observed_downloaded = max(previous_downloaded or 0, snapshot.downloaded_bytes)
+
+    if state is ManagedTorrentState.READY:
+        torrent.last_progress_at = now
+        torrent.last_downloaded_bytes = observed_downloaded
+        torrent.stall_count = 0
+        torrent.scheduler_retry_at = None
+        return state
+
+    if useful_progress:
+        torrent.last_progress_at = now
+        torrent.last_downloaded_bytes = observed_downloaded
+        torrent.stall_count = 0
+        torrent.scheduler_retry_at = None
+        return state
+
+    if torrent.last_progress_at is None or previous_downloaded is None:
+        torrent.last_progress_at = now
+        torrent.last_downloaded_bytes = observed_downloaded
+        return state
+
+    retry_at = torrent.scheduler_retry_at
+    if retry_at is not None and _as_utc(retry_at) > _as_utc(now):
+        return ManagedTorrentState.PAUSED
+
+    if snapshot.state.lower() not in STALL_EVALUATED_QB_STATES:
+        return state
+
+    if previous_qb_state is not None and previous_qb_state.lower().startswith(
+        ("stopped", "paused")
+    ):
+        torrent.scheduler_retry_at = None
+        torrent.last_progress_at = now
+        torrent.last_downloaded_bytes = observed_downloaded
+        return state
+
+    if retry_at is not None:
+        torrent.scheduler_retry_at = None
+        torrent.last_progress_at = now
+        torrent.last_downloaded_bytes = observed_downloaded
+        return state
+
+    if _as_utc(now) - _as_utc(torrent.last_progress_at) < STALL_TIMEOUT:
+        return state
+
+    torrent.stall_count += 1
+    cooldown = STALL_COOLDOWNS[min(torrent.stall_count - 1, len(STALL_COOLDOWNS) - 1)]
+    torrent.scheduler_retry_at = now + cooldown
+    torrent.desired_active = False
+    torrent.desired_priority = None
+    torrent.desired_download_limit = 0
+    return ManagedTorrentState.PAUSED
 
 
 def _database_timestamp(value: datetime) -> datetime:

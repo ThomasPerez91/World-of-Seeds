@@ -773,6 +773,23 @@
   seeding without occupying a download slot or receiving a scheduler stop.
 - Added regression coverage for initially paused additions, one/two dynamic slots, ten queued
   torrents, progress at 99 percent, restart recovery, READY seeding, and malformed progress input.
+- V2-28A was squash-merged through PR `#87` into `develop_V2` at
+  `055cc30cdbdb68292349fdbae3672880fb636de5`.
+
+## V2-28B — Durable anti-stall and cooldown
+
+- Added qBittorrent's bounded cumulative downloaded-byte observation to the existing safe snapshot;
+  no speed-only signal can classify a torrent as stalled.
+- Persisted only the durable scheduler observations required for restart safety: last useful
+  progress time, last downloaded bytes, stall count, and scheduler-specific next eligibility.
+- A selected torrent with no useful byte or progress delta for 60 seconds now releases its slot
+  without deleting partial data; repeated stalls use centralized 3, 5, then 10 minute cooldowns.
+- Initial scheduler starts and post-cooldown resumes open a fresh observation window, while any real
+  progress clears the cooldown and stall count. Repeated observations during a cooldown are
+  idempotent and do not cause pause/resume thrashing.
+- Added a reversible PostgreSQL migration plus regression coverage for 99-percent stalls, very slow
+  progress, repeated stalls, recovery, scheduler restart during cooldown, 100 eligible torrents for
+  two slots, and an empty eligible set.
 
 ## Documentation hardening phase after V2-28
 
@@ -1036,6 +1053,12 @@
   PASS, 53 tests with 1 PostgreSQL locking test deferred to CI.
 - V2-28A complete backend suite: PASS, 421 tests with 6 service-backed tests deferred to CI.
 - V2-28A targeted Ruff lint/format, mypy, and `git diff --check`: PASS.
+- V2-28A GitHub CI run `33090676466`: PASS; backend with real PostgreSQL, frontend, container,
+  complete local-profile smoke, and monitoring smoke are green.
+- V2-28B targeted scheduler, worker-effect, qBittorrent gateway, and model tests: PASS, 56 tests
+  with 1 PostgreSQL locking test deferred to CI.
+- V2-28B complete backend suite: PASS, 426 tests with 6 service-backed tests deferred to CI.
+- V2-28B PostgreSQL migration upgrade/downgrade SQL generation: PASS.
 
 ## Known constraints
 
@@ -1052,6 +1075,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-28B — Durable anti-stall and cooldown`.
-- V2-28A is implemented. V2-29 must wait until V2-28A through V2-28H are individually reviewed,
-  green, and merged into `develop_V2`.
+- The next roadmap task is `V2-28C — Shared-torrent fairness and bounded backlog`.
+- V2-28A is merged and V2-28B is implemented. V2-29 must wait until V2-28A through V2-28H are
+  individually reviewed, green, and merged into `develop_V2`.

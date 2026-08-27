@@ -69,6 +69,7 @@ class QBittorrentV2TorrentSnapshot:
     info_hash: str
     state: str
     progress: float
+    downloaded_bytes: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +112,7 @@ class _TorrentRecord:
     state: str | None
     download_limit: int | None
     progress: float | None
+    downloaded_bytes: int | None
 
 
 class _AmbiguousAdd(Exception):
@@ -319,6 +321,7 @@ class QBittorrentV2Gateway:
                     record.state is None
                     or not 1 <= len(record.state) <= 64
                     or record.progress is None
+                    or record.downloaded_bytes is None
                 ):
                     raise QBittorrentV2TransientError("qBittorrent state snapshot is incomplete")
                 snapshots.append(
@@ -326,6 +329,7 @@ class QBittorrentV2Gateway:
                         info_hash=record.info_hash,
                         state=record.state,
                         progress=record.progress,
+                        downloaded_bytes=record.downloaded_bytes,
                     )
                 )
             return tuple(snapshots)
@@ -619,6 +623,7 @@ def _parse_torrent_record(value: object) -> _TorrentRecord:
     state = value.get("state")
     download_limit = value.get("dl_limit")
     progress = value.get("progress")
+    downloaded_bytes = value.get("downloaded")
     normalized_progress: float | None = None
     if isinstance(progress, (int, float)) and not isinstance(progress, bool):
         candidate_progress = float(progress)
@@ -640,6 +645,11 @@ def _parse_torrent_record(value: object) -> _TorrentRecord:
         state=state if isinstance(state, str) else None,
         download_limit=download_limit if type(download_limit) is int else None,
         progress=normalized_progress,
+        downloaded_bytes=(
+            downloaded_bytes
+            if type(downloaded_bytes) is int and 0 <= downloaded_bytes <= 2**63 - 1
+            else None
+        ),
     )
 
 
