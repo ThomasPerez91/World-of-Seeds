@@ -75,6 +75,8 @@
   `0f43d18c04f755270309e3df48e356a8c73f803d`.
 - V2-27 PR `#84` was merged into `develop_V2` at
   `cfc847d0aa2c0ef64e7d2b7f98a801d8edbe7987`.
+- V2-28 PR `#85` was merged into `develop_V2` at
+  `5de4cd0282fd1397c810a0a693e455cada4c6c9e`.
 
 ## V1 completion state
 
@@ -755,7 +757,33 @@
   dashboard.
 - Extended the macOS helper and checklist with `monitoring-up` and `monitoring-smoke`; Docker Desktop
   metrics intentionally describe its Linux VM and the profile remains disposable and V1-isolated.
-- V2-28 is implemented on `feat/v2-monitoring-stack` from the merged V2-27 commit.
+- V2-28 was squash-merged through PR `#85` into `develop_V2` at
+  `5de4cd0282fd1397c810a0a693e455cada4c6c9e`.
+
+## Documentation hardening phase after V2-28
+
+- The main V2 profile was validated successfully on Docker Desktop macOS with
+  `scripts/local_v2.sh up`; API, PostgreSQL, Redis, worker, scheduler, qBittorrent, and the
+  NewGreedy fixture were operational.
+- `GET /api/v1/health/ready` returned HTTP 200 with version `2.0.0-alpha.0`.
+- `scripts/local_v2.sh smoke` completed with a durable `COMPLETED` job, exactly one qBittorrent
+  match, zero worker-restart duplicates, scheduler application, HTTP Range, ZIP fallback,
+  retained cancellation, secret-safe metrics, and UI bundle checks.
+- The optional monitoring profile is not portable to the tested Docker Desktop macOS setup:
+  `node-exporter` bind-mounts `/` with `propagation: rslave`, causing `monitoring-up` to fail with
+  `path / is mounted on / but it is not a shared or slave mount`.
+- Targeted code verification confirmed the hardening backlog: qB additions are not initially
+  stopped; the scheduler currently uses total size, selects the earliest request as beneficiary,
+  and fails closed above 200 controls; no durable anti-stall cooldown exists; the downloads page
+  polls every ten seconds; recursive download fetches all manifest pages before starting; storage
+  reconciliation performs per-user aggregate queries; production workers can run without the
+  required integration registry; and reconciliation reports qB/DB orphans without safe recovery
+  actions.
+- The roadmap now inserts V2-28A through V2-28H before Rise2 composition and V2-32A before the
+  external pilot. No functional code or migration is included in this documentation phase.
+- Rise2 must explicitly validate NewGreedy's effective read access to its read-only `config.ini`.
+  The V1 incident showed that UID 0 with all capabilities dropped cannot read an application-owned
+  mode `0600` file merely because it is root inside the container.
 
 ## Current validation
 
@@ -984,9 +1012,12 @@
 - V2-28 complete backend regression suite: PASS, with 6 service-backed tests deferred to CI.
 - V2-28 targeted Ruff lint/format, mypy, Python/shell syntax, YAML/JSON parsing, and
   `git diff --check`: PASS.
-- V2-28 real image startup, Prometheus target/rule checks, Grafana provisioning, complete
-  backend/frontend/container regressions, and local-profile smoke remain required in PR CI before
-  merge because Docker is unavailable in the development workspace.
+- PR #85 (V2-28) GitHub CI run `32573254177`: PASS; real image startup, Prometheus
+  target/rule checks, Grafana provisioning, backend, frontend, container, and complete Linux
+  local-profile smoke are green; squash-merged into `develop_V2` at
+  `5de4cd0282fd1397c810a0a693e455cada4c6c9e`.
+- Post-V2-28 main-profile validation on Docker Desktop macOS: PASS. Monitoring-profile startup:
+  FAIL with the confirmed `node-exporter` root-bind `rslave` portability issue tracked in V2-28H.
 
 ## Known constraints
 
@@ -1003,6 +1034,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-29 — Complete Rise2 Compose`.
-- Do not start V2-29 until V2-28 has passed review, complete CI, real monitoring smoke, and its PR
-  is merged into `develop_V2`.
+- The next roadmap task is `V2-28A — Scheduler authority and active download slots`.
+- V2-28A is not started. V2-29 must wait until V2-28A through V2-28H are individually reviewed,
+  green, and merged into `develop_V2`.
