@@ -161,7 +161,7 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL",
         "Torrents actifs globaux",
         "Nombre maximal de torrents physiques admis simultanément par le scheduler V2.",
-        8,
+        2,
         "torrents",
         minimum=1,
         maximum=200,

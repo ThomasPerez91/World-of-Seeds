@@ -760,6 +760,20 @@
 - V2-28 was squash-merged through PR `#85` into `develop_V2` at
   `5de4cd0282fd1397c810a0a693e455cada4c6c9e`.
 
+## V2-28A — Scheduler authority and active download slots
+
+- Made the PostgreSQL-backed scheduler the sole download authority: qBittorrent additions are
+  created paused and become eligible only through a scheduler control generation.
+- Set the global active-download default to two while retaining the typed PostgreSQL option and
+  its existing 1-to-200 bound; the value is reloaded on every scheduler cycle without restart.
+- Scheduler cost now uses bounded remaining bytes derived from total size and progress, including
+  safe behavior for unknown, zero, complete, non-finite, and inconsistent values.
+- READY torrents are excluded from download-slot controls and their desired download fields are
+  cleared transactionally when qBittorrent reports completion, so completed torrents may continue
+  seeding without occupying a download slot or receiving a scheduler stop.
+- Added regression coverage for initially paused additions, one/two dynamic slots, ten queued
+  torrents, progress at 99 percent, restart recovery, READY seeding, and malformed progress input.
+
 ## Documentation hardening phase after V2-28
 
 - The main V2 profile was validated successfully on Docker Desktop macOS with
@@ -1018,6 +1032,10 @@
   `5de4cd0282fd1397c810a0a693e455cada4c6c9e`.
 - Post-V2-28 main-profile validation on Docker Desktop macOS: PASS. Monitoring-profile startup:
   FAIL with the confirmed `node-exporter` root-bind `rslave` portability issue tracked in V2-28H.
+- V2-28A targeted scheduler, weighted-fair policy, qBittorrent gateway, and worker-effect tests:
+  PASS, 53 tests with 1 PostgreSQL locking test deferred to CI.
+- V2-28A complete backend suite: PASS, 421 tests with 6 service-backed tests deferred to CI.
+- V2-28A targeted Ruff lint/format, mypy, and `git diff --check`: PASS.
 
 ## Known constraints
 
@@ -1034,6 +1052,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-28A — Scheduler authority and active download slots`.
-- V2-28A is not started. V2-29 must wait until V2-28A through V2-28H are individually reviewed,
+- The next roadmap task is `V2-28B — Durable anti-stall and cooldown`.
+- V2-28A is implemented. V2-29 must wait until V2-28A through V2-28H are individually reviewed,
   green, and merged into `develop_V2`.

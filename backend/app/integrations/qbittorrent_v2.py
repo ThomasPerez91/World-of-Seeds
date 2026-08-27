@@ -429,6 +429,7 @@ class QBittorrentV2Gateway:
                 "savepath": identity.save_path,
                 "category": WOS_V2_CATEGORY,
                 "tags": ",".join(sorted(identity.tags)),
+                "paused": "true",
             },
             files={"torrents": ("upload.torrent", content, "application/x-bittorrent")},
             headers=self._browser_headers(),

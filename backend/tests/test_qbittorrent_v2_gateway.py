@@ -115,6 +115,8 @@ async def test_gateway_adds_with_server_owned_path_category_and_identity() -> No
             assert b"wos-v2" in request.content
             assert b'name="tags"' in request.content
             assert IDENTITY_TAG.encode() in request.content
+            assert b'name="paused"' in request.content
+            assert b"true" in request.content
             return httpx.Response(
                 200,
                 json={
