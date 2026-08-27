@@ -151,6 +151,10 @@ class ManagedTorrent(Base):
             name="ck_managed_torrents_schedule_values",
         ),
         CheckConstraint(
+            "(last_downloaded_bytes IS NULL OR last_downloaded_bytes >= 0) AND stall_count >= 0",
+            name="ck_managed_torrents_stall_values",
+        ),
+        CheckConstraint(
             "lifecycle_generation >= 0 AND "
             "((state IN ('PURGE_PENDING', 'PURGING') AND purge_after IS NOT NULL) "
             "OR (state NOT IN ('PURGE_PENDING', 'PURGING') AND purge_after IS NULL))",
@@ -181,6 +185,7 @@ class ManagedTorrent(Base):
         ),
         Index("ix_managed_torrents_tracker_account", "tracker_account_ref"),
         Index("ix_managed_torrents_qb_account", "qbittorrent_account_ref"),
+        Index("ix_managed_torrents_scheduler_retry", "state", "scheduler_retry_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -208,6 +213,10 @@ class ManagedTorrent(Base):
         Uuid(as_uuid=True), nullable=True
     )
     retry_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_progress_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_downloaded_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    stall_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    scheduler_retry_at: Mapped[datetime | None] = mapped_column(nullable=True)
     purge_after: Mapped[datetime | None] = mapped_column(nullable=True)
     lifecycle_generation: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     manifest_version: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)

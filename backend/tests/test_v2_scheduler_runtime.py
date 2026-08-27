@@ -239,6 +239,63 @@ async def test_global_active_limit_is_reloaded_between_cycles_with_ten_queued(
     await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_cooldown_survives_scheduler_restart(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    cooling = await _torrent(
+        sessions,
+        username="cooling",
+        info_hash="1" * 40,
+        size=10,
+    )
+    async with sessions() as session, session.begin():
+        stored = await session.get(ManagedTorrent, cooling.id)
+        assert stored is not None
+        stored.scheduler_retry_at = NOW + timedelta(minutes=3)
+        stored.stall_count = 1
+
+    before = await SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="scheduler-before-restart",
+        clock=lambda: NOW,
+        lease_ttl=timedelta(seconds=10),
+    ).run_once()
+    after = await SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="scheduler-after-restart",
+        clock=lambda: NOW + timedelta(minutes=3, seconds=1),
+        lease_ttl=timedelta(seconds=10),
+    ).run_once()
+
+    assert before.selected_torrent_ids == ()
+    assert after.selected_torrent_ids == (cooling.id,)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_two_slots_are_bounded_with_one_hundred_eligible_torrents(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    for index in range(100):
+        await _torrent(
+            sessions,
+            username=f"backlog-{index}",
+            info_hash=f"{index + 2:040x}",
+            size=20 + index,
+        )
+
+    result = await SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="scheduler-hundred",
+        clock=lambda: NOW,
+    ).run_once()
+
+    assert len(result.selected_torrent_ids) == 2
+    await engine.dispose()
+
+
 @pytest.mark.parametrize(
     ("total_size", "progress", "expected"),
     [

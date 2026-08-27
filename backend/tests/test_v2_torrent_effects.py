@@ -441,6 +441,161 @@ async def test_sync_handler_marks_completed_torrent_and_request_ready(
 
 
 @pytest.mark.asyncio
+async def test_sync_handler_persists_stall_backoff_and_resets_on_real_progress(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(
+        sessions,
+        state=ManagedTorrentState.DOWNLOADING,
+    )
+    payloads = _payloads(tmp_path)
+    content = _content(tmp_path)
+
+    async def sync(at: datetime, *, progress: float, downloaded: int) -> ManagedTorrent:
+        effects = TorrentEffectHandlers(
+            sessions,
+            _router(
+                sessions,
+                FakeAdder(),
+                QBittorrentV2TorrentSnapshot(
+                    INFO_HASH,
+                    "stalledDL",
+                    progress,
+                    downloaded,
+                ),
+            ),
+            payloads,
+            content,
+            clock=lambda: at,
+        )
+        await effects.sync_torrent(_snapshot(torrent_id, request_id, "SYNC_TORRENT"))
+        async with sessions() as session:
+            stored = await session.get(ManagedTorrent, torrent_id)
+            assert stored is not None
+            session.expunge(stored)
+            return stored
+
+    baseline = await sync(NOW, progress=0.99, downloaded=990)
+    assert baseline.state is ManagedTorrentState.DOWNLOADING
+    assert baseline.last_progress_at == NOW.replace(tzinfo=None)
+
+    first_stall = await sync(NOW + timedelta(seconds=61), progress=0.99, downloaded=990)
+    assert first_stall.state is ManagedTorrentState.PAUSED
+    assert first_stall.stall_count == 1
+    assert first_stall.scheduler_retry_at == (NOW + timedelta(minutes=3, seconds=61)).replace(
+        tzinfo=None
+    )
+    assert first_stall.desired_active is False
+
+    same_cooldown = await sync(NOW + timedelta(minutes=2), progress=0.99, downloaded=990)
+    assert same_cooldown.state is ManagedTorrentState.PAUSED
+    assert same_cooldown.stall_count == 1
+    assert same_cooldown.scheduler_retry_at == first_stall.scheduler_retry_at
+
+    resumed = await sync(NOW + timedelta(minutes=4, seconds=2), progress=0.99, downloaded=990)
+    assert resumed.state is ManagedTorrentState.DOWNLOADING
+    assert resumed.stall_count == 1
+    assert resumed.scheduler_retry_at is None
+
+    second_stall = await sync(NOW + timedelta(minutes=5, seconds=3), progress=0.99, downloaded=990)
+    assert second_stall.state is ManagedTorrentState.PAUSED
+    assert second_stall.stall_count == 2
+    assert second_stall.scheduler_retry_at == (NOW + timedelta(minutes=10, seconds=3)).replace(
+        tzinfo=None
+    )
+
+    third_resume = await sync(NOW + timedelta(minutes=10, seconds=4), progress=0.99, downloaded=990)
+    assert third_resume.state is ManagedTorrentState.DOWNLOADING
+    assert third_resume.stall_count == 2
+
+    third_stall = await sync(NOW + timedelta(minutes=11, seconds=5), progress=0.99, downloaded=990)
+    assert third_stall.state is ManagedTorrentState.PAUSED
+    assert third_stall.stall_count == 3
+    assert third_stall.scheduler_retry_at == (NOW + timedelta(minutes=21, seconds=5)).replace(
+        tzinfo=None
+    )
+
+    recovered = await sync(NOW + timedelta(minutes=12), progress=0.9901, downloaded=991)
+    assert recovered.state is ManagedTorrentState.DOWNLOADING
+    assert recovered.stall_count == 0
+    assert recovered.scheduler_retry_at is None
+    assert recovered.last_downloaded_bytes == 991
+
+
+@pytest.mark.asyncio
+async def test_scheduler_resume_starts_a_fresh_stall_window(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(sessions, state=ManagedTorrentState.PAUSED)
+    async with sessions() as session, session.begin():
+        torrent = await session.get(ManagedTorrent, torrent_id)
+        assert torrent is not None
+        torrent.qb_state = "stoppedDL"
+        torrent.last_progress_at = (NOW - timedelta(hours=1)).replace(tzinfo=None)
+        torrent.last_downloaded_bytes = 0
+    effects = TorrentEffectHandlers(
+        sessions,
+        _router(
+            sessions,
+            FakeAdder(),
+            QBittorrentV2TorrentSnapshot(INFO_HASH, "downloading", 0, 0),
+        ),
+        _payloads(tmp_path),
+        _content(tmp_path),
+        clock=lambda: NOW,
+    )
+
+    await effects.sync_torrent(_snapshot(torrent_id, request_id, "SYNC_TORRENT"))
+
+    async with sessions() as session:
+        torrent = await session.get(ManagedTorrent, torrent_id)
+    assert torrent is not None
+    assert torrent.state is ManagedTorrentState.DOWNLOADING
+    assert torrent.last_progress_at == NOW.replace(tzinfo=None)
+    assert torrent.scheduler_retry_at is None
+
+
+@pytest.mark.asyncio
+async def test_one_new_byte_keeps_a_very_slow_torrent_healthy(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(
+        sessions,
+        state=ManagedTorrentState.DOWNLOADING,
+    )
+    payloads = _payloads(tmp_path)
+    content = _content(tmp_path)
+
+    async def sync(at: datetime, downloaded: int) -> None:
+        effects = TorrentEffectHandlers(
+            sessions,
+            _router(
+                sessions,
+                FakeAdder(),
+                QBittorrentV2TorrentSnapshot(INFO_HASH, "downloading", 0.5, downloaded),
+            ),
+            payloads,
+            content,
+            clock=lambda: at,
+        )
+        await effects.sync_torrent(_snapshot(torrent_id, request_id, "SYNC_TORRENT"))
+
+    await sync(NOW, 500)
+    await sync(NOW + timedelta(seconds=61), 501)
+
+    async with sessions() as session:
+        torrent = await session.get(ManagedTorrent, torrent_id)
+    assert torrent is not None
+    assert torrent.state is ManagedTorrentState.DOWNLOADING
+    assert torrent.stall_count == 0
+    assert torrent.last_downloaded_bytes == 501
+    assert torrent.last_progress_at == (NOW + timedelta(seconds=61)).replace(tzinfo=None)
+
+
+@pytest.mark.asyncio
 async def test_periodic_enqueuer_coalesces_one_active_sync_job_per_torrent(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
