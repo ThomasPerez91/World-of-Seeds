@@ -127,6 +127,57 @@ The stable V1 maintenance release documented here is `1.3.3`.
 - Normalize qBittorrent states before sending them to the frontend.
 - Polling must tolerate temporary qBittorrent unavailability.
 
+## V2 scheduler authority and download slots
+
+- The V2 scheduler is the sole authority that decides which managed torrents may download.
+- The global number of active downloads is PostgreSQL-configurable; the expected operating
+  range is normally one or two, but no implementation may hardcode either value.
+- A torrent must be added to qBittorrent stopped or through an equivalent safe sequence, so it
+  cannot download before the first scheduler decision.
+- Completed torrents may keep seeding in qBittorrent and consume zero active-download slots.
+- Scheduling cost is based on robust remaining bytes, not the original total size alone.
+- Weighted fairness, persistent deficit, size classes, aging, anti-starvation, per-user caps, and
+  future account weights remain required when active-slot authority is hardened.
+- Stall detection is based on durable useful-progress observations, not only an instantaneous
+  zero download speed. PostgreSQL owns cooldown and retry state so a restart cannot erase it.
+- A shared physical torrent may serve several users. Its scheduling beneficiary must be selected
+  by a deterministic, restart-stable, weighted-fair policy rather than permanently charging the
+  first requester.
+- Scheduler processing stays bounded, but a backlog larger than one window must continue through
+  pagination or cursors instead of stopping the whole scheduler.
+
+## V2 realtime state delivery
+
+- The V2 downloads page performs one authoritative PostgreSQL-backed load, then receives only
+  significant domain transitions through an API WebSocket; it must not poll the complete list
+  every ten seconds.
+- A worker or scheduler publishes a lightweight Redis event only after the corresponding database
+  transaction commits. Redis and WebSockets remain non-authoritative and may lose events.
+- Reconnection performs an authoritative GET resynchronization, and the UI retains an explicit
+  manual refresh action.
+- Progress changes do not produce an event for every fractional percentage update.
+- An idle WebSocket holds no SQL session and performs no periodic SQL query; its heartbeat is
+  network-only.
+
+## V2 recursive transfer scalability
+
+- Recursive browser downloads consume a stable manifest snapshot progressively: fetch the first
+  page, start transfers, then prefetch later pages through a bounded queue.
+- The browser must not load a complete very large manifest before transferring the first file.
+- Resume offsets become durable only after the corresponding local write has succeeded. Resume
+  validates the actual local size whenever the browser API permits it and handles write, close,
+  abort, permission, missing-device, and disk-full failures without skipping bytes.
+
+## V2 operational recovery
+
+- Production workers fail fast when required integration configuration is missing or invalid;
+  development and test fixtures remain explicitly supported.
+- A qBittorrent reset or state loss must reconcile deterministically with PostgreSQL and shared
+  storage. Missing qB rows cannot remain as permanent phantom downloads in the UI.
+- Administrative recovery operations may reconcile, cancel, or purge orphaned requests through
+  safe business actions. They never delete files automatically while ownership or physical state
+  is ambiguous.
+
 ## Torrent user experience
 
 - The upload page supports drag and drop and an explicit file-selection control.
