@@ -80,7 +80,7 @@ def test_monitoring_policy_accepts_isolated_pinned_stack() -> None:
 def test_monitoring_policy_accepts_docker_desktop_without_rslave() -> None:
     _, validate = _validator()
     config = _valid_config()
-    del config["services"]["node-exporter"]["volumes"][0]["bind"]
+    config["services"]["node-exporter"]["volumes"][0]["bind"]["propagation"] = "rprivate"
     validate(config, platform="docker-desktop")
 
 
@@ -88,10 +88,10 @@ def test_monitoring_policy_keeps_platform_mount_contracts_distinct() -> None:
     error, validate = _validator()
     linux = _valid_config()
     desktop = copy.deepcopy(linux)
-    del desktop["services"]["node-exporter"]["volumes"][0]["bind"]
+    desktop["services"]["node-exporter"]["volumes"][0]["bind"]["propagation"] = "rprivate"
     with pytest.raises(error, match="requires rslave"):
         validate(desktop, platform="linux")
-    with pytest.raises(error, match="default propagation"):
+    with pytest.raises(error, match="requires rprivate"):
         validate(linux, platform="docker-desktop")
 
 

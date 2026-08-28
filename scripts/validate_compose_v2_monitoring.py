@@ -93,10 +93,8 @@ def validate_config(config: Mapping[str, Any], *, platform: str = "linux") -> No
     propagation = bind.get("propagation") if isinstance(bind, dict) else None
     if platform == "linux" and propagation != "rslave":
         raise ComposeMonitoringPolicyError("Linux node-exporter rootfs requires rslave")
-    if platform == "docker-desktop" and propagation is not None:
-        raise ComposeMonitoringPolicyError(
-            "Docker Desktop node-exporter rootfs must use default propagation"
-        )
+    if platform == "docker-desktop" and propagation != "rprivate":
+        raise ComposeMonitoringPolicyError("Docker Desktop node-exporter rootfs requires rprivate")
 
     grafana = _mapping(services["grafana"], "services.grafana")
     if set(_mapping(grafana.get("networks"), "services.grafana.networks")) != {

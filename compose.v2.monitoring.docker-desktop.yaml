@@ -13,3 +13,5 @@ services:
         source: /
         target: /host/root
         read_only: true
+        bind:
+          propagation: rprivate

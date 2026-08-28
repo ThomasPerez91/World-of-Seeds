@@ -56,7 +56,8 @@ ci-dessous.
 `monitoring-smoke` attend que Prometheus collecte l'API, Prometheus lui-même, node-exporter et
 cAdvisor, vérifie les treize alertes opérationnelles, puis contrôle l'API de santé Grafana et le
 dashboard provisionné. `local_v2.sh` sélectionne automatiquement l'overlay versionné Docker
-Desktop sur macOS afin de ne pas demander la propagation `rslave`, indisponible pour le bind `/`.
+Desktop sur macOS afin de remplacer `rslave` par la propagation privée `rprivate`, compatible avec
+le bind `/` de la VM Docker Desktop.
 Linux conserve `rslave` afin que node-exporter observe les changements de montages de l'hôte.
 `WOS_V2_MONITORING_PLATFORM=linux|docker-desktop` permet uniquement de tester explicitement l'un
 des deux contrats ; aucun fichier local ignoré n'est nécessaire.

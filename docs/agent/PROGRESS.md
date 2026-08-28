@@ -900,13 +900,13 @@
 
 - Kept the Linux and Rise2 node-exporter root mount on read-only `rslave`, preserving dynamic host
   mount visibility on the production target.
-- Added a versioned Docker Desktop overlay that replaces only `/host/root` with the default bind
-  propagation supported by macOS Docker Desktop; no ignored local file or privileged workaround is
-  required.
+- Added a versioned Docker Desktop overlay that explicitly replaces `rslave` on `/host/root` with
+  private `rprivate` propagation supported by macOS Docker Desktop; no ignored local file or
+  privileged workaround is required.
 - `local_v2.sh` and the monitoring smoke select the platform contract automatically on macOS or
   Linux, with a bounded `WOS_V2_MONITORING_PLATFORM` override for policy/CI validation.
-- Compose policy tests validate both normalized contracts and reject a missing Linux `rslave` or
-  any explicit Docker Desktop propagation.
+- Compose policy tests validate both normalized contracts and reject a missing Linux `rslave` or a
+  Docker Desktop root bind that was not overridden to `rprivate`.
 - Local documentation now states that node-exporter and cAdvisor on Intel/Apple Silicon macOS
   primarily observe Docker Desktop's Linux VM rather than the physical Mac host.
 - No Rise2 composition, V1 change, monitoring privilege increase, image change, or application
