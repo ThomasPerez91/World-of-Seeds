@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -11,7 +12,11 @@ from app.models import (
     TorrentJob,
     TorrentJobState,
 )
-from app.observability import MetricsRegistry
+from app.observability import (
+    MetricsRegistry,
+    OperationalMetricsCache,
+    OperationalMetricsSnapshot,
+)
 
 
 def test_api_registry_uses_bounded_route_templates_and_status_classes() -> None:
@@ -24,6 +29,37 @@ def test_api_registry_uses_bounded_route_templates_and_status_classes() -> None:
     assert 'method="GET",route="/api/v2/torrents/{torrent_request_id}",status_class="4xx"' in output
     assert 'method="OTHER",route="unmatched",status_class="5xx"' in output
     assert "user-name" not in output
+
+
+@pytest.mark.asyncio
+async def test_operational_metrics_cache_coalesces_concurrent_scrapes() -> None:
+    cache = OperationalMetricsCache(ttl_seconds=15)
+    calls = 0
+    snapshot = OperationalMetricsSnapshot(
+        job_counts=(),
+        oldest_queued_at=None,
+        retries=0,
+        average_job_duration_seconds=0,
+        desired_generation=0,
+        applied_generation=0,
+        active_leases=0,
+        managed_bytes=0,
+        disk_total_bytes=0,
+        disk_free_bytes=0,
+        storage_pressure="normal",
+        database_query_latency_seconds=0,
+    )
+
+    async def load() -> OperationalMetricsSnapshot:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0)
+        return snapshot
+
+    results = await asyncio.gather(*(cache.get(load) for _ in range(25)))
+
+    assert calls == 1
+    assert all(result is snapshot for result in results)
 
 
 @pytest.mark.asyncio

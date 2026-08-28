@@ -1,9 +1,18 @@
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import event, select
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from app.models import StorageLedger, StoragePressureState, User, UserStorageUsage
+from app.models import (
+    ManagedTorrent,
+    StorageLedger,
+    StoragePressureState,
+    TorrentRequest,
+    User,
+    UserStorageUsage,
+)
 from app.storage import (
     StorageAdmissionError,
     StorageAdmissionPolicy,
@@ -209,6 +218,73 @@ async def test_reconciler_repairs_counters_in_bounded_user_batches(
     for index, user in enumerate(users):
         usage = await db_session.get(UserStorageUsage, user.id)
         assert usage is not None and usage.logical_bytes == (index + 1) * 10
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("account_count", [10, 100, 500])
+async def test_reconciler_query_count_is_constant_at_representative_account_volumes(
+    db_session: AsyncSession,
+    account_count: int,
+) -> None:
+    users = [
+        User(username=f"volume-{index}", password_hash="hash") for index in range(account_count)
+    ]
+    db_session.add_all(users)
+    await db_session.flush()
+    torrents = [
+        ManagedTorrent(
+            info_hash=f"{index + 1:040x}",
+            name=f"torrent-{index}",
+            total_size=index + 1,
+        )
+        for index in range(account_count)
+    ]
+    db_session.add_all(torrents)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            TorrentRequest(user_id=user.id, managed_torrent_id=torrent.id)
+            for user, torrent in zip(users, torrents, strict=True)
+        ]
+        + [UserStorageUsage(user_id=user.id, logical_bytes=999) for user in users]
+    )
+    await db_session.commit()
+
+    bind = db_session.bind
+    assert isinstance(bind, AsyncEngine)
+    statements = 0
+
+    def count_statement(
+        _connection: Connection,
+        _cursor: object,
+        _statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        nonlocal statements
+        statements += 1
+
+    event.listen(bind.sync_engine, "before_cursor_execute", count_statement)
+    try:
+        result = await reconcile_storage_counters(
+            db_session,
+            policy=_policy(),
+            disk=DEFAULT_DISK,
+            batch_size=account_count,
+            now=NOW,
+        )
+    finally:
+        event.remove(bind.sync_engine, "before_cursor_execute", count_statement)
+
+    usages = {
+        usage.user_id: usage.logical_bytes
+        for usage in (await db_session.scalars(select(UserStorageUsage))).all()
+    }
+    assert result.processed_users == account_count
+    assert result.completed is True
+    assert statements <= 8
+    assert all(usages[user.id] == index + 1 for index, user in enumerate(users))
 
 
 def test_policy_and_disk_snapshots_reject_invalid_values() -> None:

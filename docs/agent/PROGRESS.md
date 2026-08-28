@@ -845,6 +845,26 @@
   changed or incomplete manifests fail closed. Cancel aborts both file and manifest requests.
 - Added focused first-page, bounded-prefetch, 50,000-file, local-size reconciliation, write/close
   failure, pause/resume, cancel, snapshot-change, and inconsistent-Range tests.
+- V2-28E was squash-merged through PR `#92` into `develop_V2` at
+  `b03fa4e9ee51909a812cde459545b00039a5a281`.
+
+## V2-28F — PostgreSQL, metrics, and reconciliation performance
+
+- Audited the periodic frontend refresh, scheduler, qB sync, metrics, health, shared-storage
+  reconciliation, HTTP/ZIP streams, realtime WebSocket, filesystem reconciliation, and external
+  monitoring paths against their actual transaction boundaries. Scheduler/qB operations, streams,
+  and idle realtime waits already release SQL resources before slow work and required no change.
+- Replaced the storage reconciler's per-user aggregate and usage-row lookup loop with one grouped
+  logical-byte query plus one bounded usage-row fetch. Query count is now constant for a batch and
+  is regression-tested with 10, 100, and 500 accounts.
+- Added a reconstructible, secret-free 15-second operational metrics snapshot. Concurrent scrapes
+  coalesce behind one refresh and reuse the bounded last-500-job audit instead of repeating it on
+  every Prometheus scrape; fixed state labels remain low-cardinality.
+- Metrics and public health explicitly release their SQL transaction before Redis, qBittorrent, or
+  NewGreedy probes. Admin reconciliation commits its bounded, detached database inventory before
+  filesystem traversal and qBittorrent inventory calls.
+- No schema migration or durable architecture change was required. PostgreSQL remains authoritative;
+  cache loss only causes a bounded snapshot rebuild.
 
 ## Documentation hardening phase after V2-28 (Phase 0)
 
@@ -1138,6 +1158,11 @@
   TypeScript, Vitest, build, container, complete local-profile smoke, and monitoring smoke are green.
 - V2-28E complete frontend suite: PASS, 34 tests including the synthetic 50,000-file manifest.
 - V2-28E TypeScript application/node checks, production Vite build, and `git diff --check`: PASS.
+- V2-28F targeted metrics, health, admin reconciliation, and storage-accounting suite: PASS,
+  22 tests including constant-query validation at 10, 100, and 500 accounts.
+- V2-28F complete backend suite: PASS, 450 tests with 6 service-backed tests deferred to CI.
+- V2-28F Ruff lint/format and strict mypy checks: PASS.
+- V2-28F GitHub CI remains required before merge.
 
 ## Known constraints
 
@@ -1154,6 +1179,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-28F — PostgreSQL, metrics, and reconciliation performance`.
-- V2-28A through V2-28D are merged; V2-28E is implemented. V2-29 must wait until V2-28A through
-  V2-28H are individually reviewed, green, and merged into `develop_V2`.
+- The next roadmap task is `V2-28G — runtime hardening and operational recovery`.
+- V2-28A through V2-28E are merged; V2-28F is implemented on its dedicated branch. V2-29 must wait
+  until V2-28A through V2-28H are individually reviewed, green, and merged into `develop_V2`.

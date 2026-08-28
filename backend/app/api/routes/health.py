@@ -46,6 +46,9 @@ async def system_status(
         await session.execute(text("SELECT 1"))
     except SQLAlchemyError:
         database_healthy = False
+    finally:
+        # Release the pool connection before potentially slow integration probes.
+        await session.rollback()
 
     snapshot, redis_health = await asyncio.gather(
         monitor.snapshot(),

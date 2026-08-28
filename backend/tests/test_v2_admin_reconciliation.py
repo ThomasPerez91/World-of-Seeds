@@ -12,7 +12,7 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2InventoryItem,
 )
 from app.models import ManagedTorrent, ManagedTorrentState, User
-from app.storage.shared import SharedContentInventory, SharedContentStore
+from app.storage.shared import SharedContentInventory, SharedContentStore, SharedContentStoreError
 
 
 def _torrent(*, info_hash: str, storage_key: uuid.UUID) -> ManagedTorrent:
@@ -67,6 +67,7 @@ def test_shared_storage_inventory_is_bounded_and_does_not_follow_symlinks(
 async def test_admin_reconciliation_is_admin_only_and_degrades_when_services_are_absent(
     client: AsyncClient,
     db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     admin = User(
         username="reconcile-admin",
@@ -75,6 +76,13 @@ async def test_admin_reconciliation_is_admin_only_and_degrades_when_services_are
     )
     db_session.add(admin)
     await db_session.commit()
+
+    def unavailable_storage(_store: SharedContentStore, *, limit: int) -> SharedContentInventory:
+        assert limit == 25
+        assert db_session.in_transaction() is False
+        raise SharedContentStoreError("storage unavailable")
+
+    monkeypatch.setattr(SharedContentStore, "inventory", unavailable_storage)
 
     anonymous = await client.get("/api/v2/admin/reconciliation")
     login = await client.post(
