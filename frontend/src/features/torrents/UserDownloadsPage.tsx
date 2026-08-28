@@ -277,7 +277,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
     }
     setNotice({ tone: "progress", message: `Préparation de « ${torrent.name} »…` });
     try {
-      const snapshotPromise = api.getTorrentDownloadSnapshotV2(torrent.id);
+      const snapshotPromise = api.getTorrentDownloadManifestPageV2(torrent.id);
       const directoryPromise = pickDownloadDirectory();
       const [snapshot, directory] = await Promise.all([snapshotPromise, directoryPromise]);
       const update = (progress: RecursiveTransferProgress) => {
@@ -295,8 +295,16 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       };
       const controller = new RecursiveDownloadController({
         torrentRequestId: torrent.id,
-        snapshot,
+        firstPage: snapshot,
         directory,
+        loadManifestPage: (requestedOffset, snapshotId, signal) =>
+          api.getTorrentDownloadManifestPageV2(
+            torrent.id,
+            requestedOffset,
+            snapshotId,
+            signal,
+            snapshot.limit,
+          ),
         onProgress: update,
       });
       controllerRef.current = controller;

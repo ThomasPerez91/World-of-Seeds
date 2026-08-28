@@ -825,6 +825,26 @@
   retains every explicit `Actualiser` action.
 - Added bounded fan-out coverage at 10, 25, 50, and 100 connections, multi-tab delivery, Redis loss,
   reconnect/resync behavior, closed payload validation, and domain publication regression tests.
+- V2-28D was squash-merged through PR `#91` into `develop_V2` at
+  `25c1aab07afab6004ddedd72688df4f6f167f6d4`.
+
+## V2-28E — Scalable recursive transfer and integrity-safe resume
+
+- Replaced the recursive browser workflow's complete-manifest preload with a first-page request and
+  progressive snapshot-bound pagination. File transfer starts from that first page while at most one
+  following page is fetched, and the in-memory queue never exceeds two 500-entry pages.
+- Removed the growing completed-file set and releases partial-offset state after each completed file,
+  keeping controller memory bounded for synthetic 50,000-file manifests while retaining two file
+  streams and one manifest-page request as the maximum concurrent work.
+- Resume now checks the actual local file size when supported and may only reduce, never advance, the
+  last controller-confirmed offset. HTTP `Content-Range` is parsed exactly before resumed writes.
+- Local offsets advance only after `writer.write` resolves. Failed close, seek, permission, removed
+  device, disk-full, abort, and cancel paths close or abort their resources and roll back to a proven
+  durable offset so retries cannot skip unwritten bytes.
+- Every progressive page must preserve snapshot ID, version, totals, page size, and expected offset;
+  changed or incomplete manifests fail closed. Cancel aborts both file and manifest requests.
+- Added focused first-page, bounded-prefetch, 50,000-file, local-size reconciliation, write/close
+  failure, pause/resume, cancel, snapshot-change, and inconsistent-Range tests.
 
 ## Documentation hardening phase after V2-28 (Phase 0)
 
@@ -1114,8 +1134,10 @@
   tests deferred to CI.
 - V2-28D complete backend suite: PASS, 446 tests with 6 service-backed tests deferred to CI.
 - V2-28D full Ruff lint/format and mypy: PASS.
-- V2-28D TypeScript, Vitest, build, real Redis Pub/Sub, container, and local-profile smoke remain
-  required in PR CI because the workspace Node cache is incomplete.
+- V2-28D GitHub CI run `33154157035`: PASS; 452 backend tests with real PostgreSQL/Redis,
+  TypeScript, Vitest, build, container, complete local-profile smoke, and monitoring smoke are green.
+- V2-28E complete frontend suite: PASS, 34 tests including the synthetic 50,000-file manifest.
+- V2-28E TypeScript application/node checks, production Vite build, and `git diff --check`: PASS.
 
 ## Known constraints
 
@@ -1132,6 +1154,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-28E — Scalable recursive transfer and integrity-safe resume`.
-- V2-28A through V2-28C are merged; V2-28D is implemented. V2-29 must wait until V2-28A through
+- The next roadmap task is `V2-28F — PostgreSQL, metrics, and reconciliation performance`.
+- V2-28A through V2-28D are merged; V2-28E is implemented. V2-29 must wait until V2-28A through
   V2-28H are individually reviewed, green, and merged into `develop_V2`.

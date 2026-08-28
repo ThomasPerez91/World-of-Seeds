@@ -297,6 +297,6 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 
 ## Prochaine tâche
 
-`V2-28E — Téléchargement récursif scalable et reprise intègre` est la prochaine tâche non terminée.
-V2-28A à V2-28C sont fusionnées et V2-28D est implémentée ; V2-29 ne commence qu'après fusion
+`V2-28F — Performance PostgreSQL, métriques et réconciliation` est la prochaine tâche non terminée.
+V2-28A à V2-28D sont fusionnées et V2-28E est implémentée ; V2-29 ne commence qu'après fusion
 séparée de V2-28A à V2-28H.
