@@ -4,11 +4,13 @@ import httpx
 import pytest
 from httpx import AsyncClient
 from pydantic import SecretStr
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
 from app.coordination import RedisHealth
 from app.core.config import Settings
 from app.integrations import ExternalServicesMonitor
+from app.integrations.types import ExternalServicesSnapshot
 from app.main import app
 
 
@@ -31,6 +33,16 @@ class UnavailableRedisCoordinator:
             checked_at=datetime.now(UTC),
             error_code="redis_unavailable",
         )
+
+
+class TransactionAssertingMonitor:
+    def __init__(self, session: AsyncSession, delegate: ExternalServicesMonitor) -> None:
+        self._session = session
+        self._delegate = delegate
+
+    async def snapshot(self) -> ExternalServicesSnapshot:
+        assert self._session.in_transaction() is False
+        return await self._delegate.snapshot()
 
 
 @pytest.mark.asyncio
@@ -86,7 +98,12 @@ async def test_public_status_includes_external_services_without_disclosing_their
 @pytest.mark.asyncio
 async def test_public_status_is_degraded_when_integrations_are_not_configured(
     client: AsyncClient,
+    db_session: AsyncSession,
 ) -> None:
+    app.state.external_services_monitor = TransactionAssertingMonitor(
+        db_session,
+        ExternalServicesMonitor(Settings()),
+    )
     response = await client.get("/api/v1/health/status")
 
     assert response.status_code == 200

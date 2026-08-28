@@ -222,25 +222,48 @@ async def reconcile_storage_counters(
     if not 1 <= batch_size <= 500:
         raise ValueError("storage reconciliation batch size is invalid")
     timestamp = now or utc_now()
-    statement = select(User.id).order_by(User.id).limit(batch_size + 1)
+    statement = select(User.id).order_by(User.id).limit(batch_size + 1).with_for_update()
     if after_user_id is not None:
         statement = statement.where(User.id > after_user_id)
     user_ids = list((await session.scalars(statement)).all())
     has_more = len(user_ids) > batch_size
     selected = user_ids[:batch_size]
-    for user_id in selected:
-        usage = await _usage_row(session, user_id, now=timestamp)
-        logical_bytes = await session.scalar(
-            select(func.coalesce(func.sum(ManagedTorrent.total_size), 0))
-            .select_from(TorrentRequest)
-            .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
-            .where(
-                TorrentRequest.user_id == user_id,
-                TorrentRequest.state.in_(ACTIVE_REQUEST_STATES),
-            )
-        )
-        usage.logical_bytes = int(logical_bytes or 0)
-        usage.updated_at = timestamp
+    if selected:
+        logical_bytes_by_user = {
+            user_id: int(logical_bytes)
+            for user_id, logical_bytes in (
+                await session.execute(
+                    select(
+                        TorrentRequest.user_id,
+                        func.coalesce(func.sum(ManagedTorrent.total_size), 0),
+                    )
+                    .select_from(TorrentRequest)
+                    .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
+                    .where(
+                        TorrentRequest.user_id.in_(selected),
+                        TorrentRequest.state.in_(ACTIVE_REQUEST_STATES),
+                    )
+                    .group_by(TorrentRequest.user_id)
+                )
+            ).all()
+        }
+        usage_by_user = {
+            usage.user_id: usage
+            for usage in (
+                await session.scalars(
+                    select(UserStorageUsage)
+                    .where(UserStorageUsage.user_id.in_(selected))
+                    .with_for_update()
+                )
+            ).all()
+        }
+        for user_id in selected:
+            usage = usage_by_user.get(user_id)
+            if usage is None:
+                usage = UserStorageUsage(user_id=user_id)
+                session.add(usage)
+            usage.logical_bytes = logical_bytes_by_user.get(user_id, 0)
+            usage.updated_at = timestamp
 
     managed_bytes = await session.scalar(
         select(func.coalesce(func.sum(ManagedTorrent.total_size), 0)).where(

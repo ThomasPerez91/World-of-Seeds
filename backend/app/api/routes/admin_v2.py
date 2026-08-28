@@ -212,6 +212,9 @@ async def get_admin_reconciliation(
     )
     database_truncated = len(rows) > limit
     torrents = tuple(rows[:limit])
+    # Materialize and detach the bounded SQL inventory before filesystem/qB I/O.
+    # expire_on_commit=False keeps these scalar model fields available without SQL.
+    await db.commit()
     try:
         storage = await run_in_threadpool(
             SharedContentStore(settings.data_root).inventory,
