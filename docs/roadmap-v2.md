@@ -297,6 +297,6 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 
 ## Prochaine tâche
 
-`V2-30 — Sauvegarde et restauration` est la prochaine tâche après la branche V2-29.
-V2-28A à V2-28H sont fusionnées et V2-29 est implémentée sur sa branche dédiée ; V2-30 ne
-commence qu'après revue, CI verte et fusion de V2-29.
+`V2-31 — Import V1 optionnel` est la prochaine tâche après la branche V2-30.
+V2-28A à V2-29 sont fusionnées et V2-30 est implémentée sur sa branche dédiée ; V2-31 ne
+commence qu'après revue, CI verte et fusion de V2-30.
