@@ -778,11 +778,11 @@ export const api = {
     let snapshot: string | null = null;
     let firstPage: TorrentDownloadManifestPageV2 | null = null;
     do {
-      const search = new URLSearchParams({ offset: String(offset), limit: "500" });
-      if (snapshot !== null) search.set("snapshot", snapshot);
-      const page = await requestV2<TorrentDownloadManifestPageV2>(
-        `/torrents/${encodeURIComponent(torrentRequestId)}/download-manifest?${search.toString()}`,
-        { signal },
+      const page = await this.getTorrentDownloadManifestPageV2(
+        torrentRequestId,
+        offset,
+        snapshot,
+        signal,
       );
       firstPage ??= page;
       snapshot ??= page.snapshot_id;
@@ -804,6 +804,21 @@ export const api = {
       throw new ApiError(409, "Le manifeste est incomplet.", "download_snapshot_changed");
     }
     return { ...firstPage, items };
+  },
+
+  getTorrentDownloadManifestPageV2(
+    torrentRequestId: string,
+    offset = 0,
+    snapshot: string | null = null,
+    signal?: AbortSignal,
+    limit = 500,
+  ): Promise<TorrentDownloadManifestPageV2> {
+    const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (snapshot !== null) search.set("snapshot", snapshot);
+    return requestV2<TorrentDownloadManifestPageV2>(
+      `/torrents/${encodeURIComponent(torrentRequestId)}/download-manifest?${search.toString()}`,
+      { signal },
+    );
   },
 
   torrentFileDownloadUrlV2(
