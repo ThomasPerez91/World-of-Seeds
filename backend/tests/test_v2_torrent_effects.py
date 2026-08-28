@@ -20,6 +20,7 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2ControlResult,
     QBittorrentV2DesiredControl,
     QBittorrentV2ManagedIdentity,
+    QBittorrentV2MissingError,
     QBittorrentV2TorrentSnapshot,
 )
 from app.jobs.torrent_effects import TorrentEffectHandlers, TorrentSyncEnqueuer
@@ -171,6 +172,14 @@ class FakeInspector:
         _controls: Sequence[QBittorrentV2DesiredControl],
     ) -> QBittorrentV2ControlResult:
         return QBittorrentV2ControlResult((), (), (), ())
+
+
+class MissingInspector(FakeInspector):
+    async def inspect_managed_torrents(
+        self,
+        _identities: Sequence[QBittorrentV2ManagedIdentity],
+    ) -> tuple[QBittorrentV2TorrentSnapshot, ...]:
+        raise QBittorrentV2MissingError("qbittorrent_managed_torrent_missing")
 
 
 class RecordingRedis:
@@ -463,6 +472,36 @@ async def test_sync_handler_marks_completed_torrent_and_request_ready(
                 TorrentRealtimeEvent(TorrentEventType.READY, request.id, NOW),
             )
         ]
+
+
+@pytest.mark.asyncio
+async def test_sync_handler_marks_missing_qb_torrent_as_permanent_error(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(
+        sessions,
+        state=ManagedTorrentState.DOWNLOADING,
+    )
+    route = TorrentEffectRoute(
+        TRACKER_ACCOUNT_REF,
+        QBITTORRENT_ACCOUNT_REF,
+        FakeAdder(),
+        MissingInspector(QBittorrentV2TorrentSnapshot(INFO_HASH, "missing", 0)),
+    )
+    effects = TorrentEffectHandlers(
+        sessions,
+        DeploymentAccountRouter(sessions, (route,)),
+        _payloads(tmp_path),
+        _content(tmp_path),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(PermanentTorrentJobError) as failure:
+        await effects.sync_torrent(_snapshot(torrent_id, request_id, "SYNC_TORRENT"))
+
+    assert failure.value.error_code == "qbittorrent_managed_torrent_missing"
+    assert failure.value.torrent_state is ManagedTorrentState.ERROR
 
 
 @pytest.mark.asyncio

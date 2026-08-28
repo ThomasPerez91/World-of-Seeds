@@ -86,3 +86,18 @@ class AdminV2ReconciliationReport(BaseModel):
     external_torrents: int
     anomalies: list[AdminV2ReconciliationAnomaly]
     truncated: bool
+
+
+class AdminV2RecoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["cancel_requests", "purge_metadata"]
+
+
+class AdminV2RecoveryResult(BaseModel):
+    managed_torrent_id: str
+    state: str
+    cancelled_requests: int
+    metadata_purged: bool
+    qbittorrent_present: bool
+    storage_present: bool

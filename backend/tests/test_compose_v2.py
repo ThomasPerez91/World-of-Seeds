@@ -24,7 +24,12 @@ def _valid_config() -> dict[str, Any]:
                     "redis": {"condition": "service_healthy"},
                 },
                 "healthcheck": healthy,
-                "environment": {"WOS_REDIS_URL": "redis://redis:6379/0"},
+                "environment": {
+                    "WOS_API_PROCESS_COUNT": "1",
+                    "WOS_RUNTIME_PROFILE": "v2",
+                    "WOS_REDIS_URL": "redis://redis:6379/0",
+                    "WOS_INTEGRATION_ACCOUNTS_JSON": "",
+                },
                 "networks": {"backend": None, "edge": None},
                 "ports": [{"host_ip": "127.0.0.1", "target": 8000}],
             },
@@ -34,7 +39,15 @@ def _valid_config() -> dict[str, Any]:
                     "postgres": {"condition": "service_healthy"},
                     "redis": {"condition": "service_healthy"},
                 },
-                "environment": {"WOS_REDIS_URL": "redis://redis:6379/0"},
+                "environment": {
+                    "WOS_REDIS_URL": "redis://redis:6379/0",
+                    "WOS_RUNTIME_PROFILE": "v2",
+                    "WOS_COOKIE_SECURE": "false",
+                    "WOS_ALLOWED_HOSTS": '["localhost"]',
+                    "WOS_DATA_ROOT": "/data",
+                    "WOS_QBITTORRENT_DATA_ROOT": "/data",
+                    "WOS_INTEGRATION_ACCOUNTS_JSON": "",
+                },
                 "networks": {"backend": None},
             },
             "postgres": {
@@ -71,6 +84,15 @@ def test_v2_compose_policy_accepts_the_isolated_foundation() -> None:
         lambda config: config["services"]["api"]["environment"].update(
             {"WOS_REDIS_URL": "redis://outside:6379/0"}
         ),
+        lambda config: config["services"]["api"]["environment"].update(
+            {"WOS_API_PROCESS_COUNT": "2"}
+        ),
+        lambda config: config["services"]["api"]["environment"].pop(
+            "WOS_INTEGRATION_ACCOUNTS_JSON"
+        ),
+        lambda config: config["services"]["api"].update(
+            {"command": ["uvicorn", "app.main:app", "--workers", "2"]}
+        ),
         lambda config: config["networks"]["backend"].update({"internal": False}),
         lambda config: config["services"]["api"].update(
             {"volumes": ["/var/run/docker.sock:/var/run/docker.sock"]}
@@ -81,6 +103,9 @@ def test_v2_compose_policy_accepts_the_isolated_foundation() -> None:
         lambda config: config["services"]["worker"].update({"ports": [{"target": 9000}]}),
         lambda config: config["services"]["worker"].update(
             {"command": ["uvicorn", "app.main:app"]}
+        ),
+        lambda config: config["services"]["worker"]["environment"].pop(
+            "WOS_INTEGRATION_ACCOUNTS_JSON"
         ),
     ],
 )

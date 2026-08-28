@@ -53,7 +53,9 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ComposeLocalPolicyError("local V2 must use its dedicated project name")
     services = _mapping(config.get("services"), "services")
     if set(services) != SERVICES:
-        raise ComposeLocalPolicyError("local V2 service set is incomplete or unexpected")
+        raise ComposeLocalPolicyError(
+            "local V2 service set is incomplete or unexpected"
+        )
 
     for name in PRIVATE_SERVICES:
         service = _mapping(services[name], f"services.{name}")
@@ -61,7 +63,9 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ComposeLocalPolicyError(f"{name} must not publish a host port")
         networks = set(_mapping(service.get("networks"), f"services.{name}.networks"))
         if networks != {"backend"}:
-            raise ComposeLocalPolicyError(f"{name} must use only the private backend network")
+            raise ComposeLocalPolicyError(
+                f"{name} must use only the private backend network"
+            )
 
     api = _mapping(services["api"], "services.api")
     ports = api.get("ports")
@@ -71,12 +75,23 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if port.get("host_ip") != "127.0.0.1" or port.get("target") != 8000:
         raise ComposeLocalPolicyError("api must bind target 8000 to host loopback")
     api_environment = _mapping(api.get("environment"), "services.api.environment")
+    if str(api_environment.get("WOS_API_PROCESS_COUNT")) != "1":
+        raise ComposeLocalPolicyError("api must use exactly one process")
     try:
         allowed_hosts = set(json.loads(str(api_environment.get("WOS_ALLOWED_HOSTS"))))
     except (json.JSONDecodeError, TypeError) as exc:
         raise ComposeLocalPolicyError("api allowed hosts must be valid JSON") from exc
     if allowed_hosts != {"127.0.0.1", "localhost", "api"}:
-        raise ComposeLocalPolicyError("api must allow only local and internal scrape hosts")
+        raise ComposeLocalPolicyError(
+            "api must allow only local and internal scrape hosts"
+        )
+    command = api.get("command")
+    if not isinstance(command, list) or any(
+        "--workers" in str(value) for value in command
+    ):
+        raise ComposeLocalPolicyError(
+            "api must keep its measured single-process entry point"
+        )
 
     for name in ("api", "worker", "scheduler"):
         service = _mapping(services[name], f"services.{name}")
@@ -85,9 +100,15 @@ def validate_config(config: Mapping[str, Any]) -> None:
         types = _volume_types(service)
         if "bind" in types:
             raise ComposeLocalPolicyError(f"{name} must not use a host bind mount")
-        environment = _mapping(service.get("environment"), f"services.{name}.environment")
+        environment = _mapping(
+            service.get("environment"), f"services.{name}.environment"
+        )
         if environment.get("WOS_ENVIRONMENT") != "development":
-            raise ComposeLocalPolicyError(f"{name} local helpers require development mode")
+            raise ComposeLocalPolicyError(
+                f"{name} local helpers require development mode"
+            )
+        if environment.get("WOS_RUNTIME_PROFILE") != "v2":
+            raise ComposeLocalPolicyError(f"{name} must use the V2 runtime profile")
 
     if _mapping(services["scheduler"], "scheduler").get("command") != [
         "python",
@@ -104,13 +125,17 @@ def validate_config(config: Mapping[str, Any]) -> None:
 
     for name in ("qbittorrent", "qbittorrent-init"):
         if _mapping(services[name], name).get("image") != QBITTORRENT_IMAGE:
-            raise ComposeLocalPolicyError("qBittorrent must use the approved multi-arch pin")
+            raise ComposeLocalPolicyError(
+                "qBittorrent must use the approved multi-arch pin"
+            )
     if not _mapping(services["qbittorrent"], "qbittorrent").get("healthcheck"):
         raise ComposeLocalPolicyError("qBittorrent must define a healthcheck")
     if not _mapping(services["newgreedy"], "newgreedy").get("healthcheck"):
         raise ComposeLocalPolicyError("NewGreedy fixture must define a healthcheck")
 
-    backend = _mapping(_mapping(config.get("networks"), "networks").get("backend"), "backend")
+    backend = _mapping(
+        _mapping(config.get("networks"), "networks").get("backend"), "backend"
+    )
     if backend.get("internal") is not True:
         raise ComposeLocalPolicyError("backend network must remain internal")
     if set(_mapping(config.get("volumes"), "volumes")) != VOLUMES:

@@ -21,6 +21,7 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2DesiredControl,
     QBittorrentV2Gateway,
     QBittorrentV2ManagedIdentity,
+    QBittorrentV2MissingError,
     QBittorrentV2TorrentSnapshot,
 )
 from app.models import ManagedTorrent
@@ -178,6 +179,22 @@ class DeploymentAccountRouter:
             tuple(limits_updated),
             tuple(priorities_applied),
         )
+
+    async def managed_torrent_is_present(
+        self,
+        qbittorrent_account_ref: uuid.UUID,
+        identity: QBittorrentV2ManagedIdentity,
+    ) -> bool:
+        inspector = self._qb_by_ref.get(qbittorrent_account_ref)
+        if inspector is None:
+            raise AccountRoutingError("qbittorrent_control_route_unavailable")
+        try:
+            snapshots = await inspector.inspect_managed_torrents((identity,))
+        except QBittorrentV2MissingError:
+            return False
+        if len(snapshots) != 1:
+            raise AccountRoutingError("qbittorrent_inventory_invalid")
+        return True
 
 
 def parse_deployment_account_specs(secret: SecretStr) -> tuple[DeploymentAccountSpec, ...]:

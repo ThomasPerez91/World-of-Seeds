@@ -25,6 +25,7 @@ from app.integrations.c411_v2 import (
 from app.integrations.http import IntegrationAuthenticationError
 from app.integrations.qbittorrent_v2 import (
     QBittorrentV2ManagedIdentity,
+    QBittorrentV2MissingError,
     QBittorrentV2OwnershipError,
     QBittorrentV2RejectedError,
     QBittorrentV2TorrentSnapshot,
@@ -274,6 +275,11 @@ class TorrentEffectHandlers:
 
         try:
             snapshots = await route.inspector.inspect_managed_torrents((identity,))
+        except QBittorrentV2MissingError as exc:
+            raise PermanentTorrentJobError(
+                "qbittorrent_managed_torrent_missing",
+                torrent_state=ManagedTorrentState.ERROR,
+            ) from exc
         except (QBittorrentV2TransientError, IntegrationAuthenticationError) as exc:
             raise TransientTorrentJobError("qbittorrent_sync_unavailable") from exc
         except QBittorrentV2OwnershipError as exc:

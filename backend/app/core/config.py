@@ -13,9 +13,25 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 CSRF_COOKIE_NAME = "wos_csrf"
 AllowedHost = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=253)]
+_SAFE_POSTGRES_IDENTIFIER = r"^[A-Za-z_][A-Za-z0-9_.-]{0,62}$"
+_DEMO_SECRET_MARKERS = (
+    "changeme",
+    "local-only",
+    "local-test",
+    "not-a-production-secret",
+    "replace-with",
+    "world_of_seeds",
+)
+
+
+def production_secret_is_unsafe(value: str) -> bool:
+    normalized = value.strip().lower()
+    return len(value) < 20 or any(marker in normalized for marker in _DEMO_SECRET_MARKERS)
 
 
 class Settings(BaseSettings):
@@ -28,11 +44,13 @@ class Settings(BaseSettings):
 
     app_name: str = "World of Seeds"
     environment: Literal["development", "test", "production"] = "development"
+    runtime_profile: Literal["v1", "v2"] = "v1"
     allowed_hosts: list[AllowedHost] = Field(
         default_factory=lambda: ["127.0.0.1", "localhost", "test"],
         min_length=1,
     )
     cookie_secure: bool = False
+    api_process_count: int = Field(default=1, ge=1, le=1)
     session_cookie_name: str = Field(
         default="wos_session",
         min_length=1,
@@ -46,8 +64,8 @@ class Settings(BaseSettings):
     database_url: str | None = Field(default=None, repr=False)
     postgres_host: str = Field(default="localhost", min_length=1)
     postgres_port: int = Field(default=5432, ge=1, le=65535)
-    postgres_db: str = Field(default="world_of_seeds", min_length=1)
-    postgres_user: str = Field(default="world_of_seeds", min_length=1)
+    postgres_db: str = Field(default="world_of_seeds", pattern=_SAFE_POSTGRES_IDENTIFIER)
+    postgres_user: str = Field(default="world_of_seeds", pattern=_SAFE_POSTGRES_IDENTIFIER)
     postgres_password: SecretStr = Field(default=SecretStr("world_of_seeds"), repr=False)
     redis_url: SecretStr | None = Field(default=None, repr=False)
     redis_namespace: str = Field(
@@ -93,6 +111,11 @@ class Settings(BaseSettings):
         if value is not None and value.get_secret_value() == "":
             raise ValueError("qBittorrent password must not be empty")
         return value
+
+    @field_validator("integration_accounts_json", mode="before")
+    @classmethod
+    def normalize_empty_integration_registry(cls, value: object) -> object:
+        return None if value == "" else value
 
     @field_validator("redis_url")
     @classmethod
@@ -141,10 +164,40 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def require_production_data_mount(self) -> Self:
-        if self.environment == "production" and (
-            self.data_root != Path("/data") or self.qbittorrent_data_root != Path("/data")
+        if self.environment != "production":
+            return self
+        if self.data_root != Path("/data") or self.qbittorrent_data_root != Path("/data"):
+            raise ValueError("Production container paths are invalid")
+        if self.runtime_profile != "v2":
+            return self
+        if self.static_root != Path("/app/static"):
+            raise ValueError("Production container paths are invalid")
+        if not self.cookie_secure:
+            raise ValueError("Production session cookies must be secure")
+        if any(
+            host == "*" or host.startswith("*.") or "://" in host or "/" in host
+            for host in self.allowed_hosts
+        ) or not any(host not in {"127.0.0.1", "localhost", "test"} for host in self.allowed_hosts):
+            raise ValueError("Production allowed hosts are invalid")
+        try:
+            database = make_url(self.sqlalchemy_database_url)
+        except (ArgumentError, TypeError, ValueError) as exc:
+            raise ValueError("Production database configuration is invalid") from exc
+        if (
+            database.drivername != "postgresql+asyncpg"
+            or not database.username
+            or not database.password
+            or not database.host
+            or not database.database
+            or database.host in {"127.0.0.1", "localhost", "test"}
+            or production_secret_is_unsafe(database.password)
         ):
-            raise ValueError("Production WOS and qBittorrent data roots must be /data")
+            raise ValueError("Production database configuration is invalid")
+        if self.redis_url is None:
+            raise ValueError("Production Redis configuration is required")
+        redis_host = urlsplit(self.redis_url.get_secret_value()).hostname
+        if redis_host in {None, "127.0.0.1", "localhost", "test"}:
+            raise ValueError("Production Redis configuration is invalid")
         return self
 
     @property

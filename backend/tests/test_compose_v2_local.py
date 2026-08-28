@@ -14,7 +14,7 @@ def _validator() -> tuple[type[RuntimeError], Callable[[dict[str, Any]], None]]:
 
 
 def _valid_config() -> dict[str, Any]:
-    environment = {"WOS_ENVIRONMENT": "development"}
+    environment = {"WOS_ENVIRONMENT": "development", "WOS_RUNTIME_PROFILE": "v2"}
     private = {"networks": {"backend": None}}
     wos = {
         **private,
@@ -35,8 +35,10 @@ def _valid_config() -> dict[str, Any]:
                 "ports": [{"host_ip": "127.0.0.1", "target": 8000}],
                 "environment": {
                     **environment,
+                    "WOS_API_PROCESS_COUNT": "1",
                     "WOS_ALLOWED_HOSTS": '["127.0.0.1","localhost","api"]',
                 },
+                "command": ["uvicorn", "app.main:app"],
             },
             "worker": {**wos, "command": ["python", "-m", "app.worker"]},
             "scheduler": {
@@ -80,6 +82,12 @@ def test_local_compose_policy_accepts_complete_private_stack() -> None:
         ),
         lambda config: config["services"]["api"]["environment"].update(
             {"WOS_ALLOWED_HOSTS": '["127.0.0.1","localhost","api","public.example"]'}
+        ),
+        lambda config: config["services"]["api"]["environment"].update(
+            {"WOS_API_PROCESS_COUNT": "2"}
+        ),
+        lambda config: config["services"]["api"].update(
+            {"command": ["uvicorn", "app.main:app", "--workers", "2"]}
         ),
         lambda config: config["services"]["qbittorrent"].update(
             {"image": "qbittorrentofficial/qbittorrent-nox:latest"}

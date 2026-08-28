@@ -12,6 +12,7 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2DesiredControl,
     QBittorrentV2Gateway,
     QBittorrentV2ManagedIdentity,
+    QBittorrentV2MissingError,
     QBittorrentV2OwnershipError,
     QBittorrentV2RejectedError,
     QBittorrentV2RunState,
@@ -245,6 +246,24 @@ async def test_gateway_reads_bounded_owned_torrent_state_snapshot() -> None:
     assert [
         (item.info_hash, item.state, item.progress, item.downloaded_bytes) for item in snapshots
     ] == [(INFO_HASH, "stalledDL", 0.25, 123)]
+
+
+@pytest.mark.asyncio
+async def test_gateway_distinguishes_exact_missing_managed_torrent() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v2/auth/login":
+            return _login_response()
+        if request.url.path == "/api/v2/torrents/info":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError(request.url.path)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(QBittorrentV2MissingError, match="qbittorrent_managed_torrent_missing"):
+            await _gateway(client).inspect_managed_torrents(
+                (QBittorrentV2ManagedIdentity(INFO_HASH, STORAGE_KEY),)
+            )
 
 
 @pytest.mark.asyncio

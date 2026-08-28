@@ -89,6 +89,10 @@ class QBittorrentV2TransientError(IntegrationRequestError):
     """The operation can be retried without risking a duplicate add."""
 
 
+class QBittorrentV2MissingError(QBittorrentV2TransientError):
+    """An exact WOS-owned torrent is absent from qBittorrent."""
+
+
 class QBittorrentV2RejectedError(IntegrationRequestError):
     """qBittorrent explicitly rejected a V2 managed-torrent operation."""
 
@@ -312,7 +316,7 @@ class QBittorrentV2Gateway:
 
             by_hash = {record.info_hash: record for record in records}
             if set(by_hash) != {item.info_hash for item in validated}:
-                raise QBittorrentV2TransientError("A managed torrent is not visible in qBittorrent")
+                raise QBittorrentV2MissingError("qbittorrent_managed_torrent_missing")
             snapshots: list[QBittorrentV2TorrentSnapshot] = []
             for item in validated:
                 record = by_hash[item.info_hash]

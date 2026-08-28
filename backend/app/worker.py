@@ -11,9 +11,12 @@ import uuid
 import httpx
 
 from app.coordination import RedisCoordinator
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings, production_secret_is_unsafe
 from app.core.database import engine, session_factory
-from app.integrations.account_routing import build_deployment_account_router
+from app.integrations.account_routing import (
+    build_deployment_account_router,
+    parse_deployment_account_specs,
+)
 from app.integrations.http import integration_timeout
 from app.jobs.torrent_effects import TorrentEffectHandlers, TorrentSyncEnqueuer
 from app.jobs.torrent_payloads import MAX_MANAGED_TORRENT_BYTES, TorrentPayloadStore
@@ -26,23 +29,37 @@ def _worker_id() -> str:
     return f"worker:{hostname}:{os.getpid()}:{uuid.uuid4().hex[:12]}"
 
 
-async def main() -> None:
-    settings = get_settings()
-    legacy_integration_values = (
+def validate_worker_runtime(settings: Settings) -> None:
+    legacy_values = (
         settings.newgreedy_url,
         settings.qbittorrent_url,
         settings.qbittorrent_username,
         settings.qbittorrent_password,
         settings.c411_passkey,
     )
-    if settings.integration_accounts_json is not None and any(
-        value is not None for value in legacy_integration_values
-    ):
-        raise RuntimeError("V2 worker integration configuration is ambiguous")
-    if settings.integration_accounts_json is None and any(
-        value is not None for value in legacy_integration_values
-    ):
-        raise RuntimeError("V2 worker deployment account registry is required")
+    if settings.integration_accounts_json is not None:
+        if any(value is not None for value in legacy_values):
+            raise RuntimeError("v2_worker_integration_config_ambiguous")
+        specs = parse_deployment_account_specs(settings.integration_accounts_json)
+        if settings.environment == "production" and any(
+            production_secret_is_unsafe(secret)
+            for spec in specs
+            for secret in (
+                spec.c411_passkey.get_secret_value(),
+                spec.qbittorrent_password.get_secret_value(),
+            )
+        ):
+            raise RuntimeError("v2_worker_integration_secret_invalid")
+        return
+    if any(value is not None for value in legacy_values):
+        raise RuntimeError("v2_worker_integration_registry_required")
+    if settings.environment == "production":
+        raise RuntimeError("v2_worker_integrations_required")
+
+
+async def main() -> None:
+    settings = get_settings()
+    validate_worker_runtime(settings)
     redis = RedisCoordinator.from_settings(settings)
     if settings.integration_accounts_json is None:
         worker = TorrentWorker(session_factory, redis, {}, worker_id=_worker_id())
