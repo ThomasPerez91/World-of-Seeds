@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import platform
 import subprocess
 import sys
 import time
@@ -29,9 +31,15 @@ COMPOSE = [
     str(ROOT / "compose.v2.local.yaml"),
     "-f",
     str(ROOT / "compose.v2.monitoring.yaml"),
-    "--profile",
-    "monitoring",
 ]
+MONITORING_PLATFORM = os.environ.get("WOS_V2_MONITORING_PLATFORM") or (
+    "docker-desktop" if platform.system() == "Darwin" else "linux"
+)
+if MONITORING_PLATFORM not in {"linux", "docker-desktop"}:
+    raise RuntimeError("WOS_V2_MONITORING_PLATFORM must be linux or docker-desktop")
+if MONITORING_PLATFORM == "docker-desktop":
+    COMPOSE.extend(["-f", str(ROOT / "compose.v2.monitoring.docker-desktop.yaml")])
+COMPOSE.extend(["--profile", "monitoring"])
 ALERTS = {
     "WOSMetricsTargetDown",
     "WOSJobQueueStalled",
@@ -92,8 +100,7 @@ def main() -> int:
     while time.monotonic() < deadline:
         payload = _prometheus("/api/v1/targets")
         targets = {
-            target["labels"]["job"]: target["health"]
-            for target in payload["data"]["activeTargets"]
+            target["labels"]["job"]: target["health"] for target in payload["data"]["activeTargets"]
         }
         if all(
             targets.get(job) == "up"
@@ -145,9 +152,7 @@ def main() -> int:
         )
         print(diagnostics.stdout, file=sys.stderr)
         print(logs.stdout, file=sys.stderr)
-        raise RuntimeError(
-            f"Grafana database is not healthy: {health}; last error: {health_error}"
-        )
+        raise RuntimeError(f"Grafana database is not healthy: {health}; last error: {health_error}")
     dashboards = _request(
         f"http://127.0.0.1:{port}/api/search?query=World%20of%20Seeds",
         authorization=authorization,
@@ -155,11 +160,7 @@ def main() -> int:
     if not any(item.get("uid") == "world-of-seeds-v2" for item in dashboards):
         raise RuntimeError("the World of Seeds V2 dashboard was not provisioned")
 
-    print(
-        json.dumps(
-            {"grafana": "ok", "prometheus_targets": targets, "alerts": len(alert_names)}
-        )
-    )
+    print(json.dumps({"grafana": "ok", "prometheus_targets": targets, "alerts": len(alert_names)}))
     return 0
 
 
