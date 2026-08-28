@@ -89,6 +89,11 @@ script ne doit appliquer récursivement `chown` ou `chmod` à un chemin existant
 
 ## Sauvegardes
 
+La procédure exécutable, la politique de rétention et l'exercice isolé sont définis dans
+[`backup-restore-rise2-v2.md`](backup-restore-rise2-v2.md). L'archive chiffrée et le snapshot
+externe de contenu sont liés par un identifiant immuable ; aucun script ne copie ou supprime le
+contenu torrent par défaut.
+
 | Élément | Méthode minimale | Test obligatoire |
 | --- | --- | --- |
 | PostgreSQL | dump cohérent + sauvegarde volume selon RPO/RTO | restauration et migrations sur hôte vierge |

@@ -1247,6 +1247,10 @@
 - V2-29 shell/Python syntax, targeted Ruff lint/format, and `git diff --check`: PASS.
 - Docker is unavailable in the development workspace; normalized production Compose validation is
   required in PR CI. Real NewGreedy UID/GID readability remains a mandatory Rise2 host preflight.
+- V2-30 targeted encrypted-backup policy and payload-integrity suite: PASS, 12 tests.
+- V2-30 Python/shell syntax, targeted Ruff lint/format, strict mypy, and `git diff --check`: PASS.
+- The real encrypted artifact flow and isolated PostgreSQL restore drill require `age` and Docker
+  on Rise2; they remain mandatory operational acceptance checks before production backup approval.
 
 ## Known constraints
 
@@ -1263,6 +1267,6 @@
 
 ## Next task
 
-- The next roadmap task after this branch is `V2-30 — backup and restore`.
-- V2-28A through V2-28H are merged; V2-29 is implemented on its dedicated branch. V2-30 starts
-  only after V2-29 is reviewed, green, and merged into `develop_V2`.
+- The next roadmap task after this branch is `V2-31 — optional V1 import`.
+- V2-28A through V2-29 are merged; V2-30 is implemented on its dedicated branch. V2-31 starts
+  only after V2-30 is reviewed, green, and merged into `develop_V2`.
