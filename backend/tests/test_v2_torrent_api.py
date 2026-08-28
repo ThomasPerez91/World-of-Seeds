@@ -1,3 +1,4 @@
+import uuid
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.security import hash_password
+from app.coordination import TorrentEventType, TorrentRealtimeEvent
+from app.main import app
 from app.models import (
     ManagedTorrent,
     ManagedTorrentState,
@@ -16,6 +19,24 @@ from app.models import (
     User,
 )
 from app.options import PostgresOptionsRegistry
+
+
+class RecordingRedis:
+    def __init__(self) -> None:
+        self.events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
+        self.signals = 0
+
+    async def signal_job_available(self) -> bool:
+        self.signals += 1
+        return True
+
+    async def publish_torrent_event(
+        self,
+        user_id: uuid.UUID,
+        event: TorrentRealtimeEvent,
+    ) -> bool:
+        self.events.append((user_id, event))
+        return True
 
 
 def _encode(value: object) -> bytes:
@@ -70,6 +91,8 @@ async def test_v2_upload_is_durable_idempotent_and_secret_free(
 ) -> None:
     user = await prepare_user(db_session)
     headers = await login(client)
+    redis = RecordingRedis()
+    app.state.redis_coordinator = redis
 
     first = await client.post(
         "/api/v2/torrents",
@@ -97,6 +120,11 @@ async def test_v2_upload_is_durable_idempotent_and_secret_free(
     assert staged.is_file()
     assert b"old-user-passkey" not in staged.read_bytes()
     assert user.id == (await db_session.scalar(select(TorrentRequest.user_id)))
+    assert redis.signals == 1
+    assert [(owner, event.event_type) for owner, event in redis.events] == [
+        (user.id, TorrentEventType.REQUESTED)
+    ]
+    assert redis.events[0][1].request_id == uuid.UUID(first.json()["id"])
 
 
 @pytest.mark.asyncio
@@ -212,11 +240,16 @@ async def test_v2_cancellation_schedules_retained_purge_and_is_idempotent(
     await db_session.commit()
     request_id = request.id
     headers = await login(client)
+    redis = RecordingRedis()
+    app.state.redis_coordinator = redis
 
     first = await client.delete(f"/api/v2/torrents/{request_id}", headers=headers)
     second = await client.delete(f"/api/v2/torrents/{request_id}", headers=headers)
 
     assert first.status_code == second.status_code == 204, (first.text, second.text)
+    assert [(user_id, event.event_type, event.request_id) for user_id, event in redis.events] == [
+        (owner.id, TorrentEventType.CANCELLED, request_id)
+    ]
     await db_session.refresh(request)
     await db_session.refresh(managed)
     assert request.state is TorrentRequestState.CANCELLED

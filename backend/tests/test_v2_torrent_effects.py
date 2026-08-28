@@ -10,7 +10,11 @@ import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.coordination import RedisCoordinator
+from app.coordination import (
+    RedisCoordinator,
+    TorrentEventType,
+    TorrentRealtimeEvent,
+)
 from app.integrations.account_routing import DeploymentAccountRouter, TorrentEffectRoute
 from app.integrations.qbittorrent_v2 import (
     QBittorrentV2ControlResult,
@@ -167,6 +171,19 @@ class FakeInspector:
         _controls: Sequence[QBittorrentV2DesiredControl],
     ) -> QBittorrentV2ControlResult:
         return QBittorrentV2ControlResult((), (), (), ())
+
+
+class RecordingRedis:
+    def __init__(self) -> None:
+        self.events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
+
+    async def publish_torrent_event(
+        self,
+        user_id: uuid.UUID,
+        event: TorrentRealtimeEvent,
+    ) -> bool:
+        self.events.append((user_id, event))
+        return True
 
 
 def _router(
@@ -413,6 +430,7 @@ async def test_sync_handler_marks_completed_torrent_and_request_ready(
         sessions,
         state=ManagedTorrentState.DOWNLOADING,
     )
+    redis = RecordingRedis()
     effects = TorrentEffectHandlers(
         sessions,
         _router(
@@ -422,6 +440,7 @@ async def test_sync_handler_marks_completed_torrent_and_request_ready(
         ),
         _payloads(tmp_path),
         _content(tmp_path),
+        redis=redis,  # type: ignore[arg-type]
         clock=lambda: NOW,
     )
 
@@ -438,6 +457,12 @@ async def test_sync_handler_marks_completed_torrent_and_request_ready(
         assert torrent.desired_download_limit == 0
         assert request is not None and request.state is TorrentRequestState.READY
         assert request.ready_at is not None
+        assert redis.events == [
+            (
+                request.user_id,
+                TorrentRealtimeEvent(TorrentEventType.READY, request.id, NOW),
+            )
+        ]
 
 
 @pytest.mark.asyncio

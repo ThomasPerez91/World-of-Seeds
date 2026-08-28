@@ -807,6 +807,24 @@
 - Added a reversible PostgreSQL migration and boundary coverage for 199, 200, 201, 500, and 1,000
   torrents, including mixed sizes and cooldowns, plus shared-owner caps, weights, restart stability,
   deterministic order, and single-physical-selection guarantees.
+- V2-28C was squash-merged through PR `#90` into `develop_V2` at
+  `ca423f29a7f8dbf9fcadbe6a9d6ba495c3ca45a4`.
+
+## V2-28D — Realtime state without full polling
+
+- Added a closed, secret-safe realtime event contract containing only an allowed transition type,
+  opaque request UUID, and timestamp; channels are namespaced per authenticated user and fan out to
+  every open browser tab.
+- Worker, scheduler, creation, cancellation, ready, stall, resume, pause, start, and failure paths
+  publish best-effort Redis events only after their PostgreSQL transaction has committed. Redis
+  failure never changes the durable outcome.
+- Added an authenticated API WebSocket whose short authentication session is closed before accept;
+  idle connections wait only on Redis and send a network heartbeat without retaining or polling SQL.
+- Removed the ten-second downloads-page polling loop. The page performs an initial authoritative
+  GET, refreshes on significant events, resynchronizes after reconnect or `resync_required`, and
+  retains every explicit `Actualiser` action.
+- Added bounded fan-out coverage at 10, 25, 50, and 100 connections, multi-tab delivery, Redis loss,
+  reconnect/resync behavior, closed payload validation, and domain publication regression tests.
 
 ## Documentation hardening phase after V2-28 (Phase 0)
 
@@ -1090,6 +1108,14 @@
 - V2-28C complete backend suite: PASS, 435 tests with 6 service-backed tests deferred to CI.
 - V2-28C full Ruff lint/format, mypy, and `git diff --check`: PASS.
 - V2-28C PostgreSQL migration upgrade/downgrade SQL generation: PASS.
+- V2-28C GitHub CI run `33151352347`: PASS; real PostgreSQL migration, backend, frontend,
+  container, complete local-profile smoke, and monitoring smoke are green.
+- V2-28D targeted Redis/realtime/API/worker/scheduler tests: PASS, 57 tests with 2 real-service
+  tests deferred to CI.
+- V2-28D complete backend suite: PASS, 446 tests with 6 service-backed tests deferred to CI.
+- V2-28D full Ruff lint/format and mypy: PASS.
+- V2-28D TypeScript, Vitest, build, real Redis Pub/Sub, container, and local-profile smoke remain
+  required in PR CI because the workspace Node cache is incomplete.
 
 ## Known constraints
 
@@ -1106,6 +1132,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-28D — Realtime state without full polling`.
-- V2-28A and V2-28B are merged; V2-28C is implemented. V2-29 must wait until V2-28A through
+- The next roadmap task is `V2-28E — Scalable recursive transfer and integrity-safe resume`.
+- V2-28A through V2-28C are merged; V2-28D is implemented. V2-29 must wait until V2-28A through
   V2-28H are individually reviewed, green, and merged into `develop_V2`.

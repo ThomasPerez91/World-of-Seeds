@@ -10,6 +10,7 @@ import uuid
 
 import httpx
 
+from app.coordination import RedisCoordinator
 from app.core.config import get_settings
 from app.core.database import engine, session_factory
 from app.integrations.account_routing import build_deployment_account_router
@@ -40,6 +41,7 @@ async def main() -> None:
         or settings.qbittorrent_password is None
     ):
         raise RuntimeError("V2 scheduler qBittorrent configuration is incomplete")
+    redis = RedisCoordinator.from_settings(settings)
     timeout = httpx.Timeout(
         connect=settings.integration_connect_timeout_seconds,
         read=settings.integration_read_timeout_seconds,
@@ -71,6 +73,7 @@ async def main() -> None:
             session_factory,
             gateway,
             scheduler_id=_scheduler_id(),
+            redis=redis,
         )
         loop = asyncio.get_running_loop()
         for signal_number in (signal.SIGINT, signal.SIGTERM):
@@ -78,6 +81,7 @@ async def main() -> None:
         try:
             await scheduler.run()
         finally:
+            await redis.aclose()
             await engine.dispose()
 
 

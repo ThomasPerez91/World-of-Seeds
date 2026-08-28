@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from app.coordination import TorrentEventType, TorrentRealtimeEvent
 from app.integrations.qbittorrent_v2 import (
     QBittorrentV2ControlResult,
     QBittorrentV2DesiredControl,
@@ -52,6 +53,19 @@ class FakeGateway:
             raise RuntimeError("qb_unavailable")
         running = tuple(control.info_hash for control in controls if control.run_state == "running")
         return QBittorrentV2ControlResult(running, (), (), running)
+
+
+class RecordingRedis:
+    def __init__(self) -> None:
+        self.events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
+
+    async def publish_torrent_event(
+        self,
+        user_id: uuid.UUID,
+        event: TorrentRealtimeEvent,
+    ) -> bool:
+        self.events.append((user_id, event))
+        return True
 
 
 async def _database(
@@ -171,7 +185,14 @@ async def test_cycle_persists_desired_controls_ledger_and_applied_generation(
     first = await _torrent(sessions, username="first", info_hash="a" * 40, size=10)
     second = await _torrent(sessions, username="second", info_hash="b" * 40, size=20)
     gateway = FakeGateway()
-    runtime = SchedulerRuntime(sessions, gateway, scheduler_id="scheduler-a", clock=lambda: NOW)
+    redis = RecordingRedis()
+    runtime = SchedulerRuntime(
+        sessions,
+        gateway,
+        scheduler_id="scheduler-a",
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW,
+    )
 
     result = await runtime.run_once()
 
@@ -182,6 +203,7 @@ async def test_cycle_persists_desired_controls_ledger_and_applied_generation(
     async with sessions() as session:
         state = await session.get(SchedulerState, 1)
         stored = list((await session.scalars(select(ManagedTorrent))).all())
+        requests = list((await session.scalars(select(TorrentRequest))).all())
     assert state is not None
     assert state.desired_generation == state.applied_generation == 1
     assert state.rounds > 0
@@ -189,6 +211,9 @@ async def test_cycle_persists_desired_controls_ledger_and_applied_generation(
         (True, 0),
         (True, 1),
     ]
+    assert sorted(
+        (user_id, event.event_type, event.request_id) for user_id, event in redis.events
+    ) == sorted((request.user_id, TorrentEventType.STARTED, request.id) for request in requests)
     await engine.dispose()
 
 

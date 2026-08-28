@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.coordination import RedisCoordinator
+from app.coordination import RedisCoordinator, TorrentEventType, TorrentRealtimeEvent
 from app.jobs.torrent_jobs import (
     TorrentJobTransitionError,
     cancel_claimed_torrent_job,
@@ -24,7 +24,14 @@ from app.jobs.torrent_jobs import (
     renew_torrent_job_claim,
     retry_torrent_job,
 )
-from app.models import ManagedTorrent, ManagedTorrentState, TorrentJob, TorrentJobState
+from app.models import (
+    ManagedTorrent,
+    ManagedTorrentState,
+    TorrentJob,
+    TorrentJobState,
+    TorrentRequest,
+    TorrentRequestState,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -322,6 +329,7 @@ class TorrentWorker:
         torrent_state: ManagedTorrentState | None = None,
     ) -> None:
         now = self._clock()
+        realtime_events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
         async with self._session_factory() as session, session.begin():
             job = await self._owned_job(session, snapshot.id)
             if job.cancel_requested_at is not None:
@@ -361,6 +369,32 @@ class TorrentWorker:
                         managed.state = torrent_state
                         managed.retry_at = job.available_at
                     managed.updated_at = now
+                    if job.state is TorrentJobState.FAILED:
+                        requests = tuple(
+                            (
+                                await session.scalars(
+                                    select(TorrentRequest).where(
+                                        TorrentRequest.managed_torrent_id == managed.id,
+                                        TorrentRequest.state.in_(
+                                            (
+                                                TorrentRequestState.REQUESTED,
+                                                TorrentRequestState.ACTIVE,
+                                                TorrentRequestState.READY,
+                                            )
+                                        ),
+                                    )
+                                )
+                            ).all()
+                        )
+                        realtime_events.extend(
+                            (
+                                request.user_id,
+                                TorrentRealtimeEvent(TorrentEventType.FAILED, request.id, now),
+                            )
+                            for request in requests
+                        )
+        for user_id, event in realtime_events:
+            await self._redis.publish_torrent_event(user_id, event)
 
     async def _owned_job(self, session: AsyncSession, job_id: uuid.UUID) -> TorrentJob:
         job = await session.scalar(

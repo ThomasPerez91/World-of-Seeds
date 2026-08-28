@@ -30,6 +30,7 @@ ACTIVE_REQUEST_STATES = (
 class TorrentCancellationResult:
     request_id: uuid.UUID
     managed_torrent_id: uuid.UUID
+    cancelled: bool
     purge_scheduled: bool
     purge_after: datetime | None
 
@@ -61,7 +62,7 @@ async def cancel_owned_torrent_request(
     if torrent is None or request is None:
         return None
     if request.state is TorrentRequestState.CANCELLED:
-        return TorrentCancellationResult(request.id, torrent.id, False, torrent.purge_after)
+        return TorrentCancellationResult(request.id, torrent.id, False, False, torrent.purge_after)
     if request.state not in ACTIVE_REQUEST_STATES:
         return None
 
@@ -83,7 +84,7 @@ async def cancel_owned_torrent_request(
     )
     if remaining is None or remaining > 0:
         await session.flush()
-        return TorrentCancellationResult(request.id, torrent.id, False, None)
+        return TorrentCancellationResult(request.id, torrent.id, True, False, None)
 
     purge_after = timestamp + timedelta(hours=retention_hours)
     torrent.lifecycle_generation += 1
@@ -122,4 +123,4 @@ async def cancel_owned_torrent_request(
         )
     )
     await session.flush()
-    return TorrentCancellationResult(request.id, torrent.id, True, purge_after)
+    return TorrentCancellationResult(request.id, torrent.id, True, True, purge_after)

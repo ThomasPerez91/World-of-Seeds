@@ -3,6 +3,7 @@ import { type ChangeEvent, type DragEvent, useCallback, useEffect, useRef, useSt
 import {
   api,
   ApiError,
+  parseTorrentRealtimeMessage,
   type TorrentRequestV2,
   type TorrentRequestV2State,
   type TorrentDownloadSnapshotV2,
@@ -172,11 +173,43 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
 
   useEffect(() => {
     const controller = new AbortController();
+    let active = true;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let hasConnected = false;
+    let refreshPending = false;
+
+    const refreshFromEvent = () => {
+      if (refreshPending || !active) return;
+      refreshPending = true;
+      void load(offset).finally(() => { refreshPending = false; });
+    };
+
+    const connect = () => {
+      if (!active || typeof WebSocket === "undefined") return;
+      socket = api.openTorrentEventsV2();
+      socket.onopen = () => {
+        if (hasConnected) refreshFromEvent();
+        hasConnected = true;
+      };
+      socket.onmessage = (event) => {
+        const message = parseTorrentRealtimeMessage(event.data);
+        if (message !== null && message.type !== "heartbeat") refreshFromEvent();
+      };
+      socket.onerror = () => socket?.close();
+      socket.onclose = () => {
+        if (!active) return;
+        reconnectTimer = window.setTimeout(connect, 1_000);
+      };
+    };
+
     void load(offset, controller.signal);
-    const interval = window.setInterval(() => void load(offset), 10_000);
+    connect();
     return () => {
+      active = false;
       controller.abort();
-      window.clearInterval(interval);
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      socket?.close();
     };
   }, [load, offset]);
 

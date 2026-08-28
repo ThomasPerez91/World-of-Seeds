@@ -4,7 +4,9 @@ import json
 import math
 import re
 import time
+import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -13,6 +15,7 @@ from typing import Literal, Protocol, cast
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
+from app.coordination.events import TorrentRealtimeEvent
 from app.core.config import Settings
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
@@ -36,7 +39,65 @@ class RedisCommands(Protocol):
 
     async def blpop(self, keys: str, blocking_seconds: int) -> tuple[str, str] | None: ...
 
+    async def publish(self, channel: str, message: str) -> int: ...
+
+    def pubsub(self) -> RedisPubSub: ...
+
     async def aclose(self) -> None: ...
+
+
+class RedisPubSub(Protocol):
+    async def subscribe(self, *channels: str) -> None: ...
+
+    async def get_message(
+        self,
+        ignore_subscribe_messages: bool,
+        wait_seconds: float,
+    ) -> dict[str, object] | None: ...
+
+    async def unsubscribe(self, *channels: str) -> None: ...
+
+    async def aclose(self) -> None: ...
+
+
+class RedisSubscriptionUnavailable(RuntimeError):
+    """A best-effort realtime subscription cannot currently continue."""
+
+
+class TorrentEventSubscription:
+    def __init__(self, pubsub: RedisPubSub, channel: str) -> None:
+        self._pubsub = pubsub
+        self._channel = channel
+        self._closed = False
+
+    async def next_event(self, *, timeout_seconds: float) -> TorrentRealtimeEvent | None:
+        if not 0 < timeout_seconds <= 300:
+            raise ValueError("timeout_seconds must be between 0 and 300")
+        if self._closed:
+            raise RedisSubscriptionUnavailable("torrent event subscription is closed")
+        try:
+            message = await self._pubsub.get_message(True, timeout_seconds)
+        except (RedisError, OSError, TimeoutError) as exc:
+            raise RedisSubscriptionUnavailable("torrent event subscription failed") from exc
+        if message is None:
+            return None
+        raw = message.get("data")
+        if not isinstance(raw, str | bytes):
+            return None
+        try:
+            return TorrentRealtimeEvent.decode(raw)
+        except (UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError):
+            return None
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            await self._pubsub.unsubscribe(self._channel)
+            await self._pubsub.aclose()
+        except (RedisError, OSError, TimeoutError):
+            return
 
 
 class CacheState(StrEnum):
@@ -129,6 +190,9 @@ class RedisCoordinator:
     def _signal_key(self) -> str:
         return f"{self._namespace}:signals:torrent-jobs"
 
+    def _torrent_event_channel(self, user_id: uuid.UUID) -> str:
+        return self._key("events", "torrent", user_id.hex)
+
     async def check_health(self) -> RedisHealth:
         checked_at = datetime.now(UTC)
         if self._client is None:
@@ -171,6 +235,44 @@ class RedisCoordinator:
         except (RedisError, OSError, TimeoutError):
             return False
         return signal is not None
+
+    async def publish_torrent_event(
+        self,
+        user_id: uuid.UUID,
+        event: TorrentRealtimeEvent,
+    ) -> bool:
+        if self._client is None:
+            return False
+        try:
+            await self._client.publish(self._torrent_event_channel(user_id), event.encode())
+        except (RedisError, OSError, TimeoutError):
+            return False
+        return True
+
+    async def subscribe_torrent_events(
+        self,
+        user_id: uuid.UUID,
+    ) -> TorrentEventSubscription | None:
+        if self._client is None:
+            return None
+        channel = self._torrent_event_channel(user_id)
+        pubsub = self._client.pubsub()
+        try:
+            await pubsub.subscribe(channel)
+            confirmation = await pubsub.get_message(False, 1)
+        except (RedisError, OSError, TimeoutError):
+            with suppress(RedisError, OSError, TimeoutError):
+                await pubsub.aclose()
+            return None
+        if (
+            confirmation is None
+            or confirmation.get("type") != "subscribe"
+            or confirmation.get("channel") != channel
+        ):
+            with suppress(RedisError, OSError, TimeoutError):
+                await pubsub.aclose()
+            return None
+        return TorrentEventSubscription(pubsub, channel)
 
     async def cache_lookup(self, namespace: str, key: str) -> CacheLookup:
         redis_key = self._key("cache", namespace, key)

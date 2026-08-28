@@ -125,6 +125,60 @@ export interface TorrentRequestV2CreateResult extends TorrentRequestV2 {
   storage_pressure: "normal" | "warning" | "critical";
 }
 
+export type TorrentRealtimeEventType =
+  | "torrent.requested"
+  | "torrent.started"
+  | "torrent.paused"
+  | "torrent.stalled"
+  | "torrent.resumed"
+  | "torrent.ready"
+  | "torrent.failed"
+  | "torrent.cancelled";
+
+export type TorrentRealtimeMessage =
+  | { type: TorrentRealtimeEventType; request_id: string; occurred_at: string }
+  | { type: "heartbeat" | "resync_required" };
+
+const torrentRealtimeEventTypes = new Set<TorrentRealtimeEventType>([
+  "torrent.requested",
+  "torrent.started",
+  "torrent.paused",
+  "torrent.stalled",
+  "torrent.resumed",
+  "torrent.ready",
+  "torrent.failed",
+  "torrent.cancelled",
+]);
+
+export function parseTorrentRealtimeMessage(data: unknown): TorrentRealtimeMessage | null {
+  if (typeof data !== "string" || data.length > 512) return null;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (typeof payload !== "object" || payload === null || !("type" in payload)) return null;
+  const record = payload as Record<string, unknown>;
+  if (record.type === "heartbeat" || record.type === "resync_required") {
+    return Object.keys(record).length === 1 ? { type: record.type } : null;
+  }
+  if (
+    typeof record.type !== "string" ||
+    !torrentRealtimeEventTypes.has(record.type as TorrentRealtimeEventType) ||
+    typeof record.request_id !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.request_id) ||
+    typeof record.occurred_at !== "string" ||
+    !Number.isFinite(Date.parse(record.occurred_at)) ||
+    Object.keys(record).length !== 3
+  ) return null;
+  return {
+    type: record.type as TorrentRealtimeEventType,
+    request_id: record.request_id,
+    occurred_at: record.occurred_at,
+  };
+}
+
 export interface TorrentDownloadFileV2 {
   id: string;
   file_index: number;
@@ -702,6 +756,11 @@ export const api = {
   ): Promise<TorrentRequestV2Listing> {
     const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
     return requestV2<TorrentRequestV2Listing>(`/torrents?${search.toString()}`, { signal });
+  },
+
+  openTorrentEventsV2(): WebSocket {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return new WebSocket(`${protocol}//${window.location.host}/api/v2/torrents/events`);
   },
 
   cancelTorrentRequestV2(torrentRequestId: string): Promise<void> {

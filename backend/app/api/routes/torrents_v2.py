@@ -14,6 +14,8 @@ from fastapi import (
     Request,
     Response,
     UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
     status,
 )
 from sqlalchemy import func, select
@@ -23,9 +25,12 @@ from starlette.concurrency import run_in_threadpool
 from app.auth.dependencies import (
     AuthContext,
     DbSession,
+    RealtimeAuthContext,
+    get_realtime_auth_context,
     require_current_credentials,
     require_current_credentials_csrf,
 )
+from app.coordination import RedisSubscriptionUnavailable, TorrentEventType, TorrentRealtimeEvent
 from app.coordination.dependencies import RedisCoordinatorDependency
 from app.core.config import Settings, get_settings
 from app.files.downloads import (
@@ -88,6 +93,7 @@ UPLOAD_READ_CHUNK = 64 * 1024
 MAX_PAGE_SIZE = 100
 MAX_MANIFEST_PAGE_SIZE = 500
 MAX_MANAGED_ARCHIVE_ENTRIES = 50_000
+REALTIME_HEARTBEAT_SECONDS = 20.0
 ACTIVE_REQUEST_STATES = (
     TorrentRequestState.REQUESTED,
     TorrentRequestState.ACTIVE,
@@ -157,6 +163,34 @@ def _response(
         created_at=request.created_at,
         updated_at=max(request.updated_at, torrent.updated_at),
     )
+
+
+@router.websocket("/events")
+async def stream_torrent_events(
+    websocket: WebSocket,
+    redis: RedisCoordinatorDependency,
+    context: Annotated[RealtimeAuthContext, Depends(get_realtime_auth_context)],
+) -> None:
+    await websocket.accept()
+    subscription = await redis.subscribe_torrent_events(context.user_id)
+    if subscription is None:
+        await websocket.send_json({"type": "resync_required"})
+        await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
+        return
+    try:
+        while True:
+            event = await subscription.next_event(timeout_seconds=REALTIME_HEARTBEAT_SECONDS)
+            await websocket.send_json(event.payload() if event else {"type": "heartbeat"})
+    except (RuntimeError, WebSocketDisconnect):
+        return
+    except RedisSubscriptionUnavailable:
+        try:
+            await websocket.send_json({"type": "resync_required"})
+            await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
+        except (RuntimeError, WebSocketDisconnect):
+            return
+    finally:
+        await subscription.aclose()
 
 
 @router.get(
@@ -758,6 +792,15 @@ async def create_torrent_request(
 
     if job_created:
         await redis.signal_job_available()
+    if result.request_created:
+        await redis.publish_torrent_event(
+            user_id,
+            TorrentRealtimeEvent(
+                TorrentEventType.REQUESTED,
+                result.request.id,
+                datetime.now(UTC),
+            ),
+        )
     base = _response(result.request, result.managed_torrent)
     return TorrentRequestV2CreateResponse(
         **base.model_dump(),
@@ -833,4 +876,13 @@ async def cancel_torrent_request(
         _fail(status.HTTP_404_NOT_FOUND, "torrent_request_not_found", "Demande introuvable.")
     if result.purge_scheduled:
         await redis.signal_job_available()
+    if result.cancelled:
+        await redis.publish_torrent_event(
+            user_id,
+            TorrentRealtimeEvent(
+                TorrentEventType.CANCELLED,
+                result.request_id,
+                datetime.now(UTC),
+            ),
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

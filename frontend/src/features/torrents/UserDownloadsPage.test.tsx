@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -35,7 +35,97 @@ function renderPage() {
   );
 }
 
+class MockWebSocket {
+  static instances: MockWebSocket[] = [];
+
+  readonly url: string;
+  onopen: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  onclose: ((event: Event) => void) | null = null;
+  closed = false;
+
+  constructor(url: string) {
+    this.url = url;
+    MockWebSocket.instances.push(this);
+  }
+
+  open() {
+    this.onopen?.(new Event("open"));
+  }
+
+  message(payload: object) {
+    this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(payload) }));
+  }
+
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.onclose?.(new Event("close"));
+  }
+}
+
 describe("UserDownloadsPage", () => {
+  it("remplace le polling par les invalidations WebSocket et resynchronise après reconnexion", async () => {
+    MockWebSocket.instances = [];
+    const fetchMock = vi.fn(async () => response({
+      items: [torrent()], offset: 0, limit: 10, total: 1,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    const view = renderPage();
+
+    await screen.findByText("En cours");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances[0].url).toContain("/api/v2/torrents/events");
+    MockWebSocket.instances[0].open();
+    MockWebSocket.instances[0].message({ type: "heartbeat" });
+    await act(async () => Promise.resolve());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    MockWebSocket.instances[0].message({
+      type: "torrent.ready",
+      request_id: torrent().id,
+      occurred_at: "2026-08-28T07:00:00+00:00",
+      passkey: "must-not-be-accepted",
+    });
+    await act(async () => Promise.resolve());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    MockWebSocket.instances[0].message({
+      type: "torrent.ready",
+      request_id: torrent().id,
+      occurred_at: "2026-08-28T07:00:00+00:00",
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    vi.useFakeTimers();
+    MockWebSocket.instances[0].close();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(MockWebSocket.instances).toHaveLength(2);
+    MockWebSocket.instances[1].open();
+    vi.useRealTimers();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    view.unmount();
+  });
+
+  it("ne recharge plus automatiquement la liste toutes les dix secondes", async () => {
+    MockWebSocket.instances = [];
+    const fetchMock = vi.fn(async () => response({
+      items: [torrent()], offset: 0, limit: 10, total: 1,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    const view = renderPage();
+
+    await screen.findByText("En cours");
+    vi.useFakeTimers();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+    view.unmount();
+  });
+
   it("télécharge récursivement un manifeste READY via le sélecteur de dossier", async () => {
     const user = userEvent.setup();
     const writes: number[] = [];

@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql import Executable
 
-from app.coordination import RedisCoordinator
+from app.coordination import RedisCoordinator, TorrentEventType, TorrentRealtimeEvent
 from app.integrations.account_routing import AccountRoutingError, TorrentEffectRoute
 from app.integrations.c411_v2 import (
     C411V2PayloadError,
@@ -95,12 +95,14 @@ class TorrentEffectHandlers:
         payloads: TorrentPayloadStore,
         content: SharedContentStore,
         *,
+        redis: RedisCoordinator | None = None,
         clock: Clock = lambda: datetime.now(UTC),
     ) -> None:
         self._session_factory = session_factory
         self._router = router
         self._payloads = payloads
         self._content = content
+        self._redis = redis or RedisCoordinator.unconfigured()
         self._clock = clock
 
     @property
@@ -188,6 +190,7 @@ class TorrentEffectHandlers:
             ) from exc
 
         now = self._clock()
+        realtime_events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
         async with self._session_factory() as session, session.begin():
             managed = await session.get(
                 ManagedTorrent,
@@ -225,6 +228,12 @@ class TorrentEffectHandlers:
             for request in requests:
                 request.state = TorrentRequestState.ACTIVE
                 request.updated_at = now
+                realtime_events.append(
+                    (
+                        request.user_id,
+                        TorrentRealtimeEvent(TorrentEventType.PAUSED, request.id, now),
+                    )
+                )
             await record_tracker_activity(
                 session,
                 managed.id,
@@ -235,6 +244,7 @@ class TorrentEffectHandlers:
                 diagnostic_code=None,
                 occurred_at=now,
             )
+        await self._publish_realtime_events(realtime_events)
         try:
             await asyncio.to_thread(self._payloads.remove, torrent.storage_key)
         except TorrentPayloadStoreError:
@@ -446,6 +456,7 @@ class TorrentEffectHandlers:
     ) -> None:
         now = self._clock()
         state, safe_qb_state = _domain_state(snapshot)
+        realtime_events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
         async with self._session_factory() as session, session.begin():
             torrent = await session.get(
                 ManagedTorrent,
@@ -463,6 +474,9 @@ class TorrentEffectHandlers:
             }:
                 return
             previous_qb_state = torrent.qb_state
+            previous_state = torrent.state
+            previous_retry_at = torrent.scheduler_retry_at
+            previous_stall_count = torrent.stall_count
             state = _apply_stall_observation(
                 torrent,
                 snapshot,
@@ -500,6 +514,29 @@ class TorrentEffectHandlers:
                 elif request.state is TorrentRequestState.REQUESTED:
                     request.state = TorrentRequestState.ACTIVE
                 request.updated_at = now
+            event_type = _snapshot_event_type(
+                previous_state=previous_state,
+                state=state,
+                previous_retry_at=previous_retry_at,
+                retry_at=torrent.scheduler_retry_at,
+                previous_stall_count=previous_stall_count,
+            )
+            if event_type is not None:
+                realtime_events.extend(
+                    (
+                        request.user_id,
+                        TorrentRealtimeEvent(event_type, request.id, now),
+                    )
+                    for request in requests
+                )
+        await self._publish_realtime_events(realtime_events)
+
+    async def _publish_realtime_events(
+        self,
+        events: list[tuple[uuid.UUID, TorrentRealtimeEvent]],
+    ) -> None:
+        for user_id, event in events:
+            await self._redis.publish_torrent_event(user_id, event)
 
 
 class TorrentSyncEnqueuer:
@@ -623,6 +660,31 @@ def _domain_state(
     }:
         return ManagedTorrentState.DOWNLOADING, normalized
     return ManagedTorrentState.ERROR, "unknown"
+
+
+def _snapshot_event_type(
+    *,
+    previous_state: ManagedTorrentState,
+    state: ManagedTorrentState,
+    previous_retry_at: datetime | None,
+    retry_at: datetime | None,
+    previous_stall_count: int,
+) -> TorrentEventType | None:
+    if state is ManagedTorrentState.READY and previous_state is not ManagedTorrentState.READY:
+        return TorrentEventType.READY
+    if state is ManagedTorrentState.ERROR and previous_state is not ManagedTorrentState.ERROR:
+        return TorrentEventType.FAILED
+    if retry_at is not None and retry_at != previous_retry_at:
+        return TorrentEventType.STALLED
+    if state is ManagedTorrentState.PAUSED and previous_state is not ManagedTorrentState.PAUSED:
+        return TorrentEventType.PAUSED
+    if state is ManagedTorrentState.DOWNLOADING and previous_state is not state:
+        if previous_state in {ManagedTorrentState.PAUSED, ManagedTorrentState.RETRY_WAIT} or (
+            previous_stall_count > 0
+        ):
+            return TorrentEventType.RESUMED
+        return TorrentEventType.STARTED
+    return None
 
 
 def _apply_stall_observation(
