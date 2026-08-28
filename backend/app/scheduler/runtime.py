@@ -12,6 +12,7 @@ from typing import Protocol
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.coordination import RedisCoordinator, TorrentEventType, TorrentRealtimeEvent
 from app.integrations.qbittorrent_v2 import (
     QBittorrentV2ControlResult,
     QBittorrentV2DesiredControl,
@@ -64,6 +65,7 @@ class SchedulerRuntime:
         gateway: ManagedControlGateway,
         *,
         scheduler_id: str,
+        redis: RedisCoordinator | None = None,
         lease_ttl: timedelta = timedelta(seconds=30),
         clock: Clock = lambda: datetime.now(UTC),
     ) -> None:
@@ -74,6 +76,7 @@ class SchedulerRuntime:
         self._session_factory = session_factory
         self._gateway = gateway
         self._scheduler_id = scheduler_id
+        self._redis = redis or RedisCoordinator.unconfigured()
         self._lease_ttl = lease_ttl
         self._clock = clock
         self._stop = asyncio.Event()
@@ -133,7 +136,9 @@ class SchedulerRuntime:
             )
             controls = build_qbittorrent_control_plan(selection, identities, options=options)
             generation = state.desired_generation + 1
+            previous_active = {torrent.id: torrent.desired_active for torrent in torrents}
             _persist_desired_controls(torrents, controls, generation=generation)
+            realtime_targets = _control_event_targets(torrents, requests, previous_active)
             state.desired_generation = generation
             await persist_scheduler_ledger(session, state, selection.ledger, now=now)
 
@@ -146,6 +151,11 @@ class SchedulerRuntime:
                 owner=self._scheduler_id,
                 generation=generation,
                 now=applied_at,
+            )
+        for user_id, request_id, event_type in realtime_targets:
+            await self._redis.publish_torrent_event(
+                user_id,
+                TorrentRealtimeEvent(event_type, request_id, applied_at),
             )
         return SchedulerCycleResult(
             leader=True,
@@ -346,3 +356,25 @@ def _persist_desired_controls(
         torrent.schedule_generation = generation
         if active:
             active_rank += 1
+
+
+def _control_event_targets(
+    torrents: Sequence[ManagedTorrent],
+    requests: Sequence[TorrentRequest],
+    previous_active: dict[uuid.UUID, bool],
+) -> tuple[tuple[uuid.UUID, uuid.UUID, TorrentEventType], ...]:
+    by_torrent = {torrent.id: torrent for torrent in torrents}
+    targets: list[tuple[uuid.UUID, uuid.UUID, TorrentEventType]] = []
+    for request in requests:
+        torrent = by_torrent[request.managed_torrent_id]
+        was_active = previous_active[torrent.id]
+        if torrent.desired_active == was_active:
+            continue
+        if torrent.desired_active:
+            event_type = (
+                TorrentEventType.RESUMED if torrent.stall_count > 0 else TorrentEventType.STARTED
+            )
+        else:
+            event_type = TorrentEventType.PAUSED
+        targets.append((request.user_id, request.id, event_type))
+    return tuple(targets)

@@ -78,6 +78,7 @@ async def main() -> None:
             router,
             payloads,
             SharedContentStore(settings.data_root),
+            redis=redis,
         )
         worker = TorrentWorker(
             session_factory,

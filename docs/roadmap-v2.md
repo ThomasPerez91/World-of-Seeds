@@ -297,6 +297,6 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 
 ## Prochaine tâche
 
-`V2-28C — Torrent partagé et backlog scheduler` est la prochaine tâche non terminée. V2-28A et
-V2-28B sont fusionnées ; V2-29 ne commence qu'après fusion séparée de V2-28A à V2-28H. La Phase 0
-était strictement documentaire et n'a commencé aucune de ces implémentations.
+`V2-28E — Téléchargement récursif scalable et reprise intègre` est la prochaine tâche non terminée.
+V2-28A à V2-28C sont fusionnées et V2-28D est implémentée ; V2-29 ne commence qu'après fusion
+séparée de V2-28A à V2-28H.
