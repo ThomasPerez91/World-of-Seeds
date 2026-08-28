@@ -790,6 +790,23 @@
 - Added a reversible PostgreSQL migration plus regression coverage for 99-percent stalls, very slow
   progress, repeated stalls, recovery, scheduler restart during cooldown, 100 eligible torrents for
   two slots, and an empty eligible set.
+- V2-28B was squash-merged through PR `#88` into `develop_V2` at
+  `fe0c92abb22050a105dd1afb1cf37b0fbc25faa6`.
+
+## V2-28C — Shared-torrent fairness and bounded backlog
+
+- A shared physical torrent is now represented once with every active owner as a possible charged
+  beneficiary. The weighted-fair selector removes the physical candidate from every owner queue
+  after one selection, so scheduling can never create or charge a duplicate physical torrent.
+- The persisted scheduler user cursor rotates the charged owner deterministically across cycles and
+  process restarts. Per-user caps, deficits, and distinct future account weights are applied to the
+  chosen beneficiary, with another owner remaining available when one cap is saturated.
+- Replaced the fail-closed 200-row query with a durable circular `(created_at, id)` scan cursor.
+  Every currently active download remains in the control set; remaining capacity up to 200 advances
+  through queued and cooling torrents without losing the scheduler lease or generation semantics.
+- Added a reversible PostgreSQL migration and boundary coverage for 199, 200, 201, 500, and 1,000
+  torrents, including mixed sizes and cooldowns, plus shared-owner caps, weights, restart stability,
+  deterministic order, and single-physical-selection guarantees.
 
 ## Documentation hardening phase after V2-28 (Phase 0)
 
@@ -1068,6 +1085,11 @@
 - V2-28B GitHub CI run `33092073758`: PASS; backend with real PostgreSQL, frontend, container,
   complete local-profile smoke, and monitoring smoke are green; squash-merged through PR `#88`
   into `develop_V2` at `fe0c92abb22050a105dd1afb1cf37b0fbc25faa6`.
+- V2-28C targeted weighted-fair, scheduler runtime, worker-effect, and model tests: PASS, 60 tests
+  with 1 PostgreSQL locking test deferred to CI.
+- V2-28C complete backend suite: PASS, 435 tests with 6 service-backed tests deferred to CI.
+- V2-28C full Ruff lint/format, mypy, and `git diff --check`: PASS.
+- V2-28C PostgreSQL migration upgrade/downgrade SQL generation: PASS.
 
 ## Known constraints
 
@@ -1084,6 +1106,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-28C — Shared-torrent fairness and bounded backlog`.
-- V2-28A and V2-28B are merged. V2-29 must wait until V2-28A through V2-28H are
-  individually reviewed, green, and merged into `develop_V2`.
+- The next roadmap task is `V2-28D — Realtime state without full polling`.
+- V2-28A and V2-28B are merged; V2-28C is implemented. V2-29 must wait until V2-28A through
+  V2-28H are individually reviewed, green, and merged into `develop_V2`.

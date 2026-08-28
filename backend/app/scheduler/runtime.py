@@ -9,14 +9,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.integrations.qbittorrent_v2 import (
     QBittorrentV2ControlResult,
     QBittorrentV2DesiredControl,
 )
-from app.models import ManagedTorrent, ManagedTorrentState, TorrentRequest, TorrentRequestState
+from app.models import (
+    ManagedTorrent,
+    ManagedTorrentState,
+    SchedulerState,
+    TorrentRequest,
+    TorrentRequestState,
+)
 from app.options import PostgresOptionsRegistry
 from app.scheduler.persistence import (
     acquire_scheduler_lease,
@@ -104,7 +110,7 @@ class SchedulerRuntime:
             await self._options.initialize(session, now=now)
             options = await self._options.snapshot(session)
             policy = SchedulerPolicy.from_options(options)
-            torrents = await self._load_control_set(session)
+            torrents = await self._load_control_set(session, state)
             requests = await self._load_active_requests(session, torrents)
             ledger = await load_scheduler_ledger(session, state)
             candidates = _scheduler_candidates(torrents, requests, now=now)
@@ -182,25 +188,68 @@ class SchedulerRuntime:
             return False
 
     @staticmethod
-    async def _load_control_set(session: AsyncSession) -> tuple[ManagedTorrent, ...]:
-        torrents = tuple(
+    async def _load_control_set(
+        session: AsyncSession,
+        state: SchedulerState,
+    ) -> tuple[ManagedTorrent, ...]:
+        active = tuple(
             (
                 await session.scalars(
                     select(ManagedTorrent)
                     .where(
                         ManagedTorrent.state.in_(
                             (ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED)
-                        )
+                        ),
+                        ManagedTorrent.desired_active.is_(True),
                     )
-                    .order_by(ManagedTorrent.created_at, ManagedTorrent.id)
+                    .order_by(ManagedTorrent.desired_priority, ManagedTorrent.id)
                     .with_for_update()
                     .limit(MAX_SCHEDULER_CONTROL_SET + 1)
                 )
             ).all()
         )
-        if len(torrents) > MAX_SCHEDULER_CONTROL_SET:
-            raise RuntimeError("scheduler control set exceeds the bounded limit")
-        return torrents
+        if len(active) > MAX_SCHEDULER_CONTROL_SET:
+            raise RuntimeError("active scheduler control set exceeds the bounded limit")
+        capacity = MAX_SCHEDULER_CONTROL_SET - len(active)
+        if capacity == 0:
+            return active
+
+        base = (
+            select(ManagedTorrent)
+            .where(
+                ManagedTorrent.state.in_(
+                    (ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED)
+                ),
+                ManagedTorrent.desired_active.is_(False),
+            )
+            .order_by(ManagedTorrent.created_at, ManagedTorrent.id)
+            .with_for_update()
+        )
+        after_cursor = base
+        if state.scan_cursor_created_at is not None and state.scan_cursor_id is not None:
+            after_cursor = after_cursor.where(
+                or_(
+                    ManagedTorrent.created_at > state.scan_cursor_created_at,
+                    and_(
+                        ManagedTorrent.created_at == state.scan_cursor_created_at,
+                        ManagedTorrent.id > state.scan_cursor_id,
+                    ),
+                )
+            )
+        window = list((await session.scalars(after_cursor.limit(capacity))).all())
+        if len(window) < capacity and state.scan_cursor_id is not None:
+            selected_ids = [torrent.id for torrent in window]
+            wrapped = base
+            if selected_ids:
+                wrapped = wrapped.where(ManagedTorrent.id.not_in(selected_ids))
+            window.extend((await session.scalars(wrapped.limit(capacity - len(window)))).all())
+        if window:
+            state.scan_cursor_created_at = window[-1].created_at
+            state.scan_cursor_id = window[-1].id
+        else:
+            state.scan_cursor_created_at = None
+            state.scan_cursor_id = None
+        return (*active, *window)
 
     @staticmethod
     async def _load_active_requests(
@@ -235,25 +284,27 @@ def _scheduler_candidates(
     *,
     now: datetime,
 ) -> tuple[SchedulerCandidate, ...]:
-    beneficiary: dict[uuid.UUID, TorrentRequest] = {}
+    requests_by_torrent: dict[uuid.UUID, list[TorrentRequest]] = {}
     for request in requests:
-        beneficiary.setdefault(request.managed_torrent_id, request)
+        requests_by_torrent.setdefault(request.managed_torrent_id, []).append(request)
     candidates: list[SchedulerCandidate] = []
     for torrent in torrents:
-        candidate_request = beneficiary.get(torrent.id)
-        if candidate_request is None:
+        torrent_requests = requests_by_torrent.get(torrent.id)
+        if not torrent_requests:
             continue
         if torrent.scheduler_retry_at is not None and _utc(torrent.scheduler_retry_at) > _utc(now):
             continue
         remaining_bytes = _remaining_bytes(torrent.total_size, torrent.progress)
         if remaining_bytes is None or remaining_bytes <= 0:
             continue
+        ordered_user_ids = tuple(dict.fromkeys(request.user_id for request in torrent_requests))
         candidates.append(
             SchedulerCandidate(
                 torrent_id=torrent.id,
-                user_id=candidate_request.user_id,
+                user_id=ordered_user_ids[0],
+                beneficiary_user_ids=ordered_user_ids[1:],
                 remaining_bytes=remaining_bytes,
-                queued_at=_utc(candidate_request.created_at),
+                queued_at=min(_utc(request.created_at) for request in torrent_requests),
             )
         )
     return tuple(candidates)

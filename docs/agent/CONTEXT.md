@@ -140,11 +140,14 @@ The stable V1 maintenance release documented here is `1.3.3`.
   future account weights remain required when active-slot authority is hardened.
 - Stall detection is based on durable useful-progress observations, not only an instantaneous
   zero download speed. PostgreSQL owns cooldown and retry state so a restart cannot erase it.
-- A shared physical torrent may serve several users. Its scheduling beneficiary must be selected
-  by a deterministic, restart-stable, weighted-fair policy rather than permanently charging the
-  first requester.
-- Scheduler processing stays bounded, but a backlog larger than one window must continue through
-  pagination or cursors instead of stopping the whole scheduler.
+- A shared physical torrent enters the weighted-fair queue of every active owner but may be
+  selected only once per cycle. The persisted user cursor rotates the charged beneficiary across
+  cycles and restarts; the selected beneficiary's cap, deficit, and future account weight apply,
+  without ever creating another physical torrent.
+- Each scheduler control cycle contains every currently active download first, then fills the
+  remaining capacity up to 200 from a circular `(created_at, id)` PostgreSQL scan cursor. The
+  cursor is durable in the singleton scheduler row, so backlogs beyond one window keep progressing
+  across cycles and process restarts instead of blocking the scheduler.
 
 ## V2 realtime state delivery
 

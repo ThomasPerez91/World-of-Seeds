@@ -272,6 +272,11 @@ class SchedulerState(Base):
             name="ck_scheduler_state_generations",
         ),
         CheckConstraint("rounds >= 0", name="ck_scheduler_state_rounds"),
+        CheckConstraint(
+            "(scan_cursor_created_at IS NULL AND scan_cursor_id IS NULL) "
+            "OR (scan_cursor_created_at IS NOT NULL AND scan_cursor_id IS NOT NULL)",
+            name="ck_scheduler_state_scan_cursor",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
@@ -283,6 +288,8 @@ class SchedulerState(Base):
     cursor_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    scan_cursor_created_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    scan_cursor_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
 
 

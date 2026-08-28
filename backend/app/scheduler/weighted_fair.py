@@ -79,6 +79,8 @@ class SchedulerCandidate:
     queued_at: datetime
     user_weight: int = 1
     stalled: bool = False
+    beneficiary_user_ids: tuple[uuid.UUID, ...] = ()
+    beneficiary_weights: Mapping[uuid.UUID, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.remaining_bytes <= 0:
@@ -86,6 +88,18 @@ class SchedulerCandidate:
         _utc(self.queued_at)
         if not 1 <= self.user_weight <= _MAX_USER_WEIGHT:
             raise ValueError("user weight must be between 1 and 100")
+        beneficiaries = self.beneficiaries
+        if set(self.beneficiary_weights) - set(beneficiaries):
+            raise ValueError("beneficiary weights must belong to this physical torrent")
+        if any(not 1 <= weight <= _MAX_USER_WEIGHT for weight in self.beneficiary_weights.values()):
+            raise ValueError("beneficiary weights must be between 1 and 100")
+
+    @property
+    def beneficiaries(self) -> tuple[uuid.UUID, ...]:
+        return tuple(sorted({self.user_id, *self.beneficiary_user_ids}, key=str))
+
+    def weight_for(self, user_id: uuid.UUID) -> int:
+        return self.beneficiary_weights.get(user_id, self.user_weight)
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +118,7 @@ class SchedulerLedger:
 @dataclass(frozen=True, slots=True)
 class SchedulerDecision:
     candidate: SchedulerCandidate
+    beneficiary_user_id: uuid.UUID
     size_class: TorrentSizeClass
     base_cost: int
     charged_cost: int
@@ -127,7 +142,11 @@ def _size_class(policy: SchedulerPolicy, remaining_bytes: int) -> tuple[TorrentS
 
 
 def _decision(
-    policy: SchedulerPolicy, candidate: SchedulerCandidate, now: datetime
+    policy: SchedulerPolicy,
+    candidate: SchedulerCandidate,
+    now: datetime,
+    *,
+    beneficiary_user_id: uuid.UUID,
 ) -> SchedulerDecision:
     size_class, base_cost = _size_class(policy, candidate.remaining_bytes)
     wait_seconds = max(0, int((_utc(now) - _utc(candidate.queued_at)).total_seconds()))
@@ -137,6 +156,7 @@ def _decision(
     )
     return SchedulerDecision(
         candidate=candidate,
+        beneficiary_user_id=beneficiary_user_id,
         size_class=size_class,
         base_cost=base_cost,
         charged_cost=max(1, base_cost - aging_bonus),
@@ -159,10 +179,11 @@ def select_torrents(
 ) -> SchedulerResult:
     """Select physical torrents without external effects and return the next durable ledger.
 
-    Callers provide one beneficiary user per physical torrent. The returned ledger is explicit
-    so the future singleton scheduler can persist it transactionally before qB control is wired.
-    Stalled torrents never consume scarce admission slots; they must be reconsidered after a
-    later health snapshot reports sources again.
+    Callers provide every active beneficiary for one physical torrent. A shared torrent is present
+    in each beneficiary queue, but is selected and charged exactly once. The durable user cursor
+    rotates that charge fairly across cycles and process restarts. Stalled torrents never consume
+    scarce admission slots; they must be reconsidered after a later health snapshot reports
+    sources again.
     """
 
     _utc(now)
@@ -178,14 +199,21 @@ def select_torrents(
     weights: dict[uuid.UUID, int] = {}
     queues: dict[uuid.UUID, list[SchedulerCandidate]] = defaultdict(list)
     stalled_ids: list[uuid.UUID] = []
+    active_users: set[uuid.UUID] = set()
     for candidate in candidates:
-        previous_weight = weights.setdefault(candidate.user_id, candidate.user_weight)
-        if previous_weight != candidate.user_weight:
-            raise ValueError("all candidates for a user must have the same weight")
         if candidate.stalled:
             stalled_ids.append(candidate.torrent_id)
-        elif active_by_user.get(candidate.user_id, 0) < policy.max_active_per_user:
-            queues[candidate.user_id].append(candidate)
+        for user_id in candidate.beneficiaries:
+            active_users.add(user_id)
+            user_weight = candidate.weight_for(user_id)
+            previous_weight = weights.setdefault(user_id, user_weight)
+            if previous_weight != user_weight:
+                raise ValueError("all candidates for a user must have the same weight")
+            if (
+                not candidate.stalled
+                and active_by_user.get(user_id, 0) < policy.max_active_per_user
+            ):
+                queues[user_id].append(candidate)
 
     for queue in queues.values():
         queue.sort(key=_candidate_order)
@@ -224,21 +252,26 @@ def select_torrents(
         )
 
         while queues[chosen_user] and slots > 0:
-            decision = _decision(policy, queues[chosen_user][0], now)
+            decision = _decision(
+                policy,
+                queues[chosen_user][0],
+                now,
+                beneficiary_user_id=chosen_user,
+            )
             if deficits[chosen_user] < decision.charged_cost:
                 break
             selected.append(decision)
             deficits[chosen_user] -= decision.charged_cost
             counts[chosen_user] = counts.get(chosen_user, 0) + 1
-            queues[chosen_user].pop(0)
+            selected_torrent_id = decision.candidate.torrent_id
+            for queue in queues.values():
+                queue[:] = [
+                    candidate for candidate in queue if candidate.torrent_id != selected_torrent_id
+                ]
             slots -= 1
             if counts[chosen_user] >= policy.max_active_per_user:
                 break
 
-        if not queues[chosen_user] or counts.get(chosen_user, 0) >= policy.max_active_per_user:
-            del queues[chosen_user]
-
-    active_users = {candidate.user_id for candidate in candidates}
     next_deficits = {
         user_id: deficits.get(user_id, 0)
         for user_id in sorted(active_users, key=str)

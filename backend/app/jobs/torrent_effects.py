@@ -685,9 +685,6 @@ def _apply_stall_observation(
     torrent.stall_count += 1
     cooldown = STALL_COOLDOWNS[min(torrent.stall_count - 1, len(STALL_COOLDOWNS) - 1)]
     torrent.scheduler_retry_at = now + cooldown
-    torrent.desired_active = False
-    torrent.desired_priority = None
-    torrent.desired_download_limit = 0
     return ManagedTorrentState.PAUSED
 
 
