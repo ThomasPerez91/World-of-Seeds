@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 
-def _validator() -> tuple[type[RuntimeError], Callable[[dict[str, Any]], None]]:
+def _validator() -> tuple[type[RuntimeError], Callable[..., None]]:
     repository = Path(__file__).resolve().parents[2]
     namespace = runpy.run_path(str(repository / "scripts/validate_compose_v2_monitoring.py"))
     return namespace["ComposeMonitoringPolicyError"], namespace["validate_config"]
@@ -16,6 +16,13 @@ def _validator() -> tuple[type[RuntimeError], Callable[[dict[str, Any]], None]]:
 def _valid_config() -> dict[str, Any]:
     monitoring = {"networks": {"monitoring": None}, "profiles": ["monitoring"]}
     bind = {"type": "bind", "source": "/config", "target": "/config", "read_only": True}
+    root_bind = {
+        "type": "bind",
+        "source": "/",
+        "target": "/host/root",
+        "read_only": True,
+        "bind": {"propagation": "rslave"},
+    }
     return {
         "name": "world-of-seeds-v2-local",
         "services": {
@@ -45,7 +52,7 @@ def _valid_config() -> dict[str, Any]:
             "node-exporter": {
                 **monitoring,
                 "image": "prom/node-exporter:v1.12.1",
-                "volumes": [bind],
+                "volumes": [root_bind],
             },
             "cadvisor": {
                 **monitoring,
@@ -68,6 +75,24 @@ def _valid_config() -> dict[str, Any]:
 def test_monitoring_policy_accepts_isolated_pinned_stack() -> None:
     _, validate = _validator()
     validate(_valid_config())
+
+
+def test_monitoring_policy_accepts_docker_desktop_without_rslave() -> None:
+    _, validate = _validator()
+    config = _valid_config()
+    config["services"]["node-exporter"]["volumes"][0]["bind"]["propagation"] = "rprivate"
+    validate(config, platform="docker-desktop")
+
+
+def test_monitoring_policy_keeps_platform_mount_contracts_distinct() -> None:
+    error, validate = _validator()
+    linux = _valid_config()
+    desktop = copy.deepcopy(linux)
+    desktop["services"]["node-exporter"]["volumes"][0]["bind"]["propagation"] = "rprivate"
+    with pytest.raises(error, match="requires rslave"):
+        validate(desktop, platform="linux")
+    with pytest.raises(error, match="requires rprivate"):
+        validate(linux, platform="docker-desktop")
 
 
 @pytest.mark.parametrize(

@@ -15,12 +15,42 @@ compose() {
 }
 
 monitoring_compose() {
+  platform=$(monitoring_platform)
+  if [ "$platform" = "docker-desktop" ]; then
+    docker compose --project-name world-of-seeds-v2-local \
+      --env-file "$environment" \
+      -f "$repository/compose.v2.yaml" \
+      -f "$repository/compose.v2.local.yaml" \
+      -f "$repository/compose.v2.monitoring.yaml" \
+      -f "$repository/compose.v2.monitoring.docker-desktop.yaml" \
+      --profile monitoring "$@"
+    return
+  fi
   docker compose --project-name world-of-seeds-v2-local \
     --env-file "$environment" \
     -f "$repository/compose.v2.yaml" \
     -f "$repository/compose.v2.local.yaml" \
     -f "$repository/compose.v2.monitoring.yaml" \
     --profile monitoring "$@"
+}
+
+monitoring_platform() {
+  case "${WOS_V2_MONITORING_PLATFORM:-}" in
+    linux|docker-desktop)
+      printf '%s\n' "$WOS_V2_MONITORING_PLATFORM"
+      ;;
+    "")
+      if [ "$(uname -s)" = "Darwin" ]; then
+        printf '%s\n' docker-desktop
+      else
+        printf '%s\n' linux
+      fi
+      ;;
+    *)
+      echo "WOS_V2_MONITORING_PLATFORM must be linux or docker-desktop." >&2
+      exit 2
+      ;;
+  esac
 }
 
 case "${1:-}" in
@@ -35,7 +65,8 @@ case "${1:-}" in
     ;;
   monitoring-up)
     monitoring_compose config --format json \
-      | python3 "$repository/scripts/validate_compose_v2_monitoring.py"
+      | python3 "$repository/scripts/validate_compose_v2_monitoring.py" \
+          --platform "$(monitoring_platform)"
     monitoring_compose up --detach --no-build --wait --wait-timeout 180 \
       prometheus grafana node-exporter cadvisor
     ;;

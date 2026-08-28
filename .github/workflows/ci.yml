@@ -156,7 +156,15 @@ jobs:
             -f compose.v2.yaml -f compose.v2.local.yaml \
             -f compose.v2.monitoring.yaml --profile monitoring \
             config --format json \
-            | python3 scripts/validate_compose_v2_monitoring.py
+            | python3 scripts/validate_compose_v2_monitoring.py --platform linux
+          docker compose --project-name world-of-seeds-v2-local \
+            --env-file .env.v2.local.example \
+            -f compose.v2.yaml -f compose.v2.local.yaml \
+            -f compose.v2.monitoring.yaml \
+            -f compose.v2.monitoring.docker-desktop.yaml --profile monitoring \
+            config --format json \
+            | python3 scripts/validate_compose_v2_monitoring.py \
+                --platform docker-desktop
       - name: Build and start production stack
         run: |
           cp .env.example .env

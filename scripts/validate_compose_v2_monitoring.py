@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import sys
+from argparse import ArgumentParser
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -34,7 +35,9 @@ def _mounts(service: Mapping[str, Any]) -> Sequence[object]:
     return mounts
 
 
-def validate_config(config: Mapping[str, Any]) -> None:
+def validate_config(config: Mapping[str, Any], *, platform: str = "linux") -> None:
+    if platform not in {"linux", "docker-desktop"}:
+        raise ComposeMonitoringPolicyError("monitoring platform is unsupported")
     if config.get("name") != "world-of-seeds-v2-local":
         raise ComposeMonitoringPolicyError("monitoring must use the isolated local project")
     services = _mapping(config.get("services"), "services")
@@ -74,6 +77,24 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ComposeMonitoringPolicyError(f"{name} must use only monitoring")
         if service.get("ports"):
             raise ComposeMonitoringPolicyError(f"{name} must not publish a host port")
+
+    node_exporter = _mapping(services["node-exporter"], "services.node-exporter")
+    root_mounts = [
+        _mapping(raw_mount, "services.node-exporter.volume")
+        for raw_mount in _mounts(node_exporter)
+        if isinstance(raw_mount, dict) and raw_mount.get("target") == "/host/root"
+    ]
+    if len(root_mounts) != 1:
+        raise ComposeMonitoringPolicyError("node-exporter requires one rootfs mount")
+    root_mount = root_mounts[0]
+    if root_mount.get("source") != "/" or root_mount.get("read_only") is not True:
+        raise ComposeMonitoringPolicyError("node-exporter rootfs must be host root read-only")
+    bind = root_mount.get("bind")
+    propagation = bind.get("propagation") if isinstance(bind, dict) else None
+    if platform == "linux" and propagation != "rslave":
+        raise ComposeMonitoringPolicyError("Linux node-exporter rootfs requires rslave")
+    if platform == "docker-desktop" and propagation != "rprivate":
+        raise ComposeMonitoringPolicyError("Docker Desktop node-exporter rootfs requires rprivate")
 
     grafana = _mapping(services["grafana"], "services.grafana")
     if set(_mapping(grafana.get("networks"), "services.grafana.networks")) != {
@@ -123,8 +144,14 @@ def validate_config(config: Mapping[str, Any]) -> None:
 
 
 def main() -> int:
+    parser = ArgumentParser()
+    parser.add_argument("--platform", choices=("linux", "docker-desktop"), default="linux")
+    args = parser.parse_args()
     try:
-        validate_config(_mapping(json.load(sys.stdin), "compose config"))
+        validate_config(
+            _mapping(json.load(sys.stdin), "compose config"),
+            platform=args.platform,
+        )
     except (ComposeMonitoringPolicyError, json.JSONDecodeError) as exc:
         print(f"V2 monitoring Compose validation failed: {exc}", file=sys.stderr)
         return 1

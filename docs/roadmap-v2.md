@@ -297,6 +297,6 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 
 ## Prochaine tâche
 
-`V2-28H — Monitoring portable Linux/macOS` est la prochaine tâche après la branche V2-28G.
-V2-28A à V2-28F sont fusionnées et V2-28G est implémentée sur sa branche dédiée ; V2-29 ne
-commence qu'après fusion séparée de V2-28A à V2-28H.
+`V2-29 — Compose Rise2 complet et isolé` est la prochaine tâche après la branche V2-28H.
+V2-28A à V2-28G sont fusionnées et V2-28H est implémentée sur sa branche dédiée ; V2-29 ne
+commence qu'après revue, CI verte et fusion de V2-28H.

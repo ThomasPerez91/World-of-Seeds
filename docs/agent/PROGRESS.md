@@ -893,6 +893,24 @@
   metadata purge refuses every active worker job.
 - No schema migration, automatic qB removal, recursive filesystem deletion, or V2-28H monitoring
   work is included.
+- V2-28G was squash-merged through PR `#94` into `develop_V2` at
+  `d078c40832ea3c310186f7574dd6532ef2b6e189`.
+
+## V2-28H — Portable Linux/macOS monitoring
+
+- Kept the Linux and Rise2 node-exporter root mount on read-only `rslave`, preserving dynamic host
+  mount visibility on the production target.
+- Added a versioned Docker Desktop overlay that explicitly replaces `rslave` on `/host/root` with
+  private `rprivate` propagation supported by macOS Docker Desktop; no ignored local file or
+  privileged workaround is required.
+- `local_v2.sh` and the monitoring smoke select the platform contract automatically on macOS or
+  Linux, with a bounded `WOS_V2_MONITORING_PLATFORM` override for policy/CI validation.
+- Compose policy tests validate both normalized contracts and reject a missing Linux `rslave` or a
+  Docker Desktop root bind that was not overridden to `rprivate`.
+- Local documentation now states that node-exporter and cAdvisor on Intel/Apple Silicon macOS
+  primarily observe Docker Desktop's Linux VM rather than the physical Mac host.
+- No Rise2 composition, V1 change, monitoring privilege increase, image change, or application
+  runtime behavior is included.
 
 ## Documentation hardening phase after V2-28 (Phase 0)
 
@@ -1197,7 +1215,13 @@
   PASS, 114 tests with 1 service-backed test deferred to CI.
 - V2-28G complete backend suite: PASS, 473 tests with 6 service-backed tests deferred to CI.
 - V2-28G full Ruff lint/format and strict mypy checks: PASS.
-- V2-28G GitHub CI remains required before merge.
+- V2-28G GitHub CI run `33196526847`: PASS; 479 backend tests with real PostgreSQL/Redis,
+  frontend, production/V2 containers, complete local smoke, and monitoring smoke are green; both
+  automated review findings were fixed and resolved before squash-merge through PR `#94`.
+- V2-28H targeted monitoring policy suite: PASS, 11 tests covering Linux and Docker Desktop.
+- V2-28H shell/Python syntax, targeted Ruff lint/format, and `git diff --check`: PASS.
+- Docker is unavailable in the development workspace; both normalized Compose variants and the
+  real monitoring smoke remain required in PR CI before merge.
 
 ## Known constraints
 
@@ -1214,6 +1238,6 @@
 
 ## Next task
 
-- The next roadmap task after this branch is `V2-28H — portable Linux/macOS monitoring`.
-- V2-28A through V2-28F are merged; V2-28G is implemented on its dedicated branch. V2-29 must wait
-  until V2-28A through V2-28H are individually reviewed, green, and merged into `develop_V2`.
+- The next roadmap task after this branch is `V2-29 — complete isolated Rise2 Compose`.
+- V2-28A through V2-28G are merged; V2-28H is implemented on its dedicated branch. V2-29 starts
+  only after V2-28H is reviewed, green, and merged into `develop_V2`.
