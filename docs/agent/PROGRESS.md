@@ -865,6 +865,34 @@
   filesystem traversal and qBittorrent inventory calls.
 - No schema migration or durable architecture change was required. PostgreSQL remains authoritative;
   cache loss only causes a bounded snapshot rebuild.
+- V2-28F was squash-merged through PR `#93` into `develop_V2` at
+  `8ba66965b4ad778fcd83dca3b274a56ae44784e5`.
+
+## V2-28G — Runtime hardening and operational recovery
+
+- The explicit V2 runtime profile now fails before startup unless secure cookies, a non-wildcard public host,
+  non-demo PostgreSQL credentials on an internal service, Redis, fixed container paths, and the
+  single-process API topology are all explicit and valid.
+- Production workers require one unambiguous deployment integration registry and reject demo
+  tracker/qB secrets with bounded codes that never interpolate credentials. Development/test
+  workers may intentionally remain integration-free.
+- Compose and its validators enforce exactly one API process. A deterministic concurrency test
+  exercises the existing process-local download limiter with 100 distinct accounts; no distributed
+  Redis semaphore is introduced without load evidence. The default V1 profile retains its existing
+  production startup contract.
+- `managed_bytes` is documented as declared capacity reserved by all non-purged managed torrents,
+  distinct from filesystem-observed `disk_total_bytes` and `disk_free_bytes`.
+- An exact missing qB torrent is distinct from a transient lookup failure. Worker sync makes that
+  absence a permanent bounded failure with torrent state `ERROR`, preventing endless retries and UI
+  ghosts after a qB reset.
+- The admin recovery API verifies exact qB and shared-storage presence before mutating SQL. It can
+  cancel all active orphan rights without touching physical data, or purge manifests/accounting
+  metadata only when both checks prove physical content absent. External qB torrents and ambiguous
+  storage remain read-only/manual-review conditions. A bounded SQL snapshot is revalidated under
+  the torrent lock after external probes; any new request or job transition aborts recovery, and
+  metadata purge refuses every active worker job.
+- No schema migration, automatic qB removal, recursive filesystem deletion, or V2-28H monitoring
+  work is included.
 
 ## Documentation hardening phase after V2-28 (Phase 0)
 
@@ -1162,7 +1190,14 @@
   22 tests including constant-query validation at 10, 100, and 500 accounts.
 - V2-28F complete backend suite: PASS, 450 tests with 6 service-backed tests deferred to CI.
 - V2-28F Ruff lint/format and strict mypy checks: PASS.
-- V2-28F GitHub CI remains required before merge.
+- V2-28F GitHub CI run `33172814341`: PASS; 456 backend tests with real PostgreSQL/Redis, frontend,
+  container, complete local-profile smoke, and monitoring smoke are green; squash-merged through
+  PR `#93` into `develop_V2` at `8ba66965b4ad778fcd83dca3b274a56ae44784e5`.
+- V2-28G targeted runtime/config/Compose/qB/account-routing/worker/reconciliation/download suite:
+  PASS, 114 tests with 1 service-backed test deferred to CI.
+- V2-28G complete backend suite: PASS, 473 tests with 6 service-backed tests deferred to CI.
+- V2-28G full Ruff lint/format and strict mypy checks: PASS.
+- V2-28G GitHub CI remains required before merge.
 
 ## Known constraints
 
@@ -1179,6 +1214,6 @@
 
 ## Next task
 
-- The next roadmap task is `V2-28G — runtime hardening and operational recovery`.
-- V2-28A through V2-28E are merged; V2-28F is implemented on its dedicated branch. V2-29 must wait
+- The next roadmap task after this branch is `V2-28H — portable Linux/macOS monitoring`.
+- V2-28A through V2-28F are merged; V2-28G is implemented on its dedicated branch. V2-29 must wait
   until V2-28A through V2-28H are individually reviewed, green, and merged into `develop_V2`.

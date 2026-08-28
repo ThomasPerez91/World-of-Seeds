@@ -175,11 +175,19 @@ The stable V1 maintenance release documented here is `1.3.3`.
 
 - Production workers fail fast when required integration configuration is missing or invalid;
   development and test fixtures remain explicitly supported.
+- The V2 API runs as exactly one process until a representative load test authorizes a topology
+  change. Download/archive admission remains process-local under that enforced topology; Redis is
+  not promoted to a durable or distributed limiter without measured need.
+- `StorageLedger.managed_bytes` is the declared capacity reserved by non-purged managed torrents,
+  including content not fully downloaded yet. It is not a filesystem measurement; observed media
+  capacity is represented separately by `disk_total_bytes` and `disk_free_bytes`.
 - A qBittorrent reset or state loss must reconcile deterministically with PostgreSQL and shared
   storage. Missing qB rows cannot remain as permanent phantom downloads in the UI.
 - Administrative recovery operations may reconcile, cancel, or purge orphaned requests through
-  safe business actions. They never delete files automatically while ownership or physical state
-  is ambiguous.
+  safe business actions. Cancelling an orphan revokes SQL rights without deleting physical data;
+  metadata purge is allowed only after exact qBittorrent and shared-storage checks both prove the
+  physical torrent absent. Recovery never deletes files automatically while ownership or physical
+  state is ambiguous.
 
 ## Torrent user experience
 

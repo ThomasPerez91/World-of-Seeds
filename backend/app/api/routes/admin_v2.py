@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Literal, Never
 
@@ -7,7 +8,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import aliased
 from starlette.concurrency import run_in_threadpool
 
-from app.admin import reconcile_inventory
+from app.admin import (
+    ReconciliationRecoveryError,
+    reconcile_inventory,
+    recover_orphaned_torrent,
+    recovery_snapshot,
+)
 from app.auth.dependencies import (
     AppSettings,
     AuthContext,
@@ -15,7 +21,16 @@ from app.auth.dependencies import (
     require_admin_csrf,
     require_current_admin,
 )
-from app.integrations.qbittorrent_v2 import QBittorrentV2Gateway, QBittorrentV2Inventory
+from app.core.database import session_factory
+from app.integrations.account_routing import build_deployment_account_router
+from app.integrations.http import IntegrationRequestError
+from app.integrations.qbittorrent_v2 import (
+    QBittorrentV2Gateway,
+    QBittorrentV2Inventory,
+    QBittorrentV2ManagedIdentity,
+    QBittorrentV2MissingError,
+)
+from app.jobs.torrent_payloads import MAX_MANAGED_TORRENT_BYTES
 from app.models import (
     DatabaseOption,
     DatabaseOptionAudit,
@@ -41,6 +56,8 @@ from app.schemas.admin_v2 import (
     AdminV2Overview,
     AdminV2ReconciliationAnomaly,
     AdminV2ReconciliationReport,
+    AdminV2RecoveryRequest,
+    AdminV2RecoveryResult,
     AdminV2SchedulerStatus,
     AdminV2StorageStatus,
 )
@@ -269,4 +286,112 @@ async def get_admin_reconciliation(
             for item in report.anomalies
         ],
         truncated=report.truncated,
+    )
+
+
+@router.post(
+    "/reconciliation/{managed_torrent_id}/recover",
+    response_model=AdminV2RecoveryResult,
+)
+async def recover_admin_managed_torrent(
+    managed_torrent_id: uuid.UUID,
+    payload: AdminV2RecoveryRequest,
+    db: DbSession,
+    settings: AppSettings,
+    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+) -> AdminV2RecoveryResult:
+    try:
+        expected = await recovery_snapshot(db, managed_torrent_id)
+    except ReconciliationRecoveryError as exc:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": str(exc)},
+        ) from exc
+    identity = QBittorrentV2ManagedIdentity(expected.info_hash, expected.storage_key)
+    await db.commit()
+    try:
+        storage_present = await run_in_threadpool(
+            SharedContentStore(settings.data_root).contains,
+            expected.storage_key,
+        )
+        timeout = httpx.Timeout(
+            connect=settings.integration_connect_timeout_seconds,
+            read=settings.integration_read_timeout_seconds,
+            write=settings.integration_read_timeout_seconds,
+            pool=settings.integration_connect_timeout_seconds,
+        )
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            if (
+                settings.integration_accounts_json is not None
+                and expected.qbittorrent_account_ref is not None
+            ):
+                account_router = build_deployment_account_router(
+                    settings.integration_accounts_json,
+                    client,
+                    session_factory,
+                    allowed_tracker_hosts=settings.c411_tracker_hosts,
+                    data_root=settings.qbittorrent_data_root,
+                    max_total_size=MAX_MANAGED_TORRENT_BYTES,
+                )
+                qbittorrent_present = await account_router.managed_torrent_is_present(
+                    expected.qbittorrent_account_ref,
+                    identity,
+                )
+            elif (
+                settings.qbittorrent_url is not None
+                and settings.qbittorrent_username is not None
+                and settings.qbittorrent_password is not None
+            ):
+                gateway = QBittorrentV2Gateway(
+                    client,
+                    str(settings.qbittorrent_url),
+                    settings.qbittorrent_username,
+                    settings.qbittorrent_password.get_secret_value(),
+                    data_root=settings.qbittorrent_data_root,
+                )
+                try:
+                    qbittorrent_present = (
+                        len(await gateway.inspect_managed_torrents((identity,))) == 1
+                    )
+                except QBittorrentV2MissingError:
+                    qbittorrent_present = False
+            else:
+                raise RuntimeError("qbittorrent_inventory_unavailable")
+    except (
+        httpx.HTTPError,
+        IntegrationRequestError,
+        RuntimeError,
+        SharedContentStoreError,
+    ) as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "reconciliation_evidence_unavailable"},
+        ) from exc
+
+    try:
+        result = await recover_orphaned_torrent(
+            db,
+            managed_torrent_id,
+            action=payload.action,
+            qbittorrent_present=qbittorrent_present,
+            storage_present=storage_present,
+            expected=expected,
+        )
+        await db.commit()
+    except ReconciliationRecoveryError as exc:
+        await db.rollback()
+        code = str(exc)
+        response_status = (
+            status.HTTP_404_NOT_FOUND
+            if code == "managed_torrent_not_found"
+            else status.HTTP_409_CONFLICT
+        )
+        raise HTTPException(response_status, detail={"code": code}) from exc
+    return AdminV2RecoveryResult(
+        managed_torrent_id=str(result.managed_torrent_id),
+        state=result.state.value,
+        cancelled_requests=result.cancelled_requests,
+        metadata_purged=result.metadata_purged,
+        qbittorrent_present=result.qbittorrent_present,
+        storage_present=result.storage_present,
     )

@@ -66,6 +66,12 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if not api.get("healthcheck"):
         raise ComposePolicyError("api must define a healthcheck")
     api_environment = _mapping(api.get("environment"), "services.api.environment")
+    if str(api_environment.get("WOS_API_PROCESS_COUNT")) != "1":
+        raise ComposePolicyError("api must use exactly one process")
+    if api_environment.get("WOS_RUNTIME_PROFILE") != "v2":
+        raise ComposePolicyError("api must use the V2 runtime profile")
+    if "WOS_INTEGRATION_ACCOUNTS_JSON" not in api_environment:
+        raise ComposePolicyError("api must accept the deployment integration registry")
     if api_environment.get("WOS_REDIS_URL") != "redis://redis:6379/0":
         raise ComposePolicyError("api must use only the internal V2 Redis service")
     worker_environment = _mapping(
@@ -73,6 +79,21 @@ def validate_config(config: Mapping[str, Any]) -> None:
     )
     if worker_environment.get("WOS_REDIS_URL") != "redis://redis:6379/0":
         raise ComposePolicyError("worker must use only the internal V2 Redis service")
+    if worker_environment.get("WOS_RUNTIME_PROFILE") != "v2":
+        raise ComposePolicyError("worker must use the V2 runtime profile")
+    for key in (
+        "WOS_COOKIE_SECURE",
+        "WOS_ALLOWED_HOSTS",
+        "WOS_DATA_ROOT",
+        "WOS_QBITTORRENT_DATA_ROOT",
+        "WOS_INTEGRATION_ACCOUNTS_JSON",
+    ):
+        if key not in worker_environment:
+            raise ComposePolicyError(
+                "worker production runtime settings are incomplete"
+            )
+    if api.get("command") is not None:
+        raise ComposePolicyError("api must retain the image single-process entry point")
 
     dependencies = _mapping(api.get("depends_on"), "services.api.depends_on")
     for dependency in ("postgres", "redis"):

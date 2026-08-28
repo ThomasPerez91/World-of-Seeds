@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import os
 import uuid
@@ -284,6 +285,39 @@ async def test_rate_limiter_reserves_user_and_global_capacity_from_same_deadline
         per_user_bytes_per_second=100,
         global_bytes_per_second=100,
     ) == pytest.approx(2.0)
+
+
+@pytest.mark.asyncio
+async def test_process_local_rate_limiter_handles_one_hundred_accounts_deterministically() -> None:
+    limiter = DownloadRateLimiter(clock=lambda: 100.0)
+    users = [uuid.uuid4() for _ in range(100)]
+
+    first = await asyncio.gather(
+        *(
+            limiter.reserve(
+                user,
+                10,
+                per_user_bytes_per_second=10,
+                global_bytes_per_second=1000,
+            )
+            for user in users
+        )
+    )
+    second = await asyncio.gather(
+        *(
+            limiter.reserve(
+                user,
+                10,
+                per_user_bytes_per_second=10,
+                global_bytes_per_second=1000,
+            )
+            for user in users
+        )
+    )
+
+    assert max(first) == pytest.approx(0.99)
+    assert min(second) == pytest.approx(1.0)
+    assert max(second) == pytest.approx(1.99)
 
 
 @pytest.mark.asyncio

@@ -66,6 +66,36 @@ class SharedContentStore:
             if descriptor is not None:
                 os.close(descriptor)
 
+    def contains(self, storage_key: UUID) -> bool:
+        """Return exact top-level presence without traversing or following links."""
+        name = self._name(storage_key)
+        data_fd: int | None = None
+        content_fd: int | None = None
+        try:
+            data_fd = self._open_directory(self._data_root)
+            try:
+                content_fd = self._open_directory("content", dir_fd=data_fd)
+            except FileNotFoundError:
+                return False
+            try:
+                metadata = os.stat(name, dir_fd=content_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return False
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise SharedContentStoreError("managed content directory is unsafe")
+            managed_fd = self._open_directory(name, dir_fd=content_fd)
+            os.close(managed_fd)
+            return True
+        except SharedContentStoreError:
+            raise
+        except OSError as exc:
+            raise SharedContentStoreError("managed content directory is unsafe") from exc
+        finally:
+            if content_fd is not None:
+                os.close(content_fd)
+            if data_fd is not None:
+                os.close(data_fd)
+
     def inventory(self, *, limit: int = 200) -> SharedContentInventory:
         """List only opaque top-level managed directories without traversing their contents."""
         if not 1 <= limit <= 1000:
