@@ -40,6 +40,8 @@ def candidate(
     queued_at: datetime = NOW,
     weight: int = 1,
     stalled: bool = False,
+    beneficiaries: tuple[uuid.UUID, ...] = (),
+    beneficiary_weights: dict[uuid.UUID, int] | None = None,
 ) -> SchedulerCandidate:
     return SchedulerCandidate(
         torrent_id=uuid.UUID(int=torrent_number),
@@ -48,6 +50,8 @@ def candidate(
         queued_at=queued_at,
         user_weight=weight,
         stalled=stalled,
+        beneficiary_user_ids=beneficiaries,
+        beneficiary_weights=beneficiary_weights or {},
     )
 
 
@@ -210,6 +214,97 @@ def test_user_weight_increases_share_without_absolute_priority() -> None:
 
     assert selected_users.count(premium_user) > selected_users.count(free_user)
     assert free_user in selected_users
+
+
+def test_shared_torrent_charge_rotates_deterministically_across_restarts() -> None:
+    first_user = uuid.UUID(int=53)
+    second_user = uuid.UUID(int=54)
+    shared = candidate(
+        first_user,
+        GIB,
+        torrent_number=750,
+        beneficiaries=(second_user,),
+    )
+    configured = policy(max_active_global=1, max_active_per_user=1)
+    ledger = SchedulerLedger()
+    charged: list[uuid.UUID] = []
+
+    for _ in range(4):
+        result = select_torrents(
+            [shared],
+            policy=configured,
+            now=NOW,
+            active_global=0,
+            active_by_user={},
+            ledger=ledger,
+        )
+        charged.append(result.selected[0].beneficiary_user_id)
+        ledger = result.ledger
+
+    restarted = select_torrents(
+        [shared],
+        policy=configured,
+        now=NOW,
+        active_global=0,
+        active_by_user={},
+        ledger=ledger,
+    )
+
+    assert charged == [first_user, second_user, first_user, second_user]
+    assert restarted.selected[0].beneficiary_user_id == first_user
+    assert all(
+        decision.candidate.torrent_id == shared.torrent_id for decision in restarted.selected
+    )
+
+
+def test_shared_torrents_use_alternate_owner_when_a_cap_is_reached() -> None:
+    first_user = uuid.UUID(int=55)
+    second_user = uuid.UUID(int=56)
+    jobs = [
+        candidate(first_user, GIB, torrent_number=760 + index, beneficiaries=(second_user,))
+        for index in range(2)
+    ]
+
+    result = select_torrents(
+        jobs,
+        policy=policy(max_active_global=2, max_active_per_user=1),
+        now=NOW,
+        active_global=0,
+        active_by_user={},
+    )
+
+    assert {decision.beneficiary_user_id for decision in result.selected} == {
+        first_user,
+        second_user,
+    }
+    assert len({decision.candidate.torrent_id for decision in result.selected}) == 2
+
+
+def test_shared_torrent_beneficiaries_support_distinct_future_weights() -> None:
+    free_user = uuid.UUID(int=57)
+    premium_user = uuid.UUID(int=58)
+    jobs = [
+        candidate(
+            free_user,
+            GIB,
+            torrent_number=770 + index,
+            beneficiaries=(premium_user,),
+            beneficiary_weights={free_user: 1, premium_user: 3},
+        )
+        for index in range(4)
+    ]
+
+    result = select_torrents(
+        jobs,
+        policy=policy(max_active_global=4, max_active_per_user=4),
+        now=NOW,
+        active_global=0,
+        active_by_user={},
+    )
+    charged = [decision.beneficiary_user_id for decision in result.selected]
+
+    assert charged.count(premium_user) == 3
+    assert charged.count(free_user) == 1
 
 
 def test_stalled_torrents_do_not_consume_capacity() -> None:

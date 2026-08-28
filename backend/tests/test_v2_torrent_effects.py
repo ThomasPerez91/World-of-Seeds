@@ -449,6 +449,11 @@ async def test_sync_handler_persists_stall_backoff_and_resets_on_real_progress(
         sessions,
         state=ManagedTorrentState.DOWNLOADING,
     )
+    async with sessions() as session, session.begin():
+        torrent = await session.get(ManagedTorrent, torrent_id)
+        assert torrent is not None
+        torrent.desired_active = True
+        torrent.desired_priority = 0
     payloads = _payloads(tmp_path)
     content = _content(tmp_path)
 
@@ -486,7 +491,7 @@ async def test_sync_handler_persists_stall_backoff_and_resets_on_real_progress(
     assert first_stall.scheduler_retry_at == (NOW + timedelta(minutes=3, seconds=61)).replace(
         tzinfo=None
     )
-    assert first_stall.desired_active is False
+    assert first_stall.desired_active is True
 
     same_cooldown = await sync(NOW + timedelta(minutes=2), progress=0.99, downloaded=990)
     assert same_cooldown.state is ManagedTorrentState.PAUSED

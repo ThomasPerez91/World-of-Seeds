@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
+import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -97,6 +99,68 @@ async def _torrent(
             )
         )
     return torrent
+
+
+async def _add_owner(
+    sessions: async_sessionmaker[AsyncSession],
+    torrent: ManagedTorrent,
+    *,
+    username: str,
+) -> uuid.UUID:
+    async with sessions() as session, session.begin():
+        user = User(username=username, password_hash="test-password-hash")
+        session.add(user)
+        await session.flush()
+        session.add(
+            TorrentRequest(
+                user_id=user.id,
+                managed_torrent_id=torrent.id,
+                state=TorrentRequestState.ACTIVE,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        return user.id
+
+
+async def _backlog(
+    sessions: async_sessionmaker[AsyncSession],
+    total: int,
+) -> set[str]:
+    expected: set[str] = set()
+    async with sessions() as session, session.begin():
+        for index in range(total):
+            user_id = uuid.UUID(int=10_000 + index)
+            torrent_id = uuid.UUID(int=20_000 + index)
+            info_hash = f"{30_000 + index:040x}"
+            created_at = NOW + timedelta(microseconds=index)
+            user = User(
+                id=user_id,
+                username=f"window-{total}-{index}",
+                password_hash="test-password-hash",
+            )
+            torrent = ManagedTorrent(
+                id=torrent_id,
+                storage_key=uuid.UUID(int=40_000 + index),
+                info_hash=info_hash,
+                name=f"window-{index}",
+                total_size=(index + 1) * 1024**3,
+                state=ManagedTorrentState.PAUSED,
+                scheduler_retry_at=(NOW + timedelta(minutes=3) if index % 29 == 0 else None),
+                created_at=created_at,
+                updated_at=created_at,
+            )
+            request = TorrentRequest(
+                id=uuid.UUID(int=50_000 + index),
+                user_id=user_id,
+                managed_torrent_id=torrent_id,
+                state=TorrentRequestState.ACTIVE,
+                created_at=created_at,
+                updated_at=created_at,
+            )
+            session.add_all((user, torrent, request))
+            expected.add(info_hash)
+    return expected
 
 
 @pytest.mark.asyncio
@@ -293,6 +357,84 @@ async def test_two_slots_are_bounded_with_one_hundred_eligible_torrents(tmp_path
     ).run_once()
 
     assert len(result.selected_torrent_ids) == 2
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_shared_beneficiary_rotation_is_persisted_across_runtime_restart(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    shared = await _torrent(
+        sessions,
+        username="shared-first",
+        info_hash="2" * 40,
+        size=10,
+    )
+    second_user_id = await _add_owner(sessions, shared, username="shared-second")
+    async with sessions() as session:
+        requests = list(
+            (
+                await session.scalars(
+                    select(TorrentRequest).where(TorrentRequest.managed_torrent_id == shared.id)
+                )
+            ).all()
+        )
+    owner_ids = {request.user_id for request in requests}
+    assert second_user_id in owner_ids
+
+    cursors: list[uuid.UUID | None] = []
+    for _ in range(3):
+        await SchedulerRuntime(
+            sessions,
+            FakeGateway(),
+            scheduler_id="scheduler-shared-restart",
+            clock=lambda: NOW,
+        ).run_once()
+        async with sessions() as session:
+            state = await session.get(SchedulerState, 1)
+        assert state is not None
+        cursors.append(state.cursor_user_id)
+
+    assert cursors[0] in owner_ids
+    assert cursors[1] in owner_ids
+    assert cursors[0] != cursors[1]
+    assert cursors[2] == cursors[0]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("total", [199, 200, 201, 500, 1_000])
+async def test_bounded_control_windows_progress_through_the_complete_backlog(
+    tmp_path: Path,
+    total: int,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    expected = await _backlog(sessions, total)
+    gateway = FakeGateway()
+    runtime = SchedulerRuntime(
+        sessions,
+        gateway,
+        scheduler_id=f"scheduler-window-{total}",
+        clock=lambda: NOW,
+    )
+
+    for _ in range(math.ceil(total / 198) + 3):
+        result = await runtime.run_once()
+        assert len(result.selected_torrent_ids) <= 2
+
+    observed = {control.info_hash for controls in gateway.calls for control in controls}
+    assert observed == expected
+    assert all(len(controls) <= 200 for controls in gateway.calls)
+    assert all(
+        len({control.info_hash for control in controls}) == len(controls)
+        for controls in gateway.calls
+    )
+    async with sessions() as session:
+        state = await session.get(SchedulerState, 1)
+    assert state is not None
+    assert state.scan_cursor_created_at is not None
+    assert state.scan_cursor_id is not None
     await engine.dispose()
 
 
