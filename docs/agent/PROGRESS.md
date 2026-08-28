@@ -791,7 +791,7 @@
   progress, repeated stalls, recovery, scheduler restart during cooldown, 100 eligible torrents for
   two slots, and an empty eligible set.
 
-## Documentation hardening phase after V2-28
+## Documentation hardening phase after V2-28 (Phase 0)
 
 - The main V2 profile was validated successfully on Docker Desktop macOS with
   `scripts/local_v2.sh up`; API, PostgreSQL, Redis, worker, scheduler, qBittorrent, and the
@@ -803,18 +803,21 @@
 - The optional monitoring profile is not portable to the tested Docker Desktop macOS setup:
   `node-exporter` bind-mounts `/` with `propagation: rslave`, causing `monitoring-up` to fail with
   `path / is mounted on / but it is not a shared or slave mount`.
-- Targeted code verification confirmed the hardening backlog: qB additions are not initially
-  stopped; the scheduler currently uses total size, selects the earliest request as beneficiary,
-  and fails closed above 200 controls; no durable anti-stall cooldown exists; the downloads page
-  polls every ten seconds; recursive download fetches all manifest pages before starting; storage
-  reconciliation performs per-user aggregate queries; production workers can run without the
-  required integration registry; and reconciliation reports qB/DB orphans without safe recovery
-  actions.
+- At the Phase 0 base commit `5de4cd0282fd1397c810a0a693e455cada4c6c9e`, targeted code
+  verification confirmed the hardening backlog: qB additions were not initially stopped; the
+  scheduler used total size, selected the earliest request as beneficiary, and failed closed above
+  200 controls; no durable anti-stall cooldown existed; the downloads page polled every ten
+  seconds; recursive download fetched all manifest pages before starting; storage reconciliation
+  performed per-user aggregate queries; production workers could run without the required
+  integration registry; and reconciliation reported qB/DB orphans without safe recovery actions.
 - The roadmap now inserts V2-28A through V2-28H before Rise2 composition and V2-32A before the
   external pilot. No functional code or migration is included in this documentation phase.
 - Rise2 must explicitly validate NewGreedy's effective read access to its read-only `config.ini`.
   The V1 incident showed that UID 0 with all capabilities dropped cannot read an application-owned
   mode `0600` file merely because it is root inside the container.
+- Phase 0 was squash-merged through PR `#86` into `develop_V2` at
+  `eba8d6b577ace5130b1772455c5fe9d586edbf14`; it changed documentation only and did not start
+  V2-28A.
 
 ## Current validation
 
@@ -1049,6 +1052,9 @@
   `5de4cd0282fd1397c810a0a693e455cada4c6c9e`.
 - Post-V2-28 main-profile validation on Docker Desktop macOS: PASS. Monitoring-profile startup:
   FAIL with the confirmed `node-exporter` root-bind `rslave` portability issue tracked in V2-28H.
+- Phase 0 documentation structure, roadmap ordering, secret scan, and `git diff --check`: PASS.
+- Phase 0 PR #86 GitHub CI run `33087085365`: PASS; backend, frontend, container, complete Linux
+  local-profile smoke, and monitoring smoke are green.
 - V2-28A targeted scheduler, weighted-fair policy, qBittorrent gateway, and worker-effect tests:
   PASS, 53 tests with 1 PostgreSQL locking test deferred to CI.
 - V2-28A complete backend suite: PASS, 421 tests with 6 service-backed tests deferred to CI.
@@ -1059,6 +1065,9 @@
   with 1 PostgreSQL locking test deferred to CI.
 - V2-28B complete backend suite: PASS, 426 tests with 6 service-backed tests deferred to CI.
 - V2-28B PostgreSQL migration upgrade/downgrade SQL generation: PASS.
+- V2-28B GitHub CI run `33092073758`: PASS; backend with real PostgreSQL, frontend, container,
+  complete local-profile smoke, and monitoring smoke are green; squash-merged through PR `#88`
+  into `develop_V2` at `fe0c92abb22050a105dd1afb1cf37b0fbc25faa6`.
 
 ## Known constraints
 
@@ -1076,5 +1085,5 @@
 ## Next task
 
 - The next roadmap task is `V2-28C — Shared-torrent fairness and bounded backlog`.
-- V2-28A is merged and V2-28B is implemented. V2-29 must wait until V2-28A through V2-28H are
+- V2-28A and V2-28B are merged. V2-29 must wait until V2-28A through V2-28H are
   individually reviewed, green, and merged into `develop_V2`.
