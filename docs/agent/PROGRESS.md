@@ -911,6 +911,27 @@
   primarily observe Docker Desktop's Linux VM rather than the physical Mac host.
 - No Rise2 composition, V1 change, monitoring privilege increase, image change, or application
   runtime behavior is included.
+- V2-28H was squash-merged through PR `#95` into `develop_V2` at
+  `6a0db1e9964567792460575ae97701d4254f1c2d` after CI run `33216607469` passed.
+
+## V2-29 — Complete isolated Rise2 Compose
+
+- Added the production-only `world-of-seeds-v2-rise2` stack with Caddy ingress, one API process,
+  a one-shot migration, replicated durable workers, the singleton scheduler, PostgreSQL, Redis,
+  qBittorrent, NewGreedy, Prometheus, Grafana, node-exporter, and cAdvisor.
+- Only Caddy publishes host ports 80/443. Backend, torrent, monitoring, and monitoring-edge are
+  internal and dedicated to V2; no V1 network, volume, profile, path, secret, or data is mounted.
+- WOS and NewGreedy images must be immutable digests. Stateful infrastructure uses pinned images
+  and dedicated named volumes; shared media uses only the explicit `/srv/world-of-seeds-v2` host
+  boundary.
+- The NewGreedy config contract is owner-write/group-read mode `0640`, mounted read-only under the
+  exact unprivileged UID/GID with all capabilities dropped. A host preflight verifies metadata and
+  executes `test -r /app/config.ini` inside the real container identity.
+- qBittorrent receives a one-time `0600` authenticated bootstrap config in its dedicated volume;
+  neither its WebUI nor NewGreedy is published to the host.
+- Added normalized Compose policy enforcement for immutable images, complete service/network/
+  volume sets, single-process API, runtime hardening, internal-only services, and V1 isolation.
+- No deployment, DNS mutation, V1 import, backup implementation, or data migration is performed.
 
 ## Documentation hardening phase after V2-28 (Phase 0)
 
@@ -1222,6 +1243,10 @@
 - V2-28H shell/Python syntax, targeted Ruff lint/format, and `git diff --check`: PASS.
 - Docker is unavailable in the development workspace; both normalized Compose variants and the
   real monitoring smoke remain required in PR CI before merge.
+- V2-29 targeted Rise2 Compose policy suite: PASS, 9 tests.
+- V2-29 shell/Python syntax, targeted Ruff lint/format, and `git diff --check`: PASS.
+- Docker is unavailable in the development workspace; normalized production Compose validation is
+  required in PR CI. Real NewGreedy UID/GID readability remains a mandatory Rise2 host preflight.
 
 ## Known constraints
 
@@ -1238,6 +1263,6 @@
 
 ## Next task
 
-- The next roadmap task after this branch is `V2-29 — complete isolated Rise2 Compose`.
-- V2-28A through V2-28G are merged; V2-28H is implemented on its dedicated branch. V2-29 starts
-  only after V2-28H is reviewed, green, and merged into `develop_V2`.
+- The next roadmap task after this branch is `V2-30 — backup and restore`.
+- V2-28A through V2-28H are merged; V2-29 is implemented on its dedicated branch. V2-30 starts
+  only after V2-29 is reviewed, green, and merged into `develop_V2`.

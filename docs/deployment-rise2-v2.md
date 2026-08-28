@@ -2,9 +2,30 @@
 
 ## Portée
 
-Ce runbook décrit la cible et les points de contrôle futurs. Il n'autorise pas encore un
-déploiement. La V1 `1.3.3` reste en production et n'est ni arrêtée ni migrée pendant la
-construction de la V2.
+Ce runbook décrit la pile versionnée `deploy/compose.rise2.v2.yaml` et ses points de contrôle.
+Il n'autorise ni bascule DNS ni import V1. La V1 `1.3.3` reste en production et n'est ni arrêtée
+ni migrée pendant la construction de la V2.
+
+## Préparation de la pile versionnée
+
+1. Copier `deploy/.env.rise2.v2.example` vers `/etc/world-of-seeds-v2/environment`, remplacer
+   toutes les valeurs et appliquer le mode `0600`.
+2. Utiliser uniquement des images WOS/NewGreedy épinglées par digest et des secrets distincts de
+   V1. Le JSON des comptes d'intégration reste dans ce fichier non versionné et ne doit jamais être
+   affiché dans les journaux ou commandes de diagnostic.
+3. Créer `/srv/world-of-seeds-v2/data` sans lien symbolique, avec l'UID/GID WOS V2 dédiés.
+4. Installer le bootstrap qBittorrent en `0600`, propriété de l'UID/GID qB V2. Il doit activer une
+   authentification WebUI cohérente avec le registre d'intégration et fixer le save path à `/data`.
+5. Installer `config.ini` NewGreedy en `0640`, propriété de l'UID applicatif WOS et du groupe GID
+   NewGreedy. Le service le monte en lecture seule, avec `cap_drop: ALL`.
+6. Exécuter `scripts/rise2_v2_preflight.sh /etc/world-of-seeds-v2/environment`. Le préflight
+   valide la pile normalisée puis exécute `test -r /app/config.ini` avec l'UID/GID et les
+   capabilities réels du conteneur NewGreedy.
+
+La pile publie uniquement Caddy sur 80/443. API, PostgreSQL, Redis, qBittorrent, NewGreedy,
+Prometheus, Grafana et les exporters n'ont aucun port hôte. Grafana est routé par son hostname TLS
+distinct. Les réseaux `backend`, `torrent`, `monitoring` et `monitoring-edge` sont internes ; seul
+Caddy relie l'edge public aux deux destinations autorisées.
 
 ## Isolation obligatoire
 

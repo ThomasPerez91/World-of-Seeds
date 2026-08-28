@@ -165,6 +165,9 @@ jobs:
             config --format json \
             | python3 scripts/validate_compose_v2_monitoring.py \
                 --platform docker-desktop
+          docker compose --env-file deploy/.env.rise2.v2.example \
+            -f deploy/compose.rise2.v2.yaml config --format json \
+            | python3 scripts/validate_compose_v2_rise2.py
       - name: Build and start production stack
         run: |
           cp .env.example .env
