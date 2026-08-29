@@ -172,6 +172,26 @@ async def test_changed_file_and_invalid_range_fail_closed_and_release_lease(
 
 
 @pytest.mark.asyncio
+async def test_revoked_right_during_lease_acquisition_fails_closed(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, request, torrent_file, _ = await _ready_file(db_session, data_root)
+    await _login(client)
+
+    async def revoked(*_: object, **__: object) -> None:
+        raise ManagedDownloadError("download right is no longer ready")
+
+    monkeypatch.setattr(DownloadLeaseManager, "acquire", revoked)
+    response = await client.get(_url(request, torrent_file))
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "torrent_file_not_found"
+
+
+@pytest.mark.asyncio
 async def test_symlinked_manifest_file_is_rejected(
     client: AsyncClient,
     db_session: AsyncSession,

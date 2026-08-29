@@ -64,10 +64,7 @@ case "${1:-}" in
     python3 "$repository/scripts/smoke_v2_local.py"
     ;;
   load)
-    if ! compose exec -T api python -m app.local_load_smoke; then
-      compose logs --no-color --tail 120 api >&2
-      exit 1
-    fi
+    compose exec -T api python -m app.local_load_smoke
     ;;
   monitoring-up)
     monitoring_compose config --format json \
