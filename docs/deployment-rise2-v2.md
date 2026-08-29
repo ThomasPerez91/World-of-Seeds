@@ -3,8 +3,9 @@
 ## Portée
 
 Ce runbook décrit la pile versionnée `deploy/compose.rise2.v2.yaml` et ses points de contrôle.
-Il n'autorise ni bascule DNS ni import V1. La V1 `1.3.3` reste en production et n'est ni arrêtée
-ni migrée pendant la construction de la V2.
+Il n'autorise aucune bascule DNS. Un import V1 n'est possible que par la procédure optionnelle,
+read-only côté V1 et dry-run par défaut, décrite dans [`import-v1-v2.md`](import-v1-v2.md). La V1
+`1.3.3` reste en production et n'est jamais modifiée par cet import.
 
 ## Préparation de la pile versionnée
 
