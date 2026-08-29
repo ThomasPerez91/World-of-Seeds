@@ -114,7 +114,13 @@ function LoginScreen({
     setError("");
     try {
       let user = await api.login(String(form.get("username")), String(form.get("password")));
-      if ((user.preferred_locale ?? "fr") !== locale) user = await api.changeLocale(locale);
+      if ((user.preferred_locale ?? "fr") !== locale) {
+        try {
+          user = await api.changeLocale(locale);
+        } catch {
+          // Authentication succeeded: a preference write must never invalidate the session.
+        }
+      }
       onLogin(user);
     } catch (caught) {
       setError(apiError(caught, "error.temporary"));
@@ -187,9 +193,19 @@ function CredentialChangeScreen({
   onChanged: (user: User) => void;
   onOpenLegal: (document: LegalDocument) => void;
 }) {
-  const { apiError, t } = useI18n();
+  const { apiError, locale, setLocale, t } = useI18n();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  async function changeLocale(nextLocale: typeof locale) {
+    setError("");
+    try {
+      onChanged(await api.changeLocale(nextLocale));
+    } catch (caught) {
+      setLocale(user.preferred_locale ?? "fr");
+      setError(apiError(caught, "language.saveFailed"));
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -219,7 +235,7 @@ function CredentialChangeScreen({
     <main className="centered-page">
       <section className="credential-card" aria-labelledby="credential-title">
         <BrandMark />
-        <LanguageSelector />
+        <LanguageSelector onChange={(nextLocale) => void changeLocale(nextLocale)} />
         <p className="eyebrow">{t("credentials.eyebrow")}</p>
         <h1 id="credential-title" className="compact-title">
           {t("credentials.title")}

@@ -15,6 +15,7 @@ import { useI18n, type MessageKey } from "../../i18n";
 import {
   pickDownloadDirectory,
   RecursiveDownloadController,
+  type RecursiveTransferErrorCode,
   type RecursiveTransferProgress,
   supportsRecursiveDirectoryDownload,
 } from "./recursiveDownload";
@@ -29,6 +30,20 @@ const stateLabels: Record<TorrentRequestV2State, MessageKey> = {
   cancelled: "downloads.cancelled",
   expired: "downloads.expired",
   error: "downloads.error",
+};
+
+const transferErrorKeys: Record<RecursiveTransferErrorCode, MessageKey> = {
+  manifest_incomplete: "downloads.manifestIncomplete",
+  manifest_changed: "downloads.manifestChanged",
+  received_file_too_large: "downloads.receivedFileInvalid",
+  received_file_incomplete: "downloads.receivedFileInvalid",
+  local_file_size_invalid: "downloads.localFileInvalid",
+  manifest_path_invalid: "downloads.manifestPathInvalid",
+  local_disk_full: "downloads.localDiskFull",
+  local_write_denied: "downloads.localWriteDenied",
+  local_destination_missing: "downloads.localDestinationMissing",
+  download_interrupted: "downloads.interrupted",
+  local_transfer_failed: "downloads.failed",
 };
 
 function TorrentRow({
@@ -274,7 +289,10 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
         if (progress.status === "completed") {
           setNotice({ tone: "success", message: t("downloads.completed", { name: torrent.name }) });
         } else if (progress.status === "error") {
-          setNotice({ tone: "error", message: progress.error ?? t("downloads.failed") });
+          setNotice({
+            tone: "error",
+            message: progress.error === null ? t("downloads.failed") : t(transferErrorKeys[progress.error]),
+          });
         }
       };
       const controller = new RecursiveDownloadController({

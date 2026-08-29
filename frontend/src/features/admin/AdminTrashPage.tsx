@@ -1,15 +1,10 @@
 import { useEffect, useState } from "react";
 
 import { api, ApiError, type AdminTrashEntry, type AdminTrashListing } from "../../api/client";
-import { formatBytes } from "../../utils/format";
+import { useI18n } from "../../i18n";
 import { Notice } from "../../components/Notice";
 import { FileDialog } from "../files/FileDialog";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
-
-const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
 
 type PurgeTarget = { kind: "all" } | { kind: "entry"; entry: AdminTrashEntry };
 
@@ -24,6 +19,7 @@ function PurgeDialog({
   onSessionExpired: () => void;
   target: PurgeTarget;
 }) {
+  const { t } = useI18n();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const all = target.kind === "all";
@@ -34,14 +30,14 @@ function PurgeDialog({
     try {
       if (target.kind === "entry") {
         await api.purgeAdminTrash(target.entry.id);
-        onCompleted(`« ${target.entry.name} » a été supprimé définitivement.`);
+        onCompleted(t("admin.trashPurged", { name: target.entry.name }));
       } else {
         const result = await api.purgeAllAdminTrash();
         const suffix =
           result.remaining === 0
-            ? "Toutes les corbeilles sont vides."
-            : `${result.remaining} éléments restent à traiter. Relance le nettoyage.`;
-        onCompleted(`${result.purged} éléments supprimés. ${suffix}`);
+            ? t("admin.purgeAllComplete")
+            : t("admin.purgeAllRemaining", { count: result.remaining });
+        onCompleted(t("admin.purgeAllResult", { count: result.purged, suffix }));
       }
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
@@ -50,8 +46,8 @@ function PurgeDialog({
       }
       setError(
         caught instanceof ApiError && caught.status === 409
-          ? "L’intégrité d’un élément n’a pas pu être confirmée."
-          : "Le nettoyage n’a pas pu être terminé. Actualise la page avant de réessayer.",
+          ? t("admin.purgeIntegrityFailed")
+          : t("admin.purgeFailed"),
       );
     } finally {
       setSubmitting(false);
@@ -60,19 +56,19 @@ function PurgeDialog({
 
   return (
     <FileDialog
-      eyebrow="Administration"
-      title={all ? "Vider toutes les corbeilles" : "Supprimer définitivement"}
+      eyebrow={t("admin.adminEyebrow")}
+      title={all ? t("admin.emptyAllTrash") : t("admin.deletePermanently")}
       description={
         all
-          ? "Tous les éléments de toutes les corbeilles seront supprimés par lots sécurisés."
-          : `« ${target.entry.name} » sera supprimé de la corbeille de ${target.entry.username}.`
+          ? t("admin.emptyTrashDescription")
+          : t("admin.deleteTrashDescription", { name: target.entry.name, username: target.entry.username })
       }
       onClose={onClose}
       closeDisabled={submitting}
     >
       <div className="confirmation-content">
         <p className="permanent-delete-warning">
-          Cette action détruit les fichiers et ne peut pas être annulée.
+          {t("admin.permanentWarning")}
         </p>
         <p className="form-message error-message" role="alert">
           {error}
@@ -85,7 +81,7 @@ function PurgeDialog({
             disabled={submitting}
             data-initial-focus
           >
-            Annuler
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -93,7 +89,7 @@ function PurgeDialog({
             onClick={() => void purge()}
             disabled={submitting}
           >
-            {submitting ? "Suppression…" : all ? "Tout supprimer" : "Supprimer"}
+            {submitting ? t("admin.deletingTrash") : all ? t("admin.deleteAll") : t("common.delete")}
           </button>
         </div>
       </div>
@@ -110,6 +106,7 @@ export function AdminTrashPage({
   onNavigate: (view: AdminView) => void;
   onSessionExpired: () => void;
 }) {
+  const { formatBytes, formatDate, t } = useI18n();
   const [listing, setListing] = useState<AdminTrashListing | null>(null);
   const [target, setTarget] = useState<PurgeTarget | null>(null);
   const [error, setError] = useState("");
@@ -130,13 +127,13 @@ export function AdminTrashPage({
           onSessionExpired();
           return;
         }
-        setError("Impossible de charger les corbeilles.");
+        setError(t("admin.trashLoadFailed"));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [onSessionExpired, revision]);
+  }, [onSessionExpired, revision, t]);
 
   function completed(message: string) {
     setTarget(null);
@@ -149,8 +146,8 @@ export function AdminTrashPage({
       <section className="admin-section" aria-labelledby="admin-trash-title" aria-busy={loading}>
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Nettoyage global</p>
-            <h2 id="admin-trash-title">Corbeilles utilisateurs</h2>
+            <p className="eyebrow">{t("admin.globalCleanup")}</p>
+            <h2 id="admin-trash-title">{t("admin.userTrash")}</h2>
           </div>
           <div className="admin-trash-actions">
             <button
@@ -159,7 +156,7 @@ export function AdminTrashPage({
               disabled={loading}
               onClick={() => setRevision((current) => current + 1)}
             >
-              Actualiser
+              {t("common.refresh")}
             </button>
             <button
               type="button"
@@ -167,7 +164,7 @@ export function AdminTrashPage({
               disabled={loading || (listing?.entries.length ?? 0) === 0}
               onClick={() => setTarget({ kind: "all" })}
             >
-              Vider toutes les corbeilles
+              {t("admin.emptyAllTrash")}
             </button>
           </div>
         </div>
@@ -178,13 +175,13 @@ export function AdminTrashPage({
         </p>
         {listing?.truncated && (
           <p className="truncation-notice" role="status">
-            La liste est limitée aux 5 000 éléments les plus récents.
+            {t("admin.trashTruncated")}
           </p>
         )}
         {!loading && listing?.entries.length === 0 && (
           <div className="admin-empty-state">
-            <strong>Toutes les corbeilles sont vides</strong>
-            <span>Aucun élément ne nécessite de nettoyage.</span>
+            <strong>{t("admin.allTrashEmpty")}</strong>
+            <span>{t("admin.noTrashCleanup")}</span>
           </div>
         )}
         {listing !== null && listing.entries.length > 0 && (
@@ -201,19 +198,19 @@ export function AdminTrashPage({
                   </div>
                   <span className="admin-trash-path">{entry.original_path}</span>
                   <span>
-                    {formatBytes(entry.size, "Taille du dossier non calculée")} · supprimé le{" "}
-                    <time dateTime={entry.deleted_at}>
-                      {dateFormatter.format(new Date(entry.deleted_at))}
-                    </time>
+                    {t("admin.deletedOn", {
+                      size: formatBytes(entry.size, t("trash.folderSizeUnknown")),
+                      date: formatDate(entry.deleted_at, { dateStyle: "medium", timeStyle: "short" }),
+                    })}
                   </span>
                 </div>
                 <button
                   type="button"
                   className="danger-outline-button compact-button"
-                  aria-label={`Supprimer définitivement ${entry.name} de la corbeille de ${entry.username}`}
+                  aria-label={t("admin.deleteTrashNamed", { name: entry.name, username: entry.username })}
                   onClick={() => setTarget({ kind: "entry", entry })}
                 >
-                  Supprimer
+                  {t("common.delete")}
                 </button>
               </li>
             ))}

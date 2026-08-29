@@ -33,11 +33,24 @@ export type RecursiveTransferStatus =
   | "completed"
   | "error";
 
+export type RecursiveTransferErrorCode =
+  | "manifest_incomplete"
+  | "manifest_changed"
+  | "received_file_too_large"
+  | "received_file_incomplete"
+  | "local_file_size_invalid"
+  | "manifest_path_invalid"
+  | "local_disk_full"
+  | "local_write_denied"
+  | "local_destination_missing"
+  | "download_interrupted"
+  | "local_transfer_failed";
+
 export interface RecursiveTransferProgress {
   status: RecursiveTransferStatus;
   downloadedBytes: number;
   completedFiles: number;
-  error: string | null;
+  error: RecursiveTransferErrorCode | null;
 }
 
 type ManifestPageLoader = (
@@ -56,7 +69,11 @@ interface RecursiveDownloadOptions {
   onProgress: (progress: RecursiveTransferProgress) => void;
 }
 
-class TransferFailure extends Error {}
+class TransferFailure extends Error {
+  constructor(readonly code: RecursiveTransferErrorCode) {
+    super(code);
+  }
+}
 
 export function supportsRecursiveDirectoryDownload(target: Window = window): boolean {
   return typeof (target as DirectoryPickerWindow).showDirectoryPicker === "function";
@@ -81,7 +98,7 @@ export class RecursiveDownloadController {
   private readonly pendingFiles: TorrentDownloadFileV2[];
   private readonly maxBufferedFiles: number;
   private status: RecursiveTransferStatus = "paused";
-  private error: string | null = null;
+  private error: RecursiveTransferErrorCode | null = null;
   private downloadedBytes = 0;
   private completedFiles = 0;
   private nextManifestOffset: number;
@@ -104,7 +121,7 @@ export class RecursiveDownloadController {
       options.firstPage.items.length > options.firstPage.file_count ||
       (options.firstPage.items.length === 0 && options.firstPage.file_count > 0)
     ) {
-      throw new TransferFailure("Le manifeste est incomplet.");
+      throw new TransferFailure("manifest_incomplete");
     }
     this.torrentRequestId = options.torrentRequestId;
     this.snapshot = options.firstPage;
@@ -240,7 +257,7 @@ export class RecursiveDownloadController {
       page.items.length === 0 ||
       expectedOffset + page.items.length > this.snapshot.file_count
     ) {
-      throw new TransferFailure("Le contenu a changé. Relance le téléchargement.");
+      throw new TransferFailure("manifest_changed");
     }
   }
 
@@ -261,7 +278,7 @@ export class RecursiveDownloadController {
         { headers, credentials: "same-origin", signal: controller.signal },
       );
       if (!this.responseMatchesSnapshot(response, file, offset) || response.body === null) {
-        throw new TransferFailure("Le contenu a changé ou la reprise n’est plus valide.");
+        throw new TransferFailure("manifest_changed");
       }
       const writer = await localFile.createWritable({ keepExistingData: offset > 0 });
       let written = offset;
@@ -276,7 +293,7 @@ export class RecursiveDownloadController {
           const result = await reader.read();
           if (result.done) break;
           if (written + result.value.byteLength > file.size) {
-            throw new TransferFailure("Le fichier reçu dépasse le manifeste.");
+            throw new TransferFailure("received_file_too_large");
           }
           await writer.write(result.value);
           written += result.value.byteLength;
@@ -290,10 +307,10 @@ export class RecursiveDownloadController {
         await writer.close();
       } catch (error) {
         await this.rollbackAfterCloseFailure(file, localFile, offset);
-        throw new TransferFailure(this.safeErrorMessage(error));
+        throw new TransferFailure(this.safeErrorCode(error));
       }
       if (streamError !== null) throw streamError;
-      if (written !== file.size) throw new TransferFailure("Le fichier reçu est incomplet.");
+      if (written !== file.size) throw new TransferFailure("received_file_incomplete");
     } finally {
       this.activeRequests.delete(controller);
     }
@@ -321,7 +338,7 @@ export class RecursiveDownloadController {
     if (recorded === 0 || localFile.getFile === undefined) return recorded;
     const actual = (await localFile.getFile()).size;
     if (!Number.isSafeInteger(actual) || actual < 0) {
-      throw new TransferFailure("La taille du fichier local est invalide.");
+      throw new TransferFailure("local_file_size_invalid");
     }
     const safeOffset = actual <= file.size ? Math.min(actual, recorded) : 0;
     this.setOffset(file.id, safeOffset);
@@ -361,7 +378,7 @@ export class RecursiveDownloadController {
       components.length === 0 ||
       components.some((component) => component === "" || component === "." || component === "..")
     ) {
-      throw new TransferFailure("Le manifeste contient un chemin invalide.");
+      throw new TransferFailure("manifest_path_invalid");
     }
     let directory = this.directory;
     for (const component of components.slice(0, -1)) {
@@ -377,25 +394,25 @@ export class RecursiveDownloadController {
   private fail(error: unknown): void {
     if (this.status !== "running") return;
     this.status = "error";
-    this.error = this.safeErrorMessage(error);
+    this.error = this.safeErrorCode(error);
     this.abortActive();
     this.emit();
   }
 
-  private safeErrorMessage(error: unknown): string {
-    if (error instanceof TransferFailure) return error.message;
+  private safeErrorCode(error: unknown): RecursiveTransferErrorCode {
+    if (error instanceof TransferFailure) return error.code;
     if (error instanceof DOMException) {
-      if (error.name === "QuotaExceededError") return "Le disque local ne dispose plus d’assez d’espace.";
+      if (error.name === "QuotaExceededError") return "local_disk_full";
       if (error.name === "NotAllowedError" || error.name === "SecurityError") {
-        return "L’autorisation d’écriture locale a été refusée.";
+        return "local_write_denied";
       }
-      if (error.name === "NotFoundError") return "Le support ou le dossier local n’est plus disponible.";
-      if (error.name === "AbortError") return "Le téléchargement a été interrompu.";
+      if (error.name === "NotFoundError") return "local_destination_missing";
+      if (error.name === "AbortError") return "download_interrupted";
     }
-    return "L’écriture ou le téléchargement local a échoué.";
+    return "local_transfer_failed";
   }
 
-  private emit(error: string | null = this.error): void {
+  private emit(error: RecursiveTransferErrorCode | null = this.error): void {
     this.onProgress({
       status: this.status,
       downloadedBytes: this.downloadedBytes,

@@ -1297,12 +1297,16 @@
 - Replaced phrase-dependent auth, file, and trash error contracts with stable structured codes and
   fields; the frontend translates codes and uses localized safe fallbacks instead of displaying
   backend phrases.
-- Localized login, account, file browser, mutations, trash, downloads, administration users,
-  dialogs, notifications, navigation, and accessibility labels on mobile and desktop.
+- Localized login, account, file browser, mutations, trash, downloads, every administration
+  destination and embedded service control, dialogs, notifications, navigation, and accessibility
+  labels on mobile and desktop.
+- Locale persistence is best-effort after a successful login, remains available on the mandatory
+  credential-change screen, and never invalidates an authenticated session. Torrent admission and
+  recursive-transfer failures are rendered from stable codes in both languages.
 - Dates, numbers, progress values, and byte units use the active locale through `Intl`; responsive
   header policy permits longer English labels without horizontal overflow.
 - V2-32A complete backend suite: PASS, 531 tests with 6 real-service tests deferred to CI.
-- V2-32A Ruff lint/format, strict mypy, Alembic single-head validation, TypeScript, 36 frontend
+- V2-32A Ruff lint/format, strict mypy, Alembic single-head validation, TypeScript, 38 frontend
   tests including axe/i18n coverage, production build, and `git diff --check`: PASS locally.
 - PR `#101` targets `develop_V2`; real PostgreSQL migration, container, complete-profile, and
   monitoring validation remain mandatory in GitHub CI before merge.

@@ -346,7 +346,7 @@ describe("RecursiveDownloadController", () => {
       status: "error",
       downloadedBytes: 0,
       completedFiles: 0,
-      error: "Le disque local ne dispose plus d’assez d’espace.",
+      error: "local_disk_full",
     });
     failWrite = false;
     await controller.resume();
@@ -375,7 +375,7 @@ describe("RecursiveDownloadController", () => {
 
     expect(updates.at(-1)).toMatchObject({
       status: "error",
-      error: "Le contenu a changé. Relance le téléchargement.",
+      error: "manifest_changed",
     });
   });
 
@@ -433,7 +433,7 @@ describe("RecursiveDownloadController", () => {
     expect(updates.at(-1)).toMatchObject({
       status: "error",
       downloadedBytes: 2,
-      error: "Le contenu a changé ou la reprise n’est plus valide.",
+      error: "manifest_changed",
     });
   });
 

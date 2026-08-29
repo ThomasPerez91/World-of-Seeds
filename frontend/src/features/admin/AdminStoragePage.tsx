@@ -6,7 +6,7 @@ import {
   type AdminReconciliationReport,
   type AdminStorageOverview,
 } from "../../api/client";
-import { formatBytes } from "../../utils/format";
+import { useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 
 export function AdminStoragePage({
@@ -18,6 +18,7 @@ export function AdminStoragePage({
   onNavigate: (view: AdminView) => void;
   onSessionExpired: () => void;
 }) {
+  const { formatBytes, formatNumber, t } = useI18n();
   const [overview, setOverview] = useState<AdminStorageOverview | null>(null);
   const [reconciliation, setReconciliation] = useState<AdminReconciliationReport | null>(null);
   const [error, setError] = useState("");
@@ -41,7 +42,7 @@ export function AdminStoragePage({
           onSessionExpired();
           return;
         }
-        setError("Impossible de charger l’état du stockage.");
+        setError(t("admin.loadFailed"));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -49,7 +50,7 @@ export function AdminStoragePage({
     return () => {
       active = false;
     };
-  }, [onSessionExpired, revision]);
+  }, [onSessionExpired, revision, t]);
 
   const usagePercent =
     overview === null || overview.total === 0
@@ -65,8 +66,8 @@ export function AdminStoragePage({
       <section className="admin-section" aria-labelledby="admin-storage-title" aria-busy={loading}>
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Capacité</p>
-            <h2 id="admin-storage-title">Stockage de la seedbox</h2>
+            <p className="eyebrow">{t("admin.capacity")}</p>
+            <h2 id="admin-storage-title">{t("admin.seedboxStorage")}</h2>
           </div>
           <button
             type="button"
@@ -74,13 +75,13 @@ export function AdminStoragePage({
             disabled={loading}
             onClick={() => setRevision((current) => current + 1)}
           >
-            Actualiser
+            {t("common.refresh")}
           </button>
         </div>
 
         {loading && overview === null && (
           <p className="admin-loading" role="status">
-            Lecture du stockage…
+            {t("admin.readingStorage")}
           </p>
         )}
         <p className="form-message error-message" role="alert">
@@ -91,75 +92,83 @@ export function AdminStoragePage({
             <div className="admin-storage-summary">
               <div className="admin-storage-usage">
                 <div>
-                  <span>Espace utilisé</span>
+                  <span>{t("admin.usedSpace")}</span>
                   <strong>{formatBytes(overview.used)}</strong>
                 </div>
                 <div className="storage-copy-right">
-                  <span>Disponible</span>
+                  <span>{t("admin.available")}</span>
                   <strong>{formatBytes(overview.available)}</strong>
                 </div>
                 <progress
                   max={100}
                   value={usagePercent}
-                  aria-label={`${usagePercent.toFixed(0)} % du stockage utilisé`}
+                  aria-label={t("admin.storageUsage", { value: formatNumber(usagePercent, { maximumFractionDigits: 0 }) })}
                 >
-                  {usagePercent.toFixed(0)} %
+                  {formatNumber(usagePercent, { maximumFractionDigits: 0 })} %
                 </progress>
                 <p>
-                  {usagePercent.toFixed(1)} % utilisés sur {formatBytes(overview.total)}
+                  {t("admin.storageSummary", {
+                    value: formatNumber(usagePercent, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+                    total: formatBytes(overview.total),
+                  })}
                 </p>
               </div>
               <div className="admin-metric-card">
-                <span>Comptes actifs</span>
-                <strong>{overview.active_users}</strong>
+                <span>{t("admin.activeAccounts")}</span>
+                <strong>{formatNumber(overview.active_users)}</strong>
               </div>
               <div className="admin-metric-card">
-                <span>Comptes suspendus</span>
-                <strong>{overview.suspended_users}</strong>
+                <span>{t("admin.suspendedAccounts")}</span>
+                <strong>{formatNumber(overview.suspended_users)}</strong>
               </div>
               <div className="admin-metric-card">
-                <span>Éléments en corbeille</span>
-                <strong>{overview.trash_entries}</strong>
+                <span>{t("admin.trashItems")}</span>
+                <strong>{formatNumber(overview.trash_entries)}</strong>
               </div>
               <div className="admin-metric-card">
-                <span>Taille connue en corbeille</span>
+                <span>{t("admin.knownTrashSize")}</span>
                 <strong>{formatBytes(overview.known_trash_bytes)}</strong>
               </div>
             </div>
             <p className="admin-data-note">
-              La taille connue additionne uniquement les fichiers. Les dossiers ne sont pas parcourus
-              récursivement afin de préserver les performances du serveur.
+              {t("admin.knownTrashNote")}
             </p>
           </>
         )}
         {reconciliation !== null && (
           <section className="reconciliation-panel" aria-labelledby="reconciliation-title">
             <div>
-              <h3 id="reconciliation-title">Réconciliation V2</h3>
+              <h3 id="reconciliation-title">{t("admin.reconciliation")}</h3>
               <p>
-                {reconciliation.database_scanned} DB · {reconciliation.qbittorrent_scanned} qB ·{" "}
-                {reconciliation.storage_scanned} stockage
+                {t("admin.reconciliationScanned", {
+                  database: formatNumber(reconciliation.database_scanned),
+                  qbittorrent: formatNumber(reconciliation.qbittorrent_scanned),
+                  storage: formatNumber(reconciliation.storage_scanned),
+                })}
               </p>
             </div>
             <p>
-              {reconciliation.external_torrents} torrent
-              {reconciliation.external_torrents > 1 ? "s externes observés" : " externe observé"}
-              , toujours en lecture seule.
+              {t(
+                reconciliation.external_torrents === 1
+                  ? "admin.externalTorrentOne"
+                  : "admin.externalTorrentMany",
+                { count: formatNumber(reconciliation.external_torrents) },
+              )}
             </p>
             {reconciliation.anomalies.length === 0 ? (
-              <strong className="reconciliation-ok">Aucune anomalie détectée.</strong>
+              <strong className="reconciliation-ok">{t("admin.noAnomaly")}</strong>
             ) : (
               <ul>
                 {reconciliation.anomalies.map((anomaly, index) => (
                   <li className={anomaly.severity} key={`${anomaly.code}-${anomaly.resource_id}-${index}`}>
                     <strong>{anomaly.code}</strong>
-                    <span>{anomaly.action === "none" ? "Aucune action" : anomaly.action}</span>
+                    <span>{anomaly.action === "none" ? t("admin.noAction") : anomaly.action}</span>
                   </li>
                 ))}
               </ul>
             )}
             {reconciliation.truncated && (
-              <p className="truncated-notice">Inventaire borné : relancer par lots pour poursuivre.</p>
+              <p className="truncated-notice">{t("admin.inventoryTruncated")}</p>
             )}
           </section>
         )}
