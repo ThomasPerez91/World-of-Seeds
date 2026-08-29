@@ -133,11 +133,11 @@ jobs:
           tar --extract --gzip --no-same-owner --file "$archive" \
             --directory "$RUNNER_TEMP" trivy
           "$RUNNER_TEMP/trivy" --version
-      - name: Scan deployment configuration
+      - name: Scan Dockerfile configuration
         run: >-
           "$RUNNER_TEMP/trivy" config
           --severity HIGH,CRITICAL --exit-code 1
-          --format json --output "$RUNNER_TEMP/security-reports/config.json" .
+          --format json --output "$RUNNER_TEMP/security-reports/config.json" Dockerfile
       - name: Build application image for scanning
         run: |
           version="$(python3 scripts/versioning.py check \

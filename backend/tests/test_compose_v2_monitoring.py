@@ -105,6 +105,8 @@ def test_monitoring_policy_keeps_platform_mount_contracts_distinct() -> None:
         lambda config: config["networks"]["monitoring-edge"].update({"internal": True}),
         lambda config: config["services"]["prometheus"].update({"image": "prom/prometheus:latest"}),
         lambda config: config["services"]["prometheus"].update({"command": []}),
+        lambda config: config["services"]["prometheus"].update({"privileged": True}),
+        lambda config: config["services"]["cadvisor"].update({"privileged": False}),
         lambda config: config["services"]["node-exporter"].update(
             {"networks": {"backend": None, "monitoring": None}}
         ),

@@ -82,6 +82,7 @@ def _valid_config() -> dict[str, Any]:
         "cadvisor": {
             "image": "ghcr.io/google/cadvisor:v0.60.5",
             "networks": {"monitoring": None},
+            "privileged": True,
         },
     }
     return {
@@ -125,6 +126,8 @@ def test_rise2_policy_accepts_complete_isolated_stack() -> None:
         ),
         lambda config: config["services"]["api"].update({"command": ["uvicorn", "--workers", "2"]}),
         lambda config: config["services"]["newgreedy"].update({"privileged": True}),
+        lambda config: config["services"]["cadvisor"].update({"privileged": False}),
+        lambda config: config["services"]["prometheus"].update({"privileged": True}),
         lambda config: config["services"]["newgreedy"].update(
             {"volumes": [{"type": "bind", "target": "/app/config.ini"}]}
         ),

@@ -60,7 +60,8 @@ La revue est alignée sur les risques OWASP pertinents, sans prétendre à une c
 - configuration : CSP et en-têtes de sécurité testés, processus non-root, filesystem
   read-only, capacités supprimées, réseaux internes, aucun socket Docker dans l'application ;
 - intégrité logicielle : locks Python/npm, versions d'actions épinglées, Trivy 0.74.0 dont
-  l'archive est vérifiée par SHA-256 avant les scans configuration/image ;
+  l'archive est vérifiée par SHA-256 avant les scans Dockerfile/image ; les variantes Compose
+  passent leurs validateurs d'isolation dédiés ;
 - journalisation : tests dédiés sur métriques, événements, audit et erreurs ; aucun passkey,
   cookie, jeton, URL credentialée, chemin utilisateur ou infohash dans les rapports de charge.
 
