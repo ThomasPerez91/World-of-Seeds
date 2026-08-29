@@ -63,6 +63,9 @@ case "${1:-}" in
   smoke)
     python3 "$repository/scripts/smoke_v2_local.py"
     ;;
+  load)
+    compose exec -T api python -m app.local_load_smoke
+    ;;
   monitoring-up)
     monitoring_compose config --format json \
       | python3 "$repository/scripts/validate_compose_v2_monitoring.py" \
@@ -80,7 +83,7 @@ case "${1:-}" in
     monitoring_compose down --volumes --remove-orphans
     ;;
   *)
-    echo "Usage: scripts/local_v2.sh {up|smoke|monitoring-up|monitoring-smoke|status|down}" >&2
+    echo "Usage: scripts/local_v2.sh {up|smoke|load|monitoring-up|monitoring-smoke|status|down}" >&2
     exit 2
     ;;
 esac

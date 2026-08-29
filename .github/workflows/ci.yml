@@ -91,6 +91,77 @@ jobs:
       - run: npm run test
       - run: npm run build
 
+  security:
+    name: Dependency and image security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Prepare bounded security reports
+        run: mkdir -p "$RUNNER_TEMP/security-reports"
+      - name: Audit locked Python dependencies
+        run: >-
+          uvx --from pip-audit==2.10.1 pip-audit
+          --requirement backend/requirements.lock
+          --no-deps --disable-pip --format json
+          --output "$RUNNER_TEMP/security-reports/python.json"
+      - name: Audit frontend production dependencies
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm ci
+          npm audit --omit=dev --audit-level=high --json \
+            | tee "$RUNNER_TEMP/security-reports/frontend.json"
+      - name: Install pinned Trivy scanner
+        env:
+          TRIVY_VERSION: "0.74.0"
+          TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+        run: |
+          archive="$RUNNER_TEMP/trivy.tar.gz"
+          curl --fail --silent --show-error --location \
+            --output "$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "$TRIVY_SHA256  $archive" | sha256sum --check --strict
+          tar --extract --gzip --no-same-owner --file "$archive" \
+            --directory "$RUNNER_TEMP" trivy
+          "$RUNNER_TEMP/trivy" --version
+      - name: Scan deployment configuration
+        run: >-
+          "$RUNNER_TEMP/trivy" config
+          --severity HIGH,CRITICAL --exit-code 1
+          --format json --output "$RUNNER_TEMP/security-reports/config.json" .
+      - name: Build application image for scanning
+        run: |
+          version="$(python3 scripts/versioning.py check \
+            --channel "$WOS_VERSION_CHANNEL" --print-version)"
+          docker build --build-arg "WOS_APP_VERSION=$version" \
+            --tag world-of-seeds:security .
+      - name: Scan application image
+        run: |
+          "$RUNNER_TEMP/trivy" image \
+            --severity HIGH,CRITICAL --exit-code 0 \
+            --format json --output "$RUNNER_TEMP/security-reports/image.json" \
+            world-of-seeds:security
+          "$RUNNER_TEMP/trivy" image \
+            --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 \
+            world-of-seeds:security
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: security-reports
+          path: ${{ runner.temp }}/security-reports
+          if-no-files-found: error
+          retention-days: 14
+
   container:
     name: Container image
     runs-on: ubuntu-latest
@@ -245,6 +316,9 @@ jobs:
       - name: Run complete local V2 smoke
         if: env.WOS_VERSION_CHANNEL == 'v2'
         run: scripts/local_v2.sh smoke
+      - name: Run bounded V2 load smoke
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: scripts/local_v2.sh load
       - name: Start isolated V2 monitoring
         if: env.WOS_VERSION_CHANNEL == 'v2'
         run: scripts/local_v2.sh monitoring-up

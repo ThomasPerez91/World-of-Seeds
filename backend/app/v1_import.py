@@ -507,6 +507,7 @@ async def apply_v1_import(
 
 
 async def rollback_v1_import(session: AsyncSession, run_id: uuid.UUID) -> dict[str, Any]:
+    await _advisory_lock(session)
     run = await session.get(V1ImportRun, run_id, with_for_update=True)
     if run is None:
         raise V1ImportError("V1 import run does not exist")

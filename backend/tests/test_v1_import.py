@@ -254,7 +254,9 @@ async def test_conflicts_block_the_entire_apply_transaction(
 
 @pytest.mark.asyncio
 async def test_rollback_deletes_only_rows_owned_by_the_import_run(
-    db_session: AsyncSession, tmp_path: Path
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_session.add(_user("Thomas"))
     await db_session.commit()
@@ -262,10 +264,18 @@ async def test_rollback_deletes_only_rows_owned_by_the_import_run(
     applied = await apply_v1_import(db_session, inventory, backup_id="rise2-backup-before-v1")
     await db_session.commit()
 
+    lock_calls: list[AsyncSession] = []
+
+    async def record_lock(session: AsyncSession) -> None:
+        lock_calls.append(session)
+
+    monkeypatch.setattr("app.v1_import._advisory_lock", record_lock)
+
     report = await rollback_v1_import(db_session, applied.run_id)
     await db_session.commit()
 
     assert report["result"] == "rolled_back"
+    assert lock_calls == [db_session]
     assert await db_session.scalar(select(func.count()).select_from(ManagedTorrent)) == 0
     assert await db_session.scalar(select(func.count()).select_from(TorrentRequest)) == 0
     run = await db_session.get(V1ImportRun, applied.run_id)

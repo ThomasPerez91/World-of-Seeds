@@ -130,6 +130,53 @@ def test_accumulated_deficit_prevents_starvation_under_a_continuous_small_job_st
     assert large_selected_on <= 4
 
 
+@pytest.mark.parametrize("account_count", [1, 10, 25, 50, 100])
+@pytest.mark.parametrize("active_slots", [1, 2])
+def test_mixed_backlog_serves_every_account_with_one_or_two_slots(
+    account_count: int,
+    active_slots: int,
+) -> None:
+    users = [uuid.UUID(int=10_000 + index) for index in range(account_count)]
+    queued: dict[uuid.UUID, SchedulerCandidate] = {}
+    for user_index, user_id in enumerate(users):
+        for size_index, size in enumerate((GIB, 20 * GIB, 80 * GIB)):
+            item = candidate(
+                user_id,
+                size,
+                torrent_number=20_000 + user_index * 3 + size_index,
+                queued_at=NOW - timedelta(hours=user_index % 5),
+                weight=1 + user_index % 3,
+            )
+            queued[item.torrent_id] = item
+
+    ledger = SchedulerLedger()
+    served: set[uuid.UUID] = set()
+    rounds = 0
+    configured = policy(
+        max_active_global=active_slots,
+        max_active_per_user=1,
+    )
+    while queued:
+        result = select_torrents(
+            list(queued.values()),
+            policy=configured,
+            now=NOW,
+            active_global=0,
+            active_by_user={},
+            ledger=ledger,
+        )
+        assert 1 <= len(result.selected) <= active_slots
+        ledger = result.ledger
+        rounds += 1
+        for decision in result.selected:
+            served.add(decision.beneficiary_user_id)
+            queued.pop(decision.candidate.torrent_id)
+
+    assert served == set(users)
+    effective_slots = min(account_count, active_slots)
+    assert rounds <= (account_count * 3 + effective_slots - 1) // effective_slots
+
+
 def test_bounded_aging_bonus_promotes_an_old_large_torrent() -> None:
     fresh_user = uuid.UUID(int=21)
     waiting_user = uuid.UUID(int=22)
