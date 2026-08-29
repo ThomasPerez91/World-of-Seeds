@@ -118,7 +118,7 @@ async def _request_batch(
     identities: list[LoadIdentity],
     cookie_name: str,
 ) -> tuple[list[float], int]:
-    async def exercise(identity: LoadIdentity) -> tuple[float, int, int, bool]:
+    async def exercise(identity: LoadIdentity) -> tuple[float, int, int, int, int, bool]:
         started = time.perf_counter()
         headers = {"Cookie": f"{cookie_name}={identity.session_token}"}
         listing = await client.get("/api/v2/torrents", params={"limit": 1}, headers=headers)
@@ -137,30 +137,39 @@ async def _request_batch(
                 break
             retries += 1
             await asyncio.sleep(0.05 * retries)
-        if listing.status_code != 200 or manifest.status_code != 200:
-            raise RuntimeError("authenticated API load request failed")
         return (
             time.perf_counter() - started,
             retries,
+            listing.status_code,
+            manifest.status_code,
             download.status_code,
             download.content == CONTENT[:1],
         )
 
     measured = await asyncio.gather(*(exercise(identity) for identity in identities))
-    failures: dict[int, int] = {}
-    for _, _, status_code, content_matches in measured:
-        if status_code != 206 or not content_matches:
-            failures[status_code] = failures.get(status_code, 0) + 1
+    failures: dict[str, dict[int, int]] = {}
+    expectations = (("listing", 2, 200), ("manifest", 3, 200), ("download", 4, 206))
+    for endpoint, position, expected_status in expectations:
+        statuses: dict[int, int] = {}
+        for result in measured:
+            status_code = int(result[position])
+            if status_code != expected_status:
+                statuses[status_code] = statuses.get(status_code, 0) + 1
+        if statuses:
+            failures[endpoint] = dict(sorted(statuses.items()))
+    content_failures = sum(not result[5] for result in measured)
+    if content_failures:
+        failures["download_content"] = {0: content_failures}
     if failures:
         snapshot = await _fixture_snapshot()
         raise RuntimeError(
-            "concurrent Range download failed: "
-            f"scale={len(identities)}, statuses={dict(sorted(failures.items()))}, "
+            "concurrent authenticated load failed: "
+            f"scale={len(identities)}, failures={failures}, "
             f"fixture={snapshot}"
         )
     return (
-        [elapsed for elapsed, _, _, _ in measured],
-        sum(retries for _, retries, _, _ in measured),
+        [elapsed for elapsed, _, _, _, _, _ in measured],
+        sum(retries for _, retries, _, _, _, _ in measured),
     )
 
 
