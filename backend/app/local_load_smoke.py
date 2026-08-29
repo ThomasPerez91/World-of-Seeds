@@ -117,8 +117,8 @@ async def _request_batch(
     client: httpx.AsyncClient,
     identities: list[LoadIdentity],
     cookie_name: str,
-) -> list[float]:
-    async def exercise(identity: LoadIdentity) -> float:
+) -> tuple[list[float], int]:
+    async def exercise(identity: LoadIdentity) -> tuple[float, int]:
         started = time.perf_counter()
         headers = {"Cookie": f"{cookie_name}={identity.session_token}"}
         listing = await client.get("/api/v2/torrents", params={"limit": 1}, headers=headers)
@@ -127,17 +127,24 @@ async def _request_batch(
             params={"limit": 1},
             headers=headers,
         )
-        download = await client.get(
-            f"/api/v2/torrents/{identity.request_id}/files/{identity.file_id}/download",
-            headers={**headers, "Range": "bytes=0-0"},
-        )
+        retries = 0
+        while True:
+            download = await client.get(
+                f"/api/v2/torrents/{identity.request_id}/files/{identity.file_id}/download",
+                headers={**headers, "Range": "bytes=0-0"},
+            )
+            if download.status_code != 429 or retries >= 5:
+                break
+            retries += 1
+            await asyncio.sleep(0.05 * retries)
         if listing.status_code != 200 or manifest.status_code != 200:
             raise RuntimeError("authenticated API load request failed")
         if download.status_code != 206 or download.content != CONTENT[:1]:
-            raise RuntimeError("concurrent Range download failed")
-        return time.perf_counter() - started
+            raise RuntimeError(f"concurrent Range download failed: HTTP {download.status_code}")
+        return time.perf_counter() - started, retries
 
-    return await asyncio.gather(*(exercise(identity) for identity in identities))
+    measured = await asyncio.gather(*(exercise(identity) for identity in identities))
+    return [elapsed for elapsed, _ in measured], sum(retries for _, retries in measured)
 
 
 async def _database_snapshot() -> dict[str, int]:
@@ -194,11 +201,16 @@ async def run() -> dict[str, object]:
         limits=limits,
     ) as client:
         for scale in SCALES:
-            elapsed = await _request_batch(client, identities[:scale], settings.session_cookie_name)
+            elapsed, retries = await _request_batch(
+                client,
+                identities[:scale],
+                settings.session_cookie_name,
+            )
             results.append(
                 {
                     "accounts": scale,
                     "requests": scale * 3,
+                    "range_contention_retries": retries,
                     "median_ms": round(statistics.median(elapsed) * 1000, 1),
                     "p95_ms": round(_percentile(elapsed, 0.95) * 1000, 1),
                 }
