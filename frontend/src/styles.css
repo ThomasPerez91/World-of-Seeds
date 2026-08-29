@@ -390,6 +390,32 @@ button:disabled {
   backdrop-filter: blur(18px);
 }
 
+.header-actions,
+.language-selector {
+  display: flex;
+  align-items: center;
+}
+
+.header-actions {
+  min-width: 0;
+  gap: 1rem;
+}
+
+.language-selector {
+  gap: 0.45rem;
+  color: #a7b2ab;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.language-selector select {
+  width: auto;
+  max-width: 9rem;
+  margin: 0;
+  padding: 0.48rem 1.9rem 0.48rem 0.65rem;
+}
+
 .app-footer {
   display: flex;
   width: min(100%, 96rem);
@@ -4095,8 +4121,23 @@ select:focus-visible {
   }
 
   .app-header {
+    flex-wrap: wrap;
+    gap: 0.65rem;
     min-height: 4.5rem;
     padding: 0.75rem 1rem;
+  }
+
+  .header-actions {
+    max-width: 100%;
+    gap: 0.55rem;
+  }
+
+  .language-selector > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
   }
 
   .wordmark > span:last-child {

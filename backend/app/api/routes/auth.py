@@ -27,6 +27,7 @@ from app.files.dependencies import WorkspaceManagerDependency
 from app.schemas.auth import (
     AuthResponse,
     ChangeCredentialsRequest,
+    ChangeLocaleRequest,
     ChangePasswordRequest,
     ChangeUsernameRequest,
     LoginRequest,
@@ -34,6 +35,10 @@ from app.schemas.auth import (
 )
 
 router = APIRouter()
+
+
+def _detail(code: str, message: str, field: str | None = None) -> dict[str, str | None]:
+    return {"code": code, "message": message, "field": field}
 
 
 def set_auth_cookies(response: Response, tokens: SessionTokens, settings: Settings) -> None:
@@ -83,12 +88,12 @@ async def login(
     except AuthenticationLockedError as exc:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many authentication attempts",
+            detail=_detail("authentication_throttled", "Too many authentication attempts"),
         ) from exc
     except AuthenticationFailedError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
+            detail=_detail("authentication_failed", "Invalid username or password"),
         ) from exc
 
     set_auth_cookies(response, tokens, settings)
@@ -135,14 +140,19 @@ async def update_credentials(
     except AuthenticationFailedError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid current password",
+            detail=_detail(
+                "current_password_invalid", "Invalid current password", "current_password"
+            ),
         ) from exc
     except (UsernameUnavailableError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_detail("username_unavailable", str(exc), "username"),
+        ) from exc
     except WorkspaceError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="User workspace is unavailable",
+            detail=_detail("user_workspace_unavailable", "User workspace is unavailable"),
         ) from exc
 
     set_auth_cookies(response, tokens, settings)
@@ -166,16 +176,30 @@ async def update_username(
     except AuthenticationFailedError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
+            detail=_detail("not_authenticated", "Not authenticated"),
         ) from exc
     except (UsernameUnavailableError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_detail("username_unavailable", str(exc), "username"),
+        ) from exc
     except WorkspaceError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="User workspace is unavailable",
+            detail=_detail("user_workspace_unavailable", "User workspace is unavailable"),
         ) from exc
     return AuthResponse(user=UserResponse.model_validate(user))
+
+
+@router.patch("/locale", response_model=AuthResponse)
+async def update_locale(
+    payload: ChangeLocaleRequest,
+    db: DbSession,
+    context: Annotated[AuthContext, Depends(require_csrf)],
+) -> AuthResponse:
+    context.user.preferred_locale = payload.preferred_locale
+    await db.commit()
+    return AuthResponse(user=UserResponse.model_validate(context.user))
 
 
 @router.patch("/password", status_code=status.HTTP_204_NO_CONTENT)
@@ -196,6 +220,8 @@ async def update_password(
     except AuthenticationFailedError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid current password",
+            detail=_detail(
+                "current_password_invalid", "Invalid current password", "current_password"
+            ),
         ) from exc
     clear_auth_cookies(response, settings)

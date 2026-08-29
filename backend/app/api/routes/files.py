@@ -52,16 +52,20 @@ from app.schemas.files import (
 router = APIRouter()
 
 
+def _detail(code: str, message: str) -> dict[str, str | None]:
+    return {"code": code, "message": message, "field": None}
+
+
 def _raise_mutation_error(exc: Exception) -> Never:
     if isinstance(exc, InvalidRelativePathError):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid relative path",
+            detail=_detail("file_path_invalid", "Invalid relative path"),
         ) from exc
     if isinstance(exc, BrowserPathNotFoundError):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="File or destination not found",
+            detail=_detail("file_or_destination_not_found", "File or destination not found"),
         ) from exc
     if isinstance(
         exc,
@@ -69,27 +73,27 @@ def _raise_mutation_error(exc: Exception) -> Never:
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid file operation",
+            detail=_detail("file_operation_invalid", "Invalid file operation"),
         ) from exc
     if isinstance(exc, (BrowserPathBlockedError, MutationProtectedPathError)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Path is blocked",
+            detail=_detail("file_path_blocked", "Path is blocked"),
         ) from exc
     if isinstance(exc, MutationCollisionError):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Destination already exists",
+            detail=_detail("file_destination_exists", "Destination already exists"),
         ) from exc
     if isinstance(exc, MutationCompensationError):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="File operation could not be verified",
+            detail=_detail("file_operation_unverified", "File operation could not be verified"),
         ) from exc
     if isinstance(exc, (FileMutationError, WorkspaceError)):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="File operation is unavailable",
+            detail=_detail("file_operation_unavailable", "File operation is unavailable"),
         ) from exc
     raise exc
 
@@ -188,27 +192,27 @@ async def download_file(
     except InvalidRelativePathError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid relative path",
+            detail=_detail("file_path_invalid", "Invalid relative path"),
         ) from exc
     except BrowserPathNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="File not found",
+            detail=_detail("file_not_found", "File not found"),
         ) from exc
     except (BrowserPathNotDirectoryError, DownloadPathNotFileError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Path is not a regular file",
+            detail=_detail("file_not_regular", "Path is not a regular file"),
         ) from exc
     except BrowserPathBlockedError as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Path is blocked",
+            detail=_detail("file_path_blocked", "Path is blocked"),
         ) from exc
     except WorkspaceError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="User storage is unavailable",
+            detail=_detail("user_storage_unavailable", "User storage is unavailable"),
         ) from exc
 
     response_headers = {
@@ -285,23 +289,41 @@ async def download_folder(
             max_source_bytes=max_source_bytes,
         )
     except InvalidRelativePathError as exc:
-        raise HTTPException(status_code=400, detail="Invalid relative path") from exc
+        raise HTTPException(
+            status_code=400,
+            detail=_detail("file_path_invalid", "Invalid relative path"),
+        ) from exc
     except BrowserPathNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Directory not found") from exc
+        raise HTTPException(
+            status_code=404,
+            detail=_detail("directory_not_found", "Directory not found"),
+        ) from exc
     except BrowserPathNotDirectoryError as exc:
-        raise HTTPException(status_code=400, detail="Path is not a directory") from exc
+        raise HTTPException(
+            status_code=400,
+            detail=_detail("path_not_directory", "Path is not a directory"),
+        ) from exc
     except BrowserPathBlockedError as exc:
-        raise HTTPException(status_code=403, detail="Path is blocked") from exc
+        raise HTTPException(
+            status_code=403,
+            detail=_detail("file_path_blocked", "Path is blocked"),
+        ) from exc
     except ArchiveTooLargeError as exc:
-        raise HTTPException(status_code=413, detail="Folder is too large to archive") from exc
+        raise HTTPException(
+            status_code=413,
+            detail=_detail("folder_archive_too_large", "Folder is too large to archive"),
+        ) from exc
     except ArchiveBusyError as exc:
         raise HTTPException(
             status_code=429,
-            detail="Another folder archive is already running",
+            detail=_detail("folder_archive_busy", "Another folder archive is already running"),
             headers={"Retry-After": "30"},
         ) from exc
     except (ArchiveError, WorkspaceError) as exc:
-        raise HTTPException(status_code=503, detail="Folder archive is unavailable") from exc
+        raise HTTPException(
+            status_code=503,
+            detail=_detail("folder_archive_unavailable", "Folder archive is unavailable"),
+        ) from exc
     return ArchiveStreamingResponse(
         archive,
         archiver=archiver,
@@ -321,27 +343,27 @@ def list_directory(
     except InvalidRelativePathError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid relative path",
+            detail=_detail("file_path_invalid", "Invalid relative path"),
         ) from exc
     except BrowserPathNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Directory not found",
+            detail=_detail("directory_not_found", "Directory not found"),
         ) from exc
     except BrowserPathNotDirectoryError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Path is not a directory",
+            detail=_detail("path_not_directory", "Path is not a directory"),
         ) from exc
     except BrowserPathBlockedError as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Path is blocked",
+            detail=_detail("file_path_blocked", "Path is blocked"),
         ) from exc
     except WorkspaceError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="User storage is unavailable",
+            detail=_detail("user_storage_unavailable", "User storage is unavailable"),
         ) from exc
 
     components = snapshot.path.split("/") if snapshot.path else []

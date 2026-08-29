@@ -17,14 +17,16 @@ import { FileBrowser } from "./features/files/FileBrowser";
 import { TrashBrowser } from "./features/files/TrashBrowser";
 import { UserDownloadsPage } from "./features/torrents/UserDownloadsPage";
 import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
+import { LanguageSelector } from "./components/LanguageSelector";
 import {
   LegalLinks,
   LegalPage,
   type LegalDocument,
 } from "./components/LegalPage";
-import { formatBytes } from "./utils/format";
 import { APP_VERSION } from "./version";
 import { FeedbackProvider } from "./components/Feedback";
+import { useFeedback } from "./components/Feedback";
+import { I18nProvider, useI18n, type Locale } from "./i18n";
 
 type AuthState =
   | { status: "loading" }
@@ -47,6 +49,7 @@ function BrandMark() {
 }
 
 function ServiceHealth() {
+  const { t } = useI18n();
   const [health, setHealth] = useState<"healthy" | "unavailable">("healthy");
   const [checking, setChecking] = useState(false);
   const mounted = useRef(true);
@@ -79,15 +82,15 @@ function ServiceHealth() {
       className={`service-health ${health}`}
       onClick={() => void check()}
       disabled={checking}
-      aria-label="Vérifier l’état du service"
+      aria-label={t("health.check")}
     >
       <span className="service-health-dot" aria-hidden="true" />
       <span aria-live="polite">
         {checking
-          ? "Vérification en cours…"
+          ? t("health.checking")
           : health === "healthy"
-            ? "Tous les services fonctionnent normalement."
-            : "Le service est momentanément interrompu."}
+            ? t("health.healthy")
+            : t("health.unavailable")}
       </span>
     </button>
   );
@@ -100,6 +103,7 @@ function LoginScreen({
   onLogin: (user: User) => void;
   onOpenLegal: (document: LegalDocument) => void;
 }) {
+  const { apiError, locale, t } = useI18n();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -109,17 +113,11 @@ function LoginScreen({
     setSubmitting(true);
     setError("");
     try {
-      const user = await api.login(String(form.get("username")), String(form.get("password")));
+      let user = await api.login(String(form.get("username")), String(form.get("password")));
+      if ((user.preferred_locale ?? "fr") !== locale) user = await api.changeLocale(locale);
       onLogin(user);
     } catch (caught) {
-      setError(
-        caught instanceof ApiError
-          ? {
-              401: "Identifiants incorrects ou compte indisponible.",
-              429: "Trop de tentatives. Réessaie dans quelques minutes.",
-            }[caught.status] ?? "Le service est temporairement indisponible."
-          : "Le service est temporairement indisponible.",
-      );
+      setError(apiError(caught, "error.temporary"));
     } finally {
       setSubmitting(false);
     }
@@ -129,22 +127,23 @@ function LoginScreen({
     <main className="login-page">
       <section className="brand-panel" aria-labelledby="brand-title">
         <BrandMark />
-        <p className="eyebrow">Espace privé</p>
+        <p className="eyebrow">{t("login.private")}</p>
         <h1 id="brand-title">World of Seeds</h1>
         <p className="brand-copy">
-          Vos fichiers et téléchargements, réunis dans un espace privé.
+          {t("login.tagline")}
         </p>
         <ServiceHealth />
       </section>
 
       <section className="form-panel" aria-labelledby="login-title">
+        <LanguageSelector />
         <div className="form-card">
-          <p className="eyebrow">Connexion</p>
-          <h2 id="login-title">Bienvenue</h2>
-          <p className="form-intro">Saisissez les identifiants fournis par l’administrateur.</p>
+          <p className="eyebrow">{t("login.title")}</p>
+          <h2 id="login-title">{t("login.welcome")}</h2>
+          <p className="form-intro">{t("login.instructions")}</p>
 
           <form onSubmit={handleSubmit}>
-            <label htmlFor="username">Nom d’utilisateur</label>
+            <label htmlFor="username">{t("login.username")}</label>
             <input
               id="username"
               name="username"
@@ -154,7 +153,7 @@ function LoginScreen({
               required
             />
 
-            <label htmlFor="password">Mot de passe</label>
+            <label htmlFor="password">{t("login.password")}</label>
             <input
               id="password"
               name="password"
@@ -166,7 +165,7 @@ function LoginScreen({
             />
 
             <button type="submit" disabled={submitting}>
-              {submitting ? "Connexion…" : "Se connecter"}
+              {submitting ? t("login.submitting") : t("login.submit")}
             </button>
             <p id="login-error" className="form-message error-message" role="alert">
               {error}
@@ -188,6 +187,7 @@ function CredentialChangeScreen({
   onChanged: (user: User) => void;
   onOpenLegal: (document: LegalDocument) => void;
 }) {
+  const { apiError, t } = useI18n();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -196,7 +196,7 @@ function CredentialChangeScreen({
     const form = new FormData(event.currentTarget);
     const newPassword = String(form.get("new-password"));
     if (newPassword !== String(form.get("password-confirmation"))) {
-      setError("Les deux nouveaux mots de passe ne correspondent pas.");
+      setError(t("credentials.mismatch"));
       return;
     }
     setSubmitting(true);
@@ -209,14 +209,7 @@ function CredentialChangeScreen({
       );
       onChanged(updatedUser);
     } catch (caught) {
-      setError(
-        caught instanceof ApiError
-          ? {
-              401: "Le mot de passe initial est incorrect.",
-              409: "Ce nom d’utilisateur est indisponible ou l’espace ne peut pas être renommé.",
-            }[caught.status] ?? "Impossible de modifier le compte pour le moment."
-          : "Impossible de modifier le compte pour le moment.",
-      );
+      setError(apiError(caught, "error.temporary"));
     } finally {
       setSubmitting(false);
     }
@@ -226,15 +219,16 @@ function CredentialChangeScreen({
     <main className="centered-page">
       <section className="credential-card" aria-labelledby="credential-title">
         <BrandMark />
-        <p className="eyebrow">Première connexion</p>
+        <LanguageSelector />
+        <p className="eyebrow">{t("credentials.eyebrow")}</p>
         <h1 id="credential-title" className="compact-title">
-          Personnalise ton accès
+          {t("credentials.title")}
         </h1>
         <p className="form-intro">
-          Remplace les identifiants générés par ceux que tu souhaites utiliser.
+          {t("credentials.intro")}
         </p>
         <form onSubmit={handleSubmit}>
-          <label htmlFor="current-password">Mot de passe initial</label>
+          <label htmlFor="current-password">{t("credentials.initialPassword")}</label>
           <input
             id="current-password"
             name="current-password"
@@ -244,7 +238,7 @@ function CredentialChangeScreen({
             aria-invalid={error !== ""}
             required
           />
-          <label htmlFor="new-username">Nouveau nom d’utilisateur</label>
+          <label htmlFor="new-username">{t("account.username")}</label>
           <input
             id="new-username"
             name="username"
@@ -256,9 +250,9 @@ function CredentialChangeScreen({
             required
           />
           <p id="new-username-hint" className="field-hint">
-            3–32 caractères : lettres, chiffres, _ ou -.
+            {t("account.usernameHint")}
           </p>
-          <label htmlFor="new-password">Nouveau mot de passe</label>
+          <label htmlFor="new-password">{t("credentials.newPassword")}</label>
           <input
             id="new-password"
             name="new-password"
@@ -269,7 +263,7 @@ function CredentialChangeScreen({
             aria-invalid={error !== ""}
             required
           />
-          <label htmlFor="password-confirmation">Confirmer le mot de passe</label>
+          <label htmlFor="password-confirmation">{t("credentials.confirmPassword")}</label>
           <input
             id="password-confirmation"
             name="password-confirmation"
@@ -281,7 +275,7 @@ function CredentialChangeScreen({
             required
           />
           <button type="submit" disabled={submitting}>
-            {submitting ? "Enregistrement…" : "Enregistrer mes identifiants"}
+            {submitting ? t("credentials.submitting") : t("credentials.submit")}
           </button>
           <p id="credential-error" className="form-message error-message" role="alert">
             {error}
@@ -306,6 +300,7 @@ function AccountMenu({
   onLogout: () => Promise<void>;
   onSessionExpired: () => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [logoutError, setLogoutError] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
@@ -340,7 +335,7 @@ function AccountMenu({
         onSessionExpired();
         return;
       }
-      setLogoutError("La déconnexion a échoué. Ta session est toujours active.");
+      setLogoutError(t("dashboard.logoutFailed"));
     } finally {
       setLoggingOut(false);
     }
@@ -351,7 +346,7 @@ function AccountMenu({
       <button
         type="button"
         className="account-trigger"
-        aria-label="Ouvrir le menu du compte"
+        aria-label={t("dashboard.accountMenu")}
         aria-expanded={open}
         aria-controls="account-dropdown"
         onClick={() => setOpen((current) => !current)}
@@ -373,7 +368,7 @@ function AccountMenu({
                 onOpenAdmin();
               }}
             >
-              Administration
+              {t("dashboard.admin")}
             </button>
           )}
           <button
@@ -384,7 +379,7 @@ function AccountMenu({
               onOpenSettings();
             }}
           >
-            Paramètres du compte
+            {t("dashboard.account")}
           </button>
           <div className="account-dropdown-separator" />
           <button
@@ -393,7 +388,7 @@ function AccountMenu({
             onClick={() => void handleLogout()}
             disabled={loggingOut}
           >
-            {loggingOut ? "Déconnexion…" : "Déconnexion"}
+            {loggingOut ? t("dashboard.loggingOut") : t("dashboard.logout")}
           </button>
           {logoutError !== "" && (
             <p className="logout-error" role="alert">
@@ -419,6 +414,7 @@ function AccountSettingsPage({
   onPasswordChanged: () => void;
   onSessionExpired: () => void;
 }) {
+  const { apiError, t } = useI18n();
   const [usernameError, setUsernameError] = useState("");
   const [usernameNotice, setUsernameNotice] = useState("");
   const [usernameSubmitting, setUsernameSubmitting] = useState(false);
@@ -435,17 +431,13 @@ function AccountSettingsPage({
       const updated = await api.changeUsername(username);
       onChanged(updated);
       setUsername(updated.username);
-      setUsernameNotice("Ton nom d’utilisateur a été mis à jour.");
+      setUsernameNotice(t("account.nameUpdated"));
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      setUsernameError(
-        caught instanceof ApiError && caught.status === 409
-          ? "Ce nom d’utilisateur est indisponible ou ton espace ne peut pas être renommé."
-          : "Impossible de modifier le nom d’utilisateur pour le moment.",
-      );
+      setUsernameError(apiError(caught, "error.temporary"));
     } finally {
       setUsernameSubmitting(false);
     }
@@ -456,7 +448,7 @@ function AccountSettingsPage({
     const form = new FormData(event.currentTarget);
     const newPassword = String(form.get("new-password"));
     if (newPassword !== String(form.get("password-confirmation"))) {
-      setPasswordError("Les deux nouveaux mots de passe ne correspondent pas.");
+      setPasswordError(t("account.passwordMismatch"));
       return;
     }
 
@@ -469,16 +461,12 @@ function AccountSettingsPage({
       if (
         caught instanceof ApiError &&
         caught.status === 401 &&
-        caught.message === "Not authenticated"
+        caught.code === "not_authenticated"
       ) {
         onSessionExpired();
         return;
       }
-      setPasswordError(
-        caught instanceof ApiError && caught.status === 401
-          ? "Le mot de passe actuel est incorrect."
-          : "Impossible de modifier le mot de passe pour le moment.",
-      );
+      setPasswordError(apiError(caught, "error.temporary"));
     } finally {
       setPasswordSubmitting(false);
     }
@@ -487,23 +475,23 @@ function AccountSettingsPage({
   return (
     <section className="settings-page" aria-labelledby="account-settings-title">
       <button type="button" className="back-button" onClick={onBack}>
-        <BackIcon /> Retour aux fichiers
+        <BackIcon /> {t("common.backFiles")}
       </button>
       <div className="settings-header">
-        <p className="eyebrow">Compte</p>
-        <h1 id="account-settings-title">Paramètres du compte</h1>
+        <p className="eyebrow">{t("account.eyebrow")}</p>
+        <h1 id="account-settings-title">{t("account.title")}</h1>
         <p className="settings-intro">
-          Mets à jour ton identité et sécurise ton accès depuis deux formulaires indépendants.
+          {t("account.intro")}
         </p>
       </div>
       <div className="settings-grid">
         <section className="settings-card" aria-labelledby="username-settings-title">
-          <h2 id="username-settings-title">Nom d’utilisateur</h2>
+          <h2 id="username-settings-title">{t("account.username")}</h2>
           <p className="settings-section-intro">
-            Le dossier personnel sera renommé en même temps, sans déplacer son contenu.
+            {t("account.renameHint")}
           </p>
           <form onSubmit={(event) => void submitUsername(event)}>
-            <label htmlFor="settings-username">Nom d’utilisateur</label>
+            <label htmlFor="settings-username">{t("account.username")}</label>
             <input
               id="settings-username"
               name="username"
@@ -514,7 +502,7 @@ function AccountSettingsPage({
               required
             />
             <p className="field-hint">
-              3–32 caractères : lettres, chiffres, tiret ou tiret bas.
+              {t("account.usernameHint")}
             </p>
             <p className="form-message error-message" role="alert">
               {usernameError}
@@ -525,18 +513,18 @@ function AccountSettingsPage({
               </p>
             )}
             <button type="submit" disabled={usernameSubmitting || username === user.username}>
-              {usernameSubmitting ? "Enregistrement…" : "Mettre à jour le nom"}
+              {usernameSubmitting ? t("credentials.submitting") : t("account.updateName")}
             </button>
           </form>
         </section>
 
         <section className="settings-card" aria-labelledby="password-settings-title">
-          <h2 id="password-settings-title">Mot de passe</h2>
+          <h2 id="password-settings-title">{t("account.passwordTitle")}</h2>
           <p className="settings-section-intro">
-            Toutes tes sessions seront fermées après la modification.
+            {t("account.passwordHint")}
           </p>
           <form onSubmit={(event) => void submitPassword(event)}>
-            <label htmlFor="settings-current-password">Mot de passe actuel</label>
+            <label htmlFor="settings-current-password">{t("account.currentPassword")}</label>
             <input
               id="settings-current-password"
               name="current-password"
@@ -544,7 +532,7 @@ function AccountSettingsPage({
               autoComplete="current-password"
               required
             />
-            <label htmlFor="settings-new-password">Nouveau mot de passe</label>
+            <label htmlFor="settings-new-password">{t("credentials.newPassword")}</label>
             <input
               id="settings-new-password"
               name="new-password"
@@ -553,7 +541,7 @@ function AccountSettingsPage({
               autoComplete="new-password"
               required
             />
-            <label htmlFor="settings-password-confirmation">Confirmer le mot de passe</label>
+            <label htmlFor="settings-password-confirmation">{t("credentials.confirmPassword")}</label>
             <input
               id="settings-password-confirmation"
               name="password-confirmation"
@@ -566,7 +554,7 @@ function AccountSettingsPage({
               {passwordError}
             </p>
             <button type="submit" disabled={passwordSubmitting}>
-              {passwordSubmitting ? "Modification…" : "Modifier le mot de passe"}
+              {passwordSubmitting ? t("common.processing") : t("account.updatePassword")}
             </button>
           </form>
         </section>
@@ -576,26 +564,27 @@ function AccountSettingsPage({
 }
 
 function StorageCard({ storage }: { storage: StorageUsage | null }) {
+  const { formatBytes, t } = useI18n();
   if (storage === null) {
     return <div className="storage-card storage-card-loading" aria-hidden="true" />;
   }
   const percent =
     storage.total === 0 ? 0 : Math.min((storage.used / storage.total) * 100, 100);
   return (
-    <div className="storage-card" role="group" aria-label="Utilisation du stockage">
+    <div className="storage-card" role="group" aria-label={t("storage.label")}>
       <div className="storage-copy">
-        <span>{formatBytes(storage.used)} utilisés</span>
-        <strong>{formatBytes(storage.available)} disponibles</strong>
+        <span>{t("storage.used", { value: formatBytes(storage.used) })}</span>
+        <strong>{t("storage.available", { value: formatBytes(storage.available) })}</strong>
       </div>
       <progress
         className="storage-track"
         max={100}
         value={percent}
-        aria-label={`${percent.toFixed(0)} % du stockage utilisé`}
+        aria-label={t("storage.percent", { value: percent.toFixed(0) })}
       >
         {percent.toFixed(0)} %
       </progress>
-      <span className="storage-total">Capacité totale : {formatBytes(storage.total)}</span>
+      <span className="storage-total">{t("storage.total", { value: formatBytes(storage.total) })}</span>
     </div>
   );
 }
@@ -609,6 +598,7 @@ function FilesWorkspace({
   onSessionExpired: () => void;
   revision: number;
 }) {
+  const { t } = useI18n();
   const [activeView, setActiveView] = useState<"files" | "trash" | "downloads">("files");
   const [storage, setStorage] = useState<StorageUsage | null>(null);
 
@@ -616,32 +606,32 @@ function FilesWorkspace({
     <section className="files-workspace" aria-labelledby="files-page-title">
       <header className="files-page-header">
         <div>
-          <p className="eyebrow">Espace personnel</p>
-          <h1 id="files-page-title">Mes fichiers</h1>
+          <p className="eyebrow">{t("files.personalSpace")}</p>
+          <h1 id="files-page-title">{t("dashboard.files")}</h1>
         </div>
         <StorageCard storage={storage} />
       </header>
-      <div className="file-view-tabs" role="group" aria-label="Vues de l’espace personnel">
+      <div className="file-view-tabs" role="group" aria-label={t("files.views")}>
         <button
           type="button"
           aria-pressed={activeView === "files"}
           onClick={() => setActiveView("files")}
         >
-          Mes fichiers
+          {t("dashboard.files")}
         </button>
         <button
           type="button"
           aria-pressed={activeView === "trash"}
           onClick={() => setActiveView("trash")}
         >
-          Corbeille
+          {t("files.trash")}
         </button>
         <button
           type="button"
           aria-pressed={activeView === "downloads"}
           onClick={() => setActiveView("downloads")}
         >
-          Mes téléchargements
+          {t("dashboard.downloads")}
         </button>
       </div>
       {activeView === "files" ? (
@@ -681,6 +671,8 @@ function Dashboard({
   onOpenLegal: (document: LegalDocument) => void;
   onSessionExpired: () => void;
 }) {
+  const feedback = useFeedback();
+  const { setLocale, t } = useI18n();
   const [view, setView] = useState<"files" | "settings" | AdminView>("files");
   const [filesRevision, setFilesRevision] = useState(0);
   const [filesHomeKey, setFilesHomeKey] = useState(0);
@@ -694,29 +686,41 @@ function Dashboard({
     setFilesHomeKey((value) => value + 1);
   }
 
+  async function changeLocale(locale: Locale) {
+    try {
+      onUserChanged(await api.changeLocale(locale));
+    } catch {
+      setLocale(user.preferred_locale ?? "fr");
+      feedback.toast({ tone: "error", message: t("language.saveFailed") });
+    }
+  }
+
   return (
     <main className="app-shell">
       <a className="skip-link" href="#dashboard-content">
-        Aller au contenu principal
+        {t("dashboard.skip")}
       </a>
       <header className="app-header">
         <button
           type="button"
           className="wordmark"
           onClick={openFilesHome}
-          aria-label="Ouvrir Mes fichiers"
+          aria-label={t("dashboard.openFiles")}
         >
           <BrandMark />
           <span>World of Seeds</span>
           <span className="version-badge">v{APP_VERSION}</span>
         </button>
-        <AccountMenu
+        <div className="header-actions">
+          <LanguageSelector onChange={changeLocale} />
+          <AccountMenu
           user={user}
           onOpenAdmin={() => setView("admin-users")}
           onOpenSettings={() => setView("settings")}
           onLogout={onLogout}
           onSessionExpired={onSessionExpired}
-        />
+          />
+        </div>
       </header>
       <div id="dashboard-content" className="dashboard-content" tabIndex={-1}>
         {view === "settings" ? (
@@ -775,19 +779,20 @@ function Dashboard({
 }
 
 function UnavailableScreen({ onRetry }: { onRetry: () => void }) {
+  const { t } = useI18n();
   return (
     <main className="centered-page">
       <section className="credential-card" aria-labelledby="unavailable-title">
         <BrandMark />
-        <p className="eyebrow">Service indisponible</p>
+        <p className="eyebrow">{t("unavailable.eyebrow")}</p>
         <h1 id="unavailable-title" className="compact-title">
-          Connexion impossible
+          {t("unavailable.title")}
         </h1>
         <p className="form-intro">
-          Le serveur ou la base de données ne répond pas. Aucun identifiant n’a été refusé.
+          {t("unavailable.message")}
         </p>
         <button type="button" onClick={onRetry}>
-          Réessayer
+          {t("common.retry")}
         </button>
       </section>
     </main>
@@ -795,6 +800,7 @@ function UnavailableScreen({ onRetry }: { onRetry: () => void }) {
 }
 
 function AppContent() {
+  const { setLocale, t } = useI18n();
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
   const [legalDocument, setLegalDocument] = useState<LegalDocument | null>(null);
   const handleSessionExpired = useCallback(() => {
@@ -820,6 +826,10 @@ function AppContent() {
     loadSession();
   }, [loadSession]);
 
+  useEffect(() => {
+    if (auth.status === "authenticated") setLocale(auth.user.preferred_locale ?? "fr");
+  }, [auth, setLocale]);
+
   async function logout() {
     await api.logout();
     clearFilePathFromUrl();
@@ -839,7 +849,7 @@ function AppContent() {
   if (auth.status === "loading") {
     return (
       <main className="loading-page" aria-live="polite" aria-busy="true">
-        Ouverture de l’espace privé…
+        {t("app.opening")}
       </main>
     );
   }
@@ -876,8 +886,10 @@ function AppContent() {
 
 export function App() {
   return (
-    <FeedbackProvider>
-      <AppContent />
-    </FeedbackProvider>
+    <I18nProvider>
+      <FeedbackProvider>
+        <AppContent />
+      </FeedbackProvider>
+    </I18nProvider>
   );
 }

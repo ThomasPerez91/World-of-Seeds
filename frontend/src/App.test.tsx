@@ -14,6 +14,51 @@ function response(body: unknown, status: number): Response {
 }
 
 describe("App", () => {
+  it("restaure la langue anglaise du compte sur les espaces utilisateur et admin", async () => {
+    const currentUser = {
+      id: "bc68aa7c-d753-4db7-8698-acf8d09045a3",
+      username: "thomas",
+      is_admin: true,
+      is_active: true,
+      must_change_credentials: false,
+      preferred_locale: "en",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/v1/auth/me") return response({ user: currentUser }, 200);
+        if (url.startsWith("/api/v1/files")) {
+          return response(
+            {
+              path: "",
+              breadcrumbs: [{ label: "Mes fichiers", path: "" }],
+              entries: [],
+              storage: { total: 2048, used: 1024, available: 1024 },
+              truncated: false,
+            },
+            200,
+          );
+        }
+        if (url === "/api/v1/trash") return response({ entries: [], truncated: false }, 200);
+        if (url === "/api/v1/admin/users") return response([currentUser], 200);
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    const user = userEvent.setup();
+    const view = render(<App />);
+    await screen.findByRole("heading", { name: "My files" });
+    expect(screen.getByText("1 KB used")).toBeTruthy();
+    expect(document.documentElement.lang).toBe("en");
+
+    await user.click(screen.getByRole("button", { name: "Open account menu" }));
+    await user.click(screen.getByRole("button", { name: "Administration" }));
+    await screen.findByRole("heading", { name: "User accounts" });
+    expect(screen.getByRole("button", { name: "Generate user" })).toBeTruthy();
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
   it("distingue une panne serveur d’un visiteur non authentifié", async () => {
     const user = userEvent.setup();
     const fetchMock = vi

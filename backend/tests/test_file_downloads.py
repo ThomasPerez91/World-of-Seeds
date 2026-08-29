@@ -457,7 +457,11 @@ async def test_download_reports_metadata_permission_errors_as_blocked(
     )
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "Path is blocked"
+    assert response.json()["detail"] == {
+        "code": "file_path_blocked",
+        "message": "Path is blocked",
+        "field": None,
+    }
 
 
 @pytest.mark.asyncio

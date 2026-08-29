@@ -4,6 +4,7 @@ export interface User {
   is_admin: boolean;
   is_active: boolean;
   must_change_credentials: boolean;
+  preferred_locale?: "fr" | "en";
 }
 
 interface AuthResponse {
@@ -423,18 +424,14 @@ export interface AdminReconciliationReport {
 
 interface BusinessErrorDetail {
   code: string;
-  message: string;
-  field: string | null;
+  message?: string;
+  field?: string | null;
 }
 
 function isBusinessErrorDetail(value: unknown): value is BusinessErrorDetail {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<BusinessErrorDetail>;
-  return (
-    typeof candidate.code === "string" &&
-    typeof candidate.message === "string" &&
-    (typeof candidate.field === "string" || candidate.field === null)
-  );
+  return typeof candidate.code === "string";
 }
 
 export class ApiError extends Error {
@@ -493,9 +490,9 @@ async function requestAt<T>(prefix: string, path: string, init: RequestInit = {}
       if (typeof body.detail === "string") {
         message = body.detail;
       } else if (isBusinessErrorDetail(body.detail)) {
-        message = body.detail.message;
+        message = body.detail.message ?? message;
         code = body.detail.code;
-        field = body.detail.field;
+        field = body.detail.field ?? null;
       }
     } catch {
       // Keep the generic message for non-JSON failures.
@@ -566,6 +563,14 @@ export const api = {
         new_password: newPassword,
       }),
     });
+  },
+
+  async changeLocale(preferredLocale: "fr" | "en"): Promise<User> {
+    const response = await request<AuthResponse>("/auth/locale", {
+      method: "PATCH",
+      body: JSON.stringify({ preferred_locale: preferredLocale }),
+    });
+    return response.user;
   },
 
   listUsers(): Promise<User[]> {
