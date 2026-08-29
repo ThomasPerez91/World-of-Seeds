@@ -118,7 +118,7 @@ async def _request_batch(
     identities: list[LoadIdentity],
     cookie_name: str,
 ) -> tuple[list[float], int]:
-    async def exercise(identity: LoadIdentity) -> tuple[float, int]:
+    async def exercise(identity: LoadIdentity) -> tuple[float, int, int, bool]:
         started = time.perf_counter()
         headers = {"Cookie": f"{cookie_name}={identity.session_token}"}
         listing = await client.get("/api/v2/torrents", params={"limit": 1}, headers=headers)
@@ -139,12 +139,60 @@ async def _request_batch(
             await asyncio.sleep(0.05 * retries)
         if listing.status_code != 200 or manifest.status_code != 200:
             raise RuntimeError("authenticated API load request failed")
-        if download.status_code != 206 or download.content != CONTENT[:1]:
-            raise RuntimeError(f"concurrent Range download failed: HTTP {download.status_code}")
-        return time.perf_counter() - started, retries
+        return (
+            time.perf_counter() - started,
+            retries,
+            download.status_code,
+            download.content == CONTENT[:1],
+        )
 
     measured = await asyncio.gather(*(exercise(identity) for identity in identities))
-    return [elapsed for elapsed, _ in measured], sum(retries for _, retries in measured)
+    failures: dict[int, int] = {}
+    for _, _, status_code, content_matches in measured:
+        if status_code != 206 or not content_matches:
+            failures[status_code] = failures.get(status_code, 0) + 1
+    if failures:
+        snapshot = await _fixture_snapshot()
+        raise RuntimeError(
+            "concurrent Range download failed: "
+            f"scale={len(identities)}, statuses={dict(sorted(failures.items()))}, "
+            f"fixture={snapshot}"
+        )
+    return (
+        [elapsed for elapsed, _, _, _ in measured],
+        sum(retries for _, retries, _, _ in measured),
+    )
+
+
+async def _fixture_snapshot() -> dict[str, object]:
+    """Return only aggregate fixture state for bounded CI failure diagnostics."""
+    async with session_factory() as session:
+        managed_state = await session.scalar(
+            select(ManagedTorrent.state).where(ManagedTorrent.name == PREFIX)
+        )
+        request_states = (
+            await session.execute(
+                select(TorrentRequest.state, func.count())
+                .join(ManagedTorrent)
+                .where(ManagedTorrent.name == PREFIX)
+                .group_by(TorrentRequest.state)
+            )
+        ).all()
+        file_count = await session.scalar(
+            select(func.count())
+            .select_from(TorrentFile)
+            .join(ManagedTorrent)
+            .where(ManagedTorrent.name == PREFIX)
+        )
+        await session.rollback()
+    return {
+        "managed_state": managed_state.value if managed_state is not None else "missing",
+        "request_states": {
+            state.value: int(count)
+            for state, count in sorted(request_states, key=lambda row: row[0])
+        },
+        "file_count": int(file_count or 0),
+    }
 
 
 async def _database_snapshot() -> dict[str, int]:
