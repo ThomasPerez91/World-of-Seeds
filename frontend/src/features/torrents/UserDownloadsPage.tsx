@@ -11,10 +11,11 @@ import {
 import { useFeedback } from "../../components/Feedback";
 import { DeleteIcon, DownloadIcon, RefreshIcon } from "../../components/icons";
 import { Notice, type NoticeTone } from "../../components/Notice";
-import { formatBytes } from "../../utils/format";
+import { useI18n, type MessageKey } from "../../i18n";
 import {
   pickDownloadDirectory,
   RecursiveDownloadController,
+  type RecursiveTransferErrorCode,
   type RecursiveTransferProgress,
   supportsRecursiveDirectoryDownload,
 } from "./recursiveDownload";
@@ -22,31 +23,28 @@ import {
 const PAGE_SIZE = 10;
 const FALLBACK_PAGE_SIZE = 50;
 
-const stateLabels: Record<TorrentRequestV2State, string> = {
-  requested: "Demandé",
-  active: "En cours",
-  ready: "Disponible",
-  cancelled: "Annulé",
-  expired: "Expiré",
-  error: "Erreur",
+const stateLabels: Record<TorrentRequestV2State, MessageKey> = {
+  requested: "downloads.requested",
+  active: "downloads.active",
+  ready: "downloads.ready",
+  cancelled: "downloads.cancelled",
+  expired: "downloads.expired",
+  error: "downloads.error",
 };
 
-const errorLabels: Record<string, string> = {
-  torrent_failed: "Le téléchargement nécessite une intervention.",
+const transferErrorKeys: Record<RecursiveTransferErrorCode, MessageKey> = {
+  manifest_incomplete: "downloads.manifestIncomplete",
+  manifest_changed: "downloads.manifestChanged",
+  received_file_too_large: "downloads.receivedFileInvalid",
+  received_file_incomplete: "downloads.receivedFileInvalid",
+  local_file_size_invalid: "downloads.localFileInvalid",
+  manifest_path_invalid: "downloads.manifestPathInvalid",
+  local_disk_full: "downloads.localDiskFull",
+  local_write_denied: "downloads.localWriteDenied",
+  local_destination_missing: "downloads.localDestinationMissing",
+  download_interrupted: "downloads.interrupted",
+  local_transfer_failed: "downloads.failed",
 };
-
-function uploadError(error: unknown): string {
-  if (!(error instanceof ApiError)) return "Le torrent n’a pas pu être envoyé.";
-  if ([409, 413, 422, 503, 507].includes(error.status)) return error.message;
-  return "Le torrent n’a pas pu être envoyé. Réessaie dans quelques instants.";
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("fr-FR", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
 
 function TorrentRow({
   torrent,
@@ -63,42 +61,43 @@ function TorrentRow({
   cancelBusy: boolean;
   downloadBusy: boolean;
 }) {
+  const { formatBytes, formatDate, t } = useI18n();
   const percent = Math.round(torrent.progress * 100);
   const error = torrent.error_code === null
     ? null
-    : errorLabels[torrent.error_code] ?? "Le téléchargement est en erreur.";
+    : t(torrent.error_code === "torrent_failed" ? "downloads.needsAttention" : "downloads.stateError");
   return (
     <tr>
-      <td className="torrent-name-cell" data-label="Nom">
+      <td className="torrent-name-cell" data-label={t("downloads.name")}>
         <span title={torrent.name}>{torrent.name}</span>
         {error !== null && <small role="alert">{error}</small>}
       </td>
-      <td data-label="État">
+      <td data-label={t("downloads.status")}>
         <span className={`torrent-primary-state ${torrent.state}`}>
-          {stateLabels[torrent.state]}
+          {t(stateLabels[torrent.state])}
         </span>
       </td>
-      <td className="torrent-size-cell" data-label="Taille">{formatBytes(torrent.total_size)}</td>
-      <td className="torrent-progress-cell" data-label="Progression">
+      <td className="torrent-size-cell" data-label={t("files.size")}>{formatBytes(torrent.total_size)}</td>
+      <td className="torrent-progress-cell" data-label={t("downloads.progress")}>
         <div>
-          <progress value={torrent.progress} max={1} aria-label={`Progression de ${torrent.name}`}>
+          <progress value={torrent.progress} max={1} aria-label={t("downloads.progressFor", { name: torrent.name })}>
             {percent} %
           </progress>
           <strong>{percent} %</strong>
         </div>
       </td>
-      <td className="torrent-date-cell" data-label="Mise à jour">{formatDate(torrent.updated_at)}</td>
-      <td className="torrent-row-actions" data-label="Actions">
+      <td className="torrent-date-cell" data-label={t("downloads.updated")}>{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</td>
+      <td className="torrent-row-actions" data-label={t("files.actions")}>
         <div className="torrent-row-action-group">
           {torrent.state === "ready" ? (
             <button type="button" disabled={downloadBusy} onClick={onDownload}>
               <DownloadIcon />
-              <span>Télécharger</span>
+              <span>{t("common.download")}</span>
             </button>
           ) : (
             <button type="button" className="secondary-button" onClick={onRefresh}>
               <RefreshIcon />
-              <span>Actualiser</span>
+              <span>{t("common.refresh")}</span>
             </button>
           )}
           {!(["cancelled", "expired"] as TorrentRequestV2State[]).includes(torrent.state) && (
@@ -107,10 +106,10 @@ function TorrentRow({
               className="danger-button"
               disabled={cancelBusy}
               onClick={onCancel}
-              aria-label={`Annuler la demande ${torrent.name}`}
+              aria-label={t("downloads.cancelNamed", { name: torrent.name })}
             >
               <DeleteIcon />
-              <span>{cancelBusy ? "Annulation…" : "Annuler"}</span>
+              <span>{cancelBusy ? t("downloads.cancelling") : t("common.cancel")}</span>
             </button>
           )}
         </div>
@@ -121,6 +120,7 @@ function TorrentRow({
 
 export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () => void }) {
   const feedback = useFeedback();
+  const { apiError, formatBytes, t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const [torrents, setTorrents] = useState<TorrentRequestV2[]>([]);
   const [total, setTotal] = useState(0);
@@ -163,13 +163,13 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       }
       setNotice({
         tone: "error",
-        message: caught instanceof ApiError ? caught.message : "Le suivi est indisponible.",
+        message: apiError(caught, "downloads.trackingFailed"),
       });
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [onSessionExpired]);
+  }, [apiError, onSessionExpired]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -216,17 +216,16 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
   async function submit(file: File | undefined) {
     if (file === undefined) return;
     if (!file.name.toLowerCase().endsWith(".torrent")) {
-      setNotice({ tone: "warning", message: "Sélectionne un fichier portant l’extension .torrent." });
+      setNotice({ tone: "warning", message: t("downloads.invalidFile") });
       return;
     }
     setUploading(true);
-    setNotice({ tone: "progress", message: "Validation et enregistrement de la demande…" });
+    setNotice({ tone: "progress", message: t("downloads.validating") });
     try {
       const result = await api.createTorrentRequestV2(file);
-      const repeated = result.created ? "a été ajouté" : "était déjà présent";
       setNotice({
         tone: result.storage_pressure === "warning" ? "warning" : "success",
-        message: `« ${result.name} » ${repeated}.`,
+        message: t(result.created ? "downloads.added" : "downloads.duplicate", { name: result.name }),
       });
       setOffset(0);
       await load(0);
@@ -235,7 +234,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
         onSessionExpired();
         return;
       }
-      setNotice({ tone: "error", message: uploadError(caught) });
+      setNotice({ tone: "error", message: apiError(caught, "downloads.uploadRetry") });
     } finally {
       setUploading(false);
       if (inputRef.current !== null) inputRef.current.value = "";
@@ -254,14 +253,14 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
 
   async function startRecursiveDownload(torrent: TorrentRequestV2) {
     if (!supportsRecursiveDirectoryDownload()) {
-      setNotice({ tone: "progress", message: "Préparation du mode compatible…" });
+      setNotice({ tone: "progress", message: t("downloads.compatPreparing") });
       try {
         const snapshot = await api.getTorrentDownloadSnapshotV2(torrent.id);
         setFallback({ torrentId: torrent.id, name: torrent.name, snapshot });
         setFallbackOffset(0);
         setNotice({
           tone: "warning",
-          message: "Le mode compatible propose les fichiers séparément et, si sa taille le permet, un ZIP streamé.",
+          message: t("downloads.compatHint"),
         });
       } catch (caught) {
         if (caught instanceof ApiError && caught.status === 401) {
@@ -270,12 +269,12 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
         }
         setNotice({
           tone: "error",
-          message: caught instanceof Error ? caught.message : "Le manifeste est indisponible.",
+          message: apiError(caught, "downloads.manifestFailed"),
         });
       }
       return;
     }
-    setNotice({ tone: "progress", message: `Préparation de « ${torrent.name} »…` });
+    setNotice({ tone: "progress", message: t("downloads.preparing", { name: torrent.name }) });
     try {
       const snapshotPromise = api.getTorrentDownloadManifestPageV2(torrent.id);
       const directoryPromise = pickDownloadDirectory();
@@ -288,9 +287,12 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
           fileCount: snapshot.file_count,
         });
         if (progress.status === "completed") {
-          setNotice({ tone: "success", message: `« ${torrent.name} » a été téléchargé.` });
+          setNotice({ tone: "success", message: t("downloads.completed", { name: torrent.name }) });
         } else if (progress.status === "error") {
-          setNotice({ tone: "error", message: progress.error ?? "Le téléchargement a échoué." });
+          setNotice({
+            tone: "error",
+            message: progress.error === null ? t("downloads.failed") : t(transferErrorKeys[progress.error]),
+          });
         }
       };
       const controller = new RecursiveDownloadController({
@@ -321,7 +323,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       }
       setNotice({
         tone: "error",
-        message: caught instanceof Error ? caught.message : "Le téléchargement a échoué.",
+        message: apiError(caught, "downloads.failed"),
       });
     }
   }
@@ -333,9 +335,9 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
 
   async function cancelTorrentRequest(torrent: TorrentRequestV2) {
     const confirmed = await feedback.confirm({
-      title: "Annuler cette demande ?",
-      message: `« ${torrent.name} » disparaîtra de tes téléchargements actifs. Le contenu partagé sera conservé pendant la rétention prévue.`,
-      confirmText: "Annuler la demande",
+      title: t("downloads.cancelTitle"),
+      message: t("downloads.cancelMessage", { name: torrent.name }),
+      confirmText: t("downloads.cancel"),
       destructive: true,
     });
     if (!confirmed) return;
@@ -344,7 +346,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       await api.cancelTorrentRequestV2(torrent.id);
       feedback.toast({
         tone: "success",
-        message: `La demande « ${torrent.name} » a été annulée.`,
+        message: t("downloads.cancelledNamed", { name: torrent.name }),
       });
       if (fallback?.torrentId === torrent.id) setFallback(null);
       await load(offset);
@@ -355,7 +357,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       }
       feedback.toast({
         tone: "error",
-        message: caught instanceof ApiError ? caught.message : "La demande n’a pas pu être annulée.",
+        message: apiError(caught, "downloads.cancelFailed"),
       });
     } finally {
       setCancellingId(null);
@@ -369,14 +371,14 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
     <section className="user-downloads" aria-labelledby="user-downloads-title">
       <header className="user-downloads-header">
         <div>
-          <p className="eyebrow">Espace personnel</p>
-          <h2 id="user-downloads-title">Mes téléchargements</h2>
-          <p>Ajoute un fichier .torrent C411 et consulte son état durable.</p>
+          <p className="eyebrow">{t("files.personalSpace")}</p>
+          <h2 id="user-downloads-title">{t("downloads.title")}</h2>
+          <p>{t("downloads.intro")}</p>
         </div>
         <div className="torrent-page-actions">
           <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()}>
             <DownloadIcon />
-            <span>{uploading ? "Ajout…" : "Ajouter un torrent"}</span>
+            <span>{uploading ? t("downloads.adding") : t("downloads.upload")}</span>
           </button>
           <button
             type="button"
@@ -385,7 +387,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
             onClick={() => void load(offset)}
           >
             <RefreshIcon className={refreshing ? "rotating" : undefined} />
-            <span>{refreshing ? "Actualisation…" : "Actualiser"}</span>
+            <span>{refreshing ? t("downloads.refreshing") : t("common.refresh")}</span>
           </button>
         </div>
       </header>
@@ -394,7 +396,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
         ref={inputRef}
         className="sr-only"
         type="file"
-        aria-label="Fichier torrent"
+        aria-label={t("downloads.fileLabel")}
         accept=".torrent,application/x-bittorrent"
         onChange={select}
         disabled={uploading}
@@ -410,8 +412,8 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
         onDrop={drop}
       >
         <DownloadIcon />
-        <strong>Dépose ton fichier .torrent ici</strong>
-        <span>La destination et le propriétaire sont déterminés par le serveur.</span>
+        <strong>{t("downloads.dropTitle")}</strong>
+        <span>{t("downloads.dropHint")}</span>
       </div>
 
       {notice !== null && (
@@ -424,36 +426,36 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       )}
 
       {transfer !== null && (
-        <section className={`recursive-transfer ${transfer.status}`} aria-label="Téléchargement local">
+        <section className={`recursive-transfer ${transfer.status}`} aria-label={t("downloads.local")}>
           <div>
             <strong title={transfer.name}>{transfer.name}</strong>
             <span aria-live="polite">
-              {transfer.completedFiles}/{transfer.fileCount} fichiers · {formatBytes(transfer.downloadedBytes)} sur {formatBytes(transfer.totalBytes)}
+              {t("downloads.files", { completed: transfer.completedFiles, total: transfer.fileCount, downloaded: formatBytes(transfer.downloadedBytes), size: formatBytes(transfer.totalBytes) })}
             </span>
           </div>
           <progress
             value={transfer.downloadedBytes}
             max={Math.max(1, transfer.totalBytes)}
-            aria-label={`Téléchargement local de ${transfer.name}`}
+            aria-label={t("downloads.localNamed", { name: transfer.name })}
           />
           <div className="recursive-transfer-actions">
             {transfer.status === "running" && (
               <button type="button" className="secondary-button" onClick={() => controllerRef.current?.pause()}>
-                Pause
+                {t("common.pause")}
               </button>
             )}
             {(transfer.status === "paused" || transfer.status === "error") && (
               <button type="button" onClick={() => void controllerRef.current?.resume()}>
-                Reprendre
+                {t("common.resume")}
               </button>
             )}
             {transfer.status === "completed" || transfer.status === "cancelled" ? (
               <button type="button" className="secondary-button" onClick={() => setTransfer(null)}>
-                Fermer
+                {t("common.close")}
               </button>
             ) : (
               <button type="button" className="danger-button" onClick={cancelTransfer}>
-                Annuler
+                {t("common.cancel")}
               </button>
             )}
           </div>
@@ -465,10 +467,10 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
           <header>
             <div>
               <strong id="download-fallback-title" title={fallback.name}>{fallback.name}</strong>
-              <span>{fallback.snapshot.file_count} fichier{fallback.snapshot.file_count > 1 ? "s" : ""}</span>
+              <span>{t("downloads.files", { completed: 0, total: fallback.snapshot.file_count, downloaded: formatBytes(0), size: formatBytes(fallback.snapshot.total_size) })}</span>
             </div>
             <button type="button" className="secondary-button" onClick={() => setFallback(null)}>
-              Fermer
+              {t("common.close")}
             </button>
           </header>
           {fallback.snapshot.archive_available && (
@@ -478,7 +480,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
               download={`${fallback.name}.zip`}
             >
               <DownloadIcon />
-              Télécharger le petit dossier en ZIP
+              {t("downloads.archive")}
             </a>
           )}
           <ul>
@@ -496,20 +498,20 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
                     )}
                     download={file.relative_path.split("/").at(-1)}
                   >
-                    Télécharger
+                    {t("common.download")}
                   </a>
                 </li>
               ))}
           </ul>
           {fallback.snapshot.file_count > FALLBACK_PAGE_SIZE && (
-            <nav aria-label="Pagination des fichiers compatibles">
+            <nav aria-label={t("downloads.compatPagination")}>
               <button
                 type="button"
                 className="secondary-button"
                 disabled={fallbackOffset === 0}
                 onClick={() => setFallbackOffset(Math.max(0, fallbackOffset - FALLBACK_PAGE_SIZE))}
               >
-                Précédent
+                {t("common.previous")}
               </button>
               <span>{Math.floor(fallbackOffset / FALLBACK_PAGE_SIZE) + 1} / {Math.ceil(fallback.snapshot.file_count / FALLBACK_PAGE_SIZE)}</span>
               <button
@@ -518,7 +520,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
                 disabled={fallbackOffset + FALLBACK_PAGE_SIZE >= fallback.snapshot.file_count}
                 onClick={() => setFallbackOffset(fallbackOffset + FALLBACK_PAGE_SIZE)}
               >
-                Suivant
+                {t("common.next")}
               </button>
             </nav>
           )}
@@ -526,22 +528,22 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       )}
 
       {loading ? (
-        <p className="torrent-list-state" role="status">Lecture des téléchargements…</p>
+        <p className="torrent-list-state" role="status">{t("downloads.reading")}</p>
       ) : torrents.length === 0 ? (
-        <p className="torrent-list-state">Aucun téléchargement pour le moment.</p>
+        <p className="torrent-list-state">{t("downloads.empty")}</p>
       ) : (
         <>
           <div className="torrent-table-wrap" aria-busy={refreshing}>
             <table className="torrent-table">
-              <caption className="sr-only">Demandes de téléchargement</caption>
+              <caption className="sr-only">{t("downloads.requests")}</caption>
               <thead>
                 <tr>
-                  <th scope="col">Nom</th>
-                  <th scope="col">État</th>
-                  <th scope="col">Taille</th>
-                  <th scope="col">Progression</th>
-                  <th scope="col">Mise à jour</th>
-                  <th scope="col">Actions</th>
+                  <th scope="col">{t("downloads.name")}</th>
+                  <th scope="col">{t("downloads.status")}</th>
+                  <th scope="col">{t("files.size")}</th>
+                  <th scope="col">{t("downloads.progress")}</th>
+                  <th scope="col">{t("downloads.updated")}</th>
+                  <th scope="col">{t("files.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -559,23 +561,23 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
               </tbody>
             </table>
           </div>
-          <nav className="torrent-pagination" aria-label="Pagination des téléchargements">
+          <nav className="torrent-pagination" aria-label={t("downloads.pagination")}>
             <button
               type="button"
               className="secondary-button"
               disabled={offset === 0 || refreshing}
               onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
             >
-              Précédent
+              {t("common.previous")}
             </button>
-            <span aria-live="polite">Page {page} sur {pageCount} · {total} demande{total > 1 ? "s" : ""}</span>
+            <span aria-live="polite">{t(total === 1 ? "downloads.pageOne" : "downloads.pageMany", { page, pages: pageCount, total })}</span>
             <button
               type="button"
               className="secondary-button"
               disabled={offset + PAGE_SIZE >= total || refreshing}
               onClick={() => setOffset(offset + PAGE_SIZE)}
             >
-              Suivant
+              {t("common.next")}
             </button>
           </nav>
         </>

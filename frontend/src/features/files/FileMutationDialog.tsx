@@ -3,6 +3,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { api, ApiError, type DirectoryListing, type FileEntry } from "../../api/client";
 import { ConfirmDialog, useFeedback } from "../../components/Feedback";
 import { FolderIcon } from "../../components/icons";
+import { useI18n, type MessageKey } from "../../i18n";
 import { splitDisplayName } from "../../utils/files";
 import { FileDialog } from "./FileDialog";
 
@@ -17,28 +18,28 @@ interface FileMutationDialogProps {
   onSessionExpired: () => void;
 }
 
-function mutationErrorMessage(error: unknown): string {
-  if (!(error instanceof ApiError)) return "L’opération n’a pas pu être effectuée.";
+function mutationErrorMessage(error: unknown, t: (key: MessageKey) => string): string {
+  if (!(error instanceof ApiError)) return t("files.operationFailed");
   return (
     {
-      400: "Cette destination ou ce nom n’est pas valide.",
-      403: "Cet élément est protégé ou bloqué.",
-      404: "L’élément ou le dossier de destination n’existe plus.",
-      409: "Un élément portant ce nom existe déjà à destination.",
-      500: "L’opération n’a pas pu être vérifiée. Actualise le dossier avant de réessayer.",
-      503: "Le stockage est temporairement indisponible.",
-    }[error.status] ?? "L’opération n’a pas pu être effectuée."
+      400: t("files.invalidDestination"),
+      403: t("files.protected"),
+      404: t("files.targetMissing"),
+      409: t("files.destinationExists"),
+      500: t("files.operationUnverified"),
+      503: t("files.storageUnavailable"),
+    }[error.status] ?? t("files.operationFailed")
   );
 }
 
-function listingErrorMessage(error: unknown): string {
-  if (!(error instanceof ApiError)) return "Impossible d’ouvrir ce dossier.";
+function listingErrorMessage(error: unknown, t: (key: MessageKey) => string): string {
+  if (!(error instanceof ApiError)) return t("files.openFailed");
   return (
     {
-      400: "Ce chemin de destination est invalide.",
-      403: "Ce dossier est bloqué.",
-      404: "Ce dossier n’existe plus.",
-    }[error.status] ?? "Impossible d’ouvrir ce dossier."
+      400: t("files.destinationPathInvalid"),
+      403: t("files.destinationBlocked"),
+      404: t("files.missingFolder"),
+    }[error.status] ?? t("files.openFailed")
   );
 }
 
@@ -49,6 +50,7 @@ function RenameDialog({
   onSessionExpired,
 }: Omit<FileMutationDialogProps, "action" | "currentDirectory">) {
   const feedback = useFeedback();
+  const { t } = useI18n();
   const displayed = splitDisplayName(entry);
   const [name, setName] = useState(displayed.basename);
   const [submitting, setSubmitting] = useState(false);
@@ -58,13 +60,13 @@ function RenameDialog({
     setSubmitting(true);
     try {
       const result = await api.renameFile(entry.path, name);
-      onCompleted(`« ${entry.name} » a été renommé en « ${result.name} ».`);
+      onCompleted(t("files.renamed", { oldName: entry.name, name: result.name }));
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      feedback.toast({ tone: "error", message: mutationErrorMessage(caught) });
+      feedback.toast({ tone: "error", message: mutationErrorMessage(caught, t) });
     } finally {
       setSubmitting(false);
     }
@@ -72,13 +74,13 @@ function RenameDialog({
 
   return (
     <FileDialog
-      title="Renommer l’élément"
-      description="Le changement est immédiat et n’écrase jamais un élément existant."
+      title={t("files.renameTitle")}
+      description={t("files.renameDescription")}
       onClose={onClose}
       closeDisabled={submitting}
     >
       <form className="mutation-form" onSubmit={(event) => void submit(event)}>
-        <label htmlFor="mutation-name">Nouveau nom</label>
+        <label htmlFor="mutation-name">{t("files.newName")}</label>
         <input
           id="mutation-name"
           value={name}
@@ -89,11 +91,11 @@ function RenameDialog({
         />
         {displayed.extension !== "" && (
           <p className="field-hint">
-            L’extension <strong>{displayed.extension}</strong> sera conservée automatiquement.
+            {t("files.extensionPreserved", { extension: displayed.extension })}
           </p>
         )}
         <p className="mutation-warning">
-          Si qBittorrent utilise encore cet élément, son téléchargement peut passer en erreur.
+          {t("files.torrentWarning")}
         </p>
         <div className="dialog-actions">
           <button
@@ -102,13 +104,13 @@ function RenameDialog({
             onClick={onClose}
             disabled={submitting}
           >
-            Annuler
+            {t("common.cancel")}
           </button>
           <button
             type="submit"
             disabled={submitting || name === displayed.basename || name.length === 0}
           >
-            {submitting ? "Renommage…" : "Confirmer le renommage"}
+            {submitting ? t("files.renaming") : t("files.confirmRename")}
           </button>
         </div>
       </form>
@@ -124,6 +126,7 @@ function MoveDialog({
   onSessionExpired,
 }: Omit<FileMutationDialogProps, "action">) {
   const feedback = useFeedback();
+  const { t } = useI18n();
   const [destination, setDestination] = useState(currentDirectory);
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(true);
@@ -144,13 +147,13 @@ function MoveDialog({
           onSessionExpired();
           return;
         }
-        setListingError(listingErrorMessage(caught));
+        setListingError(listingErrorMessage(caught, t));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [destination, onSessionExpired]);
+  }, [destination, onSessionExpired, t]);
 
   const destinationIsSource =
     entry.kind === "directory" &&
@@ -161,13 +164,13 @@ function MoveDialog({
     setSubmitting(true);
     try {
       const result = await api.moveFile(entry.path, destination);
-      onCompleted(`« ${entry.name} » a été déplacé vers « ${result.path} ».`);
+      onCompleted(t("files.moved", { name: entry.name, path: result.path }));
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      feedback.toast({ tone: "error", message: mutationErrorMessage(caught) });
+      feedback.toast({ tone: "error", message: mutationErrorMessage(caught, t) });
     } finally {
       setSubmitting(false);
     }
@@ -175,13 +178,13 @@ function MoveDialog({
 
   return (
     <FileDialog
-      title="Déplacer l’élément"
-      description={`Choisis le nouveau dossier de « ${entry.name} ».`}
+      title={t("files.moveTitle")}
+      description={t("files.moveDescription", { name: entry.name })}
       onClose={onClose}
       closeDisabled={submitting}
     >
       <div className="destination-picker">
-        <nav className="picker-breadcrumbs" aria-label="Dossier de destination">
+        <nav className="picker-breadcrumbs" aria-label={t("files.destinationFolder")}>
           {(listing?.breadcrumbs ?? [{ label: "Mes fichiers", path: "" }]).map(
             (breadcrumb, index, all) => (
               <span key={breadcrumb.path || "root"}>
@@ -190,7 +193,7 @@ function MoveDialog({
                   onClick={() => setDestination(breadcrumb.path)}
                   aria-current={index === all.length - 1 ? "page" : undefined}
                 >
-                  {breadcrumb.label}
+                  {breadcrumb.path === "" ? t("dashboard.files") : breadcrumb.label}
                 </button>
                 {index < all.length - 1 && <span aria-hidden="true">/</span>}
               </span>
@@ -199,7 +202,7 @@ function MoveDialog({
         </nav>
 
         <div className="destination-list" aria-busy={loading}>
-          {loading && <p className="picker-state">Chargement des dossiers…</p>}
+          {loading && <p className="picker-state">{t("files.loadingFolders")}</p>}
           {!loading && listingError !== "" && (
             <p className="picker-state error-message">{listingError}</p>
           )}
@@ -207,7 +210,7 @@ function MoveDialog({
             <>
               {listing.entries.filter(
                 (candidate) => candidate.kind === "directory" && !candidate.blocked,
-              ).length === 0 && <p className="picker-state">Aucun sous-dossier ici.</p>}
+              ).length === 0 && <p className="picker-state">{t("files.noSubfolder")}</p>}
               {listing.entries
                 .filter((candidate) => candidate.kind === "directory" && !candidate.blocked)
                 .map((candidate) => {
@@ -224,7 +227,7 @@ function MoveDialog({
                     >
                       <FolderIcon />
                       <strong>{candidate.name}</strong>
-                      <span>{forbidden ? "Dossier source" : "Ouvrir"}</span>
+                      <span>{forbidden ? t("files.sourceFolder") : t("files.openTitle")}</span>
                     </button>
                   );
                 })}
@@ -233,17 +236,17 @@ function MoveDialog({
         </div>
 
         <div className="selected-destination">
-          <span>Destination sélectionnée</span>
-          <strong>{destination === "" ? "Mes fichiers" : destination}</strong>
+          <span>{t("files.selectedDestination")}</span>
+          <strong>{destination === "" ? t("dashboard.files") : destination}</strong>
         </div>
         <p className="mutation-warning">
-          Si qBittorrent utilise encore cet élément, son téléchargement peut passer en erreur.
+          {t("files.torrentWarning")}
         </p>
         {destinationIsCurrent && (
-          <p className="picker-hint">Cet élément se trouve déjà dans ce dossier.</p>
+          <p className="picker-hint">{t("files.alreadyHere")}</p>
         )}
         {destinationIsSource && (
-          <p className="picker-hint error-message">Un dossier ne peut pas être déplacé en lui-même.</p>
+          <p className="picker-hint error-message">{t("files.moveIntoSelf")}</p>
         )}
         <div className="dialog-actions">
           <button
@@ -252,7 +255,7 @@ function MoveDialog({
             onClick={onClose}
             disabled={submitting}
           >
-            Annuler
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -265,7 +268,7 @@ function MoveDialog({
               destinationIsSource
             }
           >
-            {submitting ? "Déplacement…" : "Déplacer ici"}
+            {submitting ? t("files.moving") : t("files.moveHere")}
           </button>
         </div>
       </div>
@@ -280,13 +283,14 @@ function TrashDialog({
   onSessionExpired,
 }: Omit<FileMutationDialogProps, "action" | "currentDirectory">) {
   const feedback = useFeedback();
+  const { t } = useI18n();
   const [submitting, setSubmitting] = useState(false);
 
   async function trash() {
     setSubmitting(true);
     try {
       await api.trashFile(entry.path);
-      onCompleted(`« ${entry.name} » a été placé dans la corbeille.`);
+      onCompleted(t("files.trashed", { name: entry.name }));
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
@@ -295,14 +299,14 @@ function TrashDialog({
       const message =
         caught instanceof ApiError
           ? {
-              400: "Ce chemin n’est pas valide.",
-              403: "Cet élément est protégé ou bloqué.",
-              404: "L’élément n’existe plus.",
-              409: "L’intégrité de cet élément n’a pas pu être confirmée.",
-              500: "L’opération n’a pas pu être annulée en toute sécurité.",
-              503: "La corbeille est temporairement indisponible.",
-            }[caught.status] ?? "L’élément n’a pas pu être placé dans la corbeille."
-          : "L’élément n’a pas pu être placé dans la corbeille.";
+              400: t("files.invalidPath"),
+              403: t("files.protected"),
+              404: t("files.targetMissing"),
+              409: t("trash.integrityFailed"),
+              500: t("trash.restoreRollbackFailed"),
+              503: t("trash.temporarilyUnavailable"),
+            }[caught.status] ?? t("files.trashFailed")
+          : t("files.trashFailed");
       feedback.toast({ tone: "error", message });
       onClose();
     } finally {
@@ -313,9 +317,9 @@ function TrashDialog({
   return (
     <ConfirmDialog
       options={{
-        title: "Placer dans la corbeille ?",
-        message: `« ${entry.name} » pourra être restauré. Un torrent actif peut passer en erreur.`,
-        confirmText: "Placer dans la corbeille",
+        title: t("files.trashTitle"),
+        message: t("files.trashMessage", { name: entry.name }),
+        confirmText: t("files.moveToTrash"),
         destructive: true,
       }}
       closeDisabled={submitting}

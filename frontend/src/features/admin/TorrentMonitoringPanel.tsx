@@ -8,27 +8,27 @@ import {
   type QBittorrentTorrentListing,
 } from "../../api/client";
 import { RefreshIcon } from "../../components/icons";
-import { formatBytes } from "../../utils/format";
+import { type MessageKey, useI18n } from "../../i18n";
 
 const PAGE_SIZE = 50;
 
 type TorrentStateKind = "active" | "complete" | "error" | "paused" | "pending";
 
-function statePresentation(state: string): { kind: TorrentStateKind; label: string } {
+function statePresentation(state: string): { kind: TorrentStateKind; label: MessageKey | null } {
   if (["downloading", "forcedDL"].includes(state)) {
-    return { kind: "active", label: "Téléchargement" };
+    return { kind: "active", label: "admin.stateDownloading" };
   }
   if (["uploading", "forcedUP", "stalledUP"].includes(state)) {
-    return { kind: "complete", label: "En seed" };
+    return { kind: "complete", label: "admin.stateSeeding" };
   }
   if (["pausedDL", "pausedUP", "stoppedDL", "stoppedUP"].includes(state)) {
-    return { kind: "paused", label: "En pause" };
+    return { kind: "paused", label: "admin.statePaused" };
   }
   if (["error", "missingFiles", "unknown"].includes(state)) {
-    return { kind: "error", label: "Erreur" };
+    return { kind: "error", label: "admin.stateError" };
   }
   if (state === "stalledDL") {
-    return { kind: "pending", label: "En attente de sources" };
+    return { kind: "pending", label: "admin.stateStalled" };
   }
   if (
     [
@@ -42,24 +42,23 @@ function statePresentation(state: string): { kind: TorrentStateKind; label: stri
       "queuedUP",
     ].includes(state)
   ) {
-    return { kind: "pending", label: "Préparation" };
+    return { kind: "pending", label: "admin.statePreparing" };
   }
-  return { kind: "pending", label: state };
+  return { kind: "pending", label: null };
 }
 
-function formatSpeed(bytesPerSecond: number): string {
-  return `${formatBytes(bytesPerSecond)}/s`;
-}
-
-function formatEta(seconds: number | null): string {
+function formatEta(
+  seconds: number | null,
+  t: (key: MessageKey, params?: Record<string, string | number>) => string,
+): string {
   if (seconds === null) return "—";
-  if (seconds <= 0) return "Terminé";
+  if (seconds <= 0) return t("admin.completed");
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3_600);
   const minutes = Math.floor((seconds % 3_600) / 60);
-  if (days > 0) return `${days} j ${hours} h`;
-  if (hours > 0) return `${hours} h ${minutes} min`;
-  return `${Math.max(1, minutes)} min`;
+  if (days > 0) return t("admin.daysHours", { days, hours });
+  if (hours > 0) return t("admin.hoursMinutes", { hours, minutes });
+  return t("admin.minutes", { minutes: Math.max(1, minutes) });
 }
 
 function NewGreedyTorrentStatus({
@@ -69,19 +68,20 @@ function NewGreedyTorrentStatus({
   available: boolean;
   torrent: NewGreedyTorrent | undefined;
 }) {
-  if (!available) return <span className="torrent-secondary-state unavailable">Indisponible</span>;
+  const { formatBytes, t } = useI18n();
+  if (!available) return <span className="torrent-secondary-state unavailable">{t("admin.serviceUnavailable")}</span>;
   if (torrent === undefined) {
-    return <span className="torrent-secondary-state">Non suivi</span>;
+    return <span className="torrent-secondary-state">{t("admin.notTracked")}</span>;
   }
   if (torrent.stalled) {
-    return <span className="torrent-secondary-state warning">Bloqué</span>;
+    return <span className="torrent-secondary-state warning">{t("admin.blocked")}</span>;
   }
   if (torrent.target_reached) {
-    return <span className="torrent-secondary-state complete">Objectif atteint</span>;
+    return <span className="torrent-secondary-state complete">{t("admin.targetReached")}</span>;
   }
   return (
     <span className="torrent-secondary-state active">
-      {torrent.mode === "down" ? "Actif" : "Seed"} · {formatBytes(torrent.fake_uploaded_bytes)}
+      {torrent.mode === "down" ? t("admin.active") : t("admin.seed")} · {formatBytes(torrent.fake_uploaded_bytes)}
     </span>
   );
 }
@@ -91,6 +91,7 @@ export function TorrentMonitoringPanel({
 }: {
   onSessionExpired: () => void;
 }) {
+  const { formatBytes, formatDate, formatNumber, t } = useI18n();
   const [listing, setListing] = useState<QBittorrentTorrentListing | null>(null);
   const [newgreedy, setNewgreedy] = useState<NewGreedyTorrent[]>([]);
   const [newgreedyAvailable, setNewgreedyAvailable] = useState(false);
@@ -128,7 +129,7 @@ export function TorrentMonitoringPanel({
         setListing(qbittorrentResult.value);
         setError("");
       } else {
-        setError("La liste qBittorrent est indisponible.");
+        setError(t("admin.qbListUnavailable"));
       }
       if (newgreedyResult.status === "fulfilled") {
         setNewgreedy(newgreedyResult.value.torrents);
@@ -136,14 +137,14 @@ export function TorrentMonitoringPanel({
         setNewgreedyError("");
       } else {
         setNewgreedyAvailable(false);
-        setNewgreedyError("Les états NewGreedy ne peuvent pas être corrélés.");
+        setNewgreedyError(t("admin.newgreedyCorrelationUnavailable"));
       }
       setLastUpdated(new Date());
     } finally {
       inFlight.current = false;
       if (mounted.current) setLoading(false);
     }
-  }, [onSessionExpired]);
+  }, [onSessionExpired, t]);
 
   useEffect(() => {
     mounted.current = true;
@@ -173,12 +174,12 @@ export function TorrentMonitoringPanel({
     <section className="torrent-monitoring" aria-labelledby="torrent-monitoring-title">
       <div className="torrent-monitoring-heading">
         <div>
-          <p className="eyebrow">Activité</p>
-          <h3 id="torrent-monitoring-title">Torrents qBittorrent</h3>
+          <p className="eyebrow">{t("admin.activity")}</p>
+          <h3 id="torrent-monitoring-title">{t("admin.qbTorrents")}</h3>
           <p>
-            {torrents.length} torrent{torrents.length > 1 ? "s" : ""}
+            {t(torrents.length === 1 ? "admin.torrentOne" : "admin.torrentMany", { count: formatNumber(torrents.length) })}
             {unmatchedNewGreedy > 0
-              ? ` · ${unmatchedNewGreedy} état(s) NewGreedy non corrélé(s)`
+              ? t("admin.unmatchedNewgreedy", { count: formatNumber(unmatchedNewGreedy) })
               : ""}
           </p>
         </div>
@@ -189,7 +190,7 @@ export function TorrentMonitoringPanel({
           onClick={() => void load()}
         >
           <RefreshIcon className={loading ? "rotating" : undefined} />
-          {loading ? "Actualisation…" : "Actualiser"}
+          {loading ? t("downloads.refreshing") : t("common.refresh")}
         </button>
       </div>
 
@@ -198,12 +199,12 @@ export function TorrentMonitoringPanel({
       </p>
       {loading && listing === null ? (
         <div className="torrent-list-state" role="status">
-          Lecture des torrents…
+          {t("admin.readingTorrents")}
         </div>
       ) : listing === null ? (
-        <div className="torrent-list-state error">Aucun état qBittorrent disponible.</div>
+        <div className="torrent-list-state error">{t("admin.noQbState")}</div>
       ) : torrents.length === 0 ? (
-        <div className="torrent-list-state">Aucun torrent dans qBittorrent.</div>
+        <div className="torrent-list-state">{t("admin.noQbTorrent")}</div>
       ) : (
         <>
           <ol className="torrent-monitoring-list">
@@ -218,39 +219,39 @@ export function TorrentMonitoringPanel({
                         <h4 title={torrent.name}>{torrent.name}</h4>
                         <p>
                           {[torrent.category, torrent.tracker_host].filter(Boolean).join(" · ") ||
-                            "Sans catégorie ni tracker"}
+                            t("admin.noCategoryTracker")}
                         </p>
                       </div>
                       <span className={`torrent-primary-state ${presentation.kind}`}>
-                        {presentation.label}
+                        {presentation.label === null ? torrent.state : t(presentation.label)}
                       </span>
                     </header>
                     <div className="torrent-progress">
                       <progress value={torrent.progress} max={1}>
-                        {Math.round(torrent.progress * 100)} %
+                        {formatNumber(Math.round(torrent.progress * 100))} %
                       </progress>
-                      <strong>{Math.round(torrent.progress * 100)} %</strong>
+                      <strong>{formatNumber(Math.round(torrent.progress * 100))} %</strong>
                     </div>
                     <dl className="torrent-monitoring-metrics">
                       <div>
-                        <dt>Taille</dt>
+                        <dt>{t("admin.size")}</dt>
                         <dd>{formatBytes(torrent.size_bytes)}</dd>
                       </div>
                       <div>
-                        <dt>Download</dt>
-                        <dd>{formatSpeed(torrent.download_speed_bytes)}</dd>
+                        <dt>{t("admin.download")}</dt>
+                        <dd>{formatBytes(torrent.download_speed_bytes)}/s</dd>
                       </div>
                       <div>
-                        <dt>Upload</dt>
-                        <dd>{formatSpeed(torrent.upload_speed_bytes)}</dd>
+                        <dt>{t("admin.upload")}</dt>
+                        <dd>{formatBytes(torrent.upload_speed_bytes)}/s</dd>
                       </div>
                       <div>
-                        <dt>Ratio</dt>
-                        <dd>{torrent.ratio.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}</dd>
+                        <dt>{t("admin.ratio")}</dt>
+                        <dd>{formatNumber(torrent.ratio, { maximumFractionDigits: 2 })}</dd>
                       </div>
                       <div>
-                        <dt>Temps restant</dt>
-                        <dd>{formatEta(torrent.eta_seconds)}</dd>
+                        <dt>{t("admin.remainingTime")}</dt>
+                        <dd>{formatEta(torrent.eta_seconds, t)}</dd>
                       </div>
                       <div>
                         <dt>NewGreedy</dt>
@@ -273,19 +274,19 @@ export function TorrentMonitoringPanel({
               className="secondary-button torrent-show-more"
               onClick={() => setVisibleCount((current) => current + PAGE_SIZE)}
             >
-              Afficher les {Math.min(PAGE_SIZE, torrents.length - visibleCount)} suivants
+              {t("admin.showNext", { count: formatNumber(Math.min(PAGE_SIZE, torrents.length - visibleCount)) })}
             </button>
           )}
           {listing.truncated && (
             <p className="torrent-truncated-notice">
-              La vue est limitée aux 1 000 torrents les plus récents.
+              {t("admin.torrentsTruncated")}
             </p>
           )}
         </>
       )}
       {lastUpdated !== null && (
         <p className="services-last-check">
-          Activité mise à jour à {lastUpdated.toLocaleTimeString("fr-FR")}
+          {t("admin.activityUpdated", { time: formatDate(lastUpdated, { timeStyle: "medium" }) })}
         </p>
       )}
     </section>

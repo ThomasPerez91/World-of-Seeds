@@ -11,6 +11,7 @@ import {
 } from "react";
 
 import { Notice, type NoticeTone } from "./Notice";
+import { useI18n } from "../i18n";
 
 const FOCUSABLE_SELECTOR = "button:not(:disabled), [href], [tabindex]:not([tabindex='-1'])";
 
@@ -52,6 +53,7 @@ export function ConfirmDialog({
   options: ConfirmationOptions;
   onClose: (confirmed: boolean) => void;
 }) {
+  const { t } = useI18n();
   const titleId = useId();
   const descriptionId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -128,7 +130,7 @@ export function ConfirmDialog({
             onClick={() => onClose(false)}
             disabled={closeDisabled}
           >
-            Annuler
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -137,7 +139,7 @@ export function ConfirmDialog({
             onClick={() => onClose(true)}
             disabled={closeDisabled}
           >
-            {closeDisabled ? "Traitement…" : options.confirmText}
+            {closeDisabled ? t("common.processing") : options.confirmText}
           </button>
         </div>
       </div>
@@ -146,6 +148,7 @@ export function ConfirmDialog({
 }
 
 export function FeedbackProvider({ children }: { children: ReactNode }) {
+  const { t } = useI18n();
   const sequence = useRef(0);
   const confirmationsRef = useRef<ConfirmationRequest[]>([]);
   const [confirmations, setConfirmations] = useState<ConfirmationRequest[]>([]);
@@ -199,7 +202,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
         />
       )}
       {toasts.length > 0 && (
-        <div className="feedback-toast-region" role="region" aria-label="Notifications">
+        <div className="feedback-toast-region" role="region" aria-label={t("feedback.region")}>
           {toasts.map((item) => (
             <Notice
               key={item.id}

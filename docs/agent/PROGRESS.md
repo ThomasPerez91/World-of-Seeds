@@ -1286,6 +1286,31 @@
   shape, and injected dependency failures remain mandatory before the pilot; no Rise2 deployment
   is part of V2-32.
 
+## V2-32A — Internationalisation FR/EN
+
+- Added one centralized React translation catalogue and context for French and English without
+  duplicating page components; French remains the compatibility default.
+- Added a responsive language selector to anonymous, first-login, user, and administration
+  surfaces. Authenticated choices are stored on the user and restored on later sessions.
+- Added the additive `users.preferred_locale` migration with an explicit `fr`/`en` database
+  constraint. First-login users may save the preference before changing generated credentials.
+- Replaced phrase-dependent auth, file, and trash error contracts with stable structured codes and
+  fields; the frontend translates codes and uses localized safe fallbacks instead of displaying
+  backend phrases.
+- Localized login, account, file browser, mutations, trash, downloads, every administration
+  destination and embedded service control, dialogs, notifications, navigation, and accessibility
+  labels on mobile and desktop.
+- Locale persistence is best-effort after a successful login, remains available on the mandatory
+  credential-change screen, and never invalidates an authenticated session. Torrent admission and
+  recursive-transfer failures are rendered from stable codes in both languages.
+- Dates, numbers, progress values, and byte units use the active locale through `Intl`; responsive
+  header policy permits longer English labels without horizontal overflow.
+- V2-32A complete backend suite: PASS, 531 tests with 6 real-service tests deferred to CI.
+- V2-32A Ruff lint/format, strict mypy, Alembic single-head validation, TypeScript, 38 frontend
+  tests including axe/i18n coverage, production build, and `git diff --check`: PASS locally.
+- PR `#101` targets `develop_V2`; real PostgreSQL migration, container, complete-profile, and
+  monitoring validation remain mandatory in GitHub CI before merge.
+
 ## Known constraints
 
 - `master` and `develop` remain V1-only; V2 branches and PRs target `develop_V2`.
@@ -1301,5 +1326,5 @@
 
 ## Next task
 
-- The next roadmap task after V2-32 is `V2-32A — i18n FR/EN and language preference`.
-- Start V2-32A only after V2-32 is reviewed, green, and merged into `develop_V2`.
+- The next roadmap task after V2-32A is `V2-33 — pilote limité sur Rise2`.
+- Start V2-33 only after V2-32A is reviewed, green, and merged into `develop_V2`.

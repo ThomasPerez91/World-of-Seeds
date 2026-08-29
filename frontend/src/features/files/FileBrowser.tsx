@@ -20,7 +20,7 @@ import {
   VideoFileIcon,
 } from "../../components/icons";
 import { useFeedback } from "../../components/Feedback";
-import { formatBytes } from "../../utils/format";
+import { useI18n, type MessageKey } from "../../i18n";
 import { splitDisplayName } from "../../utils/files";
 import {
   FileDialog,
@@ -42,6 +42,7 @@ function CreateFolderDialog({
   onSessionExpired: () => void;
 }) {
   const feedback = useFeedback();
+  const { t } = useI18n();
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -50,7 +51,7 @@ function CreateFolderDialog({
     setSubmitting(true);
     try {
       const result = await api.createDirectory(parent, name);
-      onCompleted(`Le dossier « ${result.name} » a été créé.`);
+      onCompleted(t("files.created", { name: result.name }));
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
@@ -60,8 +61,8 @@ function CreateFolderDialog({
         tone: "error",
         message:
           caught instanceof ApiError && caught.status === 409
-            ? "Un élément porte déjà ce nom dans ce dossier."
-            : "Le dossier n’a pas pu être créé.",
+            ? t("files.exists")
+            : t("files.createFailed"),
       });
     } finally {
       setSubmitting(false);
@@ -70,13 +71,13 @@ function CreateFolderDialog({
 
   return (
     <FileDialog
-      title="Créer un dossier"
-      description="Le dossier sera créé uniquement à l’emplacement actuel."
+      title={t("files.createFolder")}
+      description={t("files.createFolderDescription")}
       onClose={onClose}
       closeDisabled={submitting}
     >
       <form className="mutation-form" onSubmit={(event) => void submit(event)}>
-        <label htmlFor="new-folder-name">Nom du dossier</label>
+        <label htmlFor="new-folder-name">{t("files.folderName")}</label>
         <input
           id="new-folder-name"
           value={name}
@@ -86,9 +87,9 @@ function CreateFolderDialog({
           required
         />
         <div className="dialog-actions">
-          <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>Annuler</button>
+          <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>{t("common.cancel")}</button>
           <button type="submit" disabled={submitting || name.length === 0}>
-            {submitting ? "Création…" : "Créer le dossier"}
+            {submitting ? t("files.creating") : t("files.create")}
           </button>
         </div>
       </form>
@@ -96,39 +97,37 @@ function CreateFolderDialog({
   );
 }
 
-const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
 function initialPath(): string {
   return new URLSearchParams(window.location.search).get("path") ?? "";
 }
 
-function typeLabel(entry: FileEntry): string {
-  if (entry.kind === "directory") return "Dossier";
-  if (entry.kind === "symlink") return "Lien bloqué";
-  if (entry.kind === "other") return "Élément bloqué";
+function typeLabel(entry: FileEntry, t: (key: MessageKey) => string): string {
+  if (entry.kind === "directory") return t("files.folder");
+  if (entry.kind === "symlink") return t("files.blockedLink");
+  if (entry.kind === "other") return t("files.blockedItem");
   const family = entry.media_type?.split("/", 1)[0];
   return {
-    video: "Vidéo",
-    audio: "Audio",
-    image: "Image",
-    text: "Document",
-    application: "Fichier",
-  }[family ?? ""] ?? "Fichier";
+    video: t("files.video"),
+    audio: t("files.audio"),
+    image: t("files.image"),
+    text: t("files.document"),
+    application: t("files.file"),
+  }[family ?? ""] ?? t("files.file");
 }
 
-function listingErrorMessage(error: unknown): string {
+function listingErrorMessage(error: unknown, t: (key: MessageKey) => string): string {
   if (!(error instanceof ApiError)) {
-    return "Impossible d’ouvrir ce dossier.";
+    return t("files.openFailed");
   }
+  if (error.code === "file_path_invalid") return t("files.invalidPath");
+  if (error.code === "file_path_blocked") return t("files.blockedPath");
+  if (error.code === "directory_not_found") return t("files.missingFolder");
   return (
     {
-      400: "Ce chemin est invalide.",
-      403: "Ce chemin est bloqué pour protéger ton espace.",
-      404: "Ce dossier n’existe plus.",
-    }[error.status] ?? "Impossible d’ouvrir ce dossier."
+      400: t("files.invalidPath"),
+      403: t("files.blockedPath"),
+      404: t("files.missingFolder"),
+    }[error.status] ?? t("files.openFailed")
   );
 }
 
@@ -144,8 +143,9 @@ function EntryIcon({ kind, mediaType }: { kind: FileEntryKind; mediaType: string
 }
 
 function LoadingRows() {
+  const { t } = useI18n();
   return (
-    <div className="browser-loading" role="status" aria-label="Chargement du dossier">
+    <div className="browser-loading" role="status" aria-label={t("files.loading")}>
       {[0, 1, 2].map((row) => (
         <div className="loading-row" key={row}>
           <span />
@@ -172,6 +172,7 @@ export function FileBrowser({
   revision: number;
 }) {
   const feedback = useFeedback();
+  const { formatBytes, formatDate, t } = useI18n();
   const [path, setPath] = useState(initialPath);
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(true);
@@ -206,13 +207,13 @@ export function FileBrowser({
           return;
         }
         setListing(null);
-        setError(listingErrorMessage(caught));
+        setError(listingErrorMessage(caught, t));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [onSessionExpired, onStorageChanged, path, reloadKey, revision]);
+  }, [onSessionExpired, onStorageChanged, path, reloadKey, revision, t]);
 
   function navigate(nextPath: string) {
     const url = new URL(window.location.href);
@@ -235,11 +236,11 @@ export function FileBrowser({
       aria-labelledby="file-browser-title"
       aria-busy={loading}
     >
-      <h2 id="file-browser-title" className="sr-only">Explorateur de fichiers</h2>
+      <h2 id="file-browser-title" className="sr-only">{t("files.explorer")}</h2>
 
       <div className="browser-navigation">
-        <nav className="breadcrumbs" aria-label="Fil d’Ariane">
-          {(listing?.breadcrumbs ?? [{ label: "Mes fichiers", path: "" }]).map(
+        <nav className="breadcrumbs" aria-label={t("files.breadcrumbs")}>
+          {(listing?.breadcrumbs ?? [{ label: t("dashboard.files"), path: "" }]).map(
             (breadcrumb, index, all) => (
               <span className="breadcrumb" key={breadcrumb.path || "root"}>
                 <button
@@ -247,7 +248,7 @@ export function FileBrowser({
                   onClick={() => navigate(breadcrumb.path)}
                   aria-current={index === all.length - 1 ? "page" : undefined}
                 >
-                  {breadcrumb.label}
+                  {breadcrumb.path === "" ? t("dashboard.files") : breadcrumb.label}
                 </button>
                 {index < all.length - 1 && <span aria-hidden="true">/</span>}
               </span>
@@ -256,7 +257,7 @@ export function FileBrowser({
         </nav>
         <div className="browser-navigation-actions">
           <button type="button" className="refresh-button" onClick={() => setCreatingFolder(true)}>
-            Nouveau dossier
+            {t("files.newFolder")}
           </button>
           <button
             type="button"
@@ -264,7 +265,7 @@ export function FileBrowser({
             onClick={() => setReloadKey((value) => value + 1)}
             disabled={loading}
           >
-            Actualiser
+            {t("common.refresh")}
           </button>
         </div>
       </div>
@@ -273,16 +274,16 @@ export function FileBrowser({
 
       {!loading && error !== "" && (
         <div className="browser-state" role="alert">
-          <strong>Dossier inaccessible</strong>
+          <strong>{t("files.inaccessible")}</strong>
           <p>{error}</p>
           <div className="state-actions">
             {path !== "" && (
               <button type="button" className="secondary-button" onClick={() => navigate("")}>
-                Revenir à la racine
+                {t("files.backRoot")}
               </button>
             )}
             <button type="button" className="compact-button" onClick={() => setReloadKey((v) => v + 1)}>
-              Réessayer
+              {t("common.retry")}
             </button>
           </div>
         </div>
@@ -290,8 +291,8 @@ export function FileBrowser({
 
       {!loading && listing !== null && listing.entries.length === 0 && (
         <div className="browser-state empty-state">
-          <strong>Ce dossier est vide</strong>
-          <p>Les fichiers ajoutés ici apparaîtront automatiquement.</p>
+          <strong>{t("files.empty")}</strong>
+          <p>{t("files.emptyHint")}</p>
         </div>
       )}
 
@@ -299,7 +300,7 @@ export function FileBrowser({
         <div className="file-table-wrap">
           <table className="file-table">
             <caption className="sr-only">
-              Contenu du dossier {listing.path === "" ? "Mes fichiers" : listing.path}
+              {t("files.contents", { path: listing.path === "" ? t("dashboard.files") : listing.path })}
             </caption>
             <colgroup>
               <col className="file-name-column" />
@@ -311,13 +312,13 @@ export function FileBrowser({
             </colgroup>
             <thead>
               <tr>
-                <th scope="col">Nom</th>
-                <th scope="col">Extension</th>
-                <th scope="col">Type</th>
-                <th scope="col">Taille</th>
-                <th scope="col">Modification</th>
+                <th scope="col">{t("files.name")}</th>
+                <th scope="col">{t("files.extension")}</th>
+                <th scope="col">{t("files.type")}</th>
+                <th scope="col">{t("files.size")}</th>
+                <th scope="col">{t("files.modification")}</th>
                 <th scope="col">
-                  <span className="sr-only">Action</span>
+                  <span className="sr-only">{t("files.action")}</span>
                 </th>
               </tr>
             </thead>
@@ -340,30 +341,30 @@ export function FileBrowser({
                           <strong>{displayed.basename}</strong>
                         )}
                         <span className="mobile-file-meta">
-                          {typeLabel(entry)} · {formatBytes(entry.size)}
+                          {typeLabel(entry, t)} · {formatBytes(entry.size)}
                         </span>
                         <time
                           className="mobile-file-date"
                           dateTime={entry.modified_at}
                         >
-                          Modifié le {dateFormatter.format(new Date(entry.modified_at))}
+                          {t("files.modifiedOn", { date: formatDate(entry.modified_at, { dateStyle: "medium", timeStyle: "short" }) })}
                         </time>
                       </span>
                     </div>
                   </td>
                   <td className="file-extension-cell">{displayed.extension || "—"}</td>
-                  <td>{typeLabel(entry)}</td>
+                  <td>{typeLabel(entry, t)}</td>
                   <td>{formatBytes(entry.size)}</td>
                   <td>
                     <time dateTime={entry.modified_at}>
-                      {dateFormatter.format(new Date(entry.modified_at))}
+                      {formatDate(entry.modified_at, { dateStyle: "medium", timeStyle: "short" })}
                     </time>
                   </td>
                   <td className="file-action-cell">
                     <div
                       className="file-actions"
                       role="group"
-                      aria-label={`Actions pour ${entry.name}`}
+                      aria-label={t("files.actionsFor", { name: entry.name })}
                     >
                       {entry.kind === "directory" && !entry.blocked ? (
                         <>
@@ -371,8 +372,8 @@ export function FileBrowser({
                             type="button"
                             className="open-folder-button"
                             onClick={() => navigate(entry.path)}
-                            aria-label={`Ouvrir ${entry.name}`}
-                            title="Ouvrir"
+                            aria-label={t("files.open", { name: entry.name })}
+                            title={t("files.openTitle")}
                           >
                             <OpenIcon />
                           </button>
@@ -380,25 +381,25 @@ export function FileBrowser({
                             className="download-link"
                             href={api.folderDownloadUrl(entry.path)}
                             download={`${entry.name}.zip`}
-                            aria-label={`Télécharger le dossier ${entry.name}`}
-                            title="Télécharger le dossier"
+                            aria-label={t("files.downloadFolderNamed", { name: entry.name })}
+                            title={t("files.downloadFolder")}
                           >
                             <DownloadIcon />
-                            <span className="download-label">Télécharger le dossier</span>
+                            <span className="download-label">{t("files.downloadFolder")}</span>
                           </a>
                         </>
                       ) : entry.blocked ? (
-                        <span className="blocked-badge">Bloqué</span>
+                        <span className="blocked-badge">{t("files.blocked")}</span>
                       ) : (
                         <a
                           className="download-link"
                           href={api.fileDownloadUrl(entry.path)}
                           download={entry.name}
-                          aria-label={`Télécharger ${entry.name}`}
-                          title="Télécharger"
+                          aria-label={t("files.downloadNamed", { name: entry.name })}
+                          title={t("common.download")}
                         >
                           <DownloadIcon />
-                          <span className="download-label">Télécharger</span>
+                          <span className="download-label">{t("common.download")}</span>
                         </a>
                       )}
                       {!entry.blocked && !isProtectedRootEntry(entry) && (
@@ -407,31 +408,31 @@ export function FileBrowser({
                             type="button"
                             className="file-mutation-button"
                             onClick={() => setMutation({ action: "rename", entry })}
-                            aria-label={`Renommer ${entry.name}`}
-                            title="Renommer"
+                            aria-label={t("files.renameNamed", { name: entry.name })}
+                            title={t("common.rename")}
                           >
                             <RenameIcon />
-                            <span>Renommer</span>
+                            <span>{t("common.rename")}</span>
                           </button>
                           <button
                             type="button"
                             className="file-mutation-button"
                             onClick={() => setMutation({ action: "move", entry })}
-                            aria-label={`Déplacer ${entry.name}`}
-                            title="Déplacer"
+                            aria-label={t("files.moveNamed", { name: entry.name })}
+                            title={t("common.move")}
                           >
                             <MoveIcon />
-                            <span>Déplacer</span>
+                            <span>{t("common.move")}</span>
                           </button>
                           <button
                             type="button"
                             className="file-mutation-button destructive-file-action"
                             onClick={() => setMutation({ action: "trash", entry })}
-                            aria-label={`Placer ${entry.name} dans la corbeille`}
-                            title="Placer dans la corbeille"
+                            aria-label={t("files.trashNamed", { name: entry.name })}
+                            title={t("files.moveToTrash")}
                           >
                             <DeleteIcon />
-                            <span>Corbeille</span>
+                            <span>{t("files.trash")}</span>
                           </button>
                         </>
                       )}
@@ -447,7 +448,7 @@ export function FileBrowser({
 
       {!loading && listing?.truncated === true && (
         <p className="truncated-notice" role="status">
-          Ce dossier contient plus de 5 000 éléments. Seuls les premiers sont affichés.
+          {t("files.truncated")}
         </p>
       )}
       {mutation !== null && (

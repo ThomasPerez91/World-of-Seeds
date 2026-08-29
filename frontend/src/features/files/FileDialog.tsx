@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useId, useRef } from "react";
 
 import { CloseIcon } from "../../components/icons";
+import { useI18n } from "../../i18n";
 
 const FOCUSABLE_SELECTOR = [
   "button:not(:disabled)",
@@ -26,6 +27,7 @@ export function FileDialog({
   onClose: () => void;
   title: string;
 }) {
+  const { t } = useI18n();
   const titleId = useId();
   const descriptionId = useId();
   const dialogRef = useRef<HTMLElement>(null);
@@ -99,7 +101,7 @@ export function FileDialog({
             type="button"
             className="dialog-close"
             onClick={onClose}
-            aria-label="Fermer"
+            aria-label={t("common.close")}
             disabled={closeDisabled}
           >
             <CloseIcon />

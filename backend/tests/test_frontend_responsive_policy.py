@@ -13,11 +13,21 @@ def test_responsive_styles_cover_supported_mobile_and_orientation_contract() -> 
     assert "content: attr(data-label)" in styles
     assert "max-height: calc(100dvh - 1rem)" in styles
     assert "env(safe-area-inset-bottom)" in styles
+    assert ".header-actions" in styles
+    assert ".language-selector" in styles
+    assert "flex-wrap: wrap" in styles
 
 
 def test_torrent_table_exposes_card_labels_without_duplicate_mobile_markup() -> None:
     page = (REPOSITORY / "frontend/src/features/torrents/UserDownloadsPage.tsx").read_text()
 
-    for label in ("Nom", "État", "Taille", "Progression", "Mise à jour", "Actions"):
-        assert f'data-label="{label}"' in page
+    for key in (
+        "downloads.name",
+        "downloads.status",
+        "files.size",
+        "downloads.progress",
+        "downloads.updated",
+        "files.actions",
+    ):
+        assert f'data-label={{t("{key}")}}' in page
     assert "window.location.reload" not in page

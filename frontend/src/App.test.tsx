@@ -14,6 +14,131 @@ function response(body: unknown, status: number): Response {
 }
 
 describe("App", () => {
+  it("conserve la connexion si la préférence de langue ne peut pas être enregistrée", async () => {
+    const signedInUser = {
+      id: "bc68aa7c-d753-4db7-8698-acf8d09045a3",
+      username: "thomas",
+      is_admin: false,
+      is_active: true,
+      must_change_credentials: false,
+      preferred_locale: "fr",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/auth/me") return response({ detail: "Not authenticated" }, 401);
+      if (url === "/api/v1/health/live") return response({ status: "ok" }, 200);
+      if (url === "/api/v1/auth/login" && init?.method === "POST") {
+        return response({ user: signedInUser }, 200);
+      }
+      if (url === "/api/v1/auth/locale" && init?.method === "PATCH") {
+        return response({ detail: "Database unavailable" }, 503);
+      }
+      if (url.startsWith("/api/v1/files")) {
+        return response({
+          path: "",
+          breadcrumbs: [{ label: "Mes fichiers", path: "" }],
+          entries: [],
+          storage: { total: 1000, used: 0, available: 1000 },
+          truncated: false,
+        }, 200);
+      }
+      if (url === "/api/v1/trash") return response({ entries: [], truncated: false }, 200);
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Bienvenue" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
+    await user.type(screen.getByLabelText("Username"), "thomas");
+    await user.type(screen.getByLabelText("Password"), "correct-password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await screen.findByRole("heading", { name: "Mes fichiers" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/auth/locale",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
+  it("enregistre le choix de langue pendant la personnalisation du premier accès", async () => {
+    let currentUser = {
+      id: "bc68aa7c-d753-4db7-8698-acf8d09045a3",
+      username: "guest-a1b2c3",
+      is_admin: false,
+      is_active: true,
+      must_change_credentials: true,
+      preferred_locale: "fr",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/auth/me") return response({ user: currentUser }, 200);
+      if (url === "/api/v1/auth/locale" && init?.method === "PATCH") {
+        currentUser = { ...currentUser, preferred_locale: "en" };
+        return response({ user: currentUser }, 200);
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Personnalise ton accès" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
+
+    await screen.findByRole("heading", { name: "Personalize your account" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/auth/locale",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
+  it("restaure la langue anglaise du compte sur les espaces utilisateur et admin", async () => {
+    const currentUser = {
+      id: "bc68aa7c-d753-4db7-8698-acf8d09045a3",
+      username: "thomas",
+      is_admin: true,
+      is_active: true,
+      must_change_credentials: false,
+      preferred_locale: "en",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/v1/auth/me") return response({ user: currentUser }, 200);
+        if (url.startsWith("/api/v1/files")) {
+          return response(
+            {
+              path: "",
+              breadcrumbs: [{ label: "Mes fichiers", path: "" }],
+              entries: [],
+              storage: { total: 2048, used: 1024, available: 1024 },
+              truncated: false,
+            },
+            200,
+          );
+        }
+        if (url === "/api/v1/trash") return response({ entries: [], truncated: false }, 200);
+        if (url === "/api/v1/admin/users") return response([currentUser], 200);
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    const user = userEvent.setup();
+    const view = render(<App />);
+    await screen.findByRole("heading", { name: "My files" });
+    expect(screen.getByText("1 KB used")).toBeTruthy();
+    expect(document.documentElement.lang).toBe("en");
+
+    await user.click(screen.getByRole("button", { name: "Open account menu" }));
+    await user.click(screen.getByRole("button", { name: "Administration" }));
+    await screen.findByRole("heading", { name: "User accounts" });
+    expect(screen.getByRole("button", { name: "Generate user" })).toBeTruthy();
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
   it("distingue une panne serveur d’un visiteur non authentifié", async () => {
     const user = userEvent.setup();
     const fetchMock = vi

@@ -3,39 +3,48 @@ import { useEffect, useState } from "react";
 import { api, ApiError, type TrashEntry, type TrashListing } from "../../api/client";
 import { ConfirmDialog, useFeedback } from "../../components/Feedback";
 import { FileIcon, FolderIcon } from "../../components/icons";
-import { formatBytes } from "../../utils/format";
+import { useI18n, type MessageKey } from "../../i18n";
 
-const deletedAtFormatter = new Intl.DateTimeFormat("fr-FR", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
-function trashListingError(error: unknown): string {
-  if (error instanceof ApiError && error.status === 503) {
-    return "La corbeille est temporairement indisponible.";
+function trashListingError(error: unknown, t: (key: MessageKey) => string): string {
+  if (
+    error instanceof ApiError &&
+    (error.code === "trash_storage_unavailable" || error.status === 503)
+  ) {
+    return t("trash.temporarilyUnavailable");
   }
-  return "Impossible de charger la corbeille.";
+  return t("trash.loadFailed");
 }
 
-function trashActionError(error: unknown, action: "purge" | "restore"): string {
-  if (!(error instanceof ApiError)) return "L’opération n’a pas pu être effectuée.";
-  if (error.status === 404) return "Cet élément n’est plus présent dans la corbeille.";
+function trashActionError(error: unknown, action: "purge" | "restore", t: (key: MessageKey) => string): string {
+  if (!(error instanceof ApiError)) return t("trash.actionFailed");
+  const codedErrors: Record<string, MessageKey> = {
+    trash_entry_not_found: "trash.missing",
+    trash_restore_target_unavailable: "trash.restoreConflict",
+    trash_integrity_failed: "trash.integrityFailed",
+    trash_operation_unverified: "trash.restoreRollbackFailed",
+    trash_purge_incomplete: "trash.purgeFailed",
+    trash_storage_unavailable: "trash.storageUnavailable",
+  };
+  if (error.code !== null && codedErrors[error.code] !== undefined) {
+    return t(codedErrors[error.code]);
+  }
+  if (error.status === 404) return t("trash.missing");
   if (error.status === 409) {
     return action === "restore"
-      ? "L’emplacement d’origine n’existe plus ou contient déjà un élément portant ce nom."
-      : "L’intégrité de cet élément n’a pas pu être confirmée.";
+      ? t("trash.restoreConflict")
+      : t("trash.integrityFailed");
   }
   if (error.status === 500) {
     return action === "restore"
-      ? "La restauration n’a pas pu être annulée en toute sécurité."
-      : "La suppression définitive n’a pas pu être terminée.";
+      ? t("trash.restoreRollbackFailed")
+      : t("trash.purgeFailed");
   }
   if (error.status === 503) {
     return action === "purge"
-      ? "Le fichier a peut-être été supprimé, mais la base n’a pas pu être mise à jour. Réessayer est sans danger."
-      : "Le stockage est temporairement indisponible.";
+      ? t("trash.purgeDatabaseFailed")
+      : t("trash.storageUnavailable");
   }
-  return "L’opération n’a pas pu être effectuée.";
+  return t("trash.actionFailed");
 }
 
 function TrashIcon({ kind }: { kind: TrashEntry["kind"] }) {
@@ -61,6 +70,7 @@ function TrashActionDialog({
 }) {
   const restoring = action === "restore";
   const feedback = useFeedback();
+  const { t } = useI18n();
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
@@ -68,17 +78,17 @@ function TrashActionDialog({
     try {
       if (restoring) {
         await api.restoreTrash(entry.id);
-        onCompleted(`« ${entry.name} » a été restauré.`);
+        onCompleted(t("trash.restored", { name: entry.name }));
       } else {
         await api.purgeTrash(entry.id);
-        onCompleted(`« ${entry.name} » a été supprimé définitivement.`);
+        onCompleted(t("trash.purged", { name: entry.name }));
       }
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      feedback.toast({ tone: "error", message: trashActionError(caught, action) });
+      feedback.toast({ tone: "error", message: trashActionError(caught, action, t) });
       onClose();
     } finally {
       setSubmitting(false);
@@ -88,11 +98,11 @@ function TrashActionDialog({
   return (
     <ConfirmDialog
       options={{
-        title: restoring ? "Restaurer cet élément ?" : "Supprimer définitivement ?",
+        title: restoring ? t("trash.restoreTitle") : t("trash.purgeTitle"),
         message: restoring
-          ? `« ${entry.name} » sera replacé dans « ${entry.original_path} ».`
-          : `« ${entry.name} » et tout son contenu seront irrécupérables.`,
-        confirmText: restoring ? "Restaurer" : "Supprimer définitivement",
+          ? t("trash.restoreMessage", { name: entry.name, path: entry.original_path })
+          : t("trash.purgeMessage", { name: entry.name }),
+        confirmText: restoring ? t("trash.restore") : t("trash.purge"),
         destructive: !restoring,
       }}
       closeDisabled={submitting}
@@ -114,6 +124,7 @@ export function TrashBrowser({
   revision: number;
 }) {
   const feedback = useFeedback();
+  const { formatBytes, formatDate, t } = useI18n();
   const [listing, setListing] = useState<TrashListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -137,13 +148,13 @@ export function TrashBrowser({
           return;
         }
         setListing(null);
-        setError(trashListingError(caught));
+        setError(trashListingError(caught, t));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [onSessionExpired, reloadKey, revision]);
+  }, [onSessionExpired, reloadKey, revision, t]);
 
   function completeAction(message: string) {
     setSelectedAction(null);
@@ -158,16 +169,16 @@ export function TrashBrowser({
       aria-labelledby="trash-title"
       aria-busy={loading}
     >
-      <h2 id="trash-title" className="sr-only">Corbeille</h2>
+      <h2 id="trash-title" className="sr-only">{t("files.trash")}</h2>
       <div className="trash-toolbar">
-        <span>Éléments supprimés</span>
+        <span>{t("trash.deletedItems")}</span>
         <button
           type="button"
           className="refresh-button"
           onClick={() => setReloadKey((value) => value + 1)}
           disabled={loading}
         >
-          Actualiser
+          {t("common.refresh")}
         </button>
       </div>
 
@@ -175,7 +186,7 @@ export function TrashBrowser({
         <div
           className="trash-loading"
           role="status"
-          aria-label="Chargement de la corbeille"
+          aria-label={t("trash.loading")}
         >
           <span />
           <span />
@@ -184,22 +195,22 @@ export function TrashBrowser({
 
       {!loading && error !== "" && (
         <div className="browser-state" role="alert">
-          <strong>Corbeille inaccessible</strong>
+          <strong>{t("trash.unavailable")}</strong>
           <p>{error}</p>
           <button
             type="button"
             className="compact-button"
             onClick={() => setReloadKey((value) => value + 1)}
           >
-            Réessayer
+            {t("common.retry")}
           </button>
         </div>
       )}
 
       {!loading && listing?.entries.length === 0 && (
         <div className="browser-state empty-state">
-          <strong>La corbeille est vide</strong>
-          <p>Les éléments supprimés depuis le gestionnaire de fichiers apparaîtront ici.</p>
+          <strong>{t("trash.empty")}</strong>
+          <p>{t("trash.emptyHint")}</p>
         </div>
       )}
 
@@ -213,33 +224,32 @@ export function TrashBrowser({
                 <code title={entry.original_path}>{entry.original_path}</code>
                 <span>
                   {entry.kind === "directory"
-                    ? formatBytes(entry.size, "Taille du dossier non calculée")
-                    : formatBytes(entry.size)}{" "}
-                  · supprimé le{" "}
+                    ? formatBytes(entry.size, t("trash.folderSizeUnknown"))
+                    : formatBytes(entry.size)}{" · "}
                   <time dateTime={entry.deleted_at}>
-                    {deletedAtFormatter.format(new Date(entry.deleted_at))}
+                    {t("trash.deletedOn", { size: "", date: formatDate(entry.deleted_at, { dateStyle: "medium", timeStyle: "short" }) }).replace(/^ · /, "")}
                   </time>
                 </span>
               </div>
               <div
                 className="trash-actions"
                 role="group"
-                aria-label={`Actions pour ${entry.name}`}
+                aria-label={t("files.actionsFor", { name: entry.name })}
               >
                 <button
                   type="button"
                   className="secondary-button"
                   onClick={() => setSelectedAction({ action: "restore", entry })}
                 >
-                  Restaurer
+                  {t("trash.restore")}
                 </button>
                 <button
                   type="button"
                   className="trash-purge-button"
                   onClick={() => setSelectedAction({ action: "purge", entry })}
-                  aria-label={`Supprimer définitivement ${entry.name}`}
+                  aria-label={t("trash.purgeNamed", { name: entry.name })}
                 >
-                  Supprimer définitivement
+                  {t("trash.purge")}
                 </button>
               </div>
             </li>
@@ -249,7 +259,7 @@ export function TrashBrowser({
 
       {!loading && listing?.truncated === true && (
         <p className="truncated-notice" role="status">
-          La corbeille contient plus de 1 000 éléments. Seuls les plus récents sont affichés.
+          {t("trash.truncated")}
         </p>
       )}
 

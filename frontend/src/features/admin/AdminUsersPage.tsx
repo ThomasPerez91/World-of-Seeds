@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api, ApiError, type GeneratedCredentials, type User } from "../../api/client";
 import { FileDialog } from "../files/FileDialog";
+import { useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 
 export function AdminUsersPage({
@@ -13,6 +14,7 @@ export function AdminUsersPage({
   onNavigate: (view: AdminView) => void;
   onSessionExpired: () => void;
 }) {
+  const { t } = useI18n();
   const [users, setUsers] = useState<User[]>([]);
   const [credentials, setCredentials] = useState<GeneratedCredentials | null>(null);
   const [pendingDeletion, setPendingDeletion] = useState<User | null>(null);
@@ -30,9 +32,9 @@ export function AdminUsersPage({
           onSessionExpired();
           return;
         }
-        setError("Impossible de charger les comptes.");
+        setError(t("admin.usersLoadFailed"));
       });
-  }, [onSessionExpired]);
+  }, [onSessionExpired, t]);
 
   async function generateUser() {
     setGenerating(true);
@@ -47,7 +49,7 @@ export function AdminUsersPage({
         onSessionExpired();
         return;
       }
-      setError("Impossible de générer le compte.");
+      setError(t("admin.userCreateFailed"));
     } finally {
       setGenerating(false);
     }
@@ -66,7 +68,7 @@ export function AdminUsersPage({
         onSessionExpired();
         return;
       }
-      setError("Impossible de modifier l’accès de cet utilisateur.");
+      setError(t("admin.userUpdateFailed"));
     } finally {
       setUpdatingUserId(null);
     }
@@ -85,7 +87,7 @@ export function AdminUsersPage({
         onSessionExpired();
         return;
       }
-      setDeletionError("Impossible de supprimer l’accès de cet utilisateur.");
+      setDeletionError(t("admin.userDeleteFailed"));
     } finally {
       setUpdatingUserId(null);
     }
@@ -96,7 +98,7 @@ export function AdminUsersPage({
       if (navigator.clipboard === undefined) throw new Error("Clipboard API unavailable");
       await navigator.clipboard.writeText(value);
     } catch {
-      setError("Copie automatique indisponible. Sélectionne la valeur manuellement.");
+      setError(t("admin.copyFailed"));
     }
   }
 
@@ -109,10 +111,10 @@ export function AdminUsersPage({
       <section className="admin-section" aria-labelledby="admin-users-title">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Accès</p>
-            <h2 id="admin-users-title">Comptes utilisateurs</h2>
+            <p className="eyebrow">{t("admin.access")}</p>
+            <h2 id="admin-users-title">{t("admin.userAccounts")}</h2>
             <p className="section-intro">
-              Les identifiants générés restent valables jusqu’à leur personnalisation.
+              {t("admin.userIntro")}
             </p>
           </div>
           <div className="generator-controls">
@@ -122,34 +124,34 @@ export function AdminUsersPage({
               onClick={() => void generateUser()}
               disabled={generating}
             >
-              {generating ? "Génération…" : "Générer un utilisateur"}
+              {generating ? t("admin.generating") : t("admin.generateUser")}
             </button>
           </div>
         </div>
 
         {credentials !== null && (
           <div className="credential-reveal" role="status">
-            <strong>À transmettre maintenant — le mot de passe ne sera plus affiché.</strong>
+            <strong>{t("admin.credentialsWarning")}</strong>
             <div className="credential-row">
-              <span>Utilisateur</span>
+              <span>{t("admin.username")}</span>
               <code>{credentials.user.username}</code>
               <button
                 type="button"
                 className="text-button"
                 onClick={() => void copy(credentials.user.username)}
               >
-                Copier
+                {t("admin.copy")}
               </button>
             </div>
             <div className="credential-row">
-              <span>Mot de passe</span>
+              <span>{t("admin.password")}</span>
               <code>{credentials.initial_password}</code>
               <button
                 type="button"
                 className="text-button"
                 onClick={() => void copy(credentials.initial_password)}
               >
-                Copier
+                {t("admin.copy")}
               </button>
             </div>
           </div>
@@ -168,38 +170,38 @@ export function AdminUsersPage({
                 <strong>{account.username}</strong>
                 <span>
                   {account.is_admin
-                    ? "Administrateur"
+                    ? t("admin.administrator")
                     : account.must_change_credentials
-                      ? "Personnalisation en attente"
-                      : "Utilisateur configuré"}
+                      ? t("admin.personalizationPending")
+                      : t("admin.configuredUser")}
                 </span>
               </div>
               <div className="user-row-actions">
                 <span className={account.is_active ? "status-pill" : "status-pill inactive"}>
-                  {account.is_active ? "Actif" : "Suspendu"}
+                  {account.is_active ? t("admin.active") : t("admin.suspended")}
                 </span>
                 {!account.is_admin && (
                   <>
                     <button
                       type="button"
                       className="secondary-button compact-button"
-                      aria-label={`${account.is_active ? "Suspendre" : "Réactiver"} ${account.username}`}
+                      aria-label={t("admin.accountNamed", { action: account.is_active ? t("admin.suspend") : t("admin.reactivate"), name: account.username })}
                       disabled={updatingUserId === account.id}
                       onClick={() => void setActive(account, !account.is_active)}
                     >
-                      {account.is_active ? "Suspendre" : "Réactiver"}
+                      {account.is_active ? t("admin.suspend") : t("admin.reactivate")}
                     </button>
                     <button
                       type="button"
                       className="danger-outline-button compact-button"
-                      aria-label={`Supprimer l’accès de ${account.username}`}
+                      aria-label={t("admin.deleteAccessNamed", { name: account.username })}
                       disabled={updatingUserId === account.id}
                       onClick={() => {
                         setDeletionError("");
                         setPendingDeletion(account);
                       }}
                     >
-                      Supprimer l’accès
+                      {t("admin.deleteAccess")}
                     </button>
                   </>
                 )}
@@ -209,9 +211,9 @@ export function AdminUsersPage({
         </div>
         {pendingDeletion !== null && (
           <FileDialog
-            eyebrow="Administration"
-            title={`Supprimer l’accès de ${pendingDeletion.username} ?`}
-            description="Le compte sera désactivé, ses sessions fermées et son dossier sera conservé."
+            eyebrow={t("admin.title")}
+            title={t("admin.deleteTitle", { name: pendingDeletion.username })}
+            description={t("admin.deleteDescription")}
             onClose={() => {
               setDeletionError("");
               setPendingDeletion(null);
@@ -220,7 +222,7 @@ export function AdminUsersPage({
           >
             <div className="confirmation-content">
               <p className="permanent-delete-warning">
-                Les fichiers ne seront pas supprimés, mais cet utilisateur ne pourra plus se connecter.
+                {t("admin.deleteWarning")}
               </p>
               <p className="form-message error-message" role="alert">
                 {deletionError}
@@ -236,7 +238,7 @@ export function AdminUsersPage({
                   disabled={updatingUserId === pendingDeletion.id}
                   data-initial-focus
                 >
-                  Annuler
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="button"
@@ -245,8 +247,8 @@ export function AdminUsersPage({
                   onClick={() => void confirmDeletion()}
                 >
                   {updatingUserId === pendingDeletion.id
-                    ? "Suppression…"
-                    : "Confirmer la suppression"}
+                    ? t("admin.deleting")
+                    : t("admin.confirmDelete")}
                 </button>
               </div>
             </div>
