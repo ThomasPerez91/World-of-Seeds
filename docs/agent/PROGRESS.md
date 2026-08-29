@@ -1308,8 +1308,13 @@
 - V2-32A complete backend suite: PASS, 531 tests with 6 real-service tests deferred to CI.
 - V2-32A Ruff lint/format, strict mypy, Alembic single-head validation, TypeScript, 38 frontend
   tests including axe/i18n coverage, production build, and `git diff --check`: PASS locally.
-- PR `#101` targets `develop_V2`; real PostgreSQL migration, container, complete-profile, and
-  monitoring validation remain mandatory in GitHub CI before merge.
+- The five P2 review findings on PR `#101` were fixed, answered, and resolved: locale persistence
+  can no longer invalidate authentication, first-login locale persists, torrent rejection and
+  recursive-transfer codes are translated, and all admin destinations are localized.
+- V2-32A GitHub CI run `33258087092`: PASS; dependency/image security, real PostgreSQL migration,
+  backend, 38 frontend tests, production image, complete local profile, bounded load, and
+  monitoring smoke are green; squash-merged through PR `#101` into `develop_V2` at
+  `63cd40f03b5869f0eae7e39b189f656a014101fa`.
 
 ## Known constraints
 
