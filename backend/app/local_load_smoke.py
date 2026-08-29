@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import statistics
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +20,12 @@ from sqlalchemy import delete, func, select, text
 from app.auth.service import issue_session
 from app.core.config import get_settings
 from app.core.database import engine, session_factory
+from app.integrations.account_routing import parse_deployment_account_specs
+from app.integrations.qbittorrent_v2 import (
+    QBittorrentV2Gateway,
+    QBittorrentV2ManagedIdentity,
+    QBittorrentV2TransientError,
+)
 from app.models import (
     DownloadLease,
     ManagedTorrent,
@@ -34,6 +42,7 @@ ACCOUNT_COUNT = 100
 SCALES = (1, 10, 25, 50, 100)
 PREFIX = "load-v2-32-"
 CONTENT = b"World of Seeds V2 bounded load smoke\n"
+STORAGE_KEY = uuid.UUID("32323232-3232-4232-8232-323232323232")
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,10 +60,62 @@ def _percentile(samples: list[float], percentile: float) -> float:
     return ordered[index]
 
 
+def _torrent_fixture() -> tuple[bytes, str]:
+    name = b"load.txt"
+    info = (
+        b"d6:lengthi"
+        + str(len(CONTENT)).encode()
+        + b"e4:name"
+        + str(len(name)).encode()
+        + b":"
+        + name
+        + b"12:piece lengthi16384e6:pieces20:"
+        + hashlib.sha1(CONTENT).digest()
+        + b"e"
+    )
+    metainfo = b"d8:announce30:https://c411.org/announce/test4:info" + info + b"e"
+    return metainfo, hashlib.sha1(info).hexdigest()
+
+
+async def _prepare_qbittorrent_fixture(
+    metainfo: bytes,
+    info_hash: str,
+) -> tuple[uuid.UUID, uuid.UUID]:
+    settings = get_settings()
+    if settings.integration_accounts_json is None:
+        raise RuntimeError("V2 load smoke requires the disposable integration registry")
+    specs = parse_deployment_account_specs(settings.integration_accounts_json)
+    spec = specs[int(info_hash, 16) % len(specs)]
+    async with httpx.AsyncClient(timeout=20) as client:
+        gateway = QBittorrentV2Gateway(
+            client,
+            spec.qbittorrent_url,
+            spec.qbittorrent_username,
+            spec.qbittorrent_password.get_secret_value(),
+            data_root=Path(settings.qbittorrent_data_root),
+        )
+        await gateway.add_managed_torrent(
+            metainfo,
+            expected_info_hash=info_hash,
+            storage_key=STORAGE_KEY,
+        )
+        identity = QBittorrentV2ManagedIdentity(info_hash, STORAGE_KEY)
+        for _ in range(100):
+            try:
+                snapshots = await gateway.inspect_managed_torrents((identity,))
+            except QBittorrentV2TransientError:
+                snapshots = ()
+            if len(snapshots) == 1 and snapshots[0].progress >= 1:
+                return spec.tracker_account_ref, spec.qbittorrent_account_ref
+            await asyncio.sleep(0.1)
+    raise RuntimeError("qBittorrent did not verify the bounded load fixture")
+
+
 async def _seed() -> list[LoadIdentity]:
     settings = get_settings()
     if settings.environment != "development" or os.environ.get("WOS_RUNTIME_PROFILE") != "v2":
         raise RuntimeError("V2 load smoke is restricted to the disposable development profile")
+    metainfo, info_hash = _torrent_fixture()
 
     async with session_factory() as session, session.begin():
         previous_users = select(User.id).where(User.username.like(f"{PREFIX}%"))
@@ -63,11 +124,12 @@ async def _seed() -> list[LoadIdentity]:
         await PostgresOptionsRegistry().initialize(session)
 
         torrent = ManagedTorrent(
-            info_hash="f" * 40,
+            info_hash=info_hash,
             name=PREFIX,
             total_size=len(CONTENT),
-            state=ManagedTorrentState.READY,
-            progress=1.0,
+            storage_key=STORAGE_KEY,
+            state=ManagedTorrentState.PENDING,
+            progress=0.0,
             manifest_version=1,
             manifest_checksum="e" * 64,
             manifest_file_count=1,
@@ -110,6 +172,19 @@ async def _seed() -> list[LoadIdentity]:
     SharedContentStore(Path(settings.data_root)).prepare(storage_key)
     target = Path(settings.data_root) / "content" / storage_key.hex / "load.txt"
     target.write_bytes(CONTENT)
+    tracker_ref, qbittorrent_ref = await _prepare_qbittorrent_fixture(metainfo, info_hash)
+    async with session_factory() as session, session.begin():
+        verified_torrent = await session.scalar(
+            select(ManagedTorrent)
+            .where(ManagedTorrent.storage_key == STORAGE_KEY)
+            .with_for_update()
+        )
+        if verified_torrent is None or verified_torrent.state is not ManagedTorrentState.PENDING:
+            raise RuntimeError("bounded load fixture changed before qBittorrent verification")
+        verified_torrent.tracker_account_ref = tracker_ref
+        verified_torrent.qbittorrent_account_ref = qbittorrent_ref
+        verified_torrent.state = ManagedTorrentState.READY
+        verified_torrent.progress = 1.0
     return identities
 
 
