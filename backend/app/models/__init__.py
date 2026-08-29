@@ -22,6 +22,7 @@ from app.models.torrent_v2 import (
     UserStorageUsage,
 )
 from app.models.trash import TrashEntry
+from app.models.v1_import import V1ImportItem, V1ImportRun, V1ImportRunStatus
 
 __all__ = [
     "Base",
@@ -49,4 +50,7 @@ __all__ = [
     "User",
     "UserSession",
     "UserTorrent",
+    "V1ImportItem",
+    "V1ImportRun",
+    "V1ImportRunStatus",
 ]

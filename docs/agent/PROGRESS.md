@@ -1251,6 +1251,14 @@
 - V2-30 Python/shell syntax, targeted Ruff lint/format, strict mypy, and `git diff --check`: PASS.
 - The real encrypted artifact flow and isolated PostgreSQL restore drill require `age` and Docker
   on Rise2; they remain mandatory operational acceptance checks before production backup approval.
+- V2-30 GitHub CI run `33218782500`: PASS; backend, frontend, container, complete local-profile,
+  and monitoring validation are green; squash-merged through PR `#97` into `develop_V2` at
+  `7144d1190a6f0bd3eac52600948c437ba2ccb938`.
+- V2-31 targeted inventory/import/idempotence/conflict/rollback suite: PASS, 17 tests.
+- V2-31 complete backend suite: PASS, 513 tests with 6 service-backed tests deferred to CI.
+- V2-31 Ruff lint/format, strict mypy, migration SQL generation, and `git diff --check`: PASS.
+- A real V1 snapshot/read-only role and the V2 physical-data reconciliation remain mandatory
+  operational acceptance checks; no V1 database or content is accessed by repository tests.
 
 ## Known constraints
 
@@ -1267,6 +1275,6 @@
 
 ## Next task
 
-- The next roadmap task after this branch is `V2-31 — optional V1 import`.
-- V2-28A through V2-29 are merged; V2-30 is implemented on its dedicated branch. V2-31 starts
-  only after V2-30 is reviewed, green, and merged into `develop_V2`.
+- The next roadmap task after this branch is `V2-32 — security and load`.
+- V2-28A through V2-30 are merged; V2-31 is implemented on its dedicated branch. V2-32 starts
+  only after V2-31 is reviewed, green, and merged into `develop_V2`.

@@ -80,8 +80,11 @@ concurrents du même torrent convergent donc vers un seul contenu physique et de
 `TorrentRequest`. Une annulation retire seulement la référence de son propriétaire. Une
 purge exige zéro demande active, zéro lease valide et une rétention expirée.
 
-Les anciennes lignes V1 `UserTorrent` ne sont pas transformées implicitement. Une migration
-d'import explicite, idempotente et réversible sera conçue après validation du modèle V2.
+Les anciennes lignes V1 `UserTorrent` ne sont pas transformées implicitement. La procédure
+optionnelle [`import-v1-v2.md`](import-v1-v2.md) produit un inventaire read-only, exige un dry-run,
+bloque les conflits et lie chaque mutation V2 à un run idempotent et réversible. Les métadonnées
+physiques absentes de V1 ne sont jamais inventées : les placeholders restent en erreur jusqu'à la
+réconciliation explicite.
 
 ## Jobs durables et reprise
 
