@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from app import local_smoke_seed, local_tracker_fixture
+from app import local_load_smoke, local_smoke_seed, local_tracker_fixture
+from app.core.config import Settings
 from app.torrents import sanitize_torrent
 
 
@@ -16,6 +17,33 @@ async def test_local_seed_refuses_non_development_environment() -> None:
         pytest.raises(RuntimeError, match="restricted to development"),
     ):
         await local_smoke_seed.seed()
+
+
+@pytest.mark.asyncio
+async def test_local_load_smoke_refuses_non_development_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings().model_copy(update={"environment": "production"})
+    monkeypatch.setattr("app.local_load_smoke.get_settings", lambda: settings)
+    monkeypatch.setenv("WOS_RUNTIME_PROFILE", "v2")
+
+    with pytest.raises(RuntimeError, match="restricted to the disposable development profile"):
+        await local_load_smoke._seed()
+
+
+def test_local_load_smoke_fixture_matches_the_shared_file() -> None:
+    content, expected_info_hash = local_load_smoke._torrent_fixture()
+
+    parsed = sanitize_torrent(
+        content,
+        allowed_tracker_hosts=["c411.org", "tk.c411.tw"],
+        max_total_size=1024,
+    )
+
+    assert parsed.info_hash == expected_info_hash
+    assert parsed.total_size == len(local_load_smoke.CONTENT)
+    assert parsed.name == "load.txt"
+    assert parsed.files[0].relative_path == "load.txt"
 
 
 def test_tracker_fixture_refuses_non_development_environment() -> None:

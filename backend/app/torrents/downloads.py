@@ -316,32 +316,27 @@ class DownloadLeaseManager:
             raise ValueError("download concurrency limit is invalid")
         now = self._clock()
         async with self._session.begin():
-            user = await self._session.scalar(
-                select(User).where(User.id == user_id).with_for_update()
+            locked_user_id = await self._session.scalar(
+                select(User.id).where(User.id == user_id).with_for_update()
             )
-            if user is None:
+            if locked_user_id is None:
                 raise ManagedDownloadError("download owner is missing")
-            managed = await self._session.get(
-                ManagedTorrent,
-                managed_torrent_id,
-                with_for_update=True,
+            locked_right_id = await self._session.scalar(
+                select(TorrentRequest.id)
+                .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
+                .join(TorrentFile, TorrentFile.managed_torrent_id == ManagedTorrent.id)
+                .where(
+                    TorrentRequest.id == torrent_request_id,
+                    TorrentRequest.user_id == user_id,
+                    TorrentRequest.managed_torrent_id == managed_torrent_id,
+                    TorrentRequest.state == TorrentRequestState.READY,
+                    ManagedTorrent.id == managed_torrent_id,
+                    ManagedTorrent.state == ManagedTorrentState.READY,
+                    TorrentFile.id == torrent_file_id,
+                )
+                .with_for_update()
             )
-            request = await self._session.get(
-                TorrentRequest,
-                torrent_request_id,
-                with_for_update=True,
-            )
-            file = await self._session.get(TorrentFile, torrent_file_id)
-            if (
-                managed is None
-                or managed.state is not ManagedTorrentState.READY
-                or request is None
-                or request.user_id != user_id
-                or request.managed_torrent_id != managed_torrent_id
-                or request.state is not TorrentRequestState.READY
-                or file is None
-                or file.managed_torrent_id != managed_torrent_id
-            ):
+            if locked_right_id is None:
                 raise ManagedDownloadError("download right is no longer ready")
             await self._session.execute(
                 delete(DownloadLease).where(

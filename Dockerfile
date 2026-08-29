@@ -19,7 +19,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/backend \
     WOS_STATIC_ROOT=/app/static
 
-RUN groupadd --gid 10001 worldofseeds \
+RUN apt-get update \
+    && apt-get upgrade --yes --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 worldofseeds \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin worldofseeds
 
 WORKDIR /app

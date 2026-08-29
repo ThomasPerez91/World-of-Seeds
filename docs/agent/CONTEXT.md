@@ -178,6 +178,10 @@ The stable V1 maintenance release documented here is `1.3.3`.
 - The V2 API runs as exactly one process until a representative load test authorizes a topology
   change. Download/archive admission remains process-local under that enforced topology; Redis is
   not promoted to a durable or distributed limiter without measured need.
+- The deterministic 100-account suite and the disposable complete-profile smoke validate the
+  single-process invariants and bounded PostgreSQL use in CI. They do not replace the sustained
+  CPU/RAM/I/O and failure-injection acceptance on Rise2; that host validation remains mandatory
+  before the pilot and before any API process-count change.
 - `StorageLedger.managed_bytes` is the declared capacity reserved by non-purged managed torrents,
   including content not fully downloaded yet. It is not a filesystem measurement; observed media
   capacity is represented separately by `disk_total_bytes` and `disk_free_bytes`.

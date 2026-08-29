@@ -127,6 +127,13 @@ def validate_config(config: Mapping[str, Any]) -> None:
         if _network_names(_mapping(services[name], name)) != expected:
             raise ComposeRise2PolicyError(f"{name} networks violate Rise2 isolation")
 
+    for name, raw in services.items():
+        privileged = _mapping(raw, name).get("privileged") is True
+        if name == "cadvisor" and not privileged:
+            raise ComposeRise2PolicyError("cAdvisor requires its approved privileged mode")
+        if name != "cadvisor" and privileged:
+            raise ComposeRise2PolicyError("only cAdvisor may be privileged")
+
     for name in ("api", "worker", "scheduler", "migrate"):
         service = _mapping(services[name], name)
         environment = _mapping(service.get("environment"), f"{name}.environment")

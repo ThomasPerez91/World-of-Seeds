@@ -419,6 +419,12 @@ async def download_torrent_archive(
             "download_concurrency_reached",
             "Trop de téléchargements sont déjà actifs.",
         )
+    except ManagedDownloadError:
+        _fail(
+            status.HTTP_404_NOT_FOUND,
+            "torrent_manifest_not_found",
+            "Ce contenu est indisponible.",
+        )
     archiver = ManagedFolderArchiver(
         ManagedFileDownloader(SharedContentStore(settings.data_root)),
         storage_key=storage_key,
@@ -557,6 +563,12 @@ async def download_torrent_file(
                 status.HTTP_429_TOO_MANY_REQUESTS,
                 "download_concurrency_reached",
                 "Trop de téléchargements sont déjà actifs.",
+            )
+        except ManagedDownloadError:
+            _fail(
+                status.HTTP_404_NOT_FOUND,
+                "torrent_file_not_found",
+                "Ce fichier est indisponible.",
             )
 
     try:

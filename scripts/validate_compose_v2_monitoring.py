@@ -78,6 +78,13 @@ def validate_config(config: Mapping[str, Any], *, platform: str = "linux") -> No
         if service.get("ports"):
             raise ComposeMonitoringPolicyError(f"{name} must not publish a host port")
 
+    for name in MONITORING_SERVICES:
+        privileged = _mapping(services[name], f"services.{name}").get("privileged") is True
+        if name == "cadvisor" and not privileged:
+            raise ComposeMonitoringPolicyError("cAdvisor requires its approved privileged mode")
+        if name != "cadvisor" and privileged:
+            raise ComposeMonitoringPolicyError("only cAdvisor may be privileged")
+
     node_exporter = _mapping(services["node-exporter"], "services.node-exporter")
     root_mounts = [
         _mapping(raw_mount, "services.node-exporter.volume")
