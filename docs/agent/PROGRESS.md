@@ -1316,6 +1316,27 @@
   monitoring smoke are green; squash-merged through PR `#101` into `develop_V2` at
   `63cd40f03b5869f0eae7e39b189f656a014101fa`.
 
+## V2-32B — Frontend UX / UI polish & mobile planning
+
+- Added V2-32B to the official roadmap after V2-32A and before the Rise2 pilot. This documentation
+  step does not implement frontend behavior, change dependencies, or add a database migration.
+- The future implementation removes confirmation-only delete modals while preserving explicit
+  danger styling, accessibility, pending-state disabling, and double-submit protection.
+- Punctual action outcomes use the existing accessible toast system; durable structural page state
+  remains inline. The future pass also centralizes the palette through design tokens.
+- Torrent submission will accept multiple picker/drop files through independent backend requests,
+  a bounded frontend queue of 2 to 4 concurrent uploads, at most 50 files per batch, per-file
+  outcomes, continued processing after failures, and one final authoritative refresh.
+- The responsive acceptance matrix covers 320, 360, 375, 390, 430, and 768 px plus desktop in
+  portrait and landscape, including user and administration surfaces, tables, long names, touch,
+  keyboard, screen readers, focus, toasts, and dialogs still required for non-confirmation flows.
+- Performance constraints prohibit full-page reloads, renewed torrent polling, unbounded lists or
+  manifests, unnecessary timers, global rerender churn, and unbounded upload concurrency.
+- Implementation acceptance will include Vitest, TypeScript, production build, interactions,
+  accessibility, FR/EN, mixed-result upload batches of 1/2/10/50 files, and responsive evidence.
+- The existing V2-33 draft work remains paused. V2-32B must be implemented, reviewed, validated,
+  and merged before the Rise2 pilot may continue.
+
 ## Pre-pilot hardening audit for V2-33
 
 - Confirmed and fixed the public monitoring boundary: Rise2 ingress returns `404` for
@@ -1373,6 +1394,7 @@
 
 ## Next task
 
-- The next roadmap task after V2-32A is `V2-33 — pilote limité sur Rise2`.
-- Start V2-33 only after this pre-pilot hardening audit is reviewed, green, and merged into
+- The next roadmap task after V2-32A is `V2-32B — Frontend UX / UI polish & mobile`.
+- Implement V2-32B only after this documentation update is reviewed, green, and merged into
   `develop_V2`.
+- Do not continue or merge the existing V2-33 draft before V2-32B is complete and merged.
