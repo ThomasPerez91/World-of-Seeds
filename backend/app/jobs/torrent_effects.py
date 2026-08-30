@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
@@ -16,6 +16,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql import Executable
 
+from app.admin import (
+    RECOVER_CANCEL_REQUESTS_JOB,
+    RECOVER_PURGE_METADATA_JOB,
+    ReconciliationRecoveryError,
+    deserialize_recovery_snapshot,
+    recover_orphaned_torrent,
+)
 from app.coordination import RedisCoordinator, TorrentEventType, TorrentRealtimeEvent
 from app.integrations.account_routing import AccountRoutingError, TorrentEffectRoute
 from app.integrations.c411_v2 import (
@@ -112,7 +119,56 @@ class TorrentEffectHandlers:
             ADD_TORRENT_JOB: self.add_torrent,
             PURGE_TORRENT_JOB: self.purge_torrent,
             SYNC_TORRENT_JOB: self.sync_torrent,
+            RECOVER_CANCEL_REQUESTS_JOB: self.recover_torrent,
+            RECOVER_PURGE_METADATA_JOB: self.recover_torrent,
         }
+
+    async def recover_torrent(self, snapshot: TorrentJobSnapshot) -> None:
+        action: Literal["cancel_requests", "purge_metadata"] = (
+            "cancel_requests"
+            if snapshot.job_type == RECOVER_CANCEL_REQUESTS_JOB
+            else "purge_metadata"
+        )
+        async with self._session_factory() as session:
+            job = await session.get(TorrentJob, snapshot.id)
+            if job is None or job.recovery_snapshot is None:
+                raise PermanentTorrentJobError("recovery_snapshot_missing")
+            try:
+                expected = deserialize_recovery_snapshot(job.recovery_snapshot)
+            except ReconciliationRecoveryError as exc:
+                raise PermanentTorrentJobError(str(exc)) from exc
+            if expected.managed_torrent_id != snapshot.managed_torrent_id:
+                raise PermanentTorrentJobError("recovery_snapshot_mismatch")
+        identity = QBittorrentV2ManagedIdentity(expected.info_hash, expected.storage_key)
+        try:
+            route = await self._router.resolve(expected.managed_torrent_id, expected.info_hash)
+            inspected = await route.inspector.inspect_managed_torrents((identity,))
+            qbittorrent_present = len(inspected) == 1
+        except QBittorrentV2MissingError:
+            qbittorrent_present = False
+        except (
+            AccountRoutingError,
+            IntegrationAuthenticationError,
+            QBittorrentV2TransientError,
+        ) as exc:
+            raise TransientTorrentJobError("reconciliation_evidence_unavailable") from exc
+        try:
+            storage_present = await asyncio.to_thread(self._content.contains, expected.storage_key)
+        except SharedContentStoreError as exc:
+            raise TransientTorrentJobError("reconciliation_evidence_unavailable") from exc
+        try:
+            async with self._session_factory() as session, session.begin():
+                await recover_orphaned_torrent(
+                    session,
+                    expected.managed_torrent_id,
+                    action=action,
+                    qbittorrent_present=qbittorrent_present,
+                    storage_present=storage_present,
+                    expected=expected,
+                    now=self._clock(),
+                )
+        except ReconciliationRecoveryError as exc:
+            raise PermanentTorrentJobError(str(exc)) from exc
 
     async def add_torrent(self, snapshot: TorrentJobSnapshot) -> None:
         torrent, should_add = await self._mark_adding(snapshot)

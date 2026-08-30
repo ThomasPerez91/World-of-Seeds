@@ -16,8 +16,9 @@ import {
   SettingsIcon,
 } from "../../components/icons";
 import { Notice } from "../../components/Notice";
-import { formatSettingIdentifier, type MessageKey, useI18n } from "../../i18n";
+import { type MessageKey, useI18n } from "../../i18n";
 import { FileDialog } from "../files/FileDialog";
+import { newGreedyFieldCopy, newGreedySectionLabel } from "./newGreedyTranslations";
 
 type DraftValue = boolean | string;
 
@@ -413,32 +414,34 @@ export function NewGreedyControlPanel({
           <div className="newgreedy-config-sections">
             {config.sections.map((section) => (
               <details key={section.id}>
-                <summary>{locale === "fr" ? section.label : formatSettingIdentifier(section.id)}</summary>
+                <summary>{newGreedySectionLabel(section.id, locale, section.label)}</summary>
                 <div className="newgreedy-fields">
-                  {section.fields.map((field) => (
-                    <div
-                      key={field.id}
-                      className={`newgreedy-field${field.editable ? "" : " locked"}`}
-                    >
-                      <div>
-                        <label htmlFor={`newgreedy-${field.id.replace(".", "-")}`}>
-                          {locale === "fr" ? field.label : formatSettingIdentifier(field.id)}
-                        </label>
-                        <p>
-                          {locale === "fr"
-                            ? field.description
-                            : t("admin.settingDescription", { key: field.id })}
-                        </p>
+                  {section.fields.map((field) => {
+                    const copy = newGreedyFieldCopy(field.id, locale, {
+                      label: field.label,
+                      description: field.description,
+                    });
+                    return (
+                      <div
+                        key={field.id}
+                        className={`newgreedy-field${field.editable ? "" : " locked"}`}
+                      >
+                        <div>
+                          <label htmlFor={`newgreedy-${field.id.replace(".", "-")}`}>
+                            {copy.label}
+                          </label>
+                          <p>{copy.description}</p>
+                        </div>
+                        <ConfigControl
+                          field={field}
+                          draft={draft[field.id] ?? originalDraftValue(field)}
+                          onChange={(value) =>
+                            setDraft((current) => ({ ...current, [field.id]: value }))
+                          }
+                        />
                       </div>
-                      <ConfigControl
-                        field={field}
-                        draft={draft[field.id] ?? originalDraftValue(field)}
-                        onChange={(value) =>
-                          setDraft((current) => ({ ...current, [field.id]: value }))
-                        }
-                      />
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </details>
             ))}

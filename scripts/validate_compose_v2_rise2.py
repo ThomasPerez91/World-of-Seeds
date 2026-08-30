@@ -145,12 +145,29 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ComposeRise2PolicyError(f"{name} must require secure cookies")
         if environment.get("WOS_REDIS_URL") != "redis://redis:6379/0":
             raise ComposeRise2PolicyError(f"{name} must use internal Redis")
-        if not environment.get("WOS_INTEGRATION_ACCOUNTS_JSON"):
+        registry = environment.get("WOS_INTEGRATION_ACCOUNTS_JSON")
+        if name in {"worker", "scheduler"} and not registry:
             raise ComposeRise2PolicyError(f"{name} requires the integration registry")
+        if name in {"api", "migrate"} and registry:
+            raise ComposeRise2PolicyError(f"{name} must not receive integration credentials")
         if service.get("read_only") is not True or service.get("cap_drop") != ["ALL"]:
             raise ComposeRise2PolicyError(f"{name} runtime hardening is incomplete")
     if _mapping(services["api"], "api").get("command") is not None:
         raise ComposeRise2PolicyError("api must retain the measured single-process entry point")
+    api_environment = _mapping(_mapping(services["api"], "api").get("environment"), "api.environment")
+    if api_environment.get("FORWARDED_ALLOW_IPS") != "172.30.0.2":
+        raise ComposeRise2PolicyError("api must trust only the fixed ingress address")
+    ingress_networks = _mapping(ingress.get("networks"), "ingress.networks")
+    api_networks = _mapping(_mapping(services["api"], "api").get("networks"), "api.networks")
+    if _mapping(ingress_networks.get("edge"), "ingress.networks.edge").get("ipv4_address") != "172.30.0.2":
+        raise ComposeRise2PolicyError("ingress must retain its trusted edge address")
+    if _mapping(api_networks.get("edge"), "api.networks.edge").get("ipv4_address") != "172.30.0.3":
+        raise ComposeRise2PolicyError("api must retain its fixed edge address")
+    edge = _mapping(networks["edge"], "networks.edge")
+    ipam = _mapping(edge.get("ipam"), "networks.edge.ipam")
+    configs = _sequence(ipam.get("config"), "networks.edge.ipam.config")
+    if len(configs) != 1 or _mapping(configs[0], "edge subnet").get("subnet") != "172.30.0.0/24":
+        raise ComposeRise2PolicyError("edge must retain its dedicated trusted-proxy subnet")
 
     newgreedy = _mapping(services["newgreedy"], "newgreedy")
     if newgreedy.get("cap_drop") != ["ALL"] or newgreedy.get("privileged") is True:

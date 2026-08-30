@@ -10,7 +10,7 @@ from starlette.requests import ClientDisconnect
 from starlette.types import Message, Scope
 
 from app.auth.security import hash_password
-from app.files import WorkspaceManager
+from app.files import BrowserPathBlockedError, WorkspaceManager
 from app.files.archives import ArchiveBusyError, SandboxedFolderArchiver
 from app.files.downloads import (
     DOWNLOAD_CHUNK_SIZE,
@@ -634,3 +634,31 @@ def test_folder_archive_does_not_follow_file_growth_during_stream(
     with zipfile.ZipFile(io.BytesIO(b"".join(archive_chunks))) as archive:
         assert archive.read("Collection/active.part") == b"seed"
     assert growing_file.stat().st_size > len(b"seed")
+
+
+def test_folder_archive_rejects_early_source_eof(
+    data_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = WorkspaceManager(data_root)
+    manager.create("thomas")
+    folder = user_downloads(data_root) / "Collection"
+    folder.mkdir()
+    (folder / "short.bin").write_bytes(b"expected")
+    archiver = SandboxedFolderArchiver(manager)
+    opened = archiver.open("thomas", "downloads/Collection", max_source_bytes=1024)
+    stream = archiver.stream(opened, max_source_bytes=1024, chunk_size=4)
+    original_read = os.read
+    reads = 0
+
+    def early_eof(file_descriptor: int, size: int) -> bytes:
+        nonlocal reads
+        reads += 1
+        return original_read(file_descriptor, size) if reads == 1 else b""
+
+    monkeypatch.setattr(os, "read", early_eof)
+    with pytest.raises(BrowserPathBlockedError, match="changed during streaming"):
+        b"".join(stream)
+
+    reopened = archiver.open("thomas", "downloads/Collection", max_source_bytes=1024)
+    reopened.close()

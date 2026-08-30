@@ -1316,6 +1316,48 @@
   monitoring smoke are green; squash-merged through PR `#101` into `develop_V2` at
   `63cd40f03b5869f0eae7e39b189f656a014101fa`.
 
+## Pre-pilot hardening audit for V2-33
+
+- Confirmed and fixed the public monitoring boundary: Rise2 ingress returns `404` for
+  `/api/v2/metrics`, sets `Referrer-Policy: no-referrer` uniformly, overwrites forwarded client
+  identity, and the API trusts only the fixed Caddy address. Prometheus keeps private API-network
+  access.
+- Replaced API-side legacy integration polling with secret-free, durable PostgreSQL observations
+  produced per account by the scheduler. Metrics, health, the admin overview, and reconciliation
+  now fail closed on stale/incomplete observations and do not receive the integration registry.
+- Added stable, bounded reconciliation across database, immutable qBittorrent snapshots, and
+  streamed shared storage, with opaque cursors and explicit boundary coverage at 0, 1, 199, 200,
+  201, 500, and 1,000 entries. Administrative recovery now enqueues idempotent durable worker jobs
+  and persists their results instead of performing network or storage effects in the API process.
+- Kept V1 behavior isolated while removing the legacy torrent route from the V2 router and unused
+  legacy frontend calls. V2 hides NewGreedy editing and WOS/NewGreedy restart controls because the
+  Rise2 runtime does not support those mutations safely.
+- User deletion now cancels active torrent requests through the normal locked lifecycle and
+  accounting path while preserving shared physical copies. Scheduler eligibility excludes deleted
+  and inactive users.
+- Made large recursive downloads progressively consume server-paginated manifests, rejected ZIP
+  sources that end before their declared size while releasing descriptors, and made torrent
+  correlation require a full hash or one unambiguous prefix.
+- Centralized explicit FR/EN copy for all 36 V2 option keys, 44 NewGreedy fields, and seven
+  NewGreedy sections; known controls no longer depend on backend French phrases.
+- Finding 10 was adjusted after inspection: arbitrary proxy spoofing was not trusted, but Uvicorn
+  did not trust Caddy at all, so rate limiting could collapse clients onto the ingress address.
+  Fixed addresses plus an overwritten forwarded chain now preserve the real client without opening
+  a broad trusted-proxy range.
+- Added migration `20260829_21` for durable integration health and bounded qBittorrent inventory
+  snapshots. Offline PostgreSQL upgrade and targeted downgrade SQL generation pass.
+- Local validation: PASS — 553 backend tests with 6 real-service tests deferred, full Ruff lint and
+  format checks, strict mypy, 40 frontend tests, TypeScript, production build, Compose/Caddy policy
+  tests, offline PostgreSQL upgrade/targeted downgrade SQL, and `git diff --check`.
+- PR `#102` review follow-up: the three findings are fixed, answered, and resolved. Recovery jobs
+  preserve their exact enqueue-time snapshot, a failed recovery can be re-enqueued without losing
+  concurrent idempotency, and durable observation validity accounts for both the configured cadence
+  and the duration of a complete multi-account cycle.
+- Corrected PR head `dcbc527cf7a7c6bbcf536281a9613dc58827726c`: GitHub CI run `33314519448`
+  (`#220`) PASS — backend with real PostgreSQL/Redis and migrations, frontend, dependency and image
+  security, production image, complete Compose profile, bounded load, WebSocket, and monitoring
+  validation are green. Docker remains unavailable only in the local workspace.
+
 ## Known constraints
 
 - `master` and `develop` remain V1-only; V2 branches and PRs target `develop_V2`.
@@ -1332,4 +1374,5 @@
 ## Next task
 
 - The next roadmap task after V2-32A is `V2-33 — pilote limité sur Rise2`.
-- Start V2-33 only after V2-32A is reviewed, green, and merged into `develop_V2`.
+- Start V2-33 only after this pre-pilot hardening audit is reviewed, green, and merged into
+  `develop_V2`.

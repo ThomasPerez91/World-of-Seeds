@@ -175,6 +175,12 @@ The stable V1 maintenance release documented here is `1.3.3`.
 
 - Production workers fail fast when required integration configuration is missing or invalid;
   development and test fixtures remain explicitly supported.
+- Only the scheduler and workers may receive the production integration registry and join the
+  torrent network. They publish secret-free, per-account integration health and immutable,
+  bounded qBittorrent inventory snapshots to PostgreSQL. The API, Prometheus metrics, and
+  administrative reconciliation consume those durable observations without integration
+  credentials or direct qBittorrent/NewGreedy access; stale or incomplete observations fail
+  closed.
 - The V2 API runs as exactly one process until a representative load test authorizes a topology
   change. Download/archive admission remains process-local under that enforced topology; Redis is
   not promoted to a durable or distributed limiter without measured need.
@@ -191,7 +197,8 @@ The stable V1 maintenance release documented here is `1.3.3`.
   safe business actions. Cancelling an orphan revokes SQL rights without deleting physical data;
   metadata purge is allowed only after exact qBittorrent and shared-storage checks both prove the
   physical torrent absent. Recovery never deletes files automatically while ownership or physical
-  state is ambiguous.
+  state is ambiguous. The API only enqueues idempotent durable recovery jobs; a worker performs
+  external checks and persists the result in PostgreSQL.
 
 ## Torrent user experience
 

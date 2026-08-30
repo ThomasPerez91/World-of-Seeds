@@ -6,6 +6,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -83,6 +84,11 @@ class TrackerDiagnosticCode(StrEnum):
     RATE_LIMITED = "RATE_LIMITED"
     INVALID_RESPONSE = "INVALID_RESPONSE"
     UNKNOWN_ERROR = "UNKNOWN_ERROR"
+
+
+class IntegrationServiceState(StrEnum):
+    HEALTHY = "HEALTHY"
+    UNAVAILABLE = "UNAVAILABLE"
 
 
 ACTIVE_REQUEST_PREDICATE = text("state IN ('REQUESTED', 'ACTIVE', 'READY')")
@@ -505,6 +511,90 @@ class TrackerActivity(Base):
     managed_torrent: Mapped[ManagedTorrent] = relationship(back_populates="tracker_activities")
 
 
+class IntegrationServiceHealth(Base):
+    """Secret-free health published by the torrent-network scheduler."""
+
+    __tablename__ = "integration_service_health"
+    __table_args__ = (
+        CheckConstraint(
+            "service IN ('newgreedy', 'qbittorrent')",
+            name="ck_integration_service_health_service",
+        ),
+        CheckConstraint(
+            "latency_ms IS NULL OR latency_ms >= 0",
+            name="ck_integration_service_health_latency",
+        ),
+        CheckConstraint(
+            "account_count BETWEEN 1 AND 16",
+            name="ck_integration_service_health_account_count",
+        ),
+    )
+
+    service: Mapped[str] = mapped_column(String(32), primary_key=True)
+    account_ref: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    observation_set: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    account_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[IntegrationServiceState] = mapped_column(
+        Enum(
+            IntegrationServiceState,
+            name="integration_service_state",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+        ),
+        nullable=False,
+    )
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    checked_at: Mapped[datetime] = mapped_column(nullable=False)
+    valid_until: Mapped[datetime] = mapped_column(nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class QBittorrentInventorySnapshot(Base):
+    """One immutable, bounded qB inventory generation for an opaque account reference."""
+
+    __tablename__ = "qbittorrent_inventory_snapshots"
+    __table_args__ = (
+        CheckConstraint("item_count >= 0", name="ck_qb_inventory_snapshot_item_count"),
+        Index(
+            "ix_qb_inventory_snapshot_account_checked",
+            "account_ref",
+            "checked_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_ref: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    observation_set: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    truncated: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(nullable=False)
+
+
+class QBittorrentInventoryItem(Base):
+    """Secret-free qB inventory item owned by one immutable snapshot."""
+
+    __tablename__ = "qbittorrent_inventory_items"
+    __table_args__ = (
+        CheckConstraint(
+            "length(info_hash) = 40 AND info_hash = lower(info_hash)",
+            name="ck_qb_inventory_items_hash",
+        ),
+        Index("ix_qb_inventory_items_hash", "info_hash"),
+        Index("ix_qb_inventory_items_storage", "storage_key"),
+    )
+
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("qbittorrent_inventory_snapshots.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    info_hash: Mapped[str] = mapped_column(String(40), primary_key=True)
+    storage_key: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    claims_wos_identity: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+
 class TorrentJob(Base):
     __tablename__ = "torrent_jobs"
     __table_args__ = (
@@ -554,6 +644,7 @@ class TorrentJob(Base):
     )
     job_type: Mapped[str] = mapped_column(String(64), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    recovery_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     state: Mapped[TorrentJobState] = mapped_column(
         Enum(
             TorrentJobState,

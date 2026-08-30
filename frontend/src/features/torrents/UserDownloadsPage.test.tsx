@@ -182,14 +182,17 @@ describe("UserDownloadsPage", () => {
 
   it("propose les fichiers et le ZIP streamé sans File System Access API", async () => {
     const user = userEvent.setup();
+    let manifestRequests = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         if (String(input).includes("download-manifest")) {
+          manifestRequests += 1;
+          expect(String(input)).toContain("limit=50");
           return response({
             snapshot_id: "b".repeat(64),
             manifest_version: 1,
-            file_count: 1,
+            file_count: 50_000,
             total_size: 3,
             archive_available: true,
             offset: 0,
@@ -216,6 +219,8 @@ describe("UserDownloadsPage", () => {
     expect(archive.getAttribute("href")).toContain("download-archive?snapshot=");
     expect(individual.getAttribute("href")).toContain("/files/file-id/download?snapshot=");
     expect(screen.getByText("Film/file.bin")).toBeTruthy();
+    expect(screen.getByText("1 / 1000")).toBeTruthy();
+    expect(manifestRequests).toBe(1);
     expect(view.container.querySelector("[style]")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });

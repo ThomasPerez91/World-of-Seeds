@@ -6,7 +6,7 @@ import {
   parseTorrentRealtimeMessage,
   type TorrentRequestV2,
   type TorrentRequestV2State,
-  type TorrentDownloadSnapshotV2,
+  type TorrentDownloadManifestPageV2,
 } from "../../api/client";
 import { useFeedback } from "../../components/Feedback";
 import { DeleteIcon, DownloadIcon, RefreshIcon } from "../../components/icons";
@@ -142,9 +142,9 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
   const [fallback, setFallback] = useState<{
     torrentId: string;
     name: string;
-    snapshot: TorrentDownloadSnapshotV2;
+    snapshot: TorrentDownloadManifestPageV2;
   } | null>(null);
-  const [fallbackOffset, setFallbackOffset] = useState(0);
+  const [fallbackLoading, setFallbackLoading] = useState(false);
 
   useEffect(() => () => controllerRef.current?.cancel(), []);
 
@@ -255,9 +255,10 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
     if (!supportsRecursiveDirectoryDownload()) {
       setNotice({ tone: "progress", message: t("downloads.compatPreparing") });
       try {
-        const snapshot = await api.getTorrentDownloadSnapshotV2(torrent.id);
+        const snapshot = await api.getTorrentDownloadManifestPageV2(
+          torrent.id, 0, null, undefined, FALLBACK_PAGE_SIZE,
+        );
         setFallback({ torrentId: torrent.id, name: torrent.name, snapshot });
-        setFallbackOffset(0);
         setNotice({
           tone: "warning",
           message: t("downloads.compatHint"),
@@ -325,6 +326,25 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
         tone: "error",
         message: apiError(caught, "downloads.failed"),
       });
+    }
+  }
+
+  async function loadFallbackPage(requestedOffset: number) {
+    if (fallback === null || fallbackLoading) return;
+    setFallbackLoading(true);
+    try {
+      const page = await api.getTorrentDownloadManifestPageV2(
+        fallback.torrentId,
+        requestedOffset,
+        fallback.snapshot.snapshot_id,
+        undefined,
+        FALLBACK_PAGE_SIZE,
+      );
+      setFallback((current) => current === null ? null : { ...current, snapshot: page });
+    } catch (caught) {
+      setNotice({ tone: "error", message: apiError(caught, "downloads.manifestFailed") });
+    } finally {
+      setFallbackLoading(false);
     }
   }
 
@@ -484,9 +504,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
             </a>
           )}
           <ul>
-            {fallback.snapshot.items
-              .slice(fallbackOffset, fallbackOffset + FALLBACK_PAGE_SIZE)
-              .map((file) => (
+            {fallback.snapshot.items.map((file) => (
                 <li key={file.id}>
                   <span title={file.relative_path}>{file.relative_path}</span>
                   <span>{formatBytes(file.size)}</span>
@@ -508,17 +526,17 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
               <button
                 type="button"
                 className="secondary-button"
-                disabled={fallbackOffset === 0}
-                onClick={() => setFallbackOffset(Math.max(0, fallbackOffset - FALLBACK_PAGE_SIZE))}
+                disabled={fallbackLoading || fallback.snapshot.offset === 0}
+                onClick={() => void loadFallbackPage(Math.max(0, fallback.snapshot.offset - FALLBACK_PAGE_SIZE))}
               >
                 {t("common.previous")}
               </button>
-              <span>{Math.floor(fallbackOffset / FALLBACK_PAGE_SIZE) + 1} / {Math.ceil(fallback.snapshot.file_count / FALLBACK_PAGE_SIZE)}</span>
+              <span>{Math.floor(fallback.snapshot.offset / FALLBACK_PAGE_SIZE) + 1} / {Math.ceil(fallback.snapshot.file_count / FALLBACK_PAGE_SIZE)}</span>
               <button
                 type="button"
                 className="secondary-button"
-                disabled={fallbackOffset + FALLBACK_PAGE_SIZE >= fallback.snapshot.file_count}
-                onClick={() => setFallbackOffset(fallbackOffset + FALLBACK_PAGE_SIZE)}
+                disabled={fallbackLoading || fallback.snapshot.offset + fallback.snapshot.items.length >= fallback.snapshot.file_count}
+                onClick={() => void loadFallbackPage(fallback.snapshot.offset + fallback.snapshot.items.length)}
               >
                 {t("common.next")}
               </button>

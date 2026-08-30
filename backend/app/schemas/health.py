@@ -29,3 +29,4 @@ class AdminSystemHealthResponse(BaseModel):
     checked_at: datetime
     newgreedy: ServiceHealthDetail
     qbittorrent: ServiceHealthDetail
+    service_controls_available: bool = True

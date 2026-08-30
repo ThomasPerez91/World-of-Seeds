@@ -23,6 +23,7 @@ from app.models import (
     SchedulerState,
     TorrentRequest,
     TorrentRequestState,
+    User,
 )
 from app.options import PostgresOptionsRegistry
 from app.scheduler.persistence import (
@@ -272,11 +273,14 @@ class SchedulerRuntime:
             (
                 await session.scalars(
                     select(TorrentRequest)
+                    .join(User, User.id == TorrentRequest.user_id)
                     .where(
                         TorrentRequest.managed_torrent_id.in_(torrent.id for torrent in torrents),
                         TorrentRequest.state.in_(
                             (TorrentRequestState.REQUESTED, TorrentRequestState.ACTIVE)
                         ),
+                        User.is_active.is_(True),
+                        User.deleted_at.is_(None),
                     )
                     .order_by(
                         TorrentRequest.managed_torrent_id,

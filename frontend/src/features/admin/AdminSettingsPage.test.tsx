@@ -4,8 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { auditAccessibility } from "../../test/accessibility";
 import { AdminSettingsPage } from "./AdminSettingsPage";
+import { translatedNewGreedyFieldIds } from "./newGreedyTranslations";
+import { translatedOptionKeys } from "./optionTranslations";
 
 const options = {
+  service_controls_available: true,
   sections: [
     {
       id: "torrents",
@@ -67,6 +70,13 @@ function response(body: unknown, status = 200): Response {
 }
 
 describe("AdminSettingsPage", () => {
+  it("possède une traduction anglaise stable pour chaque option V2", () => {
+    expect(translatedOptionKeys.size).toBe(36);
+    expect(translatedOptionKeys.has("WOS_ADMIN_REFRESH_INTERVAL_SECONDS")).toBe(true);
+    expect(translatedNewGreedyFieldIds.size).toBe(44);
+    expect(translatedNewGreedyFieldIds.has("advanced.inject_hours")).toBe(true);
+  });
+
   it("affiche une erreur métier structurée sous le champ concerné", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {

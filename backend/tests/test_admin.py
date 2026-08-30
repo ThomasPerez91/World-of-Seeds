@@ -150,6 +150,7 @@ async def test_services_health_is_detailed_and_admin_only(
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
+        "service_controls_available": True,
         "checked_at": response.json()["checked_at"],
         "newgreedy": {
             "status": "healthy",

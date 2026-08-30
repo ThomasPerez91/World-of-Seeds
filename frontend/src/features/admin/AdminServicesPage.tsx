@@ -175,8 +175,12 @@ export function AdminServicesPage({
           </div>
         )}
 
-        <TorrentMonitoringPanel onSessionExpired={onSessionExpired} />
-        <NewGreedyControlPanel onSessionExpired={onSessionExpired} />
+        {health?.service_controls_available === true && (
+          <>
+            <TorrentMonitoringPanel onSessionExpired={onSessionExpired} />
+            <NewGreedyControlPanel onSessionExpired={onSessionExpired} />
+          </>
+        )}
       </section>
     </AdminPageShell>
   );

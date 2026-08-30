@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+import base64
+import binascii
+import json
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -29,10 +35,79 @@ ACTIVE_REQUEST_STATES = (
     TorrentRequestState.READY,
 )
 MAX_RECOVERY_REQUESTS = 1000
+MAX_RECONCILIATION_CURSOR_BYTES = 4096
+RECOVER_CANCEL_REQUESTS_JOB = "RECOVER_CANCEL_REQUESTS"
+RECOVER_PURGE_METADATA_JOB = "RECOVER_PURGE_METADATA"
+RECOVERY_JOB_TYPES = (RECOVER_CANCEL_REQUESTS_JOB, RECOVER_PURGE_METADATA_JOB)
 
 
 class ReconciliationRecoveryError(RuntimeError):
     """A bounded, secret-safe recovery refusal."""
+
+
+class ReconciliationCursorError(ValueError):
+    """An opaque reconciliation cursor is malformed or unsupported."""
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationCursor:
+    phase: Literal["database", "qbittorrent", "storage"]
+    after: str | None = None
+    snapshot_ids: tuple[uuid.UUID, ...] = ()
+    snapshot_index: int = 0
+
+    def encode(self) -> str:
+        payload = json.dumps(
+            {
+                "v": 1,
+                "phase": self.phase,
+                "after": self.after,
+                "snapshot_ids": [str(value) for value in self.snapshot_ids],
+                "snapshot_index": self.snapshot_index,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+    @classmethod
+    def decode(cls, value: str) -> ReconciliationCursor:
+        if not 1 <= len(value) <= MAX_RECONCILIATION_CURSOR_BYTES:
+            raise ReconciliationCursorError("reconciliation_cursor_invalid")
+        try:
+            padded = value + "=" * (-len(value) % 4)
+            payload = json.loads(base64.b64decode(padded, altchars=b"-_", validate=True))
+            if not isinstance(payload, dict) or set(payload) != {
+                "v",
+                "phase",
+                "after",
+                "snapshot_ids",
+                "snapshot_index",
+            }:
+                raise ValueError
+            if payload["v"] != 1 or payload["phase"] not in {
+                "database",
+                "qbittorrent",
+                "storage",
+            }:
+                raise ValueError
+            after = payload["after"]
+            snapshot_index = payload["snapshot_index"]
+            raw_snapshot_ids = payload["snapshot_ids"]
+            if (
+                (after is not None and (not isinstance(after, str) or len(after) > 128))
+                or not isinstance(snapshot_index, int)
+                or snapshot_index < 0
+            ):
+                raise ValueError
+            if not isinstance(raw_snapshot_ids, list) or len(raw_snapshot_ids) > 16:
+                raise ValueError
+            snapshot_ids = tuple(uuid.UUID(item) for item in raw_snapshot_ids)
+            if len(snapshot_ids) != len(set(snapshot_ids)) or snapshot_index > len(snapshot_ids):
+                raise ValueError
+            return cls(payload["phase"], after, snapshot_ids, snapshot_index)
+        except (binascii.Error, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ReconciliationCursorError("reconciliation_cursor_invalid") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +129,75 @@ class ReconciliationRecoverySnapshot:
     lifecycle_generation: int
     active_request_ids: tuple[uuid.UUID, ...]
     active_job_ids: tuple[uuid.UUID, ...]
+
+
+_INFO_HASH = re.compile(r"[0-9a-f]{40}")
+
+
+def serialize_recovery_snapshot(snapshot: ReconciliationRecoverySnapshot) -> dict[str, object]:
+    return {
+        "v": 1,
+        "managed_torrent_id": str(snapshot.managed_torrent_id),
+        "info_hash": snapshot.info_hash,
+        "storage_key": str(snapshot.storage_key),
+        "qbittorrent_account_ref": (
+            str(snapshot.qbittorrent_account_ref)
+            if snapshot.qbittorrent_account_ref is not None
+            else None
+        ),
+        "lifecycle_generation": snapshot.lifecycle_generation,
+        "active_request_ids": [str(value) for value in snapshot.active_request_ids],
+        "active_job_ids": [str(value) for value in snapshot.active_job_ids],
+    }
+
+
+def deserialize_recovery_snapshot(payload: object) -> ReconciliationRecoverySnapshot:
+    try:
+        if not isinstance(payload, dict) or set(payload) != {
+            "v",
+            "managed_torrent_id",
+            "info_hash",
+            "storage_key",
+            "qbittorrent_account_ref",
+            "lifecycle_generation",
+            "active_request_ids",
+            "active_job_ids",
+        }:
+            raise ValueError
+        info_hash = payload["info_hash"]
+        lifecycle_generation = payload["lifecycle_generation"]
+        request_ids = payload["active_request_ids"]
+        job_ids = payload["active_job_ids"]
+        account_ref = payload["qbittorrent_account_ref"]
+        if (
+            payload["v"] != 1
+            or not isinstance(info_hash, str)
+            or _INFO_HASH.fullmatch(info_hash) is None
+            or not isinstance(lifecycle_generation, int)
+            or lifecycle_generation < 0
+            or not isinstance(request_ids, list)
+            or not isinstance(job_ids, list)
+            or len(request_ids) > MAX_RECOVERY_REQUESTS
+            or len(job_ids) > MAX_RECOVERY_REQUESTS
+            or (account_ref is not None and not isinstance(account_ref, str))
+        ):
+            raise ValueError
+        snapshot = ReconciliationRecoverySnapshot(
+            uuid.UUID(payload["managed_torrent_id"]),
+            info_hash,
+            uuid.UUID(payload["storage_key"]),
+            uuid.UUID(account_ref) if account_ref is not None else None,
+            lifecycle_generation,
+            tuple(uuid.UUID(value) for value in request_ids),
+            tuple(uuid.UUID(value) for value in job_ids),
+        )
+        if len(snapshot.active_request_ids) != len(set(snapshot.active_request_ids)) or len(
+            snapshot.active_job_ids
+        ) != len(set(snapshot.active_job_ids)):
+            raise ValueError
+        return snapshot
+    except (TypeError, ValueError) as exc:
+        raise ReconciliationRecoveryError("recovery_snapshot_invalid") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +355,7 @@ async def recover_orphaned_torrent(
                 .where(
                     TorrentJob.managed_torrent_id == torrent.id,
                     TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
+                    TorrentJob.job_type.not_in(RECOVERY_JOB_TYPES),
                 )
                 .order_by(TorrentJob.id)
             )
@@ -281,6 +426,7 @@ async def recover_orphaned_torrent(
                 .where(
                     TorrentJob.managed_torrent_id == torrent.id,
                     TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
+                    TorrentJob.job_type.not_in(RECOVERY_JOB_TYPES),
                 )
                 .with_for_update()
             )
@@ -360,6 +506,7 @@ async def recovery_snapshot(
                 .where(
                     TorrentJob.managed_torrent_id == torrent.id,
                     TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
+                    TorrentJob.job_type.not_in(RECOVERY_JOB_TYPES),
                 )
                 .order_by(TorrentJob.id)
                 .limit(MAX_RECOVERY_REQUESTS + 1)
