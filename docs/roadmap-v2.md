@@ -69,7 +69,8 @@ ou migration additive), **ÉLEVÉ** (concurrence, stockage, sécurité, déploie
 | V2-31 | ÉLEVÉ | V2-22,V2-26,V2-30 | Import V1 optionnel : inventaire, mapping `UserTorrent`, dry-run, idempotence, conflits et rollback sans toucher à V1. |
 | V2-32 | ÉLEVÉ | V2-24,V2-28,V2-29 | Sécurité et charge : 100 comptes, pannes/latences, CPU/RAM/I/O, CSP, OWASP, scan dépendances/images et tests anti-famine. |
 | V2-32A | MOYEN | V2-24,V2-32 | Internationalisation FR/EN centralisée, contrats backend par codes stables, formatage locale et couverture responsive. |
-| V2-33 | ÉLEVÉ | V2-30,V2-31,V2-32,V2-32A | Pilote Rise2 : données de test puis comptes pilotes, critères go/no-go, observation et retour arrière vérifié. |
+| V2-32B | MOYEN/ÉLEVÉ | V2-23,V2-28D,V2-32A | Frontend UX/UI et mobile : suppressions sans modale de confirmation, toasts unifiés, multi-upload torrent borné, design tokens, accessibilité et responsive complet. |
+| V2-33 | ÉLEVÉ | V2-30,V2-31,V2-32,V2-32A,V2-32B | Pilote Rise2 : données de test puis comptes pilotes, critères go/no-go, observation et retour arrière vérifié. |
 | V2-34 | ÉLEVÉ | V2-33 | Release candidate V2 : gel fonctionnel, migrations expand/contract, runbook, compatibilité digest précédent et validation complète. |
 | V2-35 | ÉLEVÉ | V2-34 | Release V2 stable : SemVer 2.0.0 seulement après approbation, bascule Rise2 progressive et conservation de la V1 pendant la fenêtre de rollback. |
 
@@ -84,7 +85,7 @@ flowchart TD
     UX --> Local["Validation locale Mac"]
     Local --> Harden["Hardening V2-28A à H"]
     Harden --> Operate["Rise2 + sauvegarde"]
-    Operate --> Release["Import + charge + i18n + pilote"]
+    Operate --> Release["Import + charge + i18n + UX + pilote"]
 ```
 
 Les branches parallélisables après le socle sont : options, Redis et domaine torrent ; puis
@@ -251,6 +252,42 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 - La sortie couvre login, fichiers, téléchargements, administration, dialogues, toasts, erreurs,
   mobile/desktop et textes anglais plus longs sans overflow.
 
+## V2-32B — Frontend UX / UI polish & mobile
+
+- Supprimer les modales qui servent uniquement à confirmer une suppression dans les parcours
+  fichiers, corbeille, utilisateurs, torrents et purge admin. Les actions destructives restent
+  explicites, accessibles, stylées en danger, désactivées pendant leur exécution et protégées
+  contre le double envoi. La suppression définitive et la purge admin conservent une confirmation
+  explicite inline, accessible et non modale. Ne pas ajouter SweetAlert ni une autre bibliothèque
+  de confirmation.
+- Acheminer les résultats ponctuels des actions par le système de toasts existant (`success`,
+  `error`, `warning`, `info` et, si utile, `progress`). Réserver les messages inline aux états
+  structurels durables et valider `aria-live`, clavier, fermeture, expiration, empilement et mobile.
+- Permettre la sélection et le glisser-déposer de plusieurs fichiers `.torrent`. Conserver une
+  requête backend indépendante par fichier, une file frontend bornée (2 à 4 envois simultanés,
+  au plus 50 fichiers par lot), un résultat par fichier et la poursuite du lot après une erreur.
+  Terminer par un refresh autoritaire sans rechargement de page, polling automatique ou rupture du
+  modèle WebSocket et refresh manuel existant.
+- Rejeter proprement les fichiers surnuméraires, vides, non torrent ou dupliqués dans un même lot,
+  sans bloquer l'interface. Couvrir les résultats ajouté, déjà présent, invalide, trop gros, quota
+  atteint et erreur temporaire.
+- Centraliser la palette dans des design tokens couvrant fonds, surfaces, texte, bordures, états
+  sémantiques, navigation, focus, hover, ombres, tableaux, progression et toasts. Préserver
+  l'identité actuelle tout en supprimant les couleurs arbitraires et en respectant les contrastes
+  WCAG importants.
+- Revoir toutes les surfaces utilisateur et administration à 320, 360, 375, 390, 430 et 768 px,
+  puis desktop, en portrait et paysage. Aucun changement d'orientation ne recharge la page.
+- Sur petit écran, convertir les tableaux en cartes/data-label/layout dédié ou limiter le scroll au
+  composant qui l'exige. Les noms longs ne provoquent aucun overflow global et ne masquent jamais
+  les actions ; les cibles tactiles, le focus, le clavier et les lecteurs d'écran restent utilisables.
+- Ne réintroduire ni polling torrent, ni chargement de listes ou manifestes non bornés, ni timers ou
+  rerenders globaux fréquents. La file de multi-upload reste bornée.
+- À l'implémentation, valider Vitest, TypeScript, build production, interactions, accessibilité et
+  i18n FR/EN ; tester des lots de 1, 2, 10 et 50 fichiers avec succès et erreurs mélangés, puis les
+  largeurs responsive, noms longs, tableaux, toasts, navigation admin et orientations.
+- Cette étape de roadmap planifie uniquement V2-32B. Son implémentation doit être réalisée dans une
+  tâche ultérieure et acceptée avant le démarrage ou la fusion du pilote V2-33.
+
 ## Migrations et ruptures anticipées
 
 | Sujet | Changement | Compatibilité/traitement |
@@ -297,6 +334,6 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 
 ## Prochaine tâche
 
-`V2-32 — Sécurité et charge` est la prochaine tâche après la branche V2-31.
-V2-28A à V2-30 sont fusionnées et V2-31 est implémentée sur sa branche dédiée ; V2-32 ne
-commence qu'après revue, CI verte et fusion de V2-31.
+`V2-32B — Frontend UX / UI polish & mobile` est la prochaine tâche après V2-32A.
+Le travail préparatoire V2-33 déjà présent reste en brouillon et en pause ; le pilote ne reprend
+qu'après implémentation, revue, CI verte et fusion de V2-32B dans `develop_V2`.

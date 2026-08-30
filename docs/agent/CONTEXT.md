@@ -96,7 +96,8 @@ The stable V1 maintenance release documented here is `1.3.3`.
 
 ## Torrent submission
 
-- Users upload a single `.torrent` file through authenticated multipart upload.
+- Each authenticated multipart upload carries one `.torrent` file. A frontend multi-upload batch
+  issues several independent bounded requests rather than creating one large backend transaction.
 - The server parses bencode strictly and rejects malformed metainfo.
 - The exact raw bencoded `info` dictionary bytes define the info hash.
 - Do not re-encode `info` before computing the hash.
@@ -202,23 +203,47 @@ The stable V1 maintenance release documented here is `1.3.3`.
 
 ## Torrent user experience
 
-- The upload page supports drag and drop and an explicit file-selection control.
-- The file input must retain an accessible label.
-- Notices cover success, error, warning, information, and progress states.
+- The upload page supports drag and drop and an explicit, accessible file-selection control on
+  desktop and mobile. Both paths accept multiple `.torrent` files in one action.
+- Multi-upload remains a set of independent backend requests driven by a bounded frontend queue.
+  The batch size and concurrency are capped, each file retains its own result, one failure does not
+  cancel the others, and completion may trigger one authoritative list refresh.
 - The page shows only torrents associated with the current user.
-- Status refresh is periodic and must not duplicate existing submissions.
+- Torrent state uses the existing WebSocket plus manual/authoritative refresh model. Multi-upload
+  must not reintroduce periodic list polling, a full page reload, or unbounded parallel requests.
 - Long torrent names wrap or truncate without breaking mobile layout.
-- Mobile behavior is covered at 320, 375, 390, and 430 pixel widths.
+- Mobile behavior is covered at 320, 360, 375, 390, 430, and 768 pixel widths, in portrait and
+  landscape, without relying on drag and drop as the only submission path.
 
 ## Notifications
 
-- Use the shared notification system for user-visible operation feedback.
+- Use the shared toast system for punctual user-action feedback. Durable page states such as an
+  unavailable service, a list that cannot load, or an empty result remain inline.
 - Use success for completed actions.
 - Use error for failed actions that need correction or retry.
 - Use warning for degraded or risky states.
 - Use information for neutral guidance.
 - Use progress for operations still running.
+- Toasts provide `aria-live` semantics, keyboard access, manual close, reasonable automatic
+  expiry, bounded stacking, and a mobile-safe layout.
 - Notifications must not contain secrets or internal absolute paths.
+
+## Frontend interaction and visual policy
+
+- Destructive delete actions do not use a confirmation-only modal. They use an explicit label and
+  danger styling, remain keyboard and screen-reader accessible, disable while pending, and reject
+  double submission. Irreversible trash deletion and administrative purge retain an explicit,
+  accessible inline confirmation step without opening a modal. Dialogs that collect required
+  information or serve a purpose beyond asking "are you sure?" remain allowed.
+- The visual palette is expressed through centralized design tokens for backgrounds, surfaces,
+  text, borders, semantic states, focus, hover, and elevation. Components must not accumulate
+  arbitrary duplicated colors, and important contrast must meet WCAG expectations.
+- Every user and administration surface is responsive across the supported mobile widths and
+  desktop. Tables use cards, data labels, a dedicated mobile layout, or narrowly scoped local
+  scrolling rather than causing global horizontal overflow.
+- Long filenames and torrent names cannot hide actions or expand the page. Primary actions remain
+  available without hover, touch targets remain usable, focus stays coherent after mutations, and
+  orientation changes never require a page reload.
 
 ## Functional options
 
