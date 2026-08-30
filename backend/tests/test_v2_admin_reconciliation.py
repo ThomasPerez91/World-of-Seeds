@@ -388,6 +388,24 @@ async def test_admin_recovery_is_durable_idempotent_and_does_no_network_io(
     assert second.json()["recovery_id"] == first.json()["recovery_id"]
     job = await db_session.get(TorrentJob, uuid.UUID(first.json()["recovery_id"]))
     assert job is not None and job.job_type == "RECOVER_CANCEL_REQUESTS"
+    assert job.recovery_snapshot is not None
+    job.state = TorrentJobState.FAILED
+    job.attempt_count = job.max_attempts
+    job.last_error_code = "reconciliation_evidence_unavailable"
+    job.finished_at = datetime.now(UTC)
+    await db_session.commit()
+
+    retried = await client.post(
+        f"/api/v2/admin/reconciliation/{torrent.id}/recover",
+        json={"action": "cancel_requests"},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert retried.status_code == 202
+    assert retried.json()["state"] == "queued"
+    assert retried.json()["recovery_id"] != first.json()["recovery_id"]
+    retry_job = await db_session.get(TorrentJob, uuid.UUID(retried.json()["recovery_id"]))
+    assert retry_job is not None and retry_job.recovery_snapshot is not None
 
 
 @pytest.mark.asyncio
@@ -414,6 +432,7 @@ async def test_admin_reconciliation_selects_one_fresh_snapshot_for_every_account
             latency_ms=1,
             error_code=None,
             checked_at=now,
+            valid_until=now + timedelta(minutes=1),
             updated_at=now,
         )
         for service in ("newgreedy", "qbittorrent")

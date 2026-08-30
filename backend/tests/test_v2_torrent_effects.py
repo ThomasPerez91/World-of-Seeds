@@ -10,6 +10,7 @@ import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.admin import recovery_snapshot, serialize_recovery_snapshot
 from app.coordination import (
     RedisCoordinator,
     TorrentEventType,
@@ -136,6 +137,25 @@ def _snapshot(
     )
 
 
+async def _recovery_job_snapshot(
+    sessions: async_sessionmaker[AsyncSession],
+    torrent_id: uuid.UUID,
+    job_type: str,
+) -> TorrentJobSnapshot:
+    async with sessions() as session, session.begin():
+        expected = await recovery_snapshot(session, torrent_id)
+        job = TorrentJob(
+            managed_torrent_id=torrent_id,
+            job_type=job_type,
+            idempotency_key=f"recover-test:{uuid.uuid4().hex}",
+            recovery_snapshot=serialize_recovery_snapshot(expected),
+            max_attempts=3,
+        )
+        session.add(job)
+        await session.flush()
+        return TorrentJobSnapshot.from_model(job)
+
+
 class FakeAdder:
     def __init__(self) -> None:
         self.contents: list[bytes] = []
@@ -236,6 +256,7 @@ async def test_recovery_handler_collects_evidence_in_worker_and_purges_absent_co
     tmp_path: Path,
 ) -> None:
     torrent_id, request_id = await _create_domain(sessions, state=ManagedTorrentState.READY)
+    job = await _recovery_job_snapshot(sessions, torrent_id, "RECOVER_PURGE_METADATA")
     effects = TorrentEffectHandlers(
         sessions,
         _missing_router(sessions, FakeAdder()),
@@ -244,13 +265,53 @@ async def test_recovery_handler_collects_evidence_in_worker_and_purges_absent_co
         clock=lambda: NOW,
     )
 
-    await effects.recover_torrent(_snapshot(torrent_id, None, "RECOVER_PURGE_METADATA"))
+    await effects.recover_torrent(job)
 
     async with sessions() as session:
         torrent = await session.get(ManagedTorrent, torrent_id)
         request = await session.get(TorrentRequest, request_id)
         assert torrent is not None and torrent.state is ManagedTorrentState.PURGED
         assert request is not None and request.state is TorrentRequestState.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_recovery_handler_rejects_ownership_added_after_enqueue(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, original_request_id = await _create_domain(
+        sessions,
+        state=ManagedTorrentState.READY,
+    )
+    job = await _recovery_job_snapshot(sessions, torrent_id, "RECOVER_CANCEL_REQUESTS")
+    async with sessions() as session, session.begin():
+        late_user = User(username="late-recovery-owner", password_hash="hash")
+        late_request = TorrentRequest(
+            user=late_user,
+            managed_torrent_id=torrent_id,
+            state=TorrentRequestState.ACTIVE,
+        )
+        session.add(late_request)
+        await session.flush()
+        late_request_id = late_request.id
+    effects = TorrentEffectHandlers(
+        sessions,
+        _missing_router(sessions, FakeAdder()),
+        _payloads(tmp_path),
+        _content(tmp_path),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(PermanentTorrentJobError, match="recovery_state_changed"):
+        await effects.recover_torrent(job)
+
+    async with sessions() as session:
+        torrent = await session.get(ManagedTorrent, torrent_id)
+        original = await session.get(TorrentRequest, original_request_id)
+        late = await session.get(TorrentRequest, late_request_id)
+        assert torrent is not None and torrent.state is ManagedTorrentState.READY
+        assert original is not None and original.state is TorrentRequestState.REQUESTED
+        assert late is not None and late.state is TorrentRequestState.ACTIVE
 
 
 def test_payload_store_removes_user_passkeys_before_durable_write(tmp_path: Path) -> None:

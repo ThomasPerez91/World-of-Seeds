@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -128,6 +129,75 @@ class ReconciliationRecoverySnapshot:
     lifecycle_generation: int
     active_request_ids: tuple[uuid.UUID, ...]
     active_job_ids: tuple[uuid.UUID, ...]
+
+
+_INFO_HASH = re.compile(r"[0-9a-f]{40}")
+
+
+def serialize_recovery_snapshot(snapshot: ReconciliationRecoverySnapshot) -> dict[str, object]:
+    return {
+        "v": 1,
+        "managed_torrent_id": str(snapshot.managed_torrent_id),
+        "info_hash": snapshot.info_hash,
+        "storage_key": str(snapshot.storage_key),
+        "qbittorrent_account_ref": (
+            str(snapshot.qbittorrent_account_ref)
+            if snapshot.qbittorrent_account_ref is not None
+            else None
+        ),
+        "lifecycle_generation": snapshot.lifecycle_generation,
+        "active_request_ids": [str(value) for value in snapshot.active_request_ids],
+        "active_job_ids": [str(value) for value in snapshot.active_job_ids],
+    }
+
+
+def deserialize_recovery_snapshot(payload: object) -> ReconciliationRecoverySnapshot:
+    try:
+        if not isinstance(payload, dict) or set(payload) != {
+            "v",
+            "managed_torrent_id",
+            "info_hash",
+            "storage_key",
+            "qbittorrent_account_ref",
+            "lifecycle_generation",
+            "active_request_ids",
+            "active_job_ids",
+        }:
+            raise ValueError
+        info_hash = payload["info_hash"]
+        lifecycle_generation = payload["lifecycle_generation"]
+        request_ids = payload["active_request_ids"]
+        job_ids = payload["active_job_ids"]
+        account_ref = payload["qbittorrent_account_ref"]
+        if (
+            payload["v"] != 1
+            or not isinstance(info_hash, str)
+            or _INFO_HASH.fullmatch(info_hash) is None
+            or not isinstance(lifecycle_generation, int)
+            or lifecycle_generation < 0
+            or not isinstance(request_ids, list)
+            or not isinstance(job_ids, list)
+            or len(request_ids) > MAX_RECOVERY_REQUESTS
+            or len(job_ids) > MAX_RECOVERY_REQUESTS
+            or (account_ref is not None and not isinstance(account_ref, str))
+        ):
+            raise ValueError
+        snapshot = ReconciliationRecoverySnapshot(
+            uuid.UUID(payload["managed_torrent_id"]),
+            info_hash,
+            uuid.UUID(payload["storage_key"]),
+            uuid.UUID(account_ref) if account_ref is not None else None,
+            lifecycle_generation,
+            tuple(uuid.UUID(value) for value in request_ids),
+            tuple(uuid.UUID(value) for value in job_ids),
+        )
+        if len(snapshot.active_request_ids) != len(set(snapshot.active_request_ids)) or len(
+            snapshot.active_job_ids
+        ) != len(set(snapshot.active_job_ids)):
+            raise ValueError
+        return snapshot
+    except (TypeError, ValueError) as exc:
+        raise ReconciliationRecoveryError("recovery_snapshot_invalid") from exc
 
 
 @dataclass(frozen=True, slots=True)

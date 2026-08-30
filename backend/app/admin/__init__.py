@@ -8,9 +8,11 @@ from app.admin.reconciliation import (
     ReconciliationRecoveryResult,
     ReconciliationRecoverySnapshot,
     ReconciliationReport,
+    deserialize_recovery_snapshot,
     reconcile_inventory,
     recover_orphaned_torrent,
     recovery_snapshot,
+    serialize_recovery_snapshot,
 )
 from app.admin.storage import AdminStorageError, AdminStorageInspector
 
@@ -26,7 +28,9 @@ __all__ = [
     "ReconciliationRecoveryResult",
     "ReconciliationRecoverySnapshot",
     "ReconciliationReport",
+    "deserialize_recovery_snapshot",
     "reconcile_inventory",
     "recover_orphaned_torrent",
     "recovery_snapshot",
+    "serialize_recovery_snapshot",
 ]

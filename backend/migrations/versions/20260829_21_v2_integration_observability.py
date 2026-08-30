@@ -26,6 +26,7 @@ def upgrade() -> None:
         sa.Column("latency_ms", sa.Integer(), nullable=True),
         sa.Column("error_code", sa.String(length=64), nullable=True),
         sa.Column("checked_at", sa.DateTime(), nullable=False),
+        sa.Column("valid_until", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.CheckConstraint(
             "service IN ('newgreedy', 'qbittorrent')",
@@ -88,9 +89,11 @@ def upgrade() -> None:
         "qbittorrent_inventory_items",
         ["storage_key"],
     )
+    op.add_column("torrent_jobs", sa.Column("recovery_snapshot", sa.JSON(), nullable=True))
 
 
 def downgrade() -> None:
+    op.drop_column("torrent_jobs", "recovery_snapshot")
     op.drop_index("ix_qb_inventory_items_storage", table_name="qbittorrent_inventory_items")
     op.drop_index("ix_qb_inventory_items_hash", table_name="qbittorrent_inventory_items")
     op.drop_table("qbittorrent_inventory_items")

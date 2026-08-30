@@ -10,7 +10,7 @@ from time import perf_counter
 from typing import Literal
 
 import httpx
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.integrations.account_routing import DeploymentAccountSpec
@@ -43,7 +43,6 @@ async def load_v2_external_services_snapshot(
     session: AsyncSession,
     *,
     now: datetime | None = None,
-    stale_after: timedelta = DEFAULT_STALE_AFTER,
 ) -> ExternalServicesSnapshot:
     """Aggregate worker-published, secret-free health for every configured account."""
 
@@ -60,6 +59,7 @@ async def load_v2_external_services_snapshot(
                     IntegrationServiceHealth.latency_ms,
                     IntegrationServiceHealth.error_code,
                     IntegrationServiceHealth.checked_at,
+                    IntegrationServiceHealth.valid_until,
                 )
             )
         ).all()
@@ -87,7 +87,7 @@ async def load_v2_external_services_snapshot(
         service_rows = by_service[service]
         if not service_rows or not registry_complete:
             return ServiceProbe(service=service, state="unavailable", error_code="health_missing")
-        stale = any(timestamp - _utc(row.checked_at) > stale_after for row in service_rows)
+        stale = any(timestamp > _utc(row.valid_until) for row in service_rows)
         failed = next(
             (row for row in service_rows if row.state is IntegrationServiceState.UNAVAILABLE),
             None,
@@ -149,11 +149,23 @@ class V2IntegrationObservabilityPublisher:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._interval.total_seconds())
 
     async def refresh_once(self) -> None:
+        cycle_started = datetime.now(UTC)
         observation_set = uuid.uuid4()
         for spec in self._specs:
             await self._refresh_account(spec, observation_set=observation_set)
         account_refs = tuple(spec.qbittorrent_account_ref for spec in self._specs)
+        completed_at = datetime.now(UTC)
+        valid_until = _observation_valid_until(
+            completed_at,
+            interval=self._interval,
+            cycle_duration=completed_at - cycle_started,
+        )
         async with self._session_factory() as session, session.begin():
+            await session.execute(
+                update(IntegrationServiceHealth)
+                .where(IntegrationServiceHealth.observation_set == observation_set)
+                .values(valid_until=valid_until, updated_at=completed_at)
+            )
             await session.execute(
                 delete(IntegrationServiceHealth).where(
                     IntegrationServiceHealth.observation_set != observation_set
@@ -293,8 +305,19 @@ class V2IntegrationObservabilityPublisher:
         row.account_count = account_count
         row.state, row.latency_ms, row.error_code = probe
         row.checked_at = checked_at
+        row.valid_until = checked_at
         row.updated_at = checked_at
 
 
 def _milliseconds(started: float) -> int:
     return max(0, round((perf_counter() - started) * 1000))
+
+
+def _observation_valid_until(
+    completed_at: datetime,
+    *,
+    interval: timedelta,
+    cycle_duration: timedelta,
+) -> datetime:
+    cycle_grace = max(DEFAULT_STALE_AFTER, cycle_duration * 2)
+    return completed_at + interval + cycle_grace

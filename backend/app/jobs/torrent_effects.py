@@ -20,8 +20,8 @@ from app.admin import (
     RECOVER_CANCEL_REQUESTS_JOB,
     RECOVER_PURGE_METADATA_JOB,
     ReconciliationRecoveryError,
+    deserialize_recovery_snapshot,
     recover_orphaned_torrent,
-    recovery_snapshot,
 )
 from app.coordination import RedisCoordinator, TorrentEventType, TorrentRealtimeEvent
 from app.integrations.account_routing import AccountRoutingError, TorrentEffectRoute
@@ -130,10 +130,15 @@ class TorrentEffectHandlers:
             else "purge_metadata"
         )
         async with self._session_factory() as session:
+            job = await session.get(TorrentJob, snapshot.id)
+            if job is None or job.recovery_snapshot is None:
+                raise PermanentTorrentJobError("recovery_snapshot_missing")
             try:
-                expected = await recovery_snapshot(session, snapshot.managed_torrent_id)
+                expected = deserialize_recovery_snapshot(job.recovery_snapshot)
             except ReconciliationRecoveryError as exc:
                 raise PermanentTorrentJobError(str(exc)) from exc
+            if expected.managed_torrent_id != snapshot.managed_torrent_id:
+                raise PermanentTorrentJobError("recovery_snapshot_mismatch")
         identity = QBittorrentV2ManagedIdentity(expected.info_hash, expected.storage_key)
         try:
             route = await self._router.resolve(expected.managed_torrent_id, expected.info_hash)

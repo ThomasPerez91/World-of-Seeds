@@ -4,7 +4,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.integrations.observability_v2 import load_v2_external_services_snapshot
+from app.integrations.observability_v2 import (
+    _observation_valid_until,
+    load_v2_external_services_snapshot,
+)
 from app.models import IntegrationServiceHealth, IntegrationServiceState
 
 NOW = datetime(2026, 8, 29, 20, tzinfo=UTC)
@@ -27,7 +30,8 @@ async def test_v2_health_aggregates_every_account_and_fails_closed_when_stale(
                 state=IntegrationServiceState.HEALTHY,
                 latency_ms=latency,
                 error_code=None,
-                checked_at=NOW,
+                checked_at=NOW - timedelta(seconds=90),
+                valid_until=NOW + timedelta(minutes=1),
                 updated_at=NOW,
             )
             for service in ("newgreedy", "qbittorrent")
@@ -66,6 +70,7 @@ async def test_v2_health_rejects_an_incomplete_account_registry(
                 latency_ms=1,
                 error_code=None,
                 checked_at=NOW,
+                valid_until=NOW + timedelta(minutes=1),
                 updated_at=NOW,
             ),
             IntegrationServiceHealth(
@@ -77,6 +82,7 @@ async def test_v2_health_rejects_an_incomplete_account_registry(
                 latency_ms=1,
                 error_code=None,
                 checked_at=NOW,
+                valid_until=NOW + timedelta(minutes=1),
                 updated_at=NOW,
             ),
         ]
@@ -106,6 +112,7 @@ async def test_v2_health_rejects_a_partially_published_observation_set(
                 latency_ms=1,
                 error_code=None,
                 checked_at=NOW,
+                valid_until=NOW + timedelta(minutes=1),
                 updated_at=NOW,
             )
             for service in ("newgreedy", "qbittorrent")
@@ -118,3 +125,15 @@ async def test_v2_health_rejects_a_partially_published_observation_set(
     assert snapshot.healthy is False
     assert snapshot.newgreedy.error_code == "health_missing"
     assert snapshot.qbittorrent.error_code == "health_missing"
+
+
+def test_observation_validity_includes_cadence_and_full_cycle_duration() -> None:
+    completed_at = NOW + timedelta(seconds=30)
+
+    valid_until = _observation_valid_until(
+        completed_at,
+        interval=timedelta(seconds=60),
+        cycle_duration=timedelta(seconds=30),
+    )
+
+    assert valid_until == completed_at + timedelta(seconds=120)

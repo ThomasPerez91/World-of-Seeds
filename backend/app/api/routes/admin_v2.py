@@ -15,6 +15,7 @@ from app.admin import (
     ReconciliationCursorError,
     ReconciliationRecoveryError,
     recovery_snapshot,
+    serialize_recovery_snapshot,
 )
 from app.auth.dependencies import (
     AppSettings,
@@ -23,7 +24,6 @@ from app.auth.dependencies import (
     require_admin_csrf,
     require_current_admin,
 )
-from app.integrations.observability_v2 import DEFAULT_STALE_AFTER
 from app.models import (
     DatabaseOption,
     DatabaseOptionAudit,
@@ -276,6 +276,7 @@ async def get_admin_reconciliation(
                         IntegrationServiceHealth.account_ref,
                         IntegrationServiceHealth.observation_set,
                         IntegrationServiceHealth.account_count,
+                        IntegrationServiceHealth.valid_until,
                     ).where(IntegrationServiceHealth.service == "qbittorrent")
                 )
             ).all()
@@ -293,16 +294,15 @@ async def get_admin_reconciliation(
             and latest_accounts == expected_accounts
             and len(health_sets) == 1
             and snapshot_sets == health_sets
+            and all(not row.truncated for row in latest)
             and all(
-                not row.truncated
-                and now
-                - (
-                    row.checked_at
-                    if row.checked_at.tzinfo is not None
-                    else row.checked_at.replace(tzinfo=UTC)
+                now
+                <= (
+                    row.valid_until
+                    if row.valid_until.tzinfo is not None
+                    else row.valid_until.replace(tzinfo=UTC)
                 ).astimezone(UTC)
-                <= DEFAULT_STALE_AFTER
-                for row in latest
+                for row in health_rows
             )
         )
         snapshot_ids = [row.id for row in latest] if complete else []
@@ -600,13 +600,28 @@ async def recover_admin_managed_torrent(
         if payload.action == "cancel_requests"
         else RECOVER_PURGE_METADATA_JOB
     )
-    key = f"recover:{payload.action}:{managed_torrent_id}:{expected.lifecycle_generation}"
-    job = await db.scalar(select(TorrentJob).where(TorrentJob.idempotency_key == key))
+    base_key = f"recover:{payload.action}:{managed_torrent_id}:{expected.lifecycle_generation}:"
+    job = await db.scalar(
+        select(TorrentJob)
+        .where(
+            TorrentJob.managed_torrent_id == managed_torrent_id,
+            TorrentJob.job_type == job_type,
+            TorrentJob.idempotency_key.like(f"{base_key}%"),
+        )
+        .order_by(TorrentJob.created_at.desc(), TorrentJob.id.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    key = f"{base_key}initial"
+    if job is not None and job.state is TorrentJobState.FAILED:
+        key = f"{base_key}retry:{job.id.hex}"
+        job = None
     if job is None:
         job = TorrentJob(
             managed_torrent_id=managed_torrent_id,
             job_type=job_type,
             idempotency_key=key,
+            recovery_snapshot=serialize_recovery_snapshot(expected),
             state=TorrentJobState.QUEUED,
             max_attempts=3,
             available_at=datetime.now(UTC),

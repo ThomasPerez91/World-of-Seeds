@@ -6,6 +6,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -546,6 +547,7 @@ class IntegrationServiceHealth(Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     checked_at: Mapped[datetime] = mapped_column(nullable=False)
+    valid_until: Mapped[datetime] = mapped_column(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
 
 
@@ -642,6 +644,7 @@ class TorrentJob(Base):
     )
     job_type: Mapped[str] = mapped_column(String(64), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    recovery_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     state: Mapped[TorrentJobState] = mapped_column(
         Enum(
             TorrentJobState,
