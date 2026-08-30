@@ -257,7 +257,9 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 - Supprimer les modales qui servent uniquement à confirmer une suppression dans les parcours
   fichiers, corbeille, utilisateurs, torrents et purge admin. Les actions destructives restent
   explicites, accessibles, stylées en danger, désactivées pendant leur exécution et protégées
-  contre le double envoi. Ne pas ajouter SweetAlert ni une autre bibliothèque de confirmation.
+  contre le double envoi. La suppression définitive et la purge admin conservent une confirmation
+  explicite inline, accessible et non modale. Ne pas ajouter SweetAlert ni une autre bibliothèque
+  de confirmation.
 - Acheminer les résultats ponctuels des actions par le système de toasts existant (`success`,
   `error`, `warning`, `info` et, si utile, `progress`). Réserver les messages inline aux états
   structurels durables et valider `aria-live`, clavier, fermeture, expiration, empilement et mobile.
