@@ -10,7 +10,6 @@ import {
 } from "../../api/client";
 import { useFeedback } from "../../components/Feedback";
 import { DeleteIcon, DownloadIcon, RefreshIcon } from "../../components/icons";
-import { Notice, type NoticeTone } from "../../components/Notice";
 import { useI18n, type MessageKey } from "../../i18n";
 import {
   pickDownloadDirectory,
@@ -22,6 +21,25 @@ import {
 
 const PAGE_SIZE = 10;
 const FALLBACK_PAGE_SIZE = 50;
+export const MAX_TORRENT_BATCH_FILES = 50;
+export const TORRENT_UPLOAD_CONCURRENCY = 3;
+
+type UploadResultStatus = "queued" | "uploading" | "added" | "duplicate" | "invalid" | "failed";
+
+interface UploadFileResult {
+  file: File;
+  name: string;
+  status: UploadResultStatus;
+}
+
+interface UploadBatchState {
+  active: number;
+  completed: number;
+  done: boolean;
+  errors: number;
+  results: UploadFileResult[];
+  total: number;
+}
 
 const stateLabels: Record<TorrentRequestV2State, MessageKey> = {
   requested: "downloads.requested",
@@ -30,6 +48,15 @@ const stateLabels: Record<TorrentRequestV2State, MessageKey> = {
   cancelled: "downloads.cancelled",
   expired: "downloads.expired",
   error: "downloads.error",
+};
+
+const uploadStatusLabels: Record<UploadResultStatus, MessageKey> = {
+  queued: "downloads.batchQueued",
+  uploading: "downloads.batchUploading",
+  added: "downloads.batchAdded",
+  duplicate: "downloads.batchDuplicate",
+  invalid: "downloads.batchInvalid",
+  failed: "downloads.batchFailed",
 };
 
 const transferErrorKeys: Record<RecursiveTransferErrorCode, MessageKey> = {
@@ -129,8 +156,9 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
   const [refreshing, setRefreshing] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadBatch, setUploadBatch] = useState<UploadBatchState | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ message: string; tone: NoticeTone } | null>(null);
+  const [pageError, setPageError] = useState("");
   const controllerRef = useRef<RecursiveDownloadController | null>(null);
   const [transfer, setTransfer] = useState<(
     RecursiveTransferProgress & {
@@ -154,17 +182,14 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       const result = await api.listTorrentRequestsV2(requestedOffset, PAGE_SIZE, signal);
       setTorrents(result.items);
       setTotal(result.total);
-      setNotice((current) => current?.tone === "error" ? null : current);
+      setPageError("");
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      setNotice({
-        tone: "error",
-        message: apiError(caught, "downloads.trackingFailed"),
-      });
+      setPageError(apiError(caught, "downloads.trackingFailed"));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -213,53 +238,129 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
     };
   }, [load, offset]);
 
-  async function submit(file: File | undefined) {
-    if (file === undefined) return;
-    if (!file.name.toLowerCase().endsWith(".torrent")) {
-      setNotice({ tone: "warning", message: t("downloads.invalidFile") });
+  async function submitBatch(fileList: FileList | File[]) {
+    if (uploading) return;
+    const files = Array.from(fileList);
+    if (files.length === 0) return;
+    if (files.length > MAX_TORRENT_BATCH_FILES) {
+      feedback.toast({
+        tone: "error",
+        message: t("downloads.batchTooLarge", { count: MAX_TORRENT_BATCH_FILES }),
+      });
+      if (inputRef.current !== null) inputRef.current.value = "";
       return;
     }
+
+    const seen = new Set<string>();
+    const results: UploadFileResult[] = files.map((file) => {
+      const fingerprint = `${file.name.toLocaleLowerCase()}\u0000${file.size}\u0000${file.lastModified}`;
+      const invalid = file.size === 0 || !file.name.toLowerCase().endsWith(".torrent");
+      if (invalid) return { file, name: file.name, status: "invalid" };
+      if (seen.has(fingerprint)) return { file, name: file.name, status: "duplicate" };
+      seen.add(fingerprint);
+      return { file, name: file.name, status: "queued" };
+    });
+    const queuedIndexes = results.flatMap((result, index) => result.status === "queued" ? [index] : []);
+    const initiallyCompleted = results.length - queuedIndexes.length;
+    let nextIndex = 0;
+    let pressureWarning = false;
+    let sessionExpired = false;
+
     setUploading(true);
-    setNotice({ tone: "progress", message: t("downloads.validating") });
-    try {
-      const result = await api.createTorrentRequestV2(file);
-      setNotice({
-        tone: result.storage_pressure === "warning" ? "warning" : "success",
-        message: t(result.created ? "downloads.added" : "downloads.duplicate", { name: result.name }),
+    setUploadBatch({
+      active: 0,
+      completed: initiallyCompleted,
+      done: queuedIndexes.length === 0,
+      errors: results.filter((result) => result.status === "invalid").length,
+      results: [...results],
+      total: results.length,
+    });
+    if (inputRef.current !== null) inputRef.current.value = "";
+
+    const updateResult = (index: number, status: UploadResultStatus) => {
+      results[index] = { ...results[index], status };
+      setUploadBatch((current) => current === null ? null : {
+        ...current,
+        active: current.active - (status === "uploading" ? -1 : 1),
+        completed: current.completed + (status === "uploading" ? 0 : 1),
+        errors: current.errors + (status === "invalid" || status === "failed" ? 1 : 0),
+        results: [...results],
+      });
+    };
+
+    const worker = async () => {
+      while (!sessionExpired) {
+        const queuePosition = nextIndex;
+        nextIndex += 1;
+        if (queuePosition >= queuedIndexes.length) return;
+        const resultIndex = queuedIndexes[queuePosition];
+        const file = results[resultIndex].file;
+        updateResult(resultIndex, "uploading");
+        try {
+          const created = await api.createTorrentRequestV2(file);
+          if (created.storage_pressure !== "normal") pressureWarning = true;
+          updateResult(resultIndex, created.created ? "added" : "duplicate");
+        } catch (caught) {
+          if (caught instanceof ApiError && caught.status === 401) {
+            sessionExpired = true;
+            updateResult(resultIndex, "failed");
+            onSessionExpired();
+            return;
+          }
+          updateResult(
+            resultIndex,
+            caught instanceof ApiError && (caught.status === 413 || caught.status === 422)
+                ? "invalid"
+                : "failed",
+          );
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from(
+        { length: Math.min(TORRENT_UPLOAD_CONCURRENCY, queuedIndexes.length) },
+        () => worker(),
+      ),
+    );
+    setUploading(false);
+    setUploadBatch((current) => current === null ? null : { ...current, active: 0, done: true });
+
+    const counts = {
+      added: results.filter((result) => result.status === "added").length,
+      duplicate: results.filter((result) => result.status === "duplicate").length,
+      invalid: results.filter((result) => result.status === "invalid").length,
+      failed: results.filter((result) => result.status === "failed").length,
+    };
+    if (!sessionExpired) {
+      feedback.toast({
+        tone: counts.failed > 0 || counts.invalid > 0 || pressureWarning ? "warning" : "success",
+        title: t("downloads.batchComplete"),
+        message: t("downloads.batchSummary", counts),
       });
       setOffset(0);
       await load(0);
-    } catch (caught) {
-      if (caught instanceof ApiError && caught.status === 401) {
-        onSessionExpired();
-        return;
-      }
-      setNotice({ tone: "error", message: apiError(caught, "downloads.uploadRetry") });
-    } finally {
-      setUploading(false);
-      if (inputRef.current !== null) inputRef.current.value = "";
     }
   }
 
   function drop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDragging(false);
-    void submit(event.dataTransfer.files.item(0) ?? undefined);
+    void submitBatch(event.dataTransfer.files);
   }
 
   function select(event: ChangeEvent<HTMLInputElement>) {
-    void submit(event.target.files?.item(0) ?? undefined);
+    void submitBatch(event.target.files ?? []);
   }
 
   async function startRecursiveDownload(torrent: TorrentRequestV2) {
     if (!supportsRecursiveDirectoryDownload()) {
-      setNotice({ tone: "progress", message: t("downloads.compatPreparing") });
       try {
         const snapshot = await api.getTorrentDownloadManifestPageV2(
           torrent.id, 0, null, undefined, FALLBACK_PAGE_SIZE,
         );
         setFallback({ torrentId: torrent.id, name: torrent.name, snapshot });
-        setNotice({
+        feedback.toast({
           tone: "warning",
           message: t("downloads.compatHint"),
         });
@@ -268,14 +369,13 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
           onSessionExpired();
           return;
         }
-        setNotice({
+        feedback.toast({
           tone: "error",
           message: apiError(caught, "downloads.manifestFailed"),
         });
       }
       return;
     }
-    setNotice({ tone: "progress", message: t("downloads.preparing", { name: torrent.name }) });
     try {
       const snapshotPromise = api.getTorrentDownloadManifestPageV2(torrent.id);
       const directoryPromise = pickDownloadDirectory();
@@ -288,9 +388,9 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
           fileCount: snapshot.file_count,
         });
         if (progress.status === "completed") {
-          setNotice({ tone: "success", message: t("downloads.completed", { name: torrent.name }) });
+          feedback.toast({ tone: "success", message: t("downloads.completed", { name: torrent.name }) });
         } else if (progress.status === "error") {
-          setNotice({
+          feedback.toast({
             tone: "error",
             message: progress.error === null ? t("downloads.failed") : t(transferErrorKeys[progress.error]),
           });
@@ -311,18 +411,16 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
         onProgress: update,
       });
       controllerRef.current = controller;
-      setNotice(null);
       await controller.start();
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") {
-        setNotice(null);
         return;
       }
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      setNotice({
+      feedback.toast({
         tone: "error",
         message: apiError(caught, "downloads.failed"),
       });
@@ -342,7 +440,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       );
       setFallback((current) => current === null ? null : { ...current, snapshot: page });
     } catch (caught) {
-      setNotice({ tone: "error", message: apiError(caught, "downloads.manifestFailed") });
+      feedback.toast({ tone: "error", message: apiError(caught, "downloads.manifestFailed") });
     } finally {
       setFallbackLoading(false);
     }
@@ -354,13 +452,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
   }
 
   async function cancelTorrentRequest(torrent: TorrentRequestV2) {
-    const confirmed = await feedback.confirm({
-      title: t("downloads.cancelTitle"),
-      message: t("downloads.cancelMessage", { name: torrent.name }),
-      confirmText: t("downloads.cancel"),
-      destructive: true,
-    });
-    if (!confirmed) return;
+    if (cancellingId !== null) return;
     setCancellingId(torrent.id);
     try {
       await api.cancelTorrentRequestV2(torrent.id);
@@ -416,6 +508,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
         ref={inputRef}
         className="sr-only"
         type="file"
+        multiple
         aria-label={t("downloads.fileLabel")}
         accept=".torrent,application/x-bittorrent"
         onChange={select}
@@ -434,15 +527,58 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
         <DownloadIcon />
         <strong>{t("downloads.dropTitle")}</strong>
         <span>{t("downloads.dropHint")}</span>
+        <button
+          type="button"
+          className="secondary-button compact-button"
+          disabled={uploading}
+          onClick={() => inputRef.current?.click()}
+        >
+          {t("downloads.upload")}
+        </button>
       </div>
 
-      {notice !== null && (
-        <Notice
-          message={notice.message}
-          tone={notice.tone}
-          onDismiss={() => setNotice(null)}
-          onRetry={notice.tone === "error" ? () => void load(offset) : undefined}
-        />
+      {uploadBatch !== null && (
+        <section className="torrent-upload-batch" aria-labelledby="torrent-batch-title" aria-busy={!uploadBatch.done}>
+          <header>
+            <div>
+              <strong id="torrent-batch-title">{t("downloads.batchTitle")}</strong>
+              <span aria-live="polite">
+                {t("downloads.batchProgress", {
+                  active: uploadBatch.active,
+                  completed: uploadBatch.completed,
+                  errors: uploadBatch.errors,
+                  total: uploadBatch.total,
+                })}
+              </span>
+            </div>
+            {uploadBatch.done && (
+              <button type="button" className="secondary-button compact-button" onClick={() => setUploadBatch(null)}>
+                {t("common.close")}
+              </button>
+            )}
+          </header>
+          <progress value={uploadBatch.completed} max={uploadBatch.total} aria-label={t("downloads.batchTitle")} />
+          <ul>
+            {uploadBatch.results.map((result, index) => (
+              <li key={`${result.name}-${result.file.lastModified}-${index}`}>
+                <span title={result.name}>{result.name}</span>
+                <strong className={`batch-result ${result.status}`}>
+                  {t(uploadStatusLabels[result.status])}
+                </strong>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {pageError !== "" && (
+        <div className="browser-state torrent-page-error" role="alert">
+          <strong>{t("downloads.trackingUnavailable")}</strong>
+          <p>{pageError}</p>
+          <button type="button" className="compact-button" onClick={() => void load(offset)}>
+            {t("common.retry")}
+          </button>
+        </div>
       )}
 
       {transfer !== null && (

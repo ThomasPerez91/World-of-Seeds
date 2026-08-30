@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { auditAccessibility } from "../../test/accessibility";
+import { FeedbackProvider } from "../../components/Feedback";
 import { AdminSettingsPage } from "./AdminSettingsPage";
 import { translatedNewGreedyFieldIds } from "./newGreedyTranslations";
 import { translatedOptionKeys } from "./optionTranslations";
@@ -103,11 +104,13 @@ describe("AdminSettingsPage", () => {
 
     const user = userEvent.setup();
     const view = render(
-      <AdminSettingsPage
-        onBack={vi.fn()}
-        onNavigate={vi.fn()}
-        onSessionExpired={vi.fn()}
-      />,
+      <FeedbackProvider>
+        <AdminSettingsPage
+          onBack={vi.fn()}
+          onNavigate={vi.fn()}
+          onSessionExpired={vi.fn()}
+        />
+      </FeedbackProvider>,
     );
 
     const input = await screen.findByRole("spinbutton", {
@@ -117,9 +120,7 @@ describe("AdminSettingsPage", () => {
     await user.type(input, "6");
     await user.click(screen.getByRole("button", { name: "Enregistrer" }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "Cette limite est incompatible avec la capacité globale.",
-    );
+    expect(await screen.findAllByText("Cette limite est incompatible avec la capacité globale.")).toHaveLength(2);
     expect(input.getAttribute("aria-invalid")).toBe("true");
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
@@ -155,11 +156,13 @@ describe("AdminSettingsPage", () => {
 
     const user = userEvent.setup();
     render(
-      <AdminSettingsPage
-        onBack={vi.fn()}
-        onNavigate={vi.fn()}
-        onSessionExpired={vi.fn()}
-      />,
+      <FeedbackProvider>
+        <AdminSettingsPage
+          onBack={vi.fn()}
+          onNavigate={vi.fn()}
+          onSessionExpired={vi.fn()}
+        />
+      </FeedbackProvider>,
     );
 
     await screen.findByRole("heading", { name: "Paramètres fonctionnels" });
@@ -171,7 +174,7 @@ describe("AdminSettingsPage", () => {
       await screen.findByText(
         "World of Seeds a redémarré avec succès.",
         {},
-        { timeout: 2500 },
+        { timeout: 3500 },
       ),
     ).toBeDefined();
     expect(fetchMock).toHaveBeenCalledWith(

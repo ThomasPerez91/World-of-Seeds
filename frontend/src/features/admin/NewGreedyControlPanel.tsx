@@ -15,7 +15,7 @@ import {
   SaveIcon,
   SettingsIcon,
 } from "../../components/icons";
-import { Notice } from "../../components/Notice";
+import { useFeedback } from "../../components/Feedback";
 import { type MessageKey, useI18n } from "../../i18n";
 import { FileDialog } from "../files/FileDialog";
 import { newGreedyFieldCopy, newGreedySectionLabel } from "./newGreedyTranslations";
@@ -131,21 +131,19 @@ export function NewGreedyControlPanel({
 }: {
   onSessionExpired: () => void;
 }) {
+  const feedback = useFeedback();
   const { formatBytes, formatNumber, locale, t } = useI18n();
   const [config, setConfig] = useState<NewGreedyConfig | null>(null);
   const [draft, setDraft] = useState<Record<string, DraftValue>>({});
   const [overview, setOverview] = useState<NewGreedyOverview | null>(null);
   const [configError, setConfigError] = useState("");
   const [overviewError, setOverviewError] = useState("");
-  const [notice, setNotice] = useState("");
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [saving, setSaving] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [resetError, setResetError] = useState("");
   const [restartStatus, setRestartStatus] = useState<NewGreedyRestartStatus | null>(null);
   const [restartControlError, setRestartControlError] = useState("");
-  const [restartActionError, setRestartActionError] = useState("");
   const [restartOpen, setRestartOpen] = useState(false);
   const [requestingRestart, setRequestingRestart] = useState(false);
   const mounted = useRef(true);
@@ -225,23 +223,22 @@ export function NewGreedyControlPanel({
     if (!hasChanges) return;
     setSaving(true);
     setConfigError("");
-    setNotice("");
     try {
       const result = await api.updateNewGreedyConfig(changes);
       setConfig(result);
       setDraft(initialDraft(result));
-      setNotice(
-        result.restart_required
-          ? t("admin.ngConfigRestart")
-          : t("admin.ngConfigSaved"),
-      );
+      feedback.toast({
+        tone: result.restart_required ? "warning" : "success",
+        message: result.restart_required ? t("admin.ngConfigRestart") : t("admin.ngConfigSaved"),
+      });
     } catch (caught) {
       if (handleUnauthorized(caught)) return;
-      setConfigError(
-        caught instanceof ApiError && caught.status === 422
+      feedback.toast({
+        tone: "error",
+        message: caught instanceof ApiError && caught.status === 422
           ? t("admin.ngValueInvalid")
           : t("admin.configurationSaveFailed"),
-      );
+      });
     } finally {
       setSaving(false);
     }
@@ -249,21 +246,21 @@ export function NewGreedyControlPanel({
 
   async function resetStats() {
     setResetting(true);
-    setResetError("");
     try {
       const result = await api.resetNewGreedyStats();
       setResetOpen(false);
-      setNotice(
-        result.purged === 0
+      feedback.toast({
+        tone: "success",
+        message: result.purged === 0
           ? t("admin.ngStatsEmpty")
           : t(result.purged === 1 ? "admin.ngStatsPurgedOne" : "admin.ngStatsPurgedMany", {
               count: formatNumber(result.purged),
             }),
-      );
+      });
       await loadOverview();
     } catch (caught) {
       if (handleUnauthorized(caught)) return;
-      setResetError(t("admin.ngResetFailed"));
+      feedback.toast({ tone: "error", message: t("admin.ngResetFailed") });
     } finally {
       setResetting(false);
     }
@@ -271,20 +268,19 @@ export function NewGreedyControlPanel({
 
   async function requestRestart() {
     setRequestingRestart(true);
-    setRestartActionError("");
     try {
       const result = await api.restartNewGreedy();
       setRestartStatus(result);
       setRestartOpen(false);
-      setNotice(t("admin.ngRestartSent"));
+      feedback.toast({ tone: "info", message: t("admin.ngRestartSent") });
     } catch (caught) {
       if (handleUnauthorized(caught)) return;
       if (caught instanceof ApiError && caught.status === 409) {
         setRestartOpen(false);
         await loadRestartStatus();
-        setNotice(t("admin.ngRestartAlready"));
+        feedback.toast({ tone: "info", message: t("admin.ngRestartAlready") });
       } else {
-        setRestartActionError(t("admin.restartRequestFailed"));
+        feedback.toast({ tone: "error", message: t("admin.restartRequestFailed") });
       }
     } finally {
       setRequestingRestart(false);
@@ -310,7 +306,6 @@ export function NewGreedyControlPanel({
               restartStatus.state === "restarting"
             }
             onClick={() => {
-              setRestartActionError("");
               setRestartOpen(true);
             }}
           >
@@ -321,10 +316,7 @@ export function NewGreedyControlPanel({
             type="button"
             className="danger-outline-button compact-button"
             disabled={overview === null}
-            onClick={() => {
-              setResetError("");
-              setResetOpen(true);
-            }}
+            onClick={() => setResetOpen(true)}
           >
             <DeleteIcon />
             {t("admin.resetStats")}
@@ -332,7 +324,21 @@ export function NewGreedyControlPanel({
         </div>
       </div>
 
-      <Notice message={notice} onDismiss={() => setNotice("")} />
+      {resetOpen && (
+        <div className="inline-danger-confirmation service-inline-confirmation" role="group" aria-labelledby="reset-stats-title">
+          <div>
+            <strong id="reset-stats-title">{t("admin.resetStatsTitle")}</strong>
+            <span>{t("admin.resetStatsDescription")}</span>
+            <small>{t("admin.resetStatsWarning")}</small>
+          </div>
+          <button type="button" className="secondary-button" onClick={() => setResetOpen(false)} disabled={resetting}>
+            {t("common.cancel")}
+          </button>
+          <button type="button" className="danger-button" onClick={() => void resetStats()} disabled={resetting} autoFocus>
+            {resetting ? t("admin.resetting") : t("admin.confirmReset")}
+          </button>
+        </div>
+      )}
       <div
         className={`restart-live-status ${restartStatus?.state ?? "unavailable"}`}
         role="status"
@@ -456,44 +462,6 @@ export function NewGreedyControlPanel({
         </form>
       )}
 
-      {resetOpen && (
-        <FileDialog
-          eyebrow={t("admin.adminEyebrow")}
-          title={t("admin.resetStatsTitle")}
-          description={t("admin.resetStatsDescription")}
-          onClose={() => setResetOpen(false)}
-          closeDisabled={resetting}
-        >
-          <div className="confirmation-content">
-            <p className="permanent-delete-warning">
-              {t("admin.resetStatsWarning")}
-            </p>
-            <p className="form-message error-message" role="alert">
-              {resetError}
-            </p>
-            <div className="dialog-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => setResetOpen(false)}
-                disabled={resetting}
-                data-initial-focus
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                className="danger-button"
-                onClick={() => void resetStats()}
-                disabled={resetting}
-              >
-                {resetting ? t("admin.resetting") : t("admin.confirm")}
-              </button>
-            </div>
-          </div>
-        </FileDialog>
-      )}
-
       {restartOpen && (
         <FileDialog
           eyebrow={t("admin.adminEyebrow")}
@@ -505,9 +473,6 @@ export function NewGreedyControlPanel({
           <div className="confirmation-content">
             <p className="permanent-delete-warning">
               {t("admin.restartNewgreedyWarning")}
-            </p>
-            <p className="form-message error-message" role="alert">
-              {restartActionError}
             </p>
             <div className="dialog-actions">
               <button

@@ -8,6 +8,7 @@ import {
   type OptionValue,
   type OptionsResponse,
 } from "../../api/client";
+import { useFeedback } from "../../components/Feedback";
 import { Notice, type NoticeTone } from "../../components/Notice";
 import { RestartIcon, SaveIcon } from "../../components/icons";
 import { type MessageKey, useI18n } from "../../i18n";
@@ -81,6 +82,7 @@ export function AdminSettingsPage({
   onNavigate: (view: AdminView) => void;
   onSessionExpired: () => void;
 }) {
+  const feedback = useFeedback();
   const { formatBytes, formatDate, formatNumber, locale, t } = useI18n();
   const [options, setOptions] = useState<CentralAdminOverview | null>(null);
   const [draft, setDraft] = useState<Record<string, DraftValue>>({});
@@ -146,10 +148,7 @@ export function AdminSettingsPage({
     );
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
-      setNotice({
-        tone: "error",
-        message: t("admin.correctFields"),
-      });
+      feedback.toast({ tone: "error", message: t("admin.correctFields") });
       return;
     }
 
@@ -159,7 +158,7 @@ export function AdminSettingsPage({
         .map((field) => [field.key, parsedValue(field, draft[field.key])]),
     );
     if (Object.keys(changes).length === 0) {
-      setNotice({ tone: "info", message: t("admin.noChanges") });
+      feedback.toast({ tone: "info", message: t("admin.noChanges") });
       return;
     }
 
@@ -171,7 +170,7 @@ export function AdminSettingsPage({
       setOptions(result);
       setDraft(createDraft(result));
       setFieldErrors({});
-      setNotice({
+      feedback.toast({
         tone: result.restart_required ? "warning" : "success",
         title: result.restart_required ? t("admin.restartNeeded") : undefined,
         message: result.restart_required
@@ -189,7 +188,7 @@ export function AdminSettingsPage({
           [caught.field]: locale === "fr" ? caught.message : t("admin.configurationSaveFailed"),
         });
       }
-      setNotice({
+      feedback.toast({
         tone: "error",
         message:
           caught instanceof ApiError && locale === "fr"
@@ -219,7 +218,8 @@ export function AdminSettingsPage({
         }
         if (status.state === "failed" || status.state === "rejected") {
           setRestarting(false);
-          setNotice({
+          setNotice(null);
+          feedback.toast({
             tone: "error",
             title: t("admin.restartRejected"),
             message:
@@ -233,7 +233,8 @@ export function AdminSettingsPage({
           await api.liveHealth();
           if (!mounted.current) return;
           setRestarting(false);
-          setNotice({
+          setNotice(null);
+          feedback.toast({
             tone: "success",
             title: t("admin.serviceOperational"),
             message: t("admin.restartSucceeded"),
@@ -261,7 +262,8 @@ export function AdminSettingsPage({
     }
     if (!mounted.current) return;
     setRestarting(false);
-    setNotice({
+    setNotice(null);
+    feedback.toast({
       tone: "error",
       title: t("admin.restartLong"),
       message: t("admin.restartLongMessage"),
@@ -286,11 +288,8 @@ export function AdminSettingsPage({
         return;
       }
       setRestarting(false);
-      setNotice({
-        tone: "error",
-        message:
-          t("admin.restartRequestFailed"),
-      });
+      setNotice(null);
+      feedback.toast({ tone: "error", message: t("admin.restartRequestFailed") });
     }
   }
 

@@ -1,6 +1,24 @@
 :root {
-  color: #f4f1e8;
-  background: #0b1512;
+  --color-background: #07110e;
+  --color-background-secondary: #0b1713;
+  --color-surface: #101f19;
+  --color-surface-elevated: #152820;
+  --color-surface-hover: #1b3128;
+  --color-border: #2d4237;
+  --color-border-strong: #4b6657;
+  --color-text: #edf4ef;
+  --color-text-muted: #aab8af;
+  --color-text-subtle: #7f9187;
+  --color-primary: #83c773;
+  --color-primary-hover: #9bdb89;
+  --color-primary-active: #69a95f;
+  --color-success: #7dcc91;
+  --color-warning: #e1bd78;
+  --color-danger: #e08d83;
+  --color-info: #72bdd0;
+  --color-focus: #b7e69f;
+  color: var(--color-text);
+  background: var(--color-background);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
@@ -28,6 +46,10 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
+}
+
+:focus-visible {
+  outline-color: var(--color-focus);
 }
 
 body.dialog-open {
@@ -215,19 +237,19 @@ input {
   width: 100%;
   height: 3.4rem;
   padding: 0 1rem;
-  border: 1px solid #2a3932;
+  border: 1px solid var(--color-border);
   border-radius: 0.75rem;
   outline: none;
-  color: #f4f1e8;
-  background: #111e19;
+  color: var(--color-text);
+  background: var(--color-surface);
   transition:
     border-color 160ms ease,
     box-shadow 160ms ease;
 }
 
 input:focus-visible {
-  border-color: #8fbd82;
-  box-shadow: 0 0 0 0.22rem rgb(143 189 130 / 14%);
+  border-color: var(--color-focus);
+  box-shadow: 0 0 0 0.22rem rgb(183 230 159 / 14%);
 }
 
 button {
@@ -235,8 +257,8 @@ button {
   margin-top: 1.25rem;
   border: 0;
   border-radius: 0.75rem;
-  color: #102015;
-  background: #aed59c;
+  color: var(--color-background-secondary);
+  background: var(--color-primary);
   cursor: pointer;
   font-weight: 750;
   transition:
@@ -245,7 +267,7 @@ button {
 }
 
 button:hover {
-  background: #c0e2b0;
+  background: var(--color-primary-hover);
 }
 
 button:active {
@@ -253,7 +275,7 @@ button:active {
 }
 
 button:focus-visible {
-  outline: 0.22rem solid rgb(174 213 156 / 25%);
+  outline: 0.22rem solid rgb(183 230 159 / 28%);
   outline-offset: 0.2rem;
 }
 
@@ -347,7 +369,7 @@ button:disabled {
 
 .app-shell {
   min-height: 100vh;
-  background: #0b1512;
+  background: var(--color-background);
 }
 
 .skip-link {
@@ -969,95 +991,6 @@ button:disabled {
   flex-wrap: nowrap;
 }
 
-.wos-modal-overlay {
-  position: fixed;
-  z-index: 1000;
-  inset: 0;
-  display: grid;
-  padding: 1rem;
-  place-items: center;
-  background: rgb(0 0 0 / 62%);
-}
-
-.wos-modal {
-  display: grid;
-  width: min(100%, 30rem);
-  max-height: calc(100dvh - 2rem);
-  overflow-y: auto;
-  justify-items: center;
-  padding: 1.5rem;
-  border: 1px solid rgb(174 213 156 / 18%);
-  border-radius: 1rem;
-  color: #dfe8e2;
-  background: #101d18;
-  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 45%);
-  text-align: center;
-}
-
-.wos-modal h2 {
-  margin: 0.8rem 0 0;
-  font-size: 1.3rem;
-}
-
-.wos-modal p {
-  margin: 0.65rem 0 0;
-  color: #aebbb4;
-  line-height: 1.5;
-}
-
-.wos-modal-icon {
-  display: grid;
-  width: 3rem;
-  height: 3rem;
-  place-items: center;
-  border: 0.15rem solid currentcolor;
-  border-radius: 50%;
-  color: #a9d39c;
-  font-size: 1.55rem;
-  font-weight: 800;
-}
-
-.wos-modal-icon.error,
-.wos-modal-icon.warning {
-  color: #dc9b92;
-}
-
-.wos-modal-icon.question {
-  color: #d7bc83;
-}
-
-.wos-modal-actions {
-  display: flex;
-  width: 100%;
-  justify-content: center;
-  gap: 0.7rem;
-  margin-top: 1.25rem;
-}
-
-.wos-alert-confirm,
-.wos-alert-cancel {
-  width: auto;
-  min-width: 7rem;
-  border: 1px solid transparent;
-  border-radius: 0.65rem;
-  font: inherit;
-  font-weight: 700;
-}
-
-.wos-alert-confirm {
-  background: #6f9b62;
-}
-
-.wos-alert-cancel {
-  color: #dfe8e2;
-  background: #405047;
-}
-
-.wos-alert-confirm.destructive {
-  border-color: rgb(220 155 146 / 52%);
-  background: #7f3935;
-}
-
 .feedback-toast-region {
   position: fixed;
   z-index: 1100;
@@ -1071,8 +1004,12 @@ button:disabled {
 .feedback-toast-region .operation-notice {
   border: 1px solid rgb(174 213 156 / 16%);
   border-radius: 0.85rem;
-  background: #101d18;
+  background: var(--color-surface);
   box-shadow: 0 1rem 3rem rgb(0 0 0 / 35%);
+}
+
+.feedback-toast-item {
+  min-width: 0;
 }
 
 .open-folder-button {
@@ -1238,9 +1175,9 @@ button:disabled {
   margin: 0 clamp(1rem, 4vw, 2rem) 1rem;
   padding: clamp(1.5rem, 6vw, 3rem) 1rem;
   place-items: center;
-  border: 1px dashed #435a4d;
+  border: 1px dashed var(--color-border-strong);
   border-radius: 1rem;
-  color: #8d9b92;
+  color: var(--color-text-muted);
   background: rgb(5 12 10 / 28%);
   text-align: center;
   cursor: pointer;
@@ -1249,7 +1186,7 @@ button:disabled {
 .torrent-drop-zone:hover,
 .torrent-drop-zone:focus-visible,
 .torrent-drop-zone.dragging {
-  border-color: #8fbd82;
+  border-color: var(--color-focus);
   outline: none;
   background: rgb(143 189 130 / 7%);
 }
@@ -1263,7 +1200,7 @@ button:disabled {
   width: 1.8rem;
   height: 1.8rem;
   margin-bottom: 0.35rem;
-  color: #aed59c;
+  color: var(--color-primary);
 }
 
 .torrent-drop-zone strong,
@@ -1273,7 +1210,7 @@ button:disabled {
 }
 
 .torrent-drop-zone strong {
-  color: #e0e9e3;
+  color: var(--color-text);
 }
 
 .torrent-drop-zone button {
@@ -1281,6 +1218,113 @@ button:disabled {
   min-height: 2.75rem;
   margin-top: 0.65rem;
   padding: 0.65rem 1rem;
+}
+
+.torrent-upload-batch {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0 clamp(1rem, 4vw, 2rem) 1rem;
+  padding: clamp(1rem, 3vw, 1.35rem);
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+  background: var(--color-surface-elevated);
+}
+
+.torrent-upload-batch > header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.torrent-upload-batch > header > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.torrent-upload-batch > header strong {
+  color: var(--color-text);
+  font-size: 0.9rem;
+}
+
+.torrent-upload-batch > header span {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.torrent-upload-batch > header button {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.torrent-upload-batch > progress {
+  width: 100%;
+}
+
+.torrent-upload-batch > ul {
+  display: grid;
+  max-height: min(19rem, 45dvh);
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 6%);
+  border-radius: 0.75rem;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.torrent-upload-batch li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-top: 1px solid rgb(255 255 255 / 5%);
+}
+
+.torrent-upload-batch li:first-child {
+  border-top: 0;
+}
+
+.torrent-upload-batch li > span {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-result {
+  color: var(--color-text-subtle);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.batch-result.added {
+  color: var(--color-success);
+}
+
+.batch-result.duplicate,
+.batch-result.invalid {
+  color: var(--color-warning);
+}
+
+.batch-result.failed {
+  color: var(--color-danger);
+}
+
+.batch-result.uploading {
+  color: var(--color-info);
+}
+
+.torrent-page-error {
+  margin: 0 clamp(1rem, 4vw, 2rem) 1rem;
+  border: 1px solid rgb(224 141 131 / 28%);
+  border-radius: 0.9rem;
 }
 
 .torrent-table-wrap {
@@ -1903,7 +1947,7 @@ button:disabled {
   margin: 0;
   padding: 0.8rem clamp(1rem, 3vw, 1.5rem);
   border-bottom: 1px solid rgb(174 213 156 / 10%);
-  color: #b9dda9;
+  color: var(--color-primary);
   background: rgb(174 213 156 / 6%);
   font-size: 0.75rem;
 }
@@ -1944,6 +1988,8 @@ button:disabled {
 }
 
 .notice-copy span {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: color-mix(in srgb, currentcolor 82%, #7f8d84);
   line-height: 1.4;
 }
@@ -2542,6 +2588,62 @@ button:disabled {
   margin: 0;
   padding: 0.62rem 0.75rem;
   font-size: 0.68rem;
+}
+
+.inline-danger-confirmation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border: 1px solid rgb(224 141 131 / 35%);
+  border-radius: 0.85rem;
+  color: var(--color-text-muted);
+  background: rgb(224 141 131 / 8%);
+}
+
+.inline-danger-confirmation > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.inline-danger-confirmation strong,
+.inline-danger-confirmation span,
+.inline-danger-confirmation small {
+  overflow-wrap: anywhere;
+}
+
+.inline-danger-confirmation strong {
+  color: var(--color-text);
+  font-size: 0.82rem;
+}
+
+.inline-danger-confirmation span {
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.inline-danger-confirmation small {
+  color: var(--color-danger);
+  font-size: 0.68rem;
+}
+
+.inline-danger-confirmation button {
+  width: auto;
+  min-height: 2.75rem;
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+}
+
+.trash-actions > .inline-danger-confirmation {
+  width: min(100%, 40rem);
+}
+
+.admin-inline-confirmation,
+.service-inline-confirmation {
+  margin-top: 1rem;
 }
 
 .trash-purge-button {
@@ -3393,16 +3495,16 @@ button:disabled {
 select {
   height: 2.75rem;
   padding: 0 0.85rem;
-  border: 1px solid #304239;
+  border: 1px solid var(--color-border);
   border-radius: 0.65rem;
   outline: none;
-  color: #eaf0ec;
-  background: #0d1814;
+  color: var(--color-text);
+  background: var(--color-background-secondary);
 }
 
 select:focus-visible {
-  border-color: #8fbd82;
-  box-shadow: 0 0 0 0.22rem rgb(143 189 130 / 14%);
+  border-color: var(--color-focus);
+  box-shadow: 0 0 0 0.22rem rgb(183 230 159 / 14%);
 }
 
 .compact-button {
@@ -3471,6 +3573,16 @@ select:focus-visible {
   display: block;
 }
 
+.user-row > div:nth-child(2) {
+  min-width: 0;
+}
+
+.user-row > div:nth-child(2) > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .user-row > div:nth-child(2) > span {
   margin-top: 0.15rem;
   color: #89978f;
@@ -3479,6 +3591,7 @@ select:focus-visible {
 
 .user-row-actions {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: flex-end;
   gap: 0.55rem;
@@ -3940,13 +4053,11 @@ select:focus-visible {
     overflow-x: auto;
   }
 
-  .wos-modal-overlay,
   .dialog-backdrop {
     padding-block: max(0.5rem, env(safe-area-inset-top))
       max(0.5rem, env(safe-area-inset-bottom));
   }
 
-  .wos-modal,
   .mutation-dialog {
     max-height: calc(100dvh - 1rem);
   }
@@ -3959,27 +4070,6 @@ select:focus-visible {
     width: calc(100% - 1.3rem);
   }
 
-  .wos-modal-overlay {
-    align-items: end;
-    padding: 0;
-  }
-
-  .wos-modal {
-    width: 100%;
-    max-height: calc(100dvh - max(0.5rem, env(safe-area-inset-top)));
-    padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
-    border-radius: 1.25rem 1.25rem 0 0;
-  }
-
-  .wos-modal-actions {
-    align-items: stretch;
-    flex-direction: column-reverse;
-  }
-
-  .wos-modal-actions button {
-    width: 100%;
-    min-height: 2.75rem;
-  }
   .operation-notice {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
@@ -4042,6 +4132,32 @@ select:focus-visible {
 
   .torrent-page-actions button {
     flex: 1 1 0;
+  }
+
+  .torrent-upload-batch > header,
+  .inline-danger-confirmation {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .torrent-upload-batch > header {
+    flex-direction: column;
+  }
+
+  .torrent-upload-batch > header button,
+  .inline-danger-confirmation button {
+    width: 100%;
+  }
+
+  .torrent-upload-batch li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+
+  .torrent-upload-batch li > span {
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
   }
 
   .torrent-pagination {
@@ -4386,6 +4502,48 @@ select:focus-visible {
   .trash-actions button {
     flex: 1;
     min-height: 2.75rem;
+  }
+
+  .trash-actions > .inline-danger-confirmation {
+    width: 100%;
+  }
+}
+
+@media (max-width: 430px) {
+  .dashboard-content,
+  .admin-section {
+    padding-inline: 0.75rem;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .account-trigger strong {
+    max-width: 6.5rem;
+  }
+
+  .torrent-drop-zone,
+  .torrent-upload-batch,
+  .torrent-table-wrap,
+  .torrent-page-error {
+    margin-inline: 0.75rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .app-header {
+    padding-inline: 0.65rem;
+  }
+
+  .language-selector select {
+    max-width: 6.5rem;
+  }
+
+  .torrent-page-actions {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 }
 

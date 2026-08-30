@@ -1,13 +1,13 @@
 import { type FormEvent, useEffect, useState } from "react";
 
 import { api, ApiError, type DirectoryListing, type FileEntry } from "../../api/client";
-import { ConfirmDialog, useFeedback } from "../../components/Feedback";
+import { useFeedback } from "../../components/Feedback";
 import { FolderIcon } from "../../components/icons";
 import { useI18n, type MessageKey } from "../../i18n";
 import { splitDisplayName } from "../../utils/files";
 import { FileDialog } from "./FileDialog";
 
-export type FileMutationAction = "move" | "rename" | "trash";
+export type FileMutationAction = "move" | "rename";
 
 interface FileMutationDialogProps {
   action: FileMutationAction;
@@ -276,67 +276,9 @@ function MoveDialog({
   );
 }
 
-function TrashDialog({
-  entry,
-  onClose,
-  onCompleted,
-  onSessionExpired,
-}: Omit<FileMutationDialogProps, "action" | "currentDirectory">) {
-  const feedback = useFeedback();
-  const { t } = useI18n();
-  const [submitting, setSubmitting] = useState(false);
-
-  async function trash() {
-    setSubmitting(true);
-    try {
-      await api.trashFile(entry.path);
-      onCompleted(t("files.trashed", { name: entry.name }));
-    } catch (caught) {
-      if (caught instanceof ApiError && caught.status === 401) {
-        onSessionExpired();
-        return;
-      }
-      const message =
-        caught instanceof ApiError
-          ? {
-              400: t("files.invalidPath"),
-              403: t("files.protected"),
-              404: t("files.targetMissing"),
-              409: t("trash.integrityFailed"),
-              500: t("trash.restoreRollbackFailed"),
-              503: t("trash.temporarilyUnavailable"),
-            }[caught.status] ?? t("files.trashFailed")
-          : t("files.trashFailed");
-      feedback.toast({ tone: "error", message });
-      onClose();
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <ConfirmDialog
-      options={{
-        title: t("files.trashTitle"),
-        message: t("files.trashMessage", { name: entry.name }),
-        confirmText: t("files.moveToTrash"),
-        destructive: true,
-      }}
-      closeDisabled={submitting}
-      onClose={(confirmed) => {
-        if (confirmed) void trash();
-        else onClose();
-      }}
-    />
-  );
-}
-
 export function FileMutationDialog(props: FileMutationDialogProps) {
   if (props.action === "rename") {
     return <RenameDialog {...props} />;
-  }
-  if (props.action === "trash") {
-    return <TrashDialog {...props} />;
   }
   return <MoveDialog {...props} />;
 }

@@ -324,11 +324,9 @@ describe("App", () => {
     expect(screen.getByText("Suspendu")).toBeDefined();
 
     await user.click(screen.getByRole("button", { name: "Supprimer l’accès de guest-a1b2c3" }));
-    await screen.findByText("Le compte sera désactivé, ses sessions fermées et son dossier sera conservé.");
-    await user.click(screen.getByRole("button", { name: "Confirmer la suppression" }));
     await screen.findByText("Impossible de supprimer l’accès de cet utilisateur.");
-    expect(screen.getByRole("dialog")).toBeDefined();
-    await user.click(screen.getByRole("button", { name: "Confirmer la suppression" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Supprimer l’accès de guest-a1b2c3" }));
     expect(screen.queryByText("guest-a1b2c3")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
@@ -700,8 +698,9 @@ describe("App", () => {
     expect(newgreedyTargetRatio).toBe(2.2);
 
     await user.click(screen.getByRole("button", { name: "Remettre les stats à zéro" }));
-    await screen.findByRole("heading", { name: "Remettre les statistiques à zéro ?" });
-    await user.click(screen.getByRole("button", { name: "Confirmer" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await screen.findByText("Toutes les statistiques NewGreedy actuellement enregistrées seront supprimées.");
+    await user.click(screen.getByRole("button", { name: "Confirmer la remise à zéro" }));
     await screen.findByText("3 statistiques supprimées.");
     expect(newgreedyStatsPurged).toBe(true);
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
@@ -719,7 +718,8 @@ describe("App", () => {
     await screen.findByText("un-fichier-avec-un-nom-tres-long.mkv");
     expect(screen.getByText("Shadowsun")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Vider toutes les corbeilles" }));
-    await screen.findByRole("heading", { name: "Vider toutes les corbeilles" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await screen.findByText("Cette action détruit les fichiers et ne peut pas être annulée.");
     await user.click(screen.getByRole("button", { name: "Tout supprimer" }));
     await screen.findByText("Toutes les corbeilles sont vides");
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });

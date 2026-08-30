@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 
 import { api, ApiError, type AdminTrashEntry, type AdminTrashListing } from "../../api/client";
+import { useFeedback } from "../../components/Feedback";
 import { useI18n } from "../../i18n";
-import { Notice } from "../../components/Notice";
-import { FileDialog } from "../files/FileDialog";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 
 type PurgeTarget = { kind: "all" } | { kind: "entry"; entry: AdminTrashEntry };
 
-function PurgeDialog({
+function InlinePurgeConfirmation({
   onClose,
   onCompleted,
   onSessionExpired,
@@ -19,14 +18,13 @@ function PurgeDialog({
   onSessionExpired: () => void;
   target: PurgeTarget;
 }) {
+  const feedback = useFeedback();
   const { t } = useI18n();
-  const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const all = target.kind === "all";
 
   async function purge() {
     setSubmitting(true);
-    setError("");
     try {
       if (target.kind === "entry") {
         await api.purgeAdminTrash(target.entry.id);
@@ -44,56 +42,47 @@ function PurgeDialog({
         onSessionExpired();
         return;
       }
-      setError(
-        caught instanceof ApiError && caught.status === 409
+      feedback.toast({
+        tone: "error",
+        message: caught instanceof ApiError && caught.status === 409
           ? t("admin.purgeIntegrityFailed")
           : t("admin.purgeFailed"),
-      );
+      });
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <FileDialog
-      eyebrow={t("admin.adminEyebrow")}
-      title={all ? t("admin.emptyAllTrash") : t("admin.deletePermanently")}
-      description={
-        all
-          ? t("admin.emptyTrashDescription")
-          : t("admin.deleteTrashDescription", { name: target.entry.name, username: target.entry.username })
-      }
-      onClose={onClose}
-      closeDisabled={submitting}
+    <div
+      className="inline-danger-confirmation admin-inline-confirmation"
+      role="group"
+      aria-labelledby="admin-purge-confirmation-title"
     >
-      <div className="confirmation-content">
-        <p className="permanent-delete-warning">
-          {t("admin.permanentWarning")}
-        </p>
-        <p className="form-message error-message" role="alert">
-          {error}
-        </p>
-        <div className="dialog-actions">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onClose}
-            disabled={submitting}
-            data-initial-focus
-          >
-            {t("common.cancel")}
-          </button>
-          <button
-            type="button"
-            className="danger-button"
-            onClick={() => void purge()}
-            disabled={submitting}
-          >
-            {submitting ? t("admin.deletingTrash") : all ? t("admin.deleteAll") : t("common.delete")}
-          </button>
-        </div>
+      <div>
+        <strong id="admin-purge-confirmation-title">
+          {all ? t("admin.emptyAllTrash") : t("admin.deletePermanently")}
+        </strong>
+        <span>
+          {all
+            ? t("admin.emptyTrashDescription")
+            : t("admin.deleteTrashDescription", { name: target.entry.name, username: target.entry.username })}
+        </span>
+        <small>{t("admin.permanentWarning")}</small>
       </div>
-    </FileDialog>
+      <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>
+        {t("common.cancel")}
+      </button>
+      <button
+        type="button"
+        className="danger-button"
+        onClick={() => void purge()}
+        disabled={submitting}
+        autoFocus
+      >
+        {submitting ? t("admin.deletingTrash") : all ? t("admin.deleteAll") : t("admin.confirmPurge")}
+      </button>
+    </div>
   );
 }
 
@@ -106,11 +95,11 @@ export function AdminTrashPage({
   onNavigate: (view: AdminView) => void;
   onSessionExpired: () => void;
 }) {
+  const feedback = useFeedback();
   const { formatBytes, formatDate, t } = useI18n();
   const [listing, setListing] = useState<AdminTrashListing | null>(null);
   const [target, setTarget] = useState<PurgeTarget | null>(null);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
 
@@ -137,7 +126,7 @@ export function AdminTrashPage({
 
   function completed(message: string) {
     setTarget(null);
-    setNotice(message);
+    feedback.toast({ tone: "success", message });
     setRevision((current) => current + 1);
   }
 
@@ -161,7 +150,7 @@ export function AdminTrashPage({
             <button
               type="button"
               className="danger-outline-button"
-              disabled={loading || (listing?.entries.length ?? 0) === 0}
+              disabled={loading || target !== null || (listing?.entries.length ?? 0) === 0}
               onClick={() => setTarget({ kind: "all" })}
             >
               {t("admin.emptyAllTrash")}
@@ -169,7 +158,14 @@ export function AdminTrashPage({
           </div>
         </div>
 
-        <Notice message={notice} onDismiss={() => setNotice("")} />
+        {target !== null && (
+          <InlinePurgeConfirmation
+            target={target}
+            onClose={() => setTarget(null)}
+            onCompleted={completed}
+            onSessionExpired={onSessionExpired}
+          />
+        )}
         <p className="form-message error-message" role="alert">
           {error}
         </p>
@@ -208,6 +204,7 @@ export function AdminTrashPage({
                   type="button"
                   className="danger-outline-button compact-button"
                   aria-label={t("admin.deleteTrashNamed", { name: entry.name, username: entry.username })}
+                  disabled={target !== null}
                   onClick={() => setTarget({ kind: "entry", entry })}
                 >
                   {t("common.delete")}
@@ -217,14 +214,6 @@ export function AdminTrashPage({
           </ul>
         )}
       </section>
-      {target !== null && (
-        <PurgeDialog
-          target={target}
-          onClose={() => setTarget(null)}
-          onCompleted={completed}
-          onSessionExpired={onSessionExpired}
-        />
-      )}
     </AdminPageShell>
   );
 }

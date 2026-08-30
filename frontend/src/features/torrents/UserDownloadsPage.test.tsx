@@ -4,7 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { auditAccessibility } from "../../test/accessibility";
 import { FeedbackProvider } from "../../components/Feedback";
-import { UserDownloadsPage } from "./UserDownloadsPage";
+import {
+  MAX_TORRENT_BATCH_FILES,
+  TORRENT_UPLOAD_CONCURRENCY,
+  UserDownloadsPage,
+} from "./UserDownloadsPage";
 
 function response(body: unknown, status = 200): Response {
   return new Response(status === 204 ? null : JSON.stringify(body), {
@@ -259,9 +263,10 @@ describe("UserDownloadsPage", () => {
       new File(["torrent"], "film.torrent", { type: "application/x-bittorrent" }),
     );
 
-    expect((await screen.findByRole("status")).textContent).toContain("Film.mkv");
+    expect(await screen.findByText("Lot terminé")).toBeTruthy();
+    expect(screen.getByText("1 ajoutés · 0 déjà présents · 0 invalides · 0 en erreur")).toBeTruthy();
     expect(await screen.findByText("En cours")).toBeTruthy();
-    expect(screen.getByRole("progressbar").getAttribute("value")).toBe("0.5");
+    expect(screen.getByRole("progressbar", { name: "Progression de Film.mkv" }).getAttribute("value")).toBe("0.5");
     expect(screen.getByRole("columnheader", { name: "Actions" })).toBeTruthy();
     expect(view.container.querySelector(".torrent-row-actions")).toBeTruthy();
     expect(view.container.querySelector("[style]")).toBeNull();
@@ -306,14 +311,13 @@ describe("UserDownloadsPage", () => {
     expect(calls.some((url) => url.includes("offset=10") && url.includes("limit=10"))).toBe(true);
   });
 
-  it("supporte le drop, le clavier et les erreurs métier bornées", async () => {
-    const longName = "Release-avec-un-nom-très-long.mkv";
+  it("supporte le drop, le sélecteur clavier et les erreurs métier bornées", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
         init?.method === "POST"
           ? response({
-              ...torrent({ name: longName, state: "requested", progress: 0 }),
+              ...torrent({ state: "requested", progress: 0 }),
               created: false,
               storage_pressure: "warning",
             }, 201)
@@ -327,21 +331,24 @@ describe("UserDownloadsPage", () => {
     );
     const view = renderPage();
     const zone = screen.getByTestId("torrent-drop-zone");
-    const selectButton = screen.getByRole("button", { name: "Ajouter un torrent" });
-    selectButton.focus();
-    fireEvent.keyDown(selectButton, { key: "Enter" });
+    const selectButton = screen.getAllByRole("button", { name: "Ajouter des torrents" })[1];
     const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
-    expect(document.activeElement === selectButton || input !== null).toBe(true);
+    const inputClick = vi.spyOn(input, "click");
+    selectButton.focus();
+    await userEvent.setup().keyboard("{Enter}");
+    expect(inputClick).toHaveBeenCalledOnce();
+    const dropped = new File(["torrent"], "film.torrent", { type: "application/x-bittorrent" });
     fireEvent.drop(zone, {
-      dataTransfer: { files: { item: () => new File(["torrent"], "film.torrent") } },
+      dataTransfer: { files: [dropped] },
     });
 
-    await waitFor(() => expect(screen.getByText(new RegExp(longName))).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("film.torrent")).toBeTruthy());
+    expect(screen.getByText("Déjà présent")).toBeTruthy();
     expect(await screen.findByText("Erreur")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("intervention");
   });
 
-  it("confirme et annule une demande via l’API V2", async () => {
+  it("annule directement une demande via l’API V2", async () => {
     const user = userEvent.setup();
     let cancelled = false;
     const calls: Array<{ method: string; url: string }> = [];
@@ -366,16 +373,210 @@ describe("UserDownloadsPage", () => {
     const view = renderPage();
 
     await user.click(await screen.findByRole("button", { name: "Annuler la demande Film.mkv" }));
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Annuler" }));
-    expect(await auditAccessibility(document.body)).toMatchObject({ violations: [] });
-    await user.click(screen.getByRole("button", { name: "Annuler la demande" }));
-
     expect(await screen.findByText("La demande « Film.mkv » a été annulée.")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(await auditAccessibility(document.body)).toMatchObject({ violations: [] });
     expect(await screen.findByText("Annulé")).toBeTruthy();
     expect(calls).toContainEqual({
       method: "DELETE",
       url: "/api/v2/torrents/d86528f5-bc01-4a8b-86a1-74fe3404864b",
     });
     expect(view.container.querySelector("[style]")).toBeNull();
+  });
+
+  it.each([1, 2, 10, 50])(
+    "traite un lot de %d fichiers avec au plus trois envois concurrents",
+    async (count) => {
+      let active = 0;
+      let maximumActive = 0;
+      let postCount = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+          if (init?.method === "POST") {
+            postCount += 1;
+            active += 1;
+            maximumActive = Math.max(maximumActive, active);
+            await new Promise((resolve) => window.setTimeout(resolve, 2));
+            active -= 1;
+            return response({
+              ...torrent({ name: `Film ${postCount}` }),
+              created: true,
+              storage_pressure: "normal",
+            }, 201);
+          }
+          return response({ items: [], offset: 0, limit: 10, total: 0 });
+        }),
+      );
+      const view = renderPage();
+      await screen.findByText("Aucun téléchargement pour le moment.");
+      const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+      const files = Array.from({ length: count }, (_, index) =>
+        new File([`torrent-${index}`], `film-${index}.torrent`, {
+          type: "application/x-bittorrent",
+          lastModified: index + 1,
+        }));
+
+      fireEvent.change(input, { target: { files } });
+
+      await screen.findByText(
+        `${count} ajoutés · 0 déjà présents · 0 invalides · 0 en erreur`,
+      );
+      expect(postCount).toBe(count);
+      expect(maximumActive).toBe(Math.min(count, TORRENT_UPLOAD_CONCURRENCY));
+      expect(maximumActive).toBeLessThanOrEqual(TORRENT_UPLOAD_CONCURRENCY);
+      expect(input.multiple).toBe(true);
+    },
+  );
+
+  it("isole les doublons, invalides et échecs sans interrompre le lot", async () => {
+    const timestamp = 1_800_000_000_000;
+    const original = new File(["same"], "same.torrent", { lastModified: timestamp });
+    const duplicate = new File(["same"], "same.torrent", { lastModified: timestamp });
+    const files = [
+      original,
+      duplicate,
+      new File(["invalid"], "notes.txt"),
+      new File([], "empty.torrent"),
+      new File(["server"], "server-error.torrent"),
+      new File(["ok"], "ok.torrent"),
+    ];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method !== "POST") {
+          return response({ items: [], offset: 0, limit: 10, total: 0 });
+        }
+        const file = (init.body as FormData).get("torrent") as File;
+        if (file.name === "server-error.torrent") return response({ detail: "failed" }, 500);
+        return response({
+          ...torrent({ name: file.name }),
+          created: true,
+          storage_pressure: "normal",
+        }, 201);
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = renderPage();
+    await screen.findByText("Aucun téléchargement pour le moment.");
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files } });
+
+    await screen.findByText("2 ajoutés · 1 déjà présents · 2 invalides · 1 en erreur");
+    expect(screen.getAllByText("Ajouté")).toHaveLength(2);
+    expect(screen.getByText("Déjà présent")).toBeTruthy();
+    expect(screen.getAllByText("Invalide")).toHaveLength(2);
+    expect(screen.getByText("Erreur", { selector: ".batch-result" })).toBeTruthy();
+    const postCalls = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+    expect(postCalls).toHaveLength(3);
+  });
+
+  it("classe 409, 413, 422, quota, 503 et erreur réseau sans arrêter les autres envois", async () => {
+    const files = [
+      "ok-before.torrent",
+      "conflict-409.torrent",
+      "large-413.torrent",
+      "invalid-422.torrent",
+      "quota-507.torrent",
+      "service-503.torrent",
+      "network.torrent",
+      "ok-after.torrent",
+    ].map((name, index) => new File([`payload-${index}`], name));
+    const successful: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method !== "POST") {
+          return response({ items: [], offset: 0, limit: 10, total: 0 });
+        }
+        const file = (init.body as FormData).get("torrent") as File;
+        if (file.name === "network.torrent") throw new TypeError("network unavailable");
+        const status = Number(file.name.match(/-(409|413|422|507|503)\./)?.[1] ?? 0);
+        if (status !== 0) {
+          return response({
+            detail: {
+              code: status === 507 ? "user_quota_exceeded" : `upload_${status}`,
+              message: "rejected",
+            },
+          }, status);
+        }
+        successful.push(file.name);
+        return response({
+          ...torrent({ name: file.name }),
+          created: true,
+          storage_pressure: file.name === "ok-before.torrent" ? "warning" : "normal",
+        }, 201);
+      }),
+    );
+    const view = renderPage();
+    await screen.findByText("Aucun téléchargement pour le moment.");
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files } });
+
+    await screen.findByText("2 ajoutés · 0 déjà présents · 2 invalides · 4 en erreur");
+    expect(successful).toEqual(["ok-before.torrent", "ok-after.torrent"]);
+    expect(screen.getAllByText("Invalide")).toHaveLength(2);
+    expect(screen.getAllByText("Erreur", { selector: ".batch-result" })).toHaveLength(4);
+  });
+
+  it("désactive les entrées pendant un envoi lent et réutilise picker puis drop", async () => {
+    let releaseFirst!: () => void;
+    const firstPending = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const uploaded: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method !== "POST") {
+          return response({ items: [], offset: 0, limit: 10, total: 0 });
+        }
+        const file = (init.body as FormData).get("torrent") as File;
+        uploaded.push(file.name);
+        if (file.name === "first.torrent") await firstPending;
+        return response({
+          ...torrent({ name: file.name }),
+          created: true,
+          storage_pressure: "normal",
+        }, 201);
+      }),
+    );
+    const view = renderPage();
+    await screen.findByText("Aucun téléchargement pour le moment.");
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    const uploadButtons = screen.getAllByRole("button", { name: "Ajouter des torrents" });
+
+    fireEvent.change(input, { target: { files: [new File(["one"], "first.torrent")] } });
+    await waitFor(() => expect(uploaded).toEqual(["first.torrent"]));
+    expect(input.disabled).toBe(true);
+    expect(uploadButtons.every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+    fireEvent.change(input, { target: { files: [new File(["ignored"], "ignored.torrent")] } });
+    expect(uploaded).toEqual(["first.torrent"]);
+
+    releaseFirst();
+    await screen.findByText("1 ajoutés · 0 déjà présents · 0 invalides · 0 en erreur");
+    expect(input.disabled).toBe(false);
+    expect(input.value).toBe("");
+
+    fireEvent.drop(screen.getByTestId("torrent-drop-zone"), {
+      dataTransfer: { files: [new File(["two"], "second.torrent")] },
+    });
+    await waitFor(() => expect(uploaded).toEqual(["first.torrent", "second.torrent"]));
+    expect(await screen.findByText("second.torrent")).toBeTruthy();
+    expect(input.value).toBe("");
+  });
+
+  it("refuse plus de cinquante fichiers avant tout envoi", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      response({ items: [], offset: 0, limit: 10, total: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = renderPage();
+    await screen.findByText("Aucun téléchargement pour le moment.");
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = Array.from({ length: MAX_TORRENT_BATCH_FILES + 1 }, (_, index) =>
+      new File(["torrent"], `film-${index}.torrent`));
+
+    fireEvent.change(input, { target: { files } });
+
+    await screen.findByText("Un lot peut contenir au maximum 50 fichiers .torrent.");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    expect(input.value).toBe("");
   });
 });
