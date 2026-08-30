@@ -1322,6 +1322,8 @@
   step does not implement frontend behavior, change dependencies, or add a database migration.
 - The future implementation removes confirmation-only delete modals while preserving explicit
   danger styling, accessibility, pending-state disabling, and double-submit protection.
+  Irreversible trash deletion and administrative purge retain explicit non-modal inline
+  confirmation, preserving the architecture's permanent-delete safeguard.
 - Punctual action outcomes use the existing accessible toast system; durable structural page state
   remains inline. The future pass also centralizes the palette through design tokens.
 - Torrent submission will accept multiple picker/drop files through independent backend requests,
@@ -1336,6 +1338,11 @@
   accessibility, FR/EN, mixed-result upload batches of 1/2/10/50 files, and responsive evidence.
 - The existing V2-33 draft work remains paused. V2-32B must be implemented, reviewed, validated,
   and merged before the Rise2 pilot may continue.
+- Documentation PR `#104` initial GitHub CI run `33316787183` (`#224`): PASS — backend,
+  frontend, dependency/image security, production image, complete Compose profile, bounded load,
+  WebSocket, and monitoring validation are green.
+- PR `#104` review finding: addressed by explicitly retaining accessible non-modal inline
+  confirmation for irreversible trash deletion and administrative purge.
 
 ## Pre-pilot hardening audit for V2-33
 
