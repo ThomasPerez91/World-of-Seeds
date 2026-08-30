@@ -113,6 +113,84 @@ describe("UserDownloadsPage", () => {
     view.unmount();
   });
 
+  it("ignore une invalidation WebSocket obsolète après le rafraîchissement autoritatif d’un upload", async () => {
+    MockWebSocket.instances = [];
+    const user = userEvent.setup();
+    let offsetZeroRequests = 0;
+    let offsetTenRequests = 0;
+    let releaseUpload!: () => void;
+    let markUploadStarted!: () => void;
+    let releaseStalePage!: () => void;
+    let markStalePageStarted!: () => void;
+    const uploadPending = new Promise<void>((resolve) => { releaseUpload = resolve; });
+    const uploadStarted = new Promise<void>((resolve) => { markUploadStarted = resolve; });
+    const stalePagePending = new Promise<void>((resolve) => { releaseStalePage = resolve; });
+    const stalePageStarted = new Promise<void>((resolve) => { markStalePageStarted = resolve; });
+
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === "POST") {
+          markUploadStarted();
+          await uploadPending;
+          return response({
+            ...torrent({ name: "Ajout récent.mkv", state: "requested", progress: 0 }),
+            created: true,
+            storage_pressure: "normal",
+          }, 201);
+        }
+        if (url.includes("offset=10")) {
+          offsetTenRequests += 1;
+          if (offsetTenRequests > 1) {
+            markStalePageStarted();
+            await stalePagePending;
+          }
+          return response({
+            items: [torrent({
+              id: "c8c69f91-8e73-48b3-a14f-35199ce7c101",
+              name: offsetTenRequests > 1 ? "Page obsolète.mkv" : "Deuxième page.mkv",
+            })],
+            offset: 10,
+            limit: 10,
+            total: 11,
+          });
+        }
+        offsetZeroRequests += 1;
+        return response({
+          items: [torrent({ name: offsetZeroRequests === 1 ? "Page initiale.mkv" : "Page fraîche.mkv" })],
+          offset: 0,
+          limit: 10,
+          total: 11,
+        });
+      }),
+    );
+    const view = renderPage();
+
+    await screen.findByText("Page initiale.mkv");
+    await user.click(screen.getByRole("button", { name: "Suivant" }));
+    await screen.findByText("Deuxième page.mkv");
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["torrent"], "nouveau.torrent")] } });
+    await uploadStarted;
+
+    MockWebSocket.instances.at(-1)?.message({
+      type: "torrent.ready",
+      request_id: torrent().id,
+      occurred_at: "2026-08-30T12:00:00+00:00",
+    });
+    await stalePageStarted;
+    releaseUpload();
+    await screen.findByText("Page fraîche.mkv");
+
+    releaseStalePage();
+    await act(async () => Promise.resolve());
+    await waitFor(() => expect(screen.queryByText("Page obsolète.mkv")).toBeNull());
+    expect(screen.getByText("Page fraîche.mkv")).toBeTruthy();
+    view.unmount();
+  });
+
   it("ne recharge plus automatiquement la liste toutes les dix secondes", async () => {
     MockWebSocket.instances = [];
     const fetchMock = vi.fn(async () => response({

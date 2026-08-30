@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api, ApiError, type AdminTrashEntry, type AdminTrashListing } from "../../api/client";
 import { useFeedback } from "../../components/Feedback";
@@ -102,6 +102,14 @@ export function AdminTrashPage({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
+  const purgeOpenerRef = useRef<HTMLButtonElement | null>(null);
+  const restorePurgeFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (target !== null || !restorePurgeFocusRef.current) return;
+    restorePurgeFocusRef.current = false;
+    purgeOpenerRef.current?.focus();
+  }, [target]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -125,9 +133,15 @@ export function AdminTrashPage({
   }, [onSessionExpired, revision, t]);
 
   function completed(message: string) {
+    purgeOpenerRef.current = null;
     setTarget(null);
     feedback.toast({ tone: "success", message });
     setRevision((current) => current + 1);
+  }
+
+  function closePurgeConfirmation() {
+    restorePurgeFocusRef.current = true;
+    setTarget(null);
   }
 
   return (
@@ -151,7 +165,10 @@ export function AdminTrashPage({
               type="button"
               className="danger-outline-button"
               disabled={loading || target !== null || (listing?.entries.length ?? 0) === 0}
-              onClick={() => setTarget({ kind: "all" })}
+              onClick={(event) => {
+                purgeOpenerRef.current = event.currentTarget;
+                setTarget({ kind: "all" });
+              }}
             >
               {t("admin.emptyAllTrash")}
             </button>
@@ -161,7 +178,7 @@ export function AdminTrashPage({
         {target !== null && (
           <InlinePurgeConfirmation
             target={target}
-            onClose={() => setTarget(null)}
+            onClose={closePurgeConfirmation}
             onCompleted={completed}
             onSessionExpired={onSessionExpired}
           />
@@ -205,7 +222,10 @@ export function AdminTrashPage({
                   className="danger-outline-button compact-button"
                   aria-label={t("admin.deleteTrashNamed", { name: entry.name, username: entry.username })}
                   disabled={target !== null}
-                  onClick={() => setTarget({ kind: "entry", entry })}
+                  onClick={(event) => {
+                    purgeOpenerRef.current = event.currentTarget;
+                    setTarget({ kind: "entry", entry });
+                  }}
                 >
                   {t("common.delete")}
                 </button>

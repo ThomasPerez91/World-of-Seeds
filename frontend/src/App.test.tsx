@@ -717,8 +717,13 @@ describe("App", () => {
     ).toBeNull();
     await screen.findByText("un-fichier-avec-un-nom-tres-long.mkv");
     expect(screen.getByText("Shadowsun")).toBeDefined();
-    await user.click(screen.getByRole("button", { name: "Vider toutes les corbeilles" }));
+    const purgeAllTrashButton = screen.getByRole("button", { name: "Vider toutes les corbeilles" });
+    await user.click(purgeAllTrashButton);
     expect(screen.queryByRole("dialog")).toBeNull();
+    await screen.findByText("Cette action détruit les fichiers et ne peut pas être annulée.");
+    await user.click(screen.getByRole("button", { name: "Annuler" }));
+    expect(document.activeElement).toBe(purgeAllTrashButton);
+    await user.click(purgeAllTrashButton);
     await screen.findByText("Cette action détruit les fichiers et ne peut pas être annulée.");
     await user.click(screen.getByRole("button", { name: "Tout supprimer" }));
     await screen.findByText("Toutes les corbeilles sont vides");

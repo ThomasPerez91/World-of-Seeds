@@ -159,6 +159,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
   const [uploadBatch, setUploadBatch] = useState<UploadBatchState | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [pageError, setPageError] = useState("");
+  const loadGenerationRef = useRef(0);
   const controllerRef = useRef<RecursiveDownloadController | null>(null);
   const [transfer, setTransfer] = useState<(
     RecursiveTransferProgress & {
@@ -177,9 +178,11 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
   useEffect(() => () => controllerRef.current?.cancel(), []);
 
   const load = useCallback(async (requestedOffset: number, signal?: AbortSignal) => {
+    const generation = ++loadGenerationRef.current;
     setRefreshing(true);
     try {
       const result = await api.listTorrentRequestsV2(requestedOffset, PAGE_SIZE, signal);
+      if (generation !== loadGenerationRef.current) return;
       setTorrents(result.items);
       setTotal(result.total);
       setPageError("");
@@ -189,10 +192,13 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
         onSessionExpired();
         return;
       }
+      if (generation !== loadGenerationRef.current) return;
       setPageError(apiError(caught, "downloads.trackingFailed"));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (generation === loadGenerationRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [apiError, onSessionExpired]);
 
