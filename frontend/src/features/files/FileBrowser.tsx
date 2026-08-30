@@ -179,6 +179,7 @@ export function FileBrowser({
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [trashingPath, setTrashingPath] = useState<string | null>(null);
   const [mutation, setMutation] = useState<{
     action: FileMutationAction;
     entry: FileEntry;
@@ -228,6 +229,35 @@ export function FileBrowser({
     feedback.toast({ tone: "success", message });
     setReloadKey((value) => value + 1);
     onFilesChanged();
+  }
+
+  async function trash(entry: FileEntry) {
+    if (trashingPath !== null) return;
+    setTrashingPath(entry.path);
+    try {
+      await api.trashFile(entry.path);
+      feedback.toast({ tone: "success", message: t("files.trashed", { name: entry.name }) });
+      setReloadKey((value) => value + 1);
+      onFilesChanged();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      const message = caught instanceof ApiError
+        ? {
+            400: t("files.invalidPath"),
+            403: t("files.protected"),
+            404: t("files.targetMissing"),
+            409: t("trash.integrityFailed"),
+            500: t("trash.restoreRollbackFailed"),
+            503: t("trash.temporarilyUnavailable"),
+          }[caught.status] ?? t("files.trashFailed")
+        : t("files.trashFailed");
+      feedback.toast({ tone: "error", message });
+    } finally {
+      setTrashingPath(null);
+    }
   }
 
   return (
@@ -427,12 +457,13 @@ export function FileBrowser({
                           <button
                             type="button"
                             className="file-mutation-button destructive-file-action"
-                            onClick={() => setMutation({ action: "trash", entry })}
+                            disabled={trashingPath !== null}
+                            onClick={() => void trash(entry)}
                             aria-label={t("files.trashNamed", { name: entry.name })}
                             title={t("files.moveToTrash")}
                           >
                             <DeleteIcon />
-                            <span>{t("files.trash")}</span>
+                            <span>{trashingPath === entry.path ? t("common.processing") : t("files.trash")}</span>
                           </button>
                         </>
                       )}

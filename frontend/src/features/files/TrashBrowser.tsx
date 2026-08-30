@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api, ApiError, type TrashEntry, type TrashListing } from "../../api/client";
-import { ConfirmDialog, useFeedback } from "../../components/Feedback";
+import { useFeedback } from "../../components/Feedback";
 import { FileIcon, FolderIcon } from "../../components/icons";
 import { useI18n, type MessageKey } from "../../i18n";
 
@@ -55,65 +55,6 @@ function TrashIcon({ kind }: { kind: TrashEntry["kind"] }) {
   );
 }
 
-function TrashActionDialog({
-  action,
-  entry,
-  onClose,
-  onCompleted,
-  onSessionExpired,
-}: {
-  action: "purge" | "restore";
-  entry: TrashEntry;
-  onClose: () => void;
-  onCompleted: (message: string) => void;
-  onSessionExpired: () => void;
-}) {
-  const restoring = action === "restore";
-  const feedback = useFeedback();
-  const { t } = useI18n();
-  const [submitting, setSubmitting] = useState(false);
-
-  async function submit() {
-    setSubmitting(true);
-    try {
-      if (restoring) {
-        await api.restoreTrash(entry.id);
-        onCompleted(t("trash.restored", { name: entry.name }));
-      } else {
-        await api.purgeTrash(entry.id);
-        onCompleted(t("trash.purged", { name: entry.name }));
-      }
-    } catch (caught) {
-      if (caught instanceof ApiError && caught.status === 401) {
-        onSessionExpired();
-        return;
-      }
-      feedback.toast({ tone: "error", message: trashActionError(caught, action, t) });
-      onClose();
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <ConfirmDialog
-      options={{
-        title: restoring ? t("trash.restoreTitle") : t("trash.purgeTitle"),
-        message: restoring
-          ? t("trash.restoreMessage", { name: entry.name, path: entry.original_path })
-          : t("trash.purgeMessage", { name: entry.name }),
-        confirmText: restoring ? t("trash.restore") : t("trash.purge"),
-        destructive: !restoring,
-      }}
-      closeDisabled={submitting}
-      onClose={(confirmed) => {
-        if (confirmed) void submit();
-        else onClose();
-      }}
-    />
-  );
-}
-
 export function TrashBrowser({
   onFilesChanged,
   onSessionExpired,
@@ -129,10 +70,11 @@ export function TrashBrowser({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
-  const [selectedAction, setSelectedAction] = useState<{
-    action: "purge" | "restore";
-    entry: TrashEntry;
-  } | null>(null);
+  const [pendingPurge, setPendingPurge] = useState<TrashEntry | null>(null);
+  const [actionBusyId, setActionBusyId] = useState<string | null>(null);
+  const returnFocusRef = useRef<HTMLButtonElement | null>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const shouldReturnFocusRef = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -156,11 +98,61 @@ export function TrashBrowser({
     return () => controller.abort();
   }, [onSessionExpired, reloadKey, revision, t]);
 
+  useEffect(() => {
+    if (pendingPurge !== null) {
+      confirmButtonRef.current?.focus();
+      return;
+    }
+    if (shouldReturnFocusRef.current) {
+      shouldReturnFocusRef.current = false;
+      returnFocusRef.current?.focus();
+    }
+  }, [pendingPurge]);
+
   function completeAction(message: string) {
-    setSelectedAction(null);
+    setPendingPurge(null);
     feedback.toast({ tone: "success", message });
     setReloadKey((value) => value + 1);
     onFilesChanged();
+  }
+
+  async function restore(entry: TrashEntry) {
+    if (actionBusyId !== null) return;
+    setActionBusyId(entry.id);
+    try {
+      await api.restoreTrash(entry.id);
+      completeAction(t("trash.restored", { name: entry.name }));
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      feedback.toast({ tone: "error", message: trashActionError(caught, "restore", t) });
+    } finally {
+      setActionBusyId(null);
+    }
+  }
+
+  async function purge(entry: TrashEntry) {
+    if (actionBusyId !== null) return;
+    setActionBusyId(entry.id);
+    try {
+      await api.purgeTrash(entry.id);
+      completeAction(t("trash.purged", { name: entry.name }));
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      feedback.toast({ tone: "error", message: trashActionError(caught, "purge", t) });
+    } finally {
+      setActionBusyId(null);
+    }
+  }
+
+  function cancelPurge() {
+    shouldReturnFocusRef.current = true;
+    setPendingPurge(null);
   }
 
   return (
@@ -236,21 +228,52 @@ export function TrashBrowser({
                 role="group"
                 aria-label={t("files.actionsFor", { name: entry.name })}
               >
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => setSelectedAction({ action: "restore", entry })}
-                >
-                  {t("trash.restore")}
-                </button>
-                <button
-                  type="button"
-                  className="trash-purge-button"
-                  onClick={() => setSelectedAction({ action: "purge", entry })}
-                  aria-label={t("trash.purgeNamed", { name: entry.name })}
-                >
-                  {t("trash.purge")}
-                </button>
+                {pendingPurge?.id === entry.id ? (
+                  <div className="inline-danger-confirmation" role="group" aria-label={t("trash.purgeTitle")}>
+                    <span>{t("trash.purgeMessage", { name: entry.name })}</span>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={actionBusyId !== null}
+                      onClick={cancelPurge}
+                    >
+                      {t("common.cancel")}
+                    </button>
+                    <button
+                      ref={confirmButtonRef}
+                      type="button"
+                      className="trash-purge-button"
+                      disabled={actionBusyId !== null}
+                      onClick={() => void purge(entry)}
+                    >
+                      {actionBusyId === entry.id ? t("common.processing") : t("trash.confirmPurge")}
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={actionBusyId !== null}
+                      onClick={() => void restore(entry)}
+                    >
+                      {actionBusyId === entry.id ? t("common.processing") : t("trash.restore")}
+                    </button>
+                    <button
+                      ref={pendingPurge === null ? returnFocusRef : undefined}
+                      type="button"
+                      className="trash-purge-button"
+                      disabled={actionBusyId !== null}
+                      onClick={(event) => {
+                        returnFocusRef.current = event.currentTarget;
+                        setPendingPurge(entry);
+                      }}
+                      aria-label={t("trash.purgeNamed", { name: entry.name })}
+                    >
+                      {t("trash.purge")}
+                    </button>
+                  </>
+                )}
               </div>
             </li>
           ))}
@@ -261,16 +284,6 @@ export function TrashBrowser({
         <p className="truncated-notice" role="status">
           {t("trash.truncated")}
         </p>
-      )}
-
-      {selectedAction !== null && (
-        <TrashActionDialog
-          action={selectedAction.action}
-          entry={selectedAction.entry}
-          onClose={() => setSelectedAction(null)}
-          onCompleted={completeAction}
-          onSessionExpired={onSessionExpired}
-        />
       )}
     </section>
   );

@@ -316,9 +316,9 @@ function AccountMenu({
   onLogout: () => Promise<void>;
   onSessionExpired: () => void;
 }) {
+  const feedback = useFeedback();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const [logoutError, setLogoutError] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -343,7 +343,6 @@ function AccountMenu({
 
   async function handleLogout() {
     setLoggingOut(true);
-    setLogoutError("");
     try {
       await onLogout();
     } catch (caught) {
@@ -351,7 +350,7 @@ function AccountMenu({
         onSessionExpired();
         return;
       }
-      setLogoutError(t("dashboard.logoutFailed"));
+      feedback.toast({ tone: "error", message: t("dashboard.logoutFailed") });
     } finally {
       setLoggingOut(false);
     }
@@ -406,11 +405,6 @@ function AccountMenu({
           >
             {loggingOut ? t("dashboard.loggingOut") : t("dashboard.logout")}
           </button>
-          {logoutError !== "" && (
-            <p className="logout-error" role="alert">
-              {logoutError}
-            </p>
-          )}
         </div>
       )}
     </div>
@@ -430,9 +424,8 @@ function AccountSettingsPage({
   onPasswordChanged: () => void;
   onSessionExpired: () => void;
 }) {
+  const feedback = useFeedback();
   const { apiError, t } = useI18n();
-  const [usernameError, setUsernameError] = useState("");
-  const [usernameNotice, setUsernameNotice] = useState("");
   const [usernameSubmitting, setUsernameSubmitting] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordSubmitting, setPasswordSubmitting] = useState(false);
@@ -441,19 +434,17 @@ function AccountSettingsPage({
   async function submitUsername(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setUsernameSubmitting(true);
-    setUsernameError("");
-    setUsernameNotice("");
     try {
       const updated = await api.changeUsername(username);
       onChanged(updated);
       setUsername(updated.username);
-      setUsernameNotice(t("account.nameUpdated"));
+      feedback.toast({ tone: "success", message: t("account.nameUpdated") });
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      setUsernameError(apiError(caught, "error.temporary"));
+      feedback.toast({ tone: "error", message: apiError(caught, "error.temporary") });
     } finally {
       setUsernameSubmitting(false);
     }
@@ -482,7 +473,7 @@ function AccountSettingsPage({
         onSessionExpired();
         return;
       }
-      setPasswordError(apiError(caught, "error.temporary"));
+      feedback.toast({ tone: "error", message: apiError(caught, "error.temporary") });
     } finally {
       setPasswordSubmitting(false);
     }
@@ -520,14 +511,6 @@ function AccountSettingsPage({
             <p className="field-hint">
               {t("account.usernameHint")}
             </p>
-            <p className="form-message error-message" role="alert">
-              {usernameError}
-            </p>
-            {usernameNotice !== "" && (
-              <p className="settings-notice" role="status">
-                {usernameNotice}
-              </p>
-            )}
             <button type="submit" disabled={usernameSubmitting || username === user.username}>
               {usernameSubmitting ? t("credentials.submitting") : t("account.updateName")}
             </button>

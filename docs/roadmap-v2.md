@@ -282,11 +282,11 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
   les actions ; les cibles tactiles, le focus, le clavier et les lecteurs d'écran restent utilisables.
 - Ne réintroduire ni polling torrent, ni chargement de listes ou manifestes non bornés, ni timers ou
   rerenders globaux fréquents. La file de multi-upload reste bornée.
-- À l'implémentation, valider Vitest, TypeScript, build production, interactions, accessibilité et
+- Valider Vitest, TypeScript, build production, interactions, accessibilité et
   i18n FR/EN ; tester des lots de 1, 2, 10 et 50 fichiers avec succès et erreurs mélangés, puis les
   largeurs responsive, noms longs, tableaux, toasts, navigation admin et orientations.
-- Cette étape de roadmap planifie uniquement V2-32B. Son implémentation doit être réalisée dans une
-  tâche ultérieure et acceptée avant le démarrage ou la fusion du pilote V2-33.
+- V2-32B doit être acceptée et fusionnée dans `develop_V2` avant le démarrage ou la fusion du
+  pilote V2-33.
 
 ## Migrations et ruptures anticipées
 
@@ -334,6 +334,6 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 
 ## Prochaine tâche
 
-`V2-32B — Frontend UX / UI polish & mobile` est la prochaine tâche après V2-32A.
-Le travail préparatoire V2-33 déjà présent reste en brouillon et en pause ; le pilote ne reprend
-qu'après implémentation, revue, CI verte et fusion de V2-32B dans `develop_V2`.
+Après la revue, la CI verte et la fusion de V2-32B, la prochaine tâche est
+`V2-33 — Pilote limité sur Rise2`. Le travail préparatoire déjà présent reste en brouillon et en
+pause ; il ne doit pas être repris, rebasé ou fusionné automatiquement.

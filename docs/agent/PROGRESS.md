@@ -1316,28 +1316,50 @@
   monitoring smoke are green; squash-merged through PR `#101` into `develop_V2` at
   `63cd40f03b5869f0eae7e39b189f656a014101fa`.
 
-## V2-32B — Frontend UX / UI polish & mobile planning
+## V2-32B — Frontend UX / UI polish & mobile
 
-- Added V2-32B to the official roadmap after V2-32A and before the Rise2 pilot. This documentation
-  step does not implement frontend behavior, change dependencies, or add a database migration.
-- The future implementation removes confirmation-only delete modals while preserving explicit
-  danger styling, accessibility, pending-state disabling, and double-submit protection.
-  Irreversible trash deletion and administrative purge retain explicit non-modal inline
-  confirmation, preserving the architecture's permanent-delete safeguard.
-- Punctual action outcomes use the existing accessible toast system; durable structural page state
-  remains inline. The future pass also centralizes the palette through design tokens.
-- Torrent submission will accept multiple picker/drop files through independent backend requests,
-  a bounded frontend queue of 2 to 4 concurrent uploads, at most 50 files per batch, per-file
-  outcomes, continued processing after failures, and one final authoritative refresh.
-- The responsive acceptance matrix covers 320, 360, 375, 390, 430, and 768 px plus desktop in
-  portrait and landscape, including user and administration surfaces, tables, long names, touch,
-  keyboard, screen readers, focus, toasts, and dialogs still required for non-confirmation flows.
-- Performance constraints prohibit full-page reloads, renewed torrent polling, unbounded lists or
-  manifests, unnecessary timers, global rerender churn, and unbounded upload concurrency.
-- Implementation acceptance will include Vitest, TypeScript, production build, interactions,
-  accessibility, FR/EN, mixed-result upload batches of 1/2/10/50 files, and responsive evidence.
-- The existing V2-33 draft work remains paused. V2-32B must be implemented, reviewed, validated,
-  and merged before the Rise2 pilot may continue.
+- Removed confirmation-only dialogs from move-to-trash, restore, user-access deletion, and torrent
+  cancellation. These reversible or recoverable actions execute directly with explicit danger
+  styling, disabled pending states, double-submit guards, and accessible success/error toasts.
+- Permanent user-trash deletion, administrative purge, and NewGreedy statistics reset retain an
+  explicit danger confirmation in the normal page flow. The inline control is non-modal, supports
+  cancel/confirm by keyboard, and returns focus to the recreated source action after cancellation.
+- Reduced the global feedback provider to an accessible toast stack of at most five items. Toasts
+  do not steal focus, pause expiration while hovered or focused, remain dismissible, and use longer
+  bounded durations for errors and progress; durable load/reconnect state remains inline.
+- Torrent submission now accepts multiple files from both the native picker and drag/drop. Each
+  file keeps an independent backend request and visible state; batches are capped at 50 files and
+  exactly three workers, continue after partial failure, and finish with one aggregate toast and
+  one authoritative list refresh.
+- Same-batch duplicates, empty/wrong-extension files, successful deduplication, 409, 413, 422,
+  quota/507, 503, storage pressure, and network failures have distinct bounded outcomes. Input and
+  drop surfaces are reusable after completion; no page reload or torrent polling was introduced.
+- Added semantic palette tokens for backgrounds, surfaces, borders, text, primary actions,
+  success, warning, danger, information, and focus. Mobile layouts now include dedicated inline
+  confirmation and upload-queue cards, bounded long-name handling, touch-sized actions, and
+  breakpoints at 680, 430, and 360 px while retaining the existing card conversion for tables.
+- Responsive source/layout checklist: 320, 360, 375, 390, 430, 768 px, desktop, portrait and
+  landscape; file/torrent names over 200 characters, nested paths, long allowed usernames,
+  navigation, tables/cards, drop zone, toast stack, inline danger actions, and remaining maintenance
+  dialogs were checked for local containment and accessible names. The repository has no installed
+  Playwright/Puppeteer or browser binary, so no new heavyweight screenshot stack was added.
+- V2-32B local validation: PASS — 54 frontend tests across 12 files, axe checks, FR/EN catalogue,
+  TypeScript, production Vite build, `git diff --check`, Ruff lint/format, strict mypy, and 553
+  backend tests with 6 service-backed tests deferred.
+- PR `#105` initial GitHub CI run `33330479493` (`#229`): PASS — backend with real
+  PostgreSQL/Redis and migrations, frontend, dependency/image security, production image, complete
+  Compose profile, bounded load, WebSocket, and monitoring validation are green. No review thread
+  or review finding was open when the documentation commit was prepared.
+- PR `#105` review follow-up: the two P2 findings were fixed, answered, and resolved. Monotonic
+  request generations prevent a delayed WebSocket refresh from replacing the authoritative
+  post-upload listing, and cancelling an inline administrative purge restores focus to its opener.
+  Both paths have explicit frontend regressions.
+- PR `#105` corrected head `642ad30072c738598da3b771d57981100451eab7`: GitHub CI run
+  `33331011403` (`#231`) PASS — backend with real PostgreSQL/Redis and migrations, 54 frontend
+  tests, dependency/image security, production image, complete Compose profile, bounded load,
+  WebSocket, and monitoring validation are green; no review thread remains open.
+- No dependency, backend contract, database migration, deployment configuration, or version change
+  is included. The separate V2-33 draft PR `#103` remains untouched and paused.
 - Documentation PR `#104` initial GitHub CI run `33316787183` (`#224`): PASS — backend,
   frontend, dependency/image security, production image, complete Compose profile, bounded load,
   WebSocket, and monitoring validation are green.
@@ -1401,7 +1423,6 @@
 
 ## Next task
 
-- The next roadmap task after V2-32A is `V2-32B — Frontend UX / UI polish & mobile`.
-- Implement V2-32B only after this documentation update is reviewed, green, and merged into
-  `develop_V2`.
-- Do not continue or merge the existing V2-33 draft before V2-32B is complete and merged.
+- After V2-32B is reviewed, green, and merged, the next roadmap task is `V2-33 — Pilote Rise2`.
+- Do not continue, rebase, close, or merge the existing V2-33 draft PR `#103` automatically; its
+  host phase requires a separate explicit decision and Rise2 authority.

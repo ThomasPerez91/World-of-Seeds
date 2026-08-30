@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api, ApiError, type GeneratedCredentials, type User } from "../../api/client";
-import { FileDialog } from "../files/FileDialog";
+import { useFeedback } from "../../components/Feedback";
 import { useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 
@@ -14,12 +14,11 @@ export function AdminUsersPage({
   onNavigate: (view: AdminView) => void;
   onSessionExpired: () => void;
 }) {
+  const feedback = useFeedback();
   const { t } = useI18n();
   const [users, setUsers] = useState<User[]>([]);
   const [credentials, setCredentials] = useState<GeneratedCredentials | null>(null);
-  const [pendingDeletion, setPendingDeletion] = useState<User | null>(null);
-  const [deletionError, setDeletionError] = useState("");
-  const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [generating, setGenerating] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
 
@@ -32,24 +31,24 @@ export function AdminUsersPage({
           onSessionExpired();
           return;
         }
-        setError(t("admin.usersLoadFailed"));
+        setLoadError(t("admin.usersLoadFailed"));
       });
   }, [onSessionExpired, t]);
 
   async function generateUser() {
     setGenerating(true);
-    setError("");
     setCredentials(null);
     try {
       const generated = await api.createUser();
       setCredentials(generated);
       setUsers((current) => [generated.user, ...current]);
+      feedback.toast({ tone: "success", message: t("admin.userCreated") });
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      setError(t("admin.userCreateFailed"));
+      feedback.toast({ tone: "error", message: t("admin.userCreateFailed") });
     } finally {
       setGenerating(false);
     }
@@ -57,37 +56,44 @@ export function AdminUsersPage({
 
   async function setActive(account: User, isActive: boolean) {
     setUpdatingUserId(account.id);
-    setError("");
     try {
       const updated = await api.setUserActive(account.id, isActive);
       setUsers((current) =>
         current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
       );
+      feedback.toast({
+        tone: "success",
+        message: t(isActive ? "admin.userReactivated" : "admin.userSuspended", {
+          name: account.username,
+        }),
+      });
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      setError(t("admin.userUpdateFailed"));
+      feedback.toast({ tone: "error", message: t("admin.userUpdateFailed") });
     } finally {
       setUpdatingUserId(null);
     }
   }
 
-  async function confirmDeletion() {
-    if (pendingDeletion === null) return;
-    setUpdatingUserId(pendingDeletion.id);
-    setDeletionError("");
+  async function deleteAccess(account: User) {
+    if (updatingUserId !== null) return;
+    setUpdatingUserId(account.id);
     try {
-      await api.deleteUser(pendingDeletion.id);
-      setUsers((current) => current.filter((candidate) => candidate.id !== pendingDeletion.id));
-      setPendingDeletion(null);
+      await api.deleteUser(account.id);
+      setUsers((current) => current.filter((candidate) => candidate.id !== account.id));
+      feedback.toast({
+        tone: "success",
+        message: t("admin.userDeleted", { name: account.username }),
+      });
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      setDeletionError(t("admin.userDeleteFailed"));
+      feedback.toast({ tone: "error", message: t("admin.userDeleteFailed") });
     } finally {
       setUpdatingUserId(null);
     }
@@ -97,8 +103,9 @@ export function AdminUsersPage({
     try {
       if (navigator.clipboard === undefined) throw new Error("Clipboard API unavailable");
       await navigator.clipboard.writeText(value);
+      feedback.toast({ tone: "info", message: t("admin.copied") });
     } catch {
-      setError(t("admin.copyFailed"));
+      feedback.toast({ tone: "error", message: t("admin.copyFailed") });
     }
   }
 
@@ -157,9 +164,9 @@ export function AdminUsersPage({
           </div>
         )}
 
-        <p className="form-message error-message" role="alert">
-          {error}
-        </p>
+        {loadError !== "" && (
+          <p className="form-message error-message" role="alert">{loadError}</p>
+        )}
         <div className="user-list">
           {users.map((account) => (
             <div className="user-row" key={account.id}>
@@ -196,12 +203,9 @@ export function AdminUsersPage({
                       className="danger-outline-button compact-button"
                       aria-label={t("admin.deleteAccessNamed", { name: account.username })}
                       disabled={updatingUserId === account.id}
-                      onClick={() => {
-                        setDeletionError("");
-                        setPendingDeletion(account);
-                      }}
+                      onClick={() => void deleteAccess(account)}
                     >
-                      {t("admin.deleteAccess")}
+                      {updatingUserId === account.id ? t("admin.deleting") : t("admin.deleteAccess")}
                     </button>
                   </>
                 )}
@@ -209,51 +213,6 @@ export function AdminUsersPage({
             </div>
           ))}
         </div>
-        {pendingDeletion !== null && (
-          <FileDialog
-            eyebrow={t("admin.title")}
-            title={t("admin.deleteTitle", { name: pendingDeletion.username })}
-            description={t("admin.deleteDescription")}
-            onClose={() => {
-              setDeletionError("");
-              setPendingDeletion(null);
-            }}
-            closeDisabled={updatingUserId === pendingDeletion.id}
-          >
-            <div className="confirmation-content">
-              <p className="permanent-delete-warning">
-                {t("admin.deleteWarning")}
-              </p>
-              <p className="form-message error-message" role="alert">
-                {deletionError}
-              </p>
-              <div className="dialog-actions">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => {
-                    setDeletionError("");
-                    setPendingDeletion(null);
-                  }}
-                  disabled={updatingUserId === pendingDeletion.id}
-                  data-initial-focus
-                >
-                  {t("common.cancel")}
-                </button>
-                <button
-                  type="button"
-                  className="danger-button"
-                  disabled={updatingUserId === pendingDeletion.id}
-                  onClick={() => void confirmDeletion()}
-                >
-                  {updatingUserId === pendingDeletion.id
-                    ? t("admin.deleting")
-                    : t("admin.confirmDelete")}
-                </button>
-              </div>
-            </div>
-          </FileDialog>
-        )}
       </section>
     </AdminPageShell>
   );
