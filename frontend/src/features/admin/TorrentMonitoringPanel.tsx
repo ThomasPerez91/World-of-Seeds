@@ -61,6 +61,26 @@ function formatEta(
   return t("admin.minutes", { minutes: Math.max(1, minutes) });
 }
 
+export function correlateNewGreedyTorrents(
+  qbittorrent: QBittorrentTorrent[],
+  newgreedy: NewGreedyTorrent[],
+): { byQBHash: Map<string, NewGreedyTorrent>; unmatched: number } {
+  const byQBHash = new Map<string, NewGreedyTorrent>();
+  const matchedNewGreedy = new Set<string>();
+  for (const entry of newgreedy) {
+    const normalized = entry.id.toLowerCase();
+    const candidates = qbittorrent.filter((torrent) => {
+      const hash = torrent.id.toLowerCase();
+      return normalized.length === 40 ? hash === normalized : hash.startsWith(normalized);
+    });
+    if (candidates.length === 1) {
+      byQBHash.set(candidates[0].id, entry);
+      matchedNewGreedy.add(entry.id);
+    }
+  }
+  return { byQBHash, unmatched: newgreedy.length - matchedNewGreedy.size };
+}
+
 function NewGreedyTorrentStatus({
   available,
   torrent,
@@ -156,19 +176,13 @@ export function TorrentMonitoringPanel({
     };
   }, [load]);
 
-  const newgreedyByHash = useMemo(
-    () => new Map(newgreedy.map((torrent) => [torrent.id.slice(0, 8), torrent])),
-    [newgreedy],
-  );
   const torrents = listing?.torrents ?? [];
-  const visibleTorrents = torrents.slice(0, visibleCount);
-  const qbittorrentHashes = useMemo(
-    () => new Set(torrents.map((torrent) => torrent.id.slice(0, 8))),
-    [torrents],
+  const correlation = useMemo(
+    () => correlateNewGreedyTorrents(torrents, newgreedy),
+    [newgreedy, torrents],
   );
-  const unmatchedNewGreedy = newgreedy.filter(
-    (entry) => !qbittorrentHashes.has(entry.id.slice(0, 8)),
-  ).length;
+  const visibleTorrents = torrents.slice(0, visibleCount);
+  const unmatchedNewGreedy = correlation.unmatched;
 
   return (
     <section className="torrent-monitoring" aria-labelledby="torrent-monitoring-title">
@@ -210,7 +224,7 @@ export function TorrentMonitoringPanel({
           <ol className="torrent-monitoring-list">
             {visibleTorrents.map((torrent) => {
               const presentation = statePresentation(torrent.state);
-              const linkedNewGreedy = newgreedyByHash.get(torrent.id.slice(0, 8));
+              const linkedNewGreedy = correlation.byQBHash.get(torrent.id);
               return (
                 <li key={torrent.id}>
                   <article className="torrent-monitoring-card">

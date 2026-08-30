@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,8 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import (
+    ReconciliationCursor,
+    ReconciliationCursorError,
     ReconciliationRecoveryError,
     reconcile_inventory,
     recover_orphaned_torrent,
@@ -17,8 +20,12 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2InventoryItem,
 )
 from app.models import (
+    IntegrationServiceHealth,
+    IntegrationServiceState,
     ManagedTorrent,
     ManagedTorrentState,
+    QBittorrentInventoryItem,
+    QBittorrentInventorySnapshot,
     StorageLedger,
     TorrentFile,
     TorrentJob,
@@ -77,6 +84,39 @@ def test_shared_storage_inventory_is_bounded_and_does_not_follow_symlinks(
 
     assert len(inventory.keys) == 1
     assert inventory.truncated is True
+
+
+@pytest.mark.parametrize("count", [0, 1, 199, 200, 201, 500, 1000])
+def test_shared_storage_inventory_pages_have_stable_boundaries(
+    tmp_path: Path,
+    count: int,
+) -> None:
+    content = tmp_path / "content"
+    content.mkdir()
+    expected = [uuid.UUID(int=index + 1) for index in range(count)]
+    for key in reversed(expected):
+        (content / key.hex).mkdir()
+    store = SharedContentStore(tmp_path)
+    collected: list[uuid.UUID] = []
+    after: uuid.UUID | None = None
+    while True:
+        page = store.inventory_page(limit=200, after=after)
+        assert len(page.keys) <= 200
+        collected.extend(page.keys)
+        if not page.truncated:
+            break
+        after = page.keys[-1]
+
+    assert collected == expected
+
+
+def test_reconciliation_cursor_is_opaque_round_trip_and_rejects_tampering() -> None:
+    snapshot_id = uuid.uuid4()
+    cursor = ReconciliationCursor("qbittorrent", "a" * 40, (snapshot_id,), snapshot_index=0)
+
+    assert ReconciliationCursor.decode(cursor.encode()) == cursor
+    with pytest.raises(ReconciliationCursorError):
+        ReconciliationCursor.decode(cursor.encode() + "!")
 
 
 def test_shared_storage_exact_presence_fails_closed_on_symlink(tmp_path: Path) -> None:
@@ -281,25 +321,158 @@ async def test_admin_reconciliation_is_admin_only_and_degrades_when_services_are
     db_session.add(admin)
     await db_session.commit()
 
-    def unavailable_storage(_store: SharedContentStore, *, limit: int) -> SharedContentInventory:
+    def unavailable_storage(
+        _store: SharedContentStore, *, limit: int, after: uuid.UUID | None
+    ) -> SharedContentInventory:
         assert limit == 25
-        assert db_session.in_transaction() is False
+        assert after is None
         raise SharedContentStoreError("storage unavailable")
 
-    monkeypatch.setattr(SharedContentStore, "inventory", unavailable_storage)
+    monkeypatch.setattr(SharedContentStore, "inventory_page", unavailable_storage)
 
     anonymous = await client.get("/api/v2/admin/reconciliation")
     login = await client.post(
         "/api/v1/auth/login",
         json={"username": "reconcile-admin", "password": "correct-horse-battery"},
     )
-    response = await client.get("/api/v2/admin/reconciliation?limit=25")
+    database_page = await client.get("/api/v2/admin/reconciliation?limit=25")
+    assert database_page.status_code == 200
+    assert database_page.json()["database_scanned"] == 0
+    cursor = database_page.json()["next_cursor"]
+    response = await client.get(
+        "/api/v2/admin/reconciliation",
+        params={"limit": 25, "cursor": cursor},
+    )
 
     assert anonymous.status_code == 401
     assert login.status_code == 200
-    assert response.status_code == 200
-    assert response.json()["database_scanned"] == 0
-    assert {item["code"] for item in response.json()["anomalies"]} == {
-        "qbittorrent_unavailable",
-        "storage_unavailable",
-    }
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "storage_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_admin_recovery_is_durable_idempotent_and_does_no_network_io(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    admin = User(
+        username="recovery-admin",
+        password_hash=hash_password("correct-horse-battery"),
+        is_admin=True,
+    )
+    torrent = _torrent(info_hash="7" * 40, storage_key=uuid.uuid4())
+    db_session.add_all([admin, torrent])
+    await db_session.commit()
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"username": "recovery-admin", "password": "correct-horse-battery"},
+    )
+    assert login.status_code == 200
+    csrf = client.cookies.get("wos_csrf")
+    assert csrf is not None
+
+    first = await client.post(
+        f"/api/v2/admin/reconciliation/{torrent.id}/recover",
+        json={"action": "cancel_requests"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    second = await client.post(
+        f"/api/v2/admin/reconciliation/{torrent.id}/recover",
+        json={"action": "cancel_requests"},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json()["state"] == "queued"
+    assert second.json()["recovery_id"] == first.json()["recovery_id"]
+    job = await db_session.get(TorrentJob, uuid.UUID(first.json()["recovery_id"]))
+    assert job is not None and job.job_type == "RECOVER_CANCEL_REQUESTS"
+
+
+@pytest.mark.asyncio
+async def test_admin_reconciliation_selects_one_fresh_snapshot_for_every_account(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    admin = User(
+        username="snapshot-admin",
+        password_hash=hash_password("correct-horse-battery"),
+        is_admin=True,
+    )
+    first_account = uuid.UUID(int=1)
+    second_account = uuid.UUID(int=2)
+    observation_set = uuid.uuid4()
+    now = datetime.now(UTC)
+    health = [
+        IntegrationServiceHealth(
+            service=service,
+            account_ref=account,
+            observation_set=observation_set,
+            account_count=2,
+            state=IntegrationServiceState.HEALTHY,
+            latency_ms=1,
+            error_code=None,
+            checked_at=now,
+            updated_at=now,
+        )
+        for service in ("newgreedy", "qbittorrent")
+        for account in (first_account, second_account)
+    ]
+    old_snapshots = [
+        QBittorrentInventorySnapshot(
+            account_ref=first_account,
+            observation_set=observation_set,
+            item_count=0,
+            truncated=False,
+            checked_at=now - timedelta(seconds=20, microseconds=index + 1),
+        )
+        for index in range(70)
+    ]
+    latest = [
+        QBittorrentInventorySnapshot(
+            account_ref=account,
+            observation_set=observation_set,
+            item_count=1,
+            truncated=False,
+            checked_at=now,
+        )
+        for account in (first_account, second_account)
+    ]
+    db_session.add_all([admin, *health, *old_snapshots, *latest])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            QBittorrentInventoryItem(
+                snapshot_id=snapshot.id,
+                info_hash=character * 40,
+                storage_key=None,
+                claims_wos_identity=False,
+            )
+            for snapshot, character in zip(latest, ("a", "b"), strict=True)
+        ]
+    )
+    await db_session.commit()
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"username": "snapshot-admin", "password": "correct-horse-battery"},
+    )
+    assert login.status_code == 200
+
+    response = await client.get("/api/v2/admin/reconciliation?limit=200")
+    scanned = response.json()["qbittorrent_scanned"]
+    cursor = response.json()["next_cursor"]
+    for _ in range(4):
+        if cursor is None or ReconciliationCursor.decode(cursor).phase == "storage":
+            break
+        response = await client.get(
+            "/api/v2/admin/reconciliation",
+            params={"limit": 200, "cursor": cursor},
+        )
+        assert response.status_code == 200
+        scanned += response.json()["qbittorrent_scanned"]
+        cursor = response.json()["next_cursor"]
+
+    assert cursor is not None
+    assert ReconciliationCursor.decode(cursor).phase == "storage"
+    assert scanned == 2

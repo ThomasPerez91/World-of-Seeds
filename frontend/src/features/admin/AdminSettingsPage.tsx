@@ -10,9 +10,10 @@ import {
 } from "../../api/client";
 import { Notice, type NoticeTone } from "../../components/Notice";
 import { RestartIcon, SaveIcon } from "../../components/icons";
-import { formatSettingIdentifier, type MessageKey, useI18n } from "../../i18n";
+import { type MessageKey, useI18n } from "../../i18n";
 import { FileDialog } from "../files/FileDialog";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
+import { optionFieldCopy, optionSectionLabel } from "./optionTranslations";
 
 type DraftValue = boolean | string;
 
@@ -304,15 +305,17 @@ export function AdminSettingsPage({
               {t("admin.settingsIntro")}
             </p>
           </div>
-          <button
-            type="button"
-            className="danger-outline-button restart-wos-button"
-            disabled={restarting}
-            onClick={() => setRestartDialogOpen(true)}
-          >
-            <RestartIcon className={restarting ? "rotating" : undefined} />
-            {restarting ? t("admin.restarting") : t("admin.restartWos")}
-          </button>
+          {options?.service_controls_available === true && (
+            <button
+              type="button"
+              className="danger-outline-button restart-wos-button"
+              disabled={restarting}
+              onClick={() => setRestartDialogOpen(true)}
+            >
+              <RestartIcon className={restarting ? "rotating" : undefined} />
+              {restarting ? t("admin.restarting") : t("admin.restartWos")}
+            </button>
+          )}
         </div>
 
         {notice !== null && (
@@ -366,9 +369,13 @@ export function AdminSettingsPage({
             <div className="options-sections">
               {options.sections.map((section, sectionIndex) => (
                 <details key={section.id} open={sectionIndex === 0}>
-                  <summary>{locale === "fr" ? section.label : formatSettingIdentifier(section.id)}</summary>
+                  <summary>{optionSectionLabel(section.id, locale, section.label)}</summary>
                   <div className="options-fields">
                     {section.fields.map((field) => {
+                      const copy = optionFieldCopy(field.key, locale, {
+                        label: field.label,
+                        description: field.description,
+                      });
                       const error = fieldErrors[field.key];
                       const inputId = `option-${field.key.toLowerCase()}`;
                       const hintId = `${inputId}-hint`;
@@ -377,12 +384,10 @@ export function AdminSettingsPage({
                         <div className={`option-field${error === undefined ? "" : " invalid"}`} key={field.key}>
                           <div>
                             <label htmlFor={inputId}>
-                              {locale === "fr" ? field.label : formatSettingIdentifier(field.key)}
+                              {copy.label}
                             </label>
                             <p id={hintId}>
-                              {locale === "fr"
-                                ? field.description
-                                : t("admin.settingDescription", { key: field.key })}
+                              {copy.description}
                               {field.restart_required && (
                                 <span className="restart-required"> {t("admin.restartRequired")}</span>
                               )}

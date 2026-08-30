@@ -20,7 +20,9 @@ from app.auth.security import (
 )
 from app.core.config import Settings
 from app.files import WorkspaceAlreadyExistsError, WorkspaceError, WorkspaceManager
-from app.models import LoginThrottle, User, UserSession
+from app.models import LoginThrottle, TorrentRequest, TorrentRequestState, User, UserSession
+from app.options import PostgresOptionsRegistry
+from app.torrents import cancel_owned_torrent_request
 
 
 class AuthenticationFailedError(Exception):
@@ -371,6 +373,34 @@ async def delete_managed_user(db: AsyncSession, *, user_id: UUID) -> None:
         raise ProtectedUserError
 
     now = datetime.now(UTC)
+    request_ids = tuple(
+        (
+            await db.scalars(
+                select(TorrentRequest.id).where(
+                    TorrentRequest.user_id == user.id,
+                    TorrentRequest.state.in_(
+                        (
+                            TorrentRequestState.REQUESTED,
+                            TorrentRequestState.ACTIVE,
+                            TorrentRequestState.READY,
+                        )
+                    ),
+                )
+            )
+        ).all()
+    )
+    retention_hours = 48
+    if request_ids:
+        options = await PostgresOptionsRegistry().snapshot(db)
+        retention_hours = int(options["WOS_TORRENT_RETENTION_HOURS"])
+    for request_id in request_ids:
+        await cancel_owned_torrent_request(
+            db,
+            user_id=user.id,
+            torrent_request_id=request_id,
+            retention_hours=retention_hours,
+            now=now,
+        )
     user.is_active = False
     user.deleted_at = now
     user.updated_at = now

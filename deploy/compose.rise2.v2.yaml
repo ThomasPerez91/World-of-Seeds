@@ -14,7 +14,6 @@ x-wos-environment: &wos-environment
   WOS_POSTGRES_USER: ${WOS_V2_POSTGRES_USER:?set WOS_V2_POSTGRES_USER}
   WOS_POSTGRES_PASSWORD: ${WOS_V2_POSTGRES_PASSWORD:?set WOS_V2_POSTGRES_PASSWORD}
   WOS_REDIS_URL: redis://redis:6379/0
-  WOS_INTEGRATION_ACCOUNTS_JSON: ${WOS_V2_INTEGRATION_ACCOUNTS_JSON:?set WOS_V2_INTEGRATION_ACCOUNTS_JSON}
 
 x-wos-runtime: &wos-runtime
   image: ${WOS_V2_IMAGE:?set immutable WOS_V2_IMAGE digest}
@@ -49,7 +48,9 @@ services:
         read_only: true
       - caddy_v2_data:/data
       - caddy_v2_config:/config
-    networks: [edge, monitoring-edge]
+    networks:
+      edge: {ipv4_address: 172.30.0.2}
+      monitoring-edge:
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
     security_opt: [no-new-privileges:true]
@@ -72,6 +73,7 @@ services:
     environment:
       <<: *wos-environment
       UVICORN_LOG_LEVEL: ${WOS_V2_LOG_LEVEL:-info}
+      FORWARDED_ALLOW_IPS: 172.30.0.2
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -81,7 +83,9 @@ services:
       - type: bind
         source: ${WOS_V2_STORAGE_HOST_PATH:?set isolated WOS_V2_STORAGE_HOST_PATH}
         target: /data
-    networks: [edge, backend]
+    networks:
+      edge: {ipv4_address: 172.30.0.3}
+      backend:
     pids_limit: 256
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=2)"]
@@ -95,7 +99,9 @@ services:
     command: ["python", "-m", "app.worker"]
     restart: unless-stopped
     stop_grace_period: 35s
-    environment: *wos-environment
+    environment:
+      <<: *wos-environment
+      WOS_INTEGRATION_ACCOUNTS_JSON: ${WOS_V2_INTEGRATION_ACCOUNTS_JSON:?set WOS_V2_INTEGRATION_ACCOUNTS_JSON}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -119,7 +125,9 @@ services:
     command: ["python", "-m", "app.scheduler_service"]
     restart: unless-stopped
     stop_grace_period: 35s
-    environment: *wos-environment
+    environment:
+      <<: *wos-environment
+      WOS_INTEGRATION_ACCOUNTS_JSON: ${WOS_V2_INTEGRATION_ACCOUNTS_JSON:?set WOS_V2_INTEGRATION_ACCOUNTS_JSON}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -327,6 +335,9 @@ services:
 
 networks:
   edge:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
   backend: {internal: true}
   torrent: {internal: true}
   monitoring: {internal: true}

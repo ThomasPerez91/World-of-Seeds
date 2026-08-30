@@ -7,13 +7,18 @@ import re
 import signal
 import socket
 import uuid
+from datetime import timedelta
 
 import httpx
 
 from app.coordination import RedisCoordinator
 from app.core.config import get_settings
 from app.core.database import engine, session_factory
-from app.integrations.account_routing import build_deployment_account_router
+from app.integrations.account_routing import (
+    build_deployment_account_router,
+    parse_deployment_account_specs,
+)
+from app.integrations.observability_v2 import V2IntegrationObservabilityPublisher
 from app.integrations.qbittorrent_v2 import QBittorrentV2Gateway
 from app.jobs.torrent_payloads import MAX_MANAGED_TORRENT_BYTES
 from app.scheduler.runtime import ManagedControlGateway, SchedulerRuntime
@@ -48,7 +53,11 @@ async def main() -> None:
         write=settings.integration_read_timeout_seconds,
         pool=settings.integration_connect_timeout_seconds,
     )
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with (
+        httpx.AsyncClient(timeout=timeout) as client,
+        httpx.AsyncClient(timeout=timeout) as observability_client,
+    ):
+        observability: V2IntegrationObservabilityPublisher | None = None
         if settings.integration_accounts_json is not None:
             gateway: ManagedControlGateway = build_deployment_account_router(
                 settings.integration_accounts_json,
@@ -57,6 +66,13 @@ async def main() -> None:
                 allowed_tracker_hosts=settings.c411_tracker_hosts,
                 data_root=settings.qbittorrent_data_root,
                 max_total_size=MAX_MANAGED_TORRENT_BYTES,
+            )
+            observability = V2IntegrationObservabilityPublisher(
+                session_factory,
+                observability_client,
+                parse_deployment_account_specs(settings.integration_accounts_json),
+                data_root=settings.qbittorrent_data_root,
+                interval=timedelta(seconds=settings.integration_health_cache_seconds),
             )
         else:
             assert settings.qbittorrent_url is not None
@@ -76,10 +92,21 @@ async def main() -> None:
             redis=redis,
         )
         loop = asyncio.get_running_loop()
+
+        def request_stop() -> None:
+            scheduler.request_stop()
+            if observability is not None:
+                observability.request_stop()
+
         for signal_number in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(signal_number, scheduler.request_stop)
+            loop.add_signal_handler(signal_number, request_stop)
         try:
-            await scheduler.run()
+            if observability is None:
+                await scheduler.run()
+            else:
+                async with asyncio.TaskGroup() as tasks:
+                    tasks.create_task(scheduler.run())
+                    tasks.create_task(observability.run())
         finally:
             await redis.aclose()
             await engine.dispose()

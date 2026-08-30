@@ -22,7 +22,6 @@ def _runtime(image: str, networks: set[str]) -> dict[str, Any]:
             "WOS_RUNTIME_PROFILE": "v2",
             "WOS_COOKIE_SECURE": "true",
             "WOS_REDIS_URL": "redis://redis:6379/0",
-            "WOS_INTEGRATION_ACCOUNTS_JSON": '{"routes":[]}',
         },
         "read_only": True,
         "cap_drop": ["ALL"],
@@ -35,7 +34,7 @@ def _valid_config() -> dict[str, Any]:
     services: dict[str, Any] = {
         "ingress": {
             "image": "caddy:2.10.2-alpine",
-            "networks": {"edge": None, "monitoring-edge": None},
+            "networks": {"edge": {"ipv4_address": "172.30.0.2"}, "monitoring-edge": None},
             "ports": [{}, {}, {}],
             "cap_drop": ["ALL"],
             "cap_add": ["NET_BIND_SERVICE"],
@@ -85,11 +84,15 @@ def _valid_config() -> dict[str, Any]:
             "privileged": True,
         },
     }
+    services["api"]["networks"]["edge"] = {"ipv4_address": "172.30.0.3"}
+    services["api"]["environment"]["FORWARDED_ALLOW_IPS"] = "172.30.0.2"
+    services["worker"]["environment"]["WOS_INTEGRATION_ACCOUNTS_JSON"] = '{"routes":[]}'
+    services["scheduler"]["environment"]["WOS_INTEGRATION_ACCOUNTS_JSON"] = '{"routes":[]}'
     return {
         "name": "world-of-seeds-v2-rise2",
         "services": services,
         "networks": {
-            "edge": {},
+            "edge": {"ipam": {"config": [{"subnet": "172.30.0.0/24"}]}},
             "backend": {"internal": True},
             "torrent": {"internal": True},
             "monitoring": {"internal": True},
@@ -132,8 +135,14 @@ def test_rise2_policy_accepts_complete_isolated_stack() -> None:
             {"volumes": [{"type": "bind", "target": "/app/config.ini"}]}
         ),
         lambda config: config["services"]["api"].update({"image": "example.invalid/wos:latest"}),
-        lambda config: config["services"]["api"]["environment"].update(
+        lambda config: config["services"]["worker"]["environment"].update(
             {"WOS_INTEGRATION_ACCOUNTS_JSON": ""}
+        ),
+        lambda config: config["services"]["api"]["environment"].update(
+            {"WOS_INTEGRATION_ACCOUNTS_JSON": "secret"}
+        ),
+        lambda config: config["services"]["api"]["environment"].update(
+            {"FORWARDED_ALLOW_IPS": "*"}
         ),
     ],
 )

@@ -182,6 +182,23 @@ class MissingInspector(FakeInspector):
         raise QBittorrentV2MissingError("qbittorrent_managed_torrent_missing")
 
 
+def _missing_router(
+    sessions: async_sessionmaker[AsyncSession],
+    adder: FakeAdder,
+) -> DeploymentAccountRouter:
+    return DeploymentAccountRouter(
+        sessions,
+        (
+            TorrentEffectRoute(
+                TRACKER_ACCOUNT_REF,
+                QBITTORRENT_ACCOUNT_REF,
+                adder,
+                MissingInspector(QBittorrentV2TorrentSnapshot(INFO_HASH, "missing", 0)),
+            ),
+        ),
+    )
+
+
 class RecordingRedis:
     def __init__(self) -> None:
         self.events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
@@ -211,6 +228,29 @@ def _router(
             ),
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_recovery_handler_collects_evidence_in_worker_and_purges_absent_content(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(sessions, state=ManagedTorrentState.READY)
+    effects = TorrentEffectHandlers(
+        sessions,
+        _missing_router(sessions, FakeAdder()),
+        _payloads(tmp_path),
+        _content(tmp_path),
+        clock=lambda: NOW,
+    )
+
+    await effects.recover_torrent(_snapshot(torrent_id, None, "RECOVER_PURGE_METADATA"))
+
+    async with sessions() as session:
+        torrent = await session.get(ManagedTorrent, torrent_id)
+        request = await session.get(TorrentRequest, request_id)
+        assert torrent is not None and torrent.state is ManagedTorrentState.PURGED
+        assert request is not None and request.state is TorrentRequestState.CANCELLED
 
 
 def test_payload_store_removes_user_passkeys_before_durable_write(tmp_path: Path) -> None:

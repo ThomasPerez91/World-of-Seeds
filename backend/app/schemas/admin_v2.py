@@ -64,6 +64,7 @@ class AdminV2Overview(BaseModel):
     audit: list[AdminV2OptionAudit]
     changed_keys: list[str] = Field(default_factory=list)
     restart_required: bool = False
+    service_controls_available: bool = True
 
 
 class AdminV2OptionsUpdate(BaseModel):
@@ -86,6 +87,7 @@ class AdminV2ReconciliationReport(BaseModel):
     external_torrents: int
     anomalies: list[AdminV2ReconciliationAnomaly]
     truncated: bool
+    next_cursor: str | None = None
 
 
 class AdminV2RecoveryRequest(BaseModel):
@@ -95,9 +97,8 @@ class AdminV2RecoveryRequest(BaseModel):
 
 
 class AdminV2RecoveryResult(BaseModel):
+    recovery_id: str
     managed_torrent_id: str
     state: str
-    cancelled_requests: int
-    metadata_purged: bool
-    qbittorrent_present: bool
-    storage_present: bool
+    action: Literal["cancel_requests", "purge_metadata"]
+    error_code: str | None = None

@@ -341,10 +341,17 @@ class QBittorrentV2Gateway:
             if logged_in:
                 await self._logout()
 
-    async def inventory_torrents(self, *, limit: int = 200) -> QBittorrentV2Inventory:
+    async def inventory_torrents(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> QBittorrentV2Inventory:
         """Read a bounded inventory; external torrents are classified but never mutated."""
         if not 1 <= limit <= MAX_CONTROL_TORRENTS:
             raise ValueError("qBittorrent inventory limit must be between 1 and 200")
+        if not 0 <= offset <= 1_000_000:
+            raise ValueError("qBittorrent inventory offset is invalid")
         logged_in = False
         try:
             if not await self._login():
@@ -353,7 +360,12 @@ class QBittorrentV2Gateway:
             async with self._client.stream(
                 "GET",
                 f"{self._base_url}/api/v2/torrents/info",
-                params={"limit": str(limit + 1), "offset": "0"},
+                params={
+                    "limit": str(limit + 1),
+                    "offset": str(offset),
+                    "sort": "hash",
+                    "reverse": "false",
+                },
                 headers=self._browser_headers(),
             ) as response:
                 if response.status_code == 401:

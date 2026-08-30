@@ -6,7 +6,13 @@ from sqlalchemy import func, select
 from starlette.concurrency import run_in_threadpool
 
 from app.admin import AdminStorageError, AdminStorageInspector
-from app.auth.dependencies import AuthContext, DbSession, require_admin_csrf, require_current_admin
+from app.auth.dependencies import (
+    AppSettings,
+    AuthContext,
+    DbSession,
+    require_admin_csrf,
+    require_current_admin,
+)
 from app.auth.service import (
     ManagedUserNotFoundError,
     ProtectedUserError,
@@ -34,6 +40,7 @@ from app.integrations.newgreedy_restart import (
     NewGreedyRestartPendingError,
     NewGreedyRestartStatus,
 )
+from app.integrations.observability_v2 import load_v2_external_services_snapshot
 from app.integrations.wos_restart import (
     WosRestartError,
     WosRestartPendingError,
@@ -182,12 +189,26 @@ async def update_options(
     )
 
 
+def require_legacy_service_controls(settings: AppSettings) -> None:
+    if settings.runtime_profile != "v1":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "legacy_service_controls_disabled"},
+        )
+
+
 @router.get("/services/health", response_model=AdminSystemHealthResponse)
 async def get_services_health(
+    db: DbSession,
+    settings: AppSettings,
     monitor: ExternalServicesMonitorDependency,
     _: Annotated[AuthContext, Depends(require_current_admin)],
 ) -> AdminSystemHealthResponse:
-    snapshot = await monitor.snapshot()
+    snapshot = (
+        await load_v2_external_services_snapshot(db)
+        if settings.runtime_profile == "v2"
+        else await monitor.snapshot()
+    )
     return AdminSystemHealthResponse(
         status="ok" if snapshot.healthy else "degraded",
         checked_at=snapshot.checked_at,
@@ -203,6 +224,7 @@ async def get_services_health(
             version=snapshot.qbittorrent.version,
             error_code=snapshot.qbittorrent.error_code,
         ),
+        service_controls_available=settings.runtime_profile == "v1",
     )
 
 
@@ -251,7 +273,11 @@ def _raise_newgreedy_config_error(exc: NewGreedyConfigError) -> Never:
     ) from exc
 
 
-@router.get("/services/newgreedy/config", response_model=NewGreedyConfigResponse)
+@router.get(
+    "/services/newgreedy/config",
+    response_model=NewGreedyConfigResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
+)
 async def get_newgreedy_config(
     store: NewGreedyConfigStoreDependency,
     _: Annotated[AuthContext, Depends(require_current_admin)],
@@ -263,7 +289,11 @@ async def get_newgreedy_config(
     return _config_response(fields)
 
 
-@router.patch("/services/newgreedy/config", response_model=NewGreedyConfigResponse)
+@router.patch(
+    "/services/newgreedy/config",
+    response_model=NewGreedyConfigResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
+)
 async def update_newgreedy_config(
     payload: NewGreedyConfigUpdateRequest,
     store: NewGreedyConfigStoreDependency,
@@ -276,7 +306,11 @@ async def update_newgreedy_config(
     return _config_response(fields, restart_required=True)
 
 
-@router.get("/services/newgreedy/overview", response_model=NewGreedyOverviewResponse)
+@router.get(
+    "/services/newgreedy/overview",
+    response_model=NewGreedyOverviewResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
+)
 async def get_newgreedy_overview(
     monitor: ExternalServicesMonitorDependency,
     _: Annotated[AuthContext, Depends(require_current_admin)],
@@ -303,6 +337,7 @@ async def get_newgreedy_overview(
 @router.delete(
     "/services/newgreedy/stats",
     response_model=NewGreedyStatsResetResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def reset_newgreedy_stats(
     monitor: ExternalServicesMonitorDependency,
@@ -321,6 +356,7 @@ async def reset_newgreedy_stats(
 @router.get(
     "/services/newgreedy/torrents",
     response_model=NewGreedyTorrentListingResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def list_newgreedy_torrents(
     monitor: ExternalServicesMonitorDependency,
@@ -341,6 +377,7 @@ async def list_newgreedy_torrents(
 @router.get(
     "/services/qbittorrent/torrents",
     response_model=QBittorrentTorrentListingResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def list_qbittorrent_torrents(
     monitor: ExternalServicesMonitorDependency,
@@ -385,6 +422,7 @@ def _raise_newgreedy_restart_error(exc: NewGreedyRestartError) -> Never:
 @router.get(
     "/services/newgreedy/restart",
     response_model=NewGreedyRestartStatusResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def get_newgreedy_restart_status(
     store: NewGreedyRestartStoreDependency,
@@ -401,6 +439,7 @@ async def get_newgreedy_restart_status(
     "/services/newgreedy/restart",
     response_model=NewGreedyRestartStatusResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def request_newgreedy_restart(
     store: NewGreedyRestartStoreDependency,
@@ -434,6 +473,7 @@ def _raise_wos_restart_error(exc: WosRestartError) -> Never:
 @router.get(
     "/services/wos/restart",
     response_model=NewGreedyRestartStatusResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def get_wos_restart_status(
     store: WosRestartStoreDependency,
@@ -450,6 +490,7 @@ async def get_wos_restart_status(
     "/services/wos/restart",
     response_model=NewGreedyRestartStatusResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def request_wos_restart(
     store: WosRestartStoreDependency,

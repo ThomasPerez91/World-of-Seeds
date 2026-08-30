@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+import base64
+import binascii
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -29,10 +34,79 @@ ACTIVE_REQUEST_STATES = (
     TorrentRequestState.READY,
 )
 MAX_RECOVERY_REQUESTS = 1000
+MAX_RECONCILIATION_CURSOR_BYTES = 4096
+RECOVER_CANCEL_REQUESTS_JOB = "RECOVER_CANCEL_REQUESTS"
+RECOVER_PURGE_METADATA_JOB = "RECOVER_PURGE_METADATA"
+RECOVERY_JOB_TYPES = (RECOVER_CANCEL_REQUESTS_JOB, RECOVER_PURGE_METADATA_JOB)
 
 
 class ReconciliationRecoveryError(RuntimeError):
     """A bounded, secret-safe recovery refusal."""
+
+
+class ReconciliationCursorError(ValueError):
+    """An opaque reconciliation cursor is malformed or unsupported."""
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationCursor:
+    phase: Literal["database", "qbittorrent", "storage"]
+    after: str | None = None
+    snapshot_ids: tuple[uuid.UUID, ...] = ()
+    snapshot_index: int = 0
+
+    def encode(self) -> str:
+        payload = json.dumps(
+            {
+                "v": 1,
+                "phase": self.phase,
+                "after": self.after,
+                "snapshot_ids": [str(value) for value in self.snapshot_ids],
+                "snapshot_index": self.snapshot_index,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+    @classmethod
+    def decode(cls, value: str) -> ReconciliationCursor:
+        if not 1 <= len(value) <= MAX_RECONCILIATION_CURSOR_BYTES:
+            raise ReconciliationCursorError("reconciliation_cursor_invalid")
+        try:
+            padded = value + "=" * (-len(value) % 4)
+            payload = json.loads(base64.b64decode(padded, altchars=b"-_", validate=True))
+            if not isinstance(payload, dict) or set(payload) != {
+                "v",
+                "phase",
+                "after",
+                "snapshot_ids",
+                "snapshot_index",
+            }:
+                raise ValueError
+            if payload["v"] != 1 or payload["phase"] not in {
+                "database",
+                "qbittorrent",
+                "storage",
+            }:
+                raise ValueError
+            after = payload["after"]
+            snapshot_index = payload["snapshot_index"]
+            raw_snapshot_ids = payload["snapshot_ids"]
+            if (
+                (after is not None and (not isinstance(after, str) or len(after) > 128))
+                or not isinstance(snapshot_index, int)
+                or snapshot_index < 0
+            ):
+                raise ValueError
+            if not isinstance(raw_snapshot_ids, list) or len(raw_snapshot_ids) > 16:
+                raise ValueError
+            snapshot_ids = tuple(uuid.UUID(item) for item in raw_snapshot_ids)
+            if len(snapshot_ids) != len(set(snapshot_ids)) or snapshot_index > len(snapshot_ids):
+                raise ValueError
+            return cls(payload["phase"], after, snapshot_ids, snapshot_index)
+        except (binascii.Error, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ReconciliationCursorError("reconciliation_cursor_invalid") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +285,7 @@ async def recover_orphaned_torrent(
                 .where(
                     TorrentJob.managed_torrent_id == torrent.id,
                     TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
+                    TorrentJob.job_type.not_in(RECOVERY_JOB_TYPES),
                 )
                 .order_by(TorrentJob.id)
             )
@@ -281,6 +356,7 @@ async def recover_orphaned_torrent(
                 .where(
                     TorrentJob.managed_torrent_id == torrent.id,
                     TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
+                    TorrentJob.job_type.not_in(RECOVERY_JOB_TYPES),
                 )
                 .with_for_update()
             )
@@ -360,6 +436,7 @@ async def recovery_snapshot(
                 .where(
                     TorrentJob.managed_torrent_id == torrent.id,
                     TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
+                    TorrentJob.job_type.not_in(RECOVERY_JOB_TYPES),
                 )
                 .order_by(TorrentJob.id)
                 .limit(MAX_RECOVERY_REQUESTS + 1)

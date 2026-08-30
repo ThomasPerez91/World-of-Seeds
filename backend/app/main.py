@@ -6,9 +6,9 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
-from app.api.router import api_router, api_v2_router
+from app.api.router import api_v2_router, build_api_router
 from app.coordination import RedisCoordinator
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.database import engine
 from app.core.http_security import SecurityHeadersMiddleware
 from app.integrations import ExternalServicesMonitor
@@ -27,8 +27,8 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     await engine.dispose()
 
 
-def create_app() -> FastAPI:
-    settings = get_settings()
+def create_app(settings_override: Settings | None = None) -> FastAPI:
+    settings = settings_override if settings_override is not None else get_settings()
     docs_url = "/api/docs" if settings.expose_api_docs else None
     openapi_url = "/api/openapi.json" if settings.expose_api_docs else None
 
@@ -61,7 +61,10 @@ def create_app() -> FastAPI:
         RequestMetricsMiddleware,
         registry=application.state.metrics_registry,
     )
-    application.include_router(api_router, prefix="/api/v1")
+    application.include_router(
+        build_api_router(runtime_profile=settings.runtime_profile),
+        prefix="/api/v1",
+    )
     application.include_router(api_v2_router, prefix="/api/v2")
 
     if settings.static_root.is_dir():

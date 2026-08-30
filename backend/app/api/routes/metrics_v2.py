@@ -1,4 +1,3 @@
-import asyncio
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Annotated, cast
@@ -6,9 +5,10 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import func, select
 
-from app.auth.dependencies import DbSession
+from app.auth.dependencies import AppSettings, DbSession
 from app.coordination.dependencies import RedisCoordinatorDependency
 from app.integrations.dependencies import ExternalServicesMonitorDependency
+from app.integrations.observability_v2 import load_v2_external_services_snapshot
 from app.models import (
     DownloadLease,
     SchedulerState,
@@ -112,14 +112,17 @@ async def metrics(
     db: DbSession,
     redis: RedisCoordinatorDependency,
     monitor: ExternalServicesMonitorDependency,
+    settings: AppSettings,
     registry: MetricsRegistryDependency,
     operational_cache: OperationalMetricsCacheDependency,
 ) -> Response:
     now = datetime.now(UTC)
     operational = await operational_cache.get(lambda: _collect_operational_metrics(db, now=now))
-    redis_health, services = await asyncio.gather(
-        redis.check_health(),
-        monitor.snapshot(),
+    redis_health = await redis.check_health()
+    services = (
+        await load_v2_external_services_snapshot(db)
+        if settings.runtime_profile == "v2"
+        else await monitor.snapshot()
     )
     job_counts = dict(operational.job_counts)
     oldest_age = (

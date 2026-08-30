@@ -64,37 +64,6 @@ export interface FileMutation {
   kind: "directory" | "file";
 }
 
-export type UserTorrentState =
-  | "adding"
-  | "pending"
-  | "downloading"
-  | "stalled"
-  | "completed"
-  | "error";
-
-export interface UserTorrent {
-  id: string;
-  name: string;
-  size_bytes: number;
-  progress: number;
-  state: UserTorrentState;
-  downloaded_bytes: number;
-  download_speed_bytes: number;
-  eta_seconds: number | null;
-  error: string | null;
-  created_at: string;
-}
-
-export interface UserTorrentListing {
-  torrents: UserTorrent[];
-}
-
-export interface TorrentUploadResult {
-  id: string;
-  name: string;
-  total_size: number;
-}
-
 export type TorrentRequestV2State =
   | "requested"
   | "active"
@@ -198,9 +167,8 @@ export interface TorrentDownloadManifestPageV2 {
   items: TorrentDownloadFileV2[];
 }
 
-export interface TorrentDownloadSnapshotV2 extends Omit<TorrentDownloadManifestPageV2, "items"> {
-  items: TorrentDownloadFileV2[];
-}
+/** A recursively consumed manifest may span pages; the compatibility UI stores one page only. */
+export type TorrentDownloadSnapshotV2 = TorrentDownloadManifestPageV2;
 
 export interface TrashEntry {
   id: string;
@@ -252,6 +220,7 @@ export interface AdminServicesHealth {
   checked_at: string;
   newgreedy: ExternalServiceHealth;
   qbittorrent: ExternalServiceHealth;
+  service_controls_available: boolean;
 }
 
 export type NewGreedyConfigValue = boolean | number | string;
@@ -381,6 +350,7 @@ export interface OptionsResponse {
 }
 
 export interface CentralAdminOverview extends OptionsResponse {
+  service_controls_available: boolean;
   scheduler: {
     desired_generation: number;
     applied_generation: number;
@@ -420,6 +390,7 @@ export interface AdminReconciliationReport {
     action: string;
   }>;
   truncated: boolean;
+  next_cursor: string | null;
 }
 
 interface BusinessErrorDetail {
@@ -669,8 +640,10 @@ export const api = {
     });
   },
 
-  getAdminReconciliation(limit = 100): Promise<AdminReconciliationReport> {
-    return requestV2<AdminReconciliationReport>(`/admin/reconciliation?limit=${limit}`);
+  getAdminReconciliation(limit = 100, cursor?: string): Promise<AdminReconciliationReport> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor) query.set("cursor", cursor);
+    return requestV2<AdminReconciliationReport>(`/admin/reconciliation?${query.toString()}`);
   },
 
   getWosRestartStatus(): Promise<WosRestartStatus> {
@@ -732,19 +705,6 @@ export const api = {
     });
   },
 
-  uploadTorrent(file: File): Promise<TorrentUploadResult> {
-    const form = new FormData();
-    form.set("torrent", file, file.name);
-    return request<TorrentUploadResult>("/torrents", {
-      method: "POST",
-      body: form,
-    });
-  },
-
-  listUserTorrents(signal?: AbortSignal): Promise<UserTorrentListing> {
-    return request<UserTorrentListing>("/torrents", { signal });
-  },
-
   createTorrentRequestV2(file: File): Promise<TorrentRequestV2CreateResult> {
     const form = new FormData();
     form.set("torrent", file, file.name);
@@ -772,43 +732,6 @@ export const api = {
     return requestV2<void>(`/torrents/${encodeURIComponent(torrentRequestId)}`, {
       method: "DELETE",
     });
-  },
-
-  async getTorrentDownloadSnapshotV2(
-    torrentRequestId: string,
-    signal?: AbortSignal,
-  ): Promise<TorrentDownloadSnapshotV2> {
-    const items: TorrentDownloadFileV2[] = [];
-    let offset = 0;
-    let snapshot: string | null = null;
-    let firstPage: TorrentDownloadManifestPageV2 | null = null;
-    do {
-      const page = await this.getTorrentDownloadManifestPageV2(
-        torrentRequestId,
-        offset,
-        snapshot,
-        signal,
-      );
-      firstPage ??= page;
-      snapshot ??= page.snapshot_id;
-      if (
-        page.snapshot_id !== snapshot ||
-        page.offset !== offset ||
-        page.file_count !== firstPage.file_count ||
-        page.total_size !== firstPage.total_size
-      ) {
-        throw new ApiError(409, "Le contenu a changé. Relance le téléchargement.", "download_snapshot_changed");
-      }
-      items.push(...page.items);
-      if (page.items.length === 0 && offset < page.file_count) {
-        throw new ApiError(409, "Le manifeste est incomplet.", "download_snapshot_changed");
-      }
-      offset += page.items.length;
-    } while (firstPage !== null && offset < firstPage.file_count);
-    if (firstPage === null || items.length !== firstPage.file_count) {
-      throw new ApiError(409, "Le manifeste est incomplet.", "download_snapshot_changed");
-    }
-    return { ...firstPage, items };
   },
 
   getTorrentDownloadManifestPageV2(

@@ -5,6 +5,7 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from app.core.config import Settings
+from app.main import create_app
 from app.worker import validate_worker_runtime
 
 TEST_DATABASE_SECRET = "d" * 32
@@ -82,3 +83,11 @@ def test_runtime_accepts_the_single_process_value_from_environment(
     monkeypatch.setenv("WOS_API_PROCESS_COUNT", "1")
 
     assert Settings().api_process_count == 1
+
+
+def test_v2_runtime_does_not_mount_the_legacy_torrent_api() -> None:
+    application = create_app(_production())
+    paths = set(application.openapi()["paths"])
+
+    assert "/api/v1/torrents" not in paths
+    assert "/api/v2/torrents" in paths

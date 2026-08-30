@@ -7,12 +7,16 @@
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
-		Referrer-Policy "same-origin"
+		Referrer-Policy "no-referrer"
 	}
 	request_body {
 		max_size 20MB
 	}
-	reverse_proxy api:8000
+	@private_metrics path /api/v2/metrics
+	respond @private_metrics 404
+	reverse_proxy api:8000 {
+		header_up X-Forwarded-For {remote_host}
+	}
 }
 
 {$WOS_V2_GRAFANA_HOST} {

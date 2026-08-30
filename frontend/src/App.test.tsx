@@ -447,6 +447,7 @@ describe("App", () => {
           return response(
             {
               status: "ok",
+              service_controls_available: true,
               checked_at: "2026-08-15T14:00:00Z",
               newgreedy: {
                 status: "healthy",

@@ -2,16 +2,18 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Literal, Never
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from starlette.concurrency import run_in_threadpool
 
 from app.admin import (
+    RECOVER_CANCEL_REQUESTS_JOB,
+    RECOVER_PURGE_METADATA_JOB,
+    ReconciliationCursor,
+    ReconciliationCursorError,
     ReconciliationRecoveryError,
-    reconcile_inventory,
-    recover_orphaned_torrent,
     recovery_snapshot,
 )
 from app.auth.dependencies import (
@@ -21,23 +23,20 @@ from app.auth.dependencies import (
     require_admin_csrf,
     require_current_admin,
 )
-from app.core.database import session_factory
-from app.integrations.account_routing import build_deployment_account_router
-from app.integrations.http import IntegrationRequestError
-from app.integrations.qbittorrent_v2 import (
-    QBittorrentV2Gateway,
-    QBittorrentV2Inventory,
-    QBittorrentV2ManagedIdentity,
-    QBittorrentV2MissingError,
-)
-from app.jobs.torrent_payloads import MAX_MANAGED_TORRENT_BYTES
+from app.integrations.observability_v2 import DEFAULT_STALE_AFTER
 from app.models import (
     DatabaseOption,
     DatabaseOptionAudit,
+    IntegrationServiceHealth,
     ManagedTorrent,
+    ManagedTorrentState,
+    QBittorrentInventoryItem,
+    QBittorrentInventorySnapshot,
     SchedulerState,
     StorageLedger,
     StoragePressureState,
+    TorrentJob,
+    TorrentJobState,
     User,
     UserStorageUsage,
 )
@@ -88,6 +87,7 @@ def _raise_options_error(exc: Exception) -> Never:
 async def _overview(
     db: DbSession,
     *,
+    service_controls_available: bool,
     changed_keys: tuple[str, ...] = (),
     restart_required: bool = False,
 ) -> AdminV2Overview:
@@ -178,16 +178,21 @@ async def _overview(
         ],
         changed_keys=list(changed_keys),
         restart_required=restart_required,
+        service_controls_available=service_controls_available,
     )
 
 
 @router.get("/overview", response_model=AdminV2Overview)
 async def get_admin_overview(
     db: DbSession,
+    settings: AppSettings,
     _: Annotated[AuthContext, Depends(require_current_admin)],
 ) -> AdminV2Overview:
     try:
-        return await _overview(db)
+        return await _overview(
+            db,
+            service_controls_available=settings.runtime_profile == "v1",
+        )
     except (DatabaseOptionsDriftError, KeyError, RuntimeError) as exc:
         _raise_options_error(exc)
 
@@ -196,6 +201,7 @@ async def get_admin_overview(
 async def update_admin_options(
     payload: AdminV2OptionsUpdate,
     db: DbSession,
+    settings: AppSettings,
     context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> AdminV2Overview:
     try:
@@ -207,6 +213,7 @@ async def update_admin_options(
         await db.commit()
         return await _overview(
             db,
+            service_controls_available=settings.runtime_profile == "v1",
             changed_keys=result.changed_keys,
             restart_required=result.restart_required,
         )
@@ -221,83 +228,364 @@ async def get_admin_reconciliation(
     settings: AppSettings,
     _: Annotated[AuthContext, Depends(require_current_admin)],
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    cursor: Annotated[str | None, Query(max_length=4096)] = None,
 ) -> AdminV2ReconciliationReport:
-    rows = list(
-        (
-            await db.scalars(select(ManagedTorrent).order_by(ManagedTorrent.id).limit(limit + 1))
-        ).all()
-    )
-    database_truncated = len(rows) > limit
-    torrents = tuple(rows[:limit])
-    # Materialize and detach the bounded SQL inventory before filesystem/qB I/O.
-    # expire_on_commit=False keeps these scalar model fields available without SQL.
-    await db.commit()
     try:
-        storage = await run_in_threadpool(
-            SharedContentStore(settings.data_root).inventory,
-            limit=limit,
-        )
-    except SharedContentStoreError:
-        storage = None
-
-    qbittorrent: QBittorrentV2Inventory | None = None
-    if (
-        settings.qbittorrent_url is not None
-        and settings.qbittorrent_username is not None
-        and settings.qbittorrent_password is not None
-    ):
-        timeout = httpx.Timeout(
-            connect=settings.integration_connect_timeout_seconds,
-            read=settings.integration_read_timeout_seconds,
-            write=settings.integration_read_timeout_seconds,
-            pool=settings.integration_connect_timeout_seconds,
-        )
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                gateway = QBittorrentV2Gateway(
-                    client,
-                    str(settings.qbittorrent_url),
-                    settings.qbittorrent_username,
-                    settings.qbittorrent_password.get_secret_value(),
-                    data_root=settings.qbittorrent_data_root,
-                )
-                qbittorrent = await gateway.inventory_torrents(limit=limit)
-        except (httpx.HTTPError, RuntimeError):
-            qbittorrent = None
-
-    report = reconcile_inventory(
-        torrents,
-        database_truncated=database_truncated,
-        qbittorrent=qbittorrent,
-        storage=storage,
-    )
-    return AdminV2ReconciliationReport(
-        database_scanned=report.database_scanned,
-        qbittorrent_scanned=report.qbittorrent_scanned,
-        storage_scanned=report.storage_scanned,
-        external_torrents=report.external_torrents,
-        anomalies=[
-            AdminV2ReconciliationAnomaly(
-                code=item.code,
-                severity=item.severity,
-                resource_id=item.resource_id,
-                action=item.action,
+        position = ReconciliationCursor.decode(cursor) if cursor else None
+    except ReconciliationCursorError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "reconciliation_cursor_invalid"},
+        ) from exc
+    if position is None:
+        ranked_snapshots = select(
+            QBittorrentInventorySnapshot.id.label("id"),
+            QBittorrentInventorySnapshot.account_ref.label("account_ref"),
+            QBittorrentInventorySnapshot.observation_set.label("observation_set"),
+            QBittorrentInventorySnapshot.truncated.label("truncated"),
+            QBittorrentInventorySnapshot.checked_at.label("checked_at"),
+            func.row_number()
+            .over(
+                partition_by=QBittorrentInventorySnapshot.account_ref,
+                order_by=(
+                    QBittorrentInventorySnapshot.checked_at.desc(),
+                    QBittorrentInventorySnapshot.id.desc(),
+                ),
             )
-            for item in report.anomalies
-        ],
-        truncated=report.truncated,
+            .label("snapshot_rank"),
+        ).subquery()
+        latest = list(
+            (
+                await db.execute(
+                    select(
+                        ranked_snapshots.c.id,
+                        ranked_snapshots.c.account_ref,
+                        ranked_snapshots.c.observation_set,
+                        ranked_snapshots.c.truncated,
+                        ranked_snapshots.c.checked_at,
+                    )
+                    .where(ranked_snapshots.c.snapshot_rank == 1)
+                    .order_by(ranked_snapshots.c.account_ref)
+                )
+            ).all()
+        )
+        health_rows = list(
+            (
+                await db.execute(
+                    select(
+                        IntegrationServiceHealth.account_ref,
+                        IntegrationServiceHealth.observation_set,
+                        IntegrationServiceHealth.account_count,
+                    ).where(IntegrationServiceHealth.service == "qbittorrent")
+                )
+            ).all()
+        )
+        expected_accounts = {row.account_ref for row in health_rows}
+        health_sets = {row.observation_set for row in health_rows}
+        health_counts = {row.account_count for row in health_rows}
+        expected_count = next(iter(health_counts)) if len(health_counts) == 1 else 0
+        now = datetime.now(UTC)
+        latest_accounts = {row.account_ref for row in latest}
+        snapshot_sets = {row.observation_set for row in latest}
+        complete = (
+            expected_count > 0
+            and len(expected_accounts) == expected_count
+            and latest_accounts == expected_accounts
+            and len(health_sets) == 1
+            and snapshot_sets == health_sets
+            and all(
+                not row.truncated
+                and now
+                - (
+                    row.checked_at
+                    if row.checked_at.tzinfo is not None
+                    else row.checked_at.replace(tzinfo=UTC)
+                ).astimezone(UTC)
+                <= DEFAULT_STALE_AFTER
+                for row in latest
+            )
+        )
+        snapshot_ids = [row.id for row in latest] if complete else []
+        position = ReconciliationCursor("database", snapshot_ids=tuple(snapshot_ids))
+
+    if position.snapshot_ids:
+        retained_snapshots = int(
+            await db.scalar(
+                select(func.count())
+                .select_from(QBittorrentInventorySnapshot)
+                .where(QBittorrentInventorySnapshot.id.in_(position.snapshot_ids))
+            )
+            or 0
+        )
+        if retained_snapshots != len(position.snapshot_ids):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "reconciliation_snapshot_expired"},
+            )
+
+    anomalies: list[AdminV2ReconciliationAnomaly] = []
+    database_scanned = qbittorrent_scanned = storage_scanned = external_torrents = 0
+    next_position: ReconciliationCursor | None = None
+    if position.phase == "database":
+        statement = select(ManagedTorrent).order_by(ManagedTorrent.id).limit(limit + 1)
+        if position.after is not None:
+            try:
+                statement = statement.where(ManagedTorrent.id > uuid.UUID(position.after))
+            except ValueError as exc:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={"code": "reconciliation_cursor_invalid"},
+                ) from exc
+        rows = list((await db.scalars(statement)).all())
+        page = rows[:limit]
+        database_scanned = len(page)
+        snapshot_items = (
+            list(
+                (
+                    await db.execute(
+                        select(
+                            QBittorrentInventoryItem,
+                            QBittorrentInventorySnapshot.account_ref,
+                        )
+                        .join(
+                            QBittorrentInventorySnapshot,
+                            QBittorrentInventorySnapshot.id == QBittorrentInventoryItem.snapshot_id,
+                        )
+                        .where(
+                            QBittorrentInventoryItem.snapshot_id.in_(position.snapshot_ids),
+                            QBittorrentInventoryItem.info_hash.in_(
+                                [item.info_hash for item in page]
+                            ),
+                        )
+                    )
+                ).all()
+            )
+            if page and position.snapshot_ids
+            else []
+        )
+        by_identity = {(item.info_hash, account_ref): item for item, account_ref in snapshot_items}
+        store = SharedContentStore(settings.data_root)
+        for torrent in page:
+            expects_physical = torrent.state not in {
+                ManagedTorrentState.PENDING,
+                ManagedTorrentState.PURGED,
+            }
+            try:
+                storage_present = await run_in_threadpool(store.contains, torrent.storage_key)
+            except SharedContentStoreError:
+                storage_present = None
+            qb_item = by_identity.get((torrent.info_hash, torrent.qbittorrent_account_ref))
+            if expects_physical and position.snapshot_ids and qb_item is None:
+                anomalies.append(
+                    AdminV2ReconciliationAnomaly(
+                        code="missing_qb_torrent",
+                        severity="critical",
+                        resource_id=str(torrent.id),
+                        action="purge_metadata" if storage_present is False else "cancel_requests",
+                    )
+                )
+            if qb_item is not None and qb_item.storage_key != torrent.storage_key:
+                anomalies.append(
+                    AdminV2ReconciliationAnomaly(
+                        code="qb_identity_mismatch",
+                        severity="critical",
+                        resource_id=str(torrent.id),
+                        action="manual_review",
+                    )
+                )
+            if expects_physical and storage_present is False:
+                anomalies.append(
+                    AdminV2ReconciliationAnomaly(
+                        code="missing_storage",
+                        severity="critical",
+                        resource_id=str(torrent.id),
+                        action="purge_metadata" if qb_item is None else "cancel_requests",
+                    )
+                )
+            if storage_present is None:
+                anomalies.append(
+                    AdminV2ReconciliationAnomaly(
+                        code="storage_unavailable",
+                        severity="critical",
+                        resource_id=str(torrent.id),
+                        action="inspect_storage",
+                    )
+                )
+        if not position.snapshot_ids:
+            anomalies.append(
+                AdminV2ReconciliationAnomaly(
+                    code="qbittorrent_unavailable",
+                    severity="warning",
+                    resource_id=None,
+                    action="retry_inventory",
+                )
+            )
+        if len(rows) > limit:
+            next_position = ReconciliationCursor(
+                "database", str(page[-1].id), position.snapshot_ids
+            )
+        else:
+            next_position = ReconciliationCursor(
+                "qbittorrent" if position.snapshot_ids else "storage",
+                snapshot_ids=position.snapshot_ids,
+            )
+    elif position.phase == "qbittorrent":
+        if position.snapshot_index >= len(position.snapshot_ids):
+            next_position = ReconciliationCursor("storage", snapshot_ids=position.snapshot_ids)
+        else:
+            snapshot_id = position.snapshot_ids[position.snapshot_index]
+            qb_statement = (
+                select(QBittorrentInventoryItem)
+                .where(QBittorrentInventoryItem.snapshot_id == snapshot_id)
+                .order_by(QBittorrentInventoryItem.info_hash)
+                .limit(limit + 1)
+            )
+            if position.after is not None:
+                qb_statement = qb_statement.where(
+                    QBittorrentInventoryItem.info_hash > position.after
+                )
+            qb_rows = list((await db.scalars(qb_statement)).all())
+            qb_page = qb_rows[:limit]
+            qbittorrent_scanned = len(qb_page)
+            hashes = [item.info_hash for item in qb_page]
+            known_identities = (
+                {
+                    (info_hash, account_ref)
+                    for info_hash, account_ref in (
+                        await db.execute(
+                            select(
+                                ManagedTorrent.info_hash,
+                                ManagedTorrent.qbittorrent_account_ref,
+                            ).where(ManagedTorrent.info_hash.in_(hashes))
+                        )
+                    ).all()
+                }
+                if hashes
+                else set()
+            )
+            snapshot_account_ref = await db.scalar(
+                select(QBittorrentInventorySnapshot.account_ref).where(
+                    QBittorrentInventorySnapshot.id == snapshot_id
+                )
+            )
+            if snapshot_account_ref is None:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail={"code": "reconciliation_snapshot_expired"},
+                )
+            external_torrents = sum(not item.claims_wos_identity for item in qb_page)
+            for item in qb_page:
+                if (
+                    item.claims_wos_identity
+                    and (
+                        item.info_hash,
+                        snapshot_account_ref,
+                    )
+                    not in known_identities
+                ):
+                    anomalies.append(
+                        AdminV2ReconciliationAnomaly(
+                            code="orphan_wos_qb",
+                            severity="warning",
+                            resource_id=None,
+                            action="manual_review",
+                        )
+                    )
+            if external_torrents:
+                anomalies.append(
+                    AdminV2ReconciliationAnomaly(
+                        code="external_torrents_read_only",
+                        severity="info",
+                        resource_id=None,
+                        action="none",
+                    )
+                )
+            if len(qb_rows) > limit:
+                next_position = ReconciliationCursor(
+                    "qbittorrent",
+                    qb_page[-1].info_hash,
+                    position.snapshot_ids,
+                    position.snapshot_index,
+                )
+            elif position.snapshot_index + 1 < len(position.snapshot_ids):
+                next_position = ReconciliationCursor(
+                    "qbittorrent",
+                    snapshot_ids=position.snapshot_ids,
+                    snapshot_index=position.snapshot_index + 1,
+                )
+            else:
+                next_position = ReconciliationCursor("storage", snapshot_ids=position.snapshot_ids)
+    else:
+        try:
+            after = uuid.UUID(position.after) if position.after is not None else None
+            inventory = await run_in_threadpool(
+                SharedContentStore(settings.data_root).inventory_page,
+                limit=limit,
+                after=after,
+            )
+        except (SharedContentStoreError, ValueError) as exc:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": "storage_unavailable"},
+            ) from exc
+        storage_scanned = len(inventory.keys)
+        known_storage = (
+            set(
+                (
+                    await db.scalars(
+                        select(ManagedTorrent.storage_key).where(
+                            ManagedTorrent.storage_key.in_(inventory.keys)
+                        )
+                    )
+                ).all()
+            )
+            if inventory.keys
+            else set()
+        )
+        for key in inventory.keys:
+            if key not in known_storage:
+                anomalies.append(
+                    AdminV2ReconciliationAnomaly(
+                        code="orphan_storage",
+                        severity="warning",
+                        resource_id=str(key),
+                        action="manual_review",
+                    )
+                )
+        if inventory.invalid_entries:
+            anomalies.append(
+                AdminV2ReconciliationAnomaly(
+                    code="unsafe_storage_entries",
+                    severity="critical",
+                    resource_id=None,
+                    action="manual_review",
+                )
+            )
+        if inventory.truncated:
+            next_position = ReconciliationCursor(
+                "storage", str(inventory.keys[-1]), position.snapshot_ids
+            )
+
+    return AdminV2ReconciliationReport(
+        database_scanned=database_scanned,
+        qbittorrent_scanned=qbittorrent_scanned,
+        storage_scanned=storage_scanned,
+        external_torrents=external_torrents,
+        anomalies=anomalies,
+        truncated=next_position is not None,
+        next_cursor=next_position.encode() if next_position is not None else None,
     )
 
 
 @router.post(
     "/reconciliation/{managed_torrent_id}/recover",
     response_model=AdminV2RecoveryResult,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def recover_admin_managed_torrent(
     managed_torrent_id: uuid.UUID,
     payload: AdminV2RecoveryRequest,
     db: DbSession,
-    settings: AppSettings,
     _: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> AdminV2RecoveryResult:
     try:
@@ -307,91 +595,62 @@ async def recover_admin_managed_torrent(
             status.HTTP_404_NOT_FOUND,
             detail={"code": str(exc)},
         ) from exc
-    identity = QBittorrentV2ManagedIdentity(expected.info_hash, expected.storage_key)
-    await db.commit()
-    try:
-        storage_present = await run_in_threadpool(
-            SharedContentStore(settings.data_root).contains,
-            expected.storage_key,
+    job_type = (
+        RECOVER_CANCEL_REQUESTS_JOB
+        if payload.action == "cancel_requests"
+        else RECOVER_PURGE_METADATA_JOB
+    )
+    key = f"recover:{payload.action}:{managed_torrent_id}:{expected.lifecycle_generation}"
+    job = await db.scalar(select(TorrentJob).where(TorrentJob.idempotency_key == key))
+    if job is None:
+        job = TorrentJob(
+            managed_torrent_id=managed_torrent_id,
+            job_type=job_type,
+            idempotency_key=key,
+            state=TorrentJobState.QUEUED,
+            max_attempts=3,
+            available_at=datetime.now(UTC),
         )
-        timeout = httpx.Timeout(
-            connect=settings.integration_connect_timeout_seconds,
-            read=settings.integration_read_timeout_seconds,
-            write=settings.integration_read_timeout_seconds,
-            pool=settings.integration_connect_timeout_seconds,
-        )
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            if (
-                settings.integration_accounts_json is not None
-                and expected.qbittorrent_account_ref is not None
-            ):
-                account_router = build_deployment_account_router(
-                    settings.integration_accounts_json,
-                    client,
-                    session_factory,
-                    allowed_tracker_hosts=settings.c411_tracker_hosts,
-                    data_root=settings.qbittorrent_data_root,
-                    max_total_size=MAX_MANAGED_TORRENT_BYTES,
-                )
-                qbittorrent_present = await account_router.managed_torrent_is_present(
-                    expected.qbittorrent_account_ref,
-                    identity,
-                )
-            elif (
-                settings.qbittorrent_url is not None
-                and settings.qbittorrent_username is not None
-                and settings.qbittorrent_password is not None
-            ):
-                gateway = QBittorrentV2Gateway(
-                    client,
-                    str(settings.qbittorrent_url),
-                    settings.qbittorrent_username,
-                    settings.qbittorrent_password.get_secret_value(),
-                    data_root=settings.qbittorrent_data_root,
-                )
-                try:
-                    qbittorrent_present = (
-                        len(await gateway.inspect_managed_torrents((identity,))) == 1
-                    )
-                except QBittorrentV2MissingError:
-                    qbittorrent_present = False
-            else:
-                raise RuntimeError("qbittorrent_inventory_unavailable")
-    except (
-        httpx.HTTPError,
-        IntegrationRequestError,
-        RuntimeError,
-        SharedContentStoreError,
-    ) as exc:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "reconciliation_evidence_unavailable"},
-        ) from exc
-
-    try:
-        result = await recover_orphaned_torrent(
-            db,
-            managed_torrent_id,
-            action=payload.action,
-            qbittorrent_present=qbittorrent_present,
-            storage_present=storage_present,
-            expected=expected,
-        )
-        await db.commit()
-    except ReconciliationRecoveryError as exc:
-        await db.rollback()
-        code = str(exc)
-        response_status = (
-            status.HTTP_404_NOT_FOUND
-            if code == "managed_torrent_not_found"
-            else status.HTTP_409_CONFLICT
-        )
-        raise HTTPException(response_status, detail={"code": code}) from exc
+        db.add(job)
+        try:
+            await db.commit()
+            await db.refresh(job)
+        except IntegrityError:
+            await db.rollback()
+            job = await db.scalar(select(TorrentJob).where(TorrentJob.idempotency_key == key))
+            if job is None:
+                raise
     return AdminV2RecoveryResult(
-        managed_torrent_id=str(result.managed_torrent_id),
-        state=result.state.value,
-        cancelled_requests=result.cancelled_requests,
-        metadata_purged=result.metadata_purged,
-        qbittorrent_present=result.qbittorrent_present,
-        storage_present=result.storage_present,
+        recovery_id=str(job.id),
+        managed_torrent_id=str(job.managed_torrent_id),
+        state=job.state.value.lower(),
+        action=payload.action,
+        error_code=job.last_error_code,
+    )
+
+
+@router.get(
+    "/reconciliation/recoveries/{recovery_id}",
+    response_model=AdminV2RecoveryResult,
+)
+async def get_admin_recovery(
+    recovery_id: uuid.UUID,
+    db: DbSession,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> AdminV2RecoveryResult:
+    job = await db.get(TorrentJob, recovery_id)
+    if job is None or job.job_type not in {
+        RECOVER_CANCEL_REQUESTS_JOB,
+        RECOVER_PURGE_METADATA_JOB,
+    }:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "recovery_not_found"})
+    action: Literal["cancel_requests", "purge_metadata"] = (
+        "cancel_requests" if job.job_type == RECOVER_CANCEL_REQUESTS_JOB else "purge_metadata"
+    )
+    return AdminV2RecoveryResult(
+        recovery_id=str(job.id),
+        managed_torrent_id=str(job.managed_torrent_id),
+        state=job.state.value.lower(),
+        action=action,
+        error_code=job.last_error_code,
     )

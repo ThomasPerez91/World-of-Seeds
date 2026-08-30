@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import stat
+from bisect import insort
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -98,28 +99,41 @@ class SharedContentStore:
 
     def inventory(self, *, limit: int = 200) -> SharedContentInventory:
         """List only opaque top-level managed directories without traversing their contents."""
+        return self.inventory_page(limit=limit)
+
+    def inventory_page(
+        self,
+        *,
+        limit: int = 200,
+        after: UUID | None = None,
+    ) -> SharedContentInventory:
+        """Return a deterministic, memory-bounded page of top-level storage UUIDs."""
         if not 1 <= limit <= 1000:
             raise ValueError("shared content inventory limit is invalid")
         content_fd = self._open_content_root(create=False)
         try:
-            names = sorted(os.listdir(content_fd))
-            keys: list[UUID] = []
+            candidates: list[UUID] = []
             invalid = 0
-            truncated = False
-            for name in names:
-                if len(keys) >= limit:
-                    truncated = True
-                    break
+            for entry in os.scandir(content_fd):
+                name = entry.name
                 try:
                     key = UUID(hex=name) if len(name) == 32 else None
-                    metadata = os.stat(name, dir_fd=content_fd, follow_symlinks=False)
+                    metadata = entry.stat(follow_symlinks=False)
                     if key is None or not stat.S_ISDIR(metadata.st_mode):
                         invalid += 1
                         continue
-                    keys.append(key)
+                    if after is not None and key <= after:
+                        continue
+                    insort(candidates, key)
+                    if len(candidates) > limit + 1:
+                        candidates.pop()
                 except (OSError, ValueError):
                     invalid += 1
-            return SharedContentInventory(tuple(keys), invalid, truncated)
+            return SharedContentInventory(
+                tuple(candidates[:limit]),
+                invalid,
+                len(candidates) > limit,
+            )
         except OSError as exc:
             raise SharedContentStoreError("shared content inventory is unavailable") from exc
         finally:
