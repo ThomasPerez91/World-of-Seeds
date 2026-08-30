@@ -1346,11 +1346,17 @@
   a broad trusted-proxy range.
 - Added migration `20260829_21` for durable integration health and bounded qBittorrent inventory
   snapshots. Offline PostgreSQL upgrade and targeted downgrade SQL generation pass.
-- Local validation: PASS — 551 backend tests with 6 real-service tests deferred, full Ruff lint and
+- Local validation: PASS — 553 backend tests with 6 real-service tests deferred, full Ruff lint and
   format checks, strict mypy, 40 frontend tests, TypeScript, production build, Compose/Caddy policy
-  tests, and `git diff --check`. Docker is unavailable in this workspace, so real PostgreSQL/Redis,
-  image, complete Compose profile, load, WebSocket, and monitoring validation remain mandatory in
-  the pull-request CI before merge.
+  tests, offline PostgreSQL upgrade/targeted downgrade SQL, and `git diff --check`.
+- PR `#102` review follow-up: the three findings are fixed, answered, and resolved. Recovery jobs
+  preserve their exact enqueue-time snapshot, a failed recovery can be re-enqueued without losing
+  concurrent idempotency, and durable observation validity accounts for both the configured cadence
+  and the duration of a complete multi-account cycle.
+- Corrected PR head `dcbc527cf7a7c6bbcf536281a9613dc58827726c`: GitHub CI run `33314519448`
+  (`#220`) PASS — backend with real PostgreSQL/Redis and migrations, frontend, dependency and image
+  security, production image, complete Compose profile, bounded load, WebSocket, and monitoring
+  validation are green. Docker remains unavailable only in the local workspace.
 
 ## Known constraints
 
