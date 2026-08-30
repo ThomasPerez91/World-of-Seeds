@@ -1343,13 +1343,21 @@
   navigation, tables/cards, drop zone, toast stack, inline danger actions, and remaining maintenance
   dialogs were checked for local containment and accessible names. The repository has no installed
   Playwright/Puppeteer or browser binary, so no new heavyweight screenshot stack was added.
-- V2-32B local validation: PASS — 53 frontend tests across 12 files, axe checks, FR/EN catalogue,
+- V2-32B local validation: PASS — 54 frontend tests across 12 files, axe checks, FR/EN catalogue,
   TypeScript, production Vite build, `git diff --check`, Ruff lint/format, strict mypy, and 553
   backend tests with 6 service-backed tests deferred.
 - PR `#105` initial GitHub CI run `33330479493` (`#229`): PASS — backend with real
   PostgreSQL/Redis and migrations, frontend, dependency/image security, production image, complete
   Compose profile, bounded load, WebSocket, and monitoring validation are green. No review thread
   or review finding was open when the documentation commit was prepared.
+- PR `#105` review follow-up: the two P2 findings were fixed, answered, and resolved. Monotonic
+  request generations prevent a delayed WebSocket refresh from replacing the authoritative
+  post-upload listing, and cancelling an inline administrative purge restores focus to its opener.
+  Both paths have explicit frontend regressions.
+- PR `#105` corrected head `642ad30072c738598da3b771d57981100451eab7`: GitHub CI run
+  `33331011403` (`#231`) PASS — backend with real PostgreSQL/Redis and migrations, 54 frontend
+  tests, dependency/image security, production image, complete Compose profile, bounded load,
+  WebSocket, and monitoring validation are green; no review thread remains open.
 - No dependency, backend contract, database migration, deployment configuration, or version change
   is included. The separate V2-33 draft PR `#103` remains untouched and paused.
 - Documentation PR `#104` initial GitHub CI run `33316787183` (`#224`): PASS — backend,
