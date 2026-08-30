@@ -232,8 +232,9 @@ The stable V1 maintenance release documented here is `1.3.3`.
 
 - Destructive delete actions do not use a confirmation-only modal. They use an explicit label and
   danger styling, remain keyboard and screen-reader accessible, disable while pending, and reject
-  double submission. Dialogs that collect required information or serve a purpose beyond asking
-  "are you sure?" remain allowed.
+  double submission. Irreversible trash deletion and administrative purge retain an explicit,
+  accessible inline confirmation step without opening a modal. Dialogs that collect required
+  information or serve a purpose beyond asking "are you sure?" remain allowed.
 - The visual palette is expressed through centralized design tokens for backgrounds, surfaces,
   text, borders, semantic states, focus, hover, and elevation. Components must not accumulate
   arbitrary duplicated colors, and important contrast must meet WCAG expectations.
