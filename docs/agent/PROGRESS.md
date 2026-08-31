@@ -1417,7 +1417,11 @@
   migration rollback/upgrade, frontend, dependency/image security, production image, complete
   smoke, bounded 100-account load, WebSockets, and monitoring are green. The P1 and three P2 review
   threads are answered and resolved; no review thread remains open.
-- Final documentation-head CI and merge status: pending.
+- PR `#106` final documentation head `53c59f92f5da3fc49df8f2f6decdcfeb630de56b`:
+  GitHub CI run `33401939599` (`#240`) PASS on the exact merged tree — backend with
+  PostgreSQL/Redis, migrations, frontend, dependency/image security, production image, complete
+  smoke, bounded 100-account load, WebSockets, and monitoring are green. No review thread remains
+  open. Squash merge into `develop_V2`: `552c4618ce26b89ac772e558631685dec7aa3d9c`.
 
 ## Pre-pilot hardening audit for V2-33
 
@@ -1476,6 +1480,6 @@
 
 ## Next task
 
-- After V2-32C is reviewed, green, and merged, the next roadmap task is `V2-33 — Pilote Rise2`.
+- V2-32C is reviewed, green, and merged. The next roadmap task is `V2-33 — Pilote Rise2`.
 - Do not continue, rebase, close, or merge the existing V2-33 draft PR `#103` automatically; its
   host phase requires a separate explicit decision and Rise2 authority.
