@@ -103,7 +103,8 @@ export type TorrentRealtimeEventType =
   | "torrent.resumed"
   | "torrent.ready"
   | "torrent.failed"
-  | "torrent.cancelled";
+  | "torrent.cancelled"
+  | "torrent.expired";
 
 export type TorrentRealtimeMessage =
   | { type: TorrentRealtimeEventType; request_id: string; occurred_at: string }
@@ -118,6 +119,7 @@ const torrentRealtimeEventTypes = new Set<TorrentRealtimeEventType>([
   "torrent.ready",
   "torrent.failed",
   "torrent.cancelled",
+  "torrent.expired",
 ]);
 
 export function parseTorrentRealtimeMessage(data: unknown): TorrentRealtimeMessage | null {

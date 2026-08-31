@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
@@ -27,6 +27,7 @@ from app.storage.accounting import (
     apply_storage_accounting,
     prepare_storage_accounting,
 )
+from app.torrents.lifecycle import extend_ready_torrent_retention
 
 _INFO_HASH_RE = re.compile(r"^[0-9a-f]{40}$")
 _ACTIVE_REQUEST_STATES = (
@@ -89,16 +90,6 @@ async def create_or_get_torrent_request(
     if owner is None or not owner.is_active or owner.deleted_at is not None:
         raise TorrentRequestOwnerError("the torrent request owner is missing or inactive")
 
-    accounting = await prepare_storage_accounting(
-        session,
-        user_id=user_id,
-        info_hash=info_hash,
-        total_size=total_size,
-        policy=storage_policy,
-        disk=disk_snapshot,
-        now=timestamp,
-    )
-
     managed_id = uuid.uuid4()
     inserted_managed_id = await _insert_managed_torrent(
         session,
@@ -120,6 +111,12 @@ async def create_or_get_torrent_request(
         )
     if managed_torrent.state is ManagedTorrentState.PURGING:
         raise TorrentPurgeInProgressError("managed torrent purge is in progress")
+    if (
+        managed_torrent.state is ManagedTorrentState.READY
+        and managed_torrent.retention_expires_at is not None
+        and _as_utc(timestamp) >= _as_utc(managed_torrent.retention_expires_at)
+    ):
+        raise TorrentPurgeInProgressError("managed torrent retention has expired")
     reactivated = managed_torrent.state is ManagedTorrentState.PURGED
     if reactivated:
         managed_torrent.state = ManagedTorrentState.PENDING
@@ -127,14 +124,22 @@ async def create_or_get_torrent_request(
         managed_torrent.qb_state = None
         managed_torrent.retry_at = None
         managed_torrent.purge_after = None
+        managed_torrent.ready_at = None
+        managed_torrent.retention_expires_at = None
+        managed_torrent.purge_stop_pending = False
         managed_torrent.updated_at = timestamp
     elif managed_torrent.state is ManagedTorrentState.PURGE_PENDING:
+        if managed_torrent.purge_after is None or _as_utc(timestamp) >= _as_utc(
+            managed_torrent.purge_after
+        ):
+            raise TorrentPurgeInProgressError("managed torrent purge deadline has passed")
         managed_torrent.state = (
             ManagedTorrentState.READY
             if managed_torrent.progress >= 1
             else ManagedTorrentState.DOWNLOADING
         )
         managed_torrent.purge_after = None
+        managed_torrent.purge_stop_pending = False
         managed_torrent.updated_at = timestamp
         purge_jobs = list(
             (
@@ -155,6 +160,17 @@ async def create_or_get_torrent_request(
             if job.state is TorrentJobState.QUEUED:
                 job.state = TorrentJobState.CANCELLED
                 job.finished_at = timestamp
+
+    accounting = await prepare_storage_accounting(
+        session,
+        user_id=user_id,
+        info_hash=info_hash,
+        total_size=total_size,
+        policy=storage_policy,
+        disk=disk_snapshot,
+        now=timestamp,
+        physical_content_missing=(inserted_managed_id is not None or reactivated),
+    )
 
     request_id = uuid.uuid4()
     inserted_request_id = await _insert_torrent_request(
@@ -186,6 +202,9 @@ async def create_or_get_torrent_request(
             request.state = TorrentRequestState.ACTIVE
         await session.flush()
 
+    if managed_torrent.state is ManagedTorrentState.READY:
+        await extend_ready_torrent_retention(session, managed_torrent, now=timestamp)
+
     apply_storage_accounting(
         accounting,
         request_created=inserted_request_id is not None,
@@ -202,6 +221,12 @@ async def create_or_get_torrent_request(
         managed_torrent_reactivated=reactivated,
         storage_pressure=accounting.pressure,
     )
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _validate_metadata(*, info_hash: str, name: str, total_size: int) -> None:

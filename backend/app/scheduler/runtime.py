@@ -138,6 +138,7 @@ class SchedulerRuntime:
             controls = build_qbittorrent_control_plan(selection, identities, options=options)
             generation = state.desired_generation + 1
             previous_active = {torrent.id: torrent.desired_active for torrent in torrents}
+            purge_stop_ids = tuple(torrent.id for torrent in torrents if torrent.purge_stop_pending)
             _persist_desired_controls(torrents, controls, generation=generation)
             realtime_targets = _control_event_targets(torrents, requests, previous_active)
             state.desired_generation = generation
@@ -153,6 +154,23 @@ class SchedulerRuntime:
                 generation=generation,
                 now=applied_at,
             )
+            if purge_stop_ids:
+                stopped = tuple(
+                    (
+                        await session.scalars(
+                            select(ManagedTorrent)
+                            .where(
+                                ManagedTorrent.id.in_(purge_stop_ids),
+                                ManagedTorrent.purge_stop_pending.is_(True),
+                                ManagedTorrent.schedule_generation == generation,
+                            )
+                            .with_for_update()
+                        )
+                    ).all()
+                )
+                for torrent in stopped:
+                    torrent.purge_stop_pending = False
+                    torrent.updated_at = applied_at
         for user_id, request_id, event_type in realtime_targets:
             await self._redis.publish_torrent_event(
                 user_id,
@@ -203,6 +221,23 @@ class SchedulerRuntime:
         session: AsyncSession,
         state: SchedulerState,
     ) -> tuple[ManagedTorrent, ...]:
+        purge_stops = tuple(
+            (
+                await session.scalars(
+                    select(ManagedTorrent)
+                    .where(
+                        ManagedTorrent.state == ManagedTorrentState.PURGE_PENDING,
+                        ManagedTorrent.purge_stop_pending.is_(True),
+                    )
+                    .order_by(ManagedTorrent.updated_at, ManagedTorrent.id)
+                    .with_for_update(skip_locked=True)
+                    .limit(MAX_SCHEDULER_CONTROL_SET)
+                )
+            ).all()
+        )
+        capacity = MAX_SCHEDULER_CONTROL_SET - len(purge_stops)
+        if capacity == 0:
+            return purge_stops
         active = tuple(
             (
                 await session.scalars(
@@ -215,15 +250,13 @@ class SchedulerRuntime:
                     )
                     .order_by(ManagedTorrent.desired_priority, ManagedTorrent.id)
                     .with_for_update()
-                    .limit(MAX_SCHEDULER_CONTROL_SET + 1)
+                    .limit(capacity)
                 )
             ).all()
         )
-        if len(active) > MAX_SCHEDULER_CONTROL_SET:
-            raise RuntimeError("active scheduler control set exceeds the bounded limit")
-        capacity = MAX_SCHEDULER_CONTROL_SET - len(active)
+        capacity -= len(active)
         if capacity == 0:
-            return active
+            return (*purge_stops, *active)
 
         base = (
             select(ManagedTorrent)
@@ -260,7 +293,7 @@ class SchedulerRuntime:
         else:
             state.scan_cursor_created_at = None
             state.scan_cursor_id = None
-        return (*active, *window)
+        return (*purge_stops, *active, *window)
 
     @staticmethod
     async def _load_active_requests(

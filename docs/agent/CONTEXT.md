@@ -149,6 +149,16 @@ The stable V1 maintenance release documented here is `1.3.3`.
   remaining capacity up to 200 from a circular `(created_at, id)` PostgreSQL scan cursor. The
   cursor is durable in the singleton scheduler row, so backlogs beyond one window keep progressing
   across cycles and process restarts instead of blocking the scheduler.
+- A completed managed torrent records its first `READY` timestamp and a durable automatic
+  expiration derived from the historical number of distinct requesting users. Later requests may
+  extend that deadline but never shorten it; cancelled and expired requests remain part of the
+  historical popularity count.
+- READY expiration is claimed from a partial indexed PostgreSQL scan in bounded batches. It expires
+  active rights and accounting atomically, persists `PURGE_PENDING`, a scheduler stop intent, and
+  one immediate purge job. Redis only accelerates worker wake-up and realtime refresh.
+- Entering `PURGE_PENDING`, including cancellation of the last owner while downloading, must be
+  stopped through the scheduler's qBittorrent control gateway. The API never issues qB start/stop
+  calls. Physical deletion remains worker-side and waits for all durable download leases to end.
 
 ## V2 realtime state delivery
 

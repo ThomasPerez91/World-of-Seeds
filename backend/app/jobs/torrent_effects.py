@@ -64,6 +64,8 @@ from app.torrents import (
     PURGE_TORRENT_JOB,
     TorrentManifestError,
     TorrentValidationError,
+    expire_ready_torrents_batch,
+    extend_ready_torrent_retention,
     record_tracker_activity,
     replace_torrent_manifest,
 )
@@ -71,6 +73,8 @@ from app.torrents import (
 ADD_TORRENT_JOB = "ADD_TORRENT"
 SYNC_TORRENT_JOB = "SYNC_TORRENT"
 MAX_SYNC_BATCH = 200
+MAX_RETENTION_BATCH = 200
+RETENTION_REAPER_INTERVAL_SECONDS = 30
 SYNC_INTERVAL_OPTION = "WOS_QB_SYNC_INTERVAL_SECONDS"
 STALL_TIMEOUT = timedelta(seconds=60)
 STALL_COOLDOWNS = (
@@ -386,6 +390,7 @@ class TorrentEffectHandlers:
                     else ManagedTorrentState.DOWNLOADING
                 )
                 torrent.purge_after = None
+                torrent.purge_stop_pending = False
                 torrent.updated_at = now
                 return
             if torrent.purge_after is None or _as_utc(torrent.purge_after) > _as_utc(now):
@@ -466,6 +471,9 @@ class TorrentEffectHandlers:
                 ledger.updated_at = now
             torrent.state = ManagedTorrentState.PURGED
             torrent.purge_after = None
+            torrent.ready_at = None
+            torrent.retention_expires_at = None
+            torrent.purge_stop_pending = False
             torrent.progress = 0
             torrent.qb_state = None
             torrent.retry_at = None
@@ -576,6 +584,12 @@ class TorrentEffectHandlers:
                 elif request.state is TorrentRequestState.REQUESTED:
                     request.state = TorrentRequestState.ACTIVE
                 request.updated_at = now
+            if state is ManagedTorrentState.READY and (
+                previous_state is not ManagedTorrentState.READY
+                or torrent.ready_at is None
+                or torrent.retention_expires_at is None
+            ):
+                await extend_ready_torrent_retention(session, torrent, now=now)
             event_type = _snapshot_event_type(
                 previous_state=previous_state,
                 state=state,
@@ -697,6 +711,58 @@ class TorrentSyncEnqueuer:
                 if result.rowcount == 1:
                     created += 1
         return interval, created
+
+
+class TorrentRetentionReaper:
+    """Trigger indexed READY expiration; SQL state and jobs remain authoritative."""
+
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        redis: RedisCoordinator,
+        *,
+        clock: Clock = lambda: datetime.now(UTC),
+    ) -> None:
+        self._session_factory = session_factory
+        self._redis = redis
+        self._clock = clock
+        self._stop = asyncio.Event()
+
+    def request_stop(self) -> None:
+        self._stop.set()
+
+    async def run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                await self.expire_once()
+            except SQLAlchemyError:
+                logger.warning("torrent_retention_reaper_database_unavailable")
+            with suppress(TimeoutError):
+                await asyncio.wait_for(
+                    self._stop.wait(),
+                    timeout=RETENTION_REAPER_INTERVAL_SECONDS,
+                )
+
+    async def expire_once(self) -> int:
+        async with self._session_factory() as session, session.begin():
+            results = await expire_ready_torrents_batch(
+                session,
+                now=self._clock(),
+                limit=MAX_RETENTION_BATCH,
+            )
+        if results:
+            await self._redis.signal_job_available()
+        for result in results:
+            for request in result.requests:
+                await self._redis.publish_torrent_event(
+                    request.user_id,
+                    TorrentRealtimeEvent(
+                        TorrentEventType.EXPIRED,
+                        request.request_id,
+                        self._clock(),
+                    ),
+                )
+        return len(results)
 
 
 def _domain_state(

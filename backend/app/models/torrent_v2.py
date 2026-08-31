@@ -167,6 +167,12 @@ class ManagedTorrent(Base):
             name="ck_managed_torrents_lifecycle",
         ),
         CheckConstraint(
+            "(ready_at IS NULL AND retention_expires_at IS NULL) OR "
+            "(ready_at IS NOT NULL AND retention_expires_at IS NOT NULL "
+            "AND retention_expires_at >= ready_at)",
+            name="ck_managed_torrents_ready_retention",
+        ),
+        CheckConstraint(
             "manifest_version >= 0 AND manifest_file_count >= 0 AND manifest_total_size >= 0",
             name="ck_managed_torrents_manifest_values",
         ),
@@ -192,6 +198,20 @@ class ManagedTorrent(Base):
         Index("ix_managed_torrents_tracker_account", "tracker_account_ref"),
         Index("ix_managed_torrents_qb_account", "qbittorrent_account_ref"),
         Index("ix_managed_torrents_scheduler_retry", "state", "scheduler_retry_at"),
+        Index(
+            "ix_managed_torrents_retention_due",
+            "retention_expires_at",
+            "id",
+            postgresql_where=text("state = 'READY' AND retention_expires_at IS NOT NULL"),
+            sqlite_where=text("state = 'READY' AND retention_expires_at IS NOT NULL"),
+        ),
+        Index(
+            "ix_managed_torrents_purge_stop_pending",
+            "updated_at",
+            "id",
+            postgresql_where=text("purge_stop_pending"),
+            sqlite_where=text("purge_stop_pending = 1"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -224,6 +244,9 @@ class ManagedTorrent(Base):
     stall_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     scheduler_retry_at: Mapped[datetime | None] = mapped_column(nullable=True)
     purge_after: Mapped[datetime | None] = mapped_column(nullable=True)
+    ready_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    retention_expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    purge_stop_pending: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     lifecycle_generation: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     manifest_version: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     manifest_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)

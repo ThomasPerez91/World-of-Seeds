@@ -332,6 +332,8 @@ class DownloadLeaseManager:
                     TorrentRequest.state == TorrentRequestState.READY,
                     ManagedTorrent.id == managed_torrent_id,
                     ManagedTorrent.state == ManagedTorrentState.READY,
+                    ManagedTorrent.retention_expires_at.is_not(None),
+                    ManagedTorrent.retention_expires_at > now,
                     TorrentFile.id == torrent_file_id,
                 )
                 .with_for_update()
@@ -389,14 +391,21 @@ class DownloadLeaseManager:
                 if lease is not None
                 else None
             )
-            if (
-                user is None
-                or managed is None
-                or managed.state is not ManagedTorrentState.READY
-                or lease is None
-                or request is None
-                or request.state is not TorrentRequestState.READY
-            ):
+            ready_right = (
+                managed is not None
+                and managed.state is ManagedTorrentState.READY
+                and managed.retention_expires_at is not None
+                and _as_utc(managed.retention_expires_at) > _as_utc(now)
+                and request is not None
+                and request.state is TorrentRequestState.READY
+            )
+            finishing_expired_download = (
+                managed is not None
+                and managed.state is ManagedTorrentState.PURGE_PENDING
+                and request is not None
+                and request.state is TorrentRequestState.EXPIRED
+            )
+            if user is None or lease is None or not (ready_right or finishing_expired_download):
                 raise ManagedDownloadError("download lease was lost")
             lease.renewed_at = now
             lease.expires_at = now + timedelta(seconds=self._lease_seconds)
@@ -405,6 +414,12 @@ class DownloadLeaseManager:
         await self._session.rollback()
         async with self._session.begin():
             await self._session.execute(delete(DownloadLease).where(DownloadLease.id == lease_id))
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 class DownloadRateLimiter:

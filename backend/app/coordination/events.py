@@ -17,6 +17,7 @@ class TorrentEventType(StrEnum):
     READY = "torrent.ready"
     FAILED = "torrent.failed"
     CANCELLED = "torrent.cancelled"
+    EXPIRED = "torrent.expired"
 
 
 @dataclass(frozen=True, slots=True)

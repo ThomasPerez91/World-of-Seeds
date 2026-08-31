@@ -18,7 +18,11 @@ from app.integrations.account_routing import (
     parse_deployment_account_specs,
 )
 from app.integrations.http import integration_timeout
-from app.jobs.torrent_effects import TorrentEffectHandlers, TorrentSyncEnqueuer
+from app.jobs.torrent_effects import (
+    TorrentEffectHandlers,
+    TorrentRetentionReaper,
+    TorrentSyncEnqueuer,
+)
 from app.jobs.torrent_payloads import MAX_MANAGED_TORRENT_BYTES, TorrentPayloadStore
 from app.jobs.worker import TorrentWorker
 from app.storage import SharedContentStore
@@ -63,11 +67,19 @@ async def main() -> None:
     redis = RedisCoordinator.from_settings(settings)
     if settings.integration_accounts_json is None:
         worker = TorrentWorker(session_factory, redis, {}, worker_id=_worker_id())
+        retention_reaper = TorrentRetentionReaper(session_factory, redis)
         loop = asyncio.get_running_loop()
+
+        def request_stop() -> None:
+            worker.request_stop()
+            retention_reaper.request_stop()
+
         for signal_number in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(signal_number, worker.request_stop)
+            loop.add_signal_handler(signal_number, request_stop)
         try:
-            await worker.run()
+            async with asyncio.TaskGroup() as tasks:
+                tasks.create_task(worker.run())
+                tasks.create_task(retention_reaper.run())
         finally:
             await redis.aclose()
             await engine.dispose()
@@ -104,11 +116,13 @@ async def main() -> None:
             worker_id=_worker_id(),
         )
         sync_enqueuer = TorrentSyncEnqueuer(session_factory, redis)
+        retention_reaper = TorrentRetentionReaper(session_factory, redis)
         loop = asyncio.get_running_loop()
 
         def request_stop() -> None:
             worker.request_stop()
             sync_enqueuer.request_stop()
+            retention_reaper.request_stop()
 
         for signal_number in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(signal_number, request_stop)
@@ -116,6 +130,7 @@ async def main() -> None:
             async with asyncio.TaskGroup() as tasks:
                 tasks.create_task(worker.run())
                 tasks.create_task(sync_enqueuer.run())
+                tasks.create_task(retention_reaper.run())
         finally:
             await redis.aclose()
             await engine.dispose()

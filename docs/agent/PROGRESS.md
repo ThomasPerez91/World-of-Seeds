@@ -1369,6 +1369,34 @@
 - PR `#104` review finding: addressed by explicitly retaining accessible non-modal inline
   confirmation for irreversible trash deletion and administrative purge.
 
+## V2-32C — Automatic READY torrent retention
+
+- Added durable `ready_at` and `retention_expires_at` timestamps to each physical managed torrent.
+  Retention is computed from all historical distinct request owners, including cancelled and
+  expired requests: 5 days for one user, 6 for 2–3, 7 for 4–5, 8 for 6–7, 9 for 8–9, and 10 from
+  10 users onward. A later distinct request may only extend the deadline from the first READY.
+- Added an indexed PostgreSQL retention reaper limited to 200 rows per claim. At the exact deadline
+  it locks the managed torrent, expires every active request, decrements each owner's logical usage,
+  records `PURGE_PENDING`, persists a scheduler stop intent, and creates one generation-keyed
+  immediate purge job. Restart and Redis-loss behavior remains driven by SQL state.
+- New requests are accepted and may extend retention strictly before the deadline. At or after the
+  deadline, and once purge has begun, they fail closed rather than reviving an object being removed;
+  a request after `PURGED` starts a fresh physical lifecycle.
+- Existing HTTP leases keep already-open transfers alive. New leases fail after request expiration,
+  while the durable purge job retries until all leases have ended.
+- Fixed last-owner cancellation for an in-progress torrent: `PURGE_PENDING` now carries a durable
+  stop intent prioritized by the scheduler. qBittorrent start/stop remains scheduler-only, failed
+  control is replayed, partial files remain until purge, and the existing WOS ownership guard keeps
+  external torrents untouched.
+- Added additive, reversible migration `20260831_22` with partial indexes for due retention and
+  pending stop intents. Existing READY rows are backfilled from their best-known durable update
+  time and historical distinct-owner count.
+- Local validation: PASS — 579 backend tests collected, 572 passed and 7 real-service integrations
+  deferred; full Ruff lint and format checks, strict mypy, 54 frontend tests, TypeScript, production
+  build, one Alembic head, offline PostgreSQL upgrade/targeted downgrade SQL, and
+  `git diff --check`. The exact request/expiration PostgreSQL race remains covered by CI.
+- PR number, corrected head, and CI status: pending.
+
 ## Pre-pilot hardening audit for V2-33
 
 - Confirmed and fixed the public monitoring boundary: Rise2 ingress returns `404` for
@@ -1426,6 +1454,6 @@
 
 ## Next task
 
-- After V2-32B is reviewed, green, and merged, the next roadmap task is `V2-33 — Pilote Rise2`.
+- After V2-32C is reviewed, green, and merged, the next roadmap task is `V2-33 — Pilote Rise2`.
 - Do not continue, rebase, close, or merge the existing V2-33 draft PR `#103` automatically; its
   host phase requires a separate explicit decision and Rise2 authority.
