@@ -421,12 +421,15 @@ async def test_postgresql_request_expiration_race_is_deterministic() -> None:
             async with factory() as session, session.begin():
                 return len(await expire_ready_torrents_batch(session, now=NOW))
 
-        assert sorted(
-            await asyncio.gather(request_at_deadline(), expire_at_deadline()), key=str
-        ) == [
-            1,
-            "rejected",
-        ]
+        request_result, first_expiration = await asyncio.gather(
+            request_at_deadline(),
+            expire_at_deadline(),
+        )
+        assert request_result == "rejected"
+        assert first_expiration in {0, 1}
+        async with factory() as session, session.begin():
+            replay_expiration = len(await expire_ready_torrents_batch(session, now=NOW))
+        assert first_expiration + replay_expiration == 1
     finally:
         async with factory() as session, session.begin():
             if torrent_id is not None:

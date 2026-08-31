@@ -1408,6 +1408,10 @@
   construction, and the complete smoke. Its load phase exposed the second synthetic READY fixture;
   the 100-account fixture now calls the production retention calculator after qB verification,
   producing the expected ten-day deadline instead of bypassing the new invariant.
+- Follow-up CI run `33374065479` (`#238`) activated the PostgreSQL request/expiration race and
+  confirmed `SKIP LOCKED` may correctly defer a locked due row to the next bounded batch. The test
+  now requires the request to be rejected and exactly one expiration across the initial claim plus
+  replay, instead of depending on which transaction acquires the row first.
 - Corrected remote head, final CI, review resolution, and merge status: pending.
 
 ## Pre-pilot hardening audit for V2-33
