@@ -1412,7 +1412,12 @@
   confirmed `SKIP LOCKED` may correctly defer a locked due row to the next bounded batch. The test
   now requires the request to be rejected and exactly one expiration across the initial claim plus
   replay, instead of depending on which transaction acquires the row first.
-- Corrected remote head, final CI, review resolution, and merge status: pending.
+- PR `#106` corrected functional head `07a8841e8d962f69681fa2688762b2d9dd02ea33`:
+  GitHub CI run `33374412646` (`#239`) PASS — backend with PostgreSQL/Redis and the exact race,
+  migration rollback/upgrade, frontend, dependency/image security, production image, complete
+  smoke, bounded 100-account load, WebSockets, and monitoring are green. The P1 and three P2 review
+  threads are answered and resolved; no review thread remains open.
+- Final documentation-head CI and merge status: pending.
 
 ## Pre-pilot hardening audit for V2-33
 
