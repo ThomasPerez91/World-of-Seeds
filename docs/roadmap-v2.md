@@ -71,7 +71,9 @@ ou migration additive), **ÉLEVÉ** (concurrence, stockage, sécurité, déploie
 | V2-32A | MOYEN | V2-24,V2-32 | Internationalisation FR/EN centralisée, contrats backend par codes stables, formatage locale et couverture responsive. |
 | V2-32B | MOYEN/ÉLEVÉ | V2-23,V2-28D,V2-32A | Frontend UX/UI et mobile : suppressions sans modale de confirmation, toasts unifiés, multi-upload torrent borné, design tokens, accessibilité et responsive complet. |
 | V2-32C | ÉLEVÉ | V2-22,V2-28A,V2-32B | Rétention READY automatique : durée selon popularité historique, expiration PostgreSQL bornée, leases et arrêt qB durable avant purge. |
-| V2-33 | ÉLEVÉ | V2-30,V2-31,V2-32,V2-32A,V2-32B,V2-32C | Pilote Rise2 : données de test puis comptes pilotes, critères go/no-go, observation et retour arrière vérifié. |
+| V2-32D | BLOQUÉ | V2-32C | Nettoyage exact NewGreedy lors de la purge définitive ; bloqué tant que NewGreedy v1.7.5 ne fournit pas une suppression durable par SHA-1 complet. Non bloquant pour V2-32E et le pilote sauf décision contraire explicite. |
+| V2-32E | MOYEN | V2-28D,V2-32A,V2-32B,V2-32C | Avertissements visuels FR/EN avant expiration READY depuis la deadline PostgreSQL autoritaire, avec timer local accessible et resynchronisation WebSocket. |
+| V2-33 | ÉLEVÉ | V2-30,V2-31,V2-32,V2-32A,V2-32B,V2-32C,V2-32E | Pilote Rise2 : données de test puis comptes pilotes, critères go/no-go, observation et retour arrière vérifié. |
 | V2-34 | ÉLEVÉ | V2-33 | Release candidate V2 : gel fonctionnel, migrations expand/contract, runbook, compatibilité digest précédent et validation complète. |
 | V2-35 | ÉLEVÉ | V2-34 | Release V2 stable : SemVer 2.0.0 seulement après approbation, bascule Rise2 progressive et conservation de la V1 pendant la fenêtre de rollback. |
 
@@ -307,6 +309,34 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 - Tester tous les paliers de popularité, les bornes temporelles, les courses demande/expiration,
   les redémarrages, la perte Redis, les leases, l'accounting, l'idempotence et la réactivation.
 - V2-32C doit être acceptée et fusionnée dans `develop_V2` avant toute reprise du pilote V2-33.
+
+## V2-32D — Nettoyage NewGreedy lors de la purge
+
+- V2-32D reste bloquée par le contrat réel NewGreedy v1.7.5 : `DELETE /api/stats/{ih}` tronque
+  l'identifiant à huit caractères, manipule un état global non isolé par route/passkey et ne
+  garantit pas la suppression durable de l'état conservé en mémoire.
+- WOS ne doit utiliser ni reset global, ni modification directe de `stats.json`, ni suppression par
+  préfixe pour simuler une suppression exacte par SHA-1 canonique.
+- Ce blocage n'empêche ni V2-32E ni le pilote V2-33, sauf décision contraire explicite. La purge WOS
+  reste sûre côté qBittorrent, stockage et PostgreSQL ; seul l'état statistique NewGreedy peut rester
+  obsolète jusqu'à l'évolution de son contrat.
+
+## V2-32E — Avertissements avant expiration READY
+
+- Exposer aux seuls propriétaires la deadline absolue `retention_expires_at` déjà autoritaire en
+  PostgreSQL dans les listes et manifestes utilisateur, sans infohash, clé de stockage, référence
+  de compte, URL tracker, passkey ou chemin hôte.
+- Afficher un avertissement orange entre 48 h incluses et plus de 24 h, puis rouge entre 24 h
+  incluses et l'échéance. La couleur est toujours accompagnée d'une icône, d'un texte et de la date
+  absolue accessibles en français et en anglais.
+- Le navigateur peut rafraîchir localement le temps restant, mais ne produit jamais lui-même une
+  transition métier EXPIRED. PostgreSQL, l'API et la resynchronisation WebSocket restent
+  autoritaires pour l'état et les prolongations.
+- Une échéance prolongée pour un torrent partagé invalide les listes de tous ses propriétaires. Le
+  warning principal reste au niveau du torrent ou de la racine du manifeste, jamais sur chaque
+  fichier d'un grand contenu.
+- Valider les bornes exactes 48 h/24 h, les courtes durées, EXPIRED, prolongation partagée, FR/EN,
+  axe, noms longs et les largeurs 320, 360, 375, 390, 430, 768 px et desktop sans polling serveur.
 
 ## Migrations et ruptures anticipées
 

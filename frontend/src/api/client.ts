@@ -79,6 +79,7 @@ export interface TorrentRequestV2 {
   state: TorrentRequestV2State;
   progress: number;
   error_code: string | null;
+  retention_expires_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -102,6 +103,7 @@ export type TorrentRealtimeEventType =
   | "torrent.stalled"
   | "torrent.resumed"
   | "torrent.ready"
+  | "torrent.retention_extended"
   | "torrent.failed"
   | "torrent.cancelled"
   | "torrent.expired";
@@ -117,6 +119,7 @@ const torrentRealtimeEventTypes = new Set<TorrentRealtimeEventType>([
   "torrent.stalled",
   "torrent.resumed",
   "torrent.ready",
+  "torrent.retention_extended",
   "torrent.failed",
   "torrent.cancelled",
   "torrent.expired",
@@ -164,6 +167,7 @@ export interface TorrentDownloadManifestPageV2 {
   file_count: number;
   total_size: number;
   archive_available: boolean;
+  retention_expires_at: string | null;
   offset: number;
   limit: number;
   items: TorrentDownloadFileV2[];

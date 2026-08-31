@@ -221,6 +221,10 @@ The stable V1 maintenance release documented here is `1.3.3`.
 - The page shows only torrents associated with the current user.
 - Torrent state uses the existing WebSocket plus manual/authoritative refresh model. Multi-upload
   must not reintroduce periodic list polling, a full page reload, or unbounded parallel requests.
+- User torrent and manifest contracts expose only the PostgreSQL-authoritative absolute READY
+  expiration. The browser may derive accessible 48-hour warning and 24-hour danger countdowns
+  locally, but only a backend state transition or authoritative resynchronization may mark content
+  expired. A shared retention extension invalidates every active owner's view.
 - Long torrent names wrap or truncate without breaking mobile layout.
 - Mobile behavior is covered at 320, 360, 375, 390, 430, and 768 pixel widths, in portrait and
   landscape, without relying on drag and drop as the only submission path.

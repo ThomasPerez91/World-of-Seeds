@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -25,6 +25,7 @@ function torrent(overrides: Record<string, unknown> = {}) {
     progress: 0.5,
     state: "active",
     error_code: null,
+    retention_expires_at: null,
     created_at: "2026-08-20T10:00:00Z",
     updated_at: "2026-08-20T10:05:00Z",
     ...overrides,
@@ -208,6 +209,124 @@ describe("UserDownloadsPage", () => {
     view.unmount();
   });
 
+  it("remplace la deadline partagée après un événement de prolongation et resync", async () => {
+    MockWebSocket.instances = [];
+    const initialDeadline = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString();
+    const extendedDeadline = new Date(Date.now() + 72 * 60 * 60 * 1_000).toISOString();
+    let requests = 0;
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      requests += 1;
+      return response({
+        items: [torrent({
+          state: "ready",
+          progress: 1,
+          retention_expires_at: requests === 1 ? initialDeadline : extendedDeadline,
+        })],
+        offset: 0,
+        limit: 10,
+        total: 1,
+      });
+    }));
+    const view = renderPage();
+
+    expect(await screen.findByTestId("retention-warning")).toBeTruthy();
+    MockWebSocket.instances[0].message({
+      type: "torrent.retention_extended",
+      request_id: torrent().id,
+      occurred_at: "2026-08-31T22:00:00Z",
+    });
+
+    await waitFor(() => expect(requests).toBe(2));
+    await waitFor(() => expect(screen.queryByTestId("retention-warning")).toBeNull());
+    view.unmount();
+  });
+
+  it("conserve l’état EXPIRED backend sans afficher de countdown négatif", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({
+      items: [torrent({
+        state: "expired",
+        progress: 1,
+        retention_expires_at: new Date(Date.now() - 60_000).toISOString(),
+      })],
+      offset: 0,
+      limit: 10,
+      total: 1,
+    })));
+    renderPage();
+
+    expect(await screen.findByText("Expiré")).toBeTruthy();
+    expect(screen.queryByTestId("retention-warning")).toBeNull();
+  });
+
+  it.each([320, 360, 375, 390, 430, 768, 1280])(
+    "garde un warning compact accessible avec un nom de plus de 200 caractères à %d px",
+    async (width) => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+      const longName = `${"Film.Name.2026.MULTi.TRUEFRENCH.2160p.UHD.BluRay.REMUX.DV.HDR.".repeat(4)}mkv`;
+      const expiresAt = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString();
+      expect(longName.length).toBeGreaterThan(200);
+      vi.stubGlobal("fetch", vi.fn(async () => response({
+        items: [torrent({
+          name: longName,
+          state: "ready",
+          progress: 1,
+          retention_expires_at: expiresAt,
+        })],
+        offset: 0,
+        limit: 10,
+        total: 1,
+      })));
+      const view = renderPage();
+
+      expect(await screen.findByTitle(longName)).toBeTruthy();
+      expect(screen.getByTestId("retention-warning").classList.contains("compact")).toBe(true);
+      expect(screen.getByText(/Expiration le/, { selector: ".sr-only" })).toBeTruthy();
+      expect(view.container.querySelector("[style]")).toBeNull();
+      expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+    },
+  );
+
+  it("affiche une seule échéance racine pour un manifeste multi-fichier", async () => {
+    const user = userEvent.setup();
+    const expiresAt = new Date(Date.now() + 45 * 60 * 1_000).toISOString();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("download-manifest")) {
+        return response({
+          snapshot_id: "c".repeat(64),
+          manifest_version: 1,
+          file_count: 3,
+          total_size: 6,
+          archive_available: true,
+          retention_expires_at: expiresAt,
+          offset: 0,
+          limit: 50,
+          items: [
+            { id: "root", file_index: 0, relative_path: "root.mkv", size: 2 },
+            { id: "nested-1", file_index: 1, relative_path: "Folder/one.mkv", size: 2 },
+            { id: "nested-2", file_index: 2, relative_path: "Folder/two.srt", size: 2 },
+          ],
+        });
+      }
+      return response({
+        items: [torrent({ state: "ready", progress: 1, retention_expires_at: expiresAt })],
+        offset: 0,
+        limit: 10,
+        total: 1,
+      });
+    }));
+    const view = renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Télécharger" }));
+    const fallback = view.container.querySelector(".download-fallback");
+    expect(fallback).not.toBeNull();
+    expect(within(fallback as HTMLElement).getAllByTestId("retention-warning")).toHaveLength(1);
+    expect(within(fallback as HTMLElement).getByText("Suppression imminente dans 45 min")).toBeTruthy();
+    expect(within(fallback as HTMLElement).getByText("root.mkv")).toBeTruthy();
+    expect(within(fallback as HTMLElement).getByText("Folder/one.mkv")).toBeTruthy();
+    expect(within(fallback as HTMLElement).getByText("Folder/two.srt")).toBeTruthy();
+  });
+
   it("télécharge récursivement un manifeste READY via le sélecteur de dossier", async () => {
     const user = userEvent.setup();
     const writes: number[] = [];
@@ -234,6 +353,7 @@ describe("UserDownloadsPage", () => {
             file_count: 1,
             total_size: 3,
             archive_available: true,
+            retention_expires_at: null,
             offset: 0,
             limit: 500,
             items: [{ id: "file-id", file_index: 0, relative_path: "Film/file.bin", size: 3 }],
@@ -277,6 +397,7 @@ describe("UserDownloadsPage", () => {
             file_count: 50_000,
             total_size: 3,
             archive_available: true,
+            retention_expires_at: null,
             offset: 0,
             limit: 500,
             items: [{ id: "file-id", file_index: 0, relative_path: "Film/file.bin", size: 3 }],

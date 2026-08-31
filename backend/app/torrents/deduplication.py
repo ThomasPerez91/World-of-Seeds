@@ -65,6 +65,7 @@ class ManagedTorrentRequestResult:
     managed_torrent_created: bool
     request_created: bool
     managed_torrent_reactivated: bool
+    retention_extended: bool
     storage_pressure: StoragePressureState
 
 
@@ -206,8 +207,17 @@ async def create_or_get_torrent_request(
             request.state = TorrentRequestState.ACTIVE
         await session.flush()
 
+    previous_retention_expires_at = (
+        None
+        if managed_torrent.retention_expires_at is None
+        else _as_utc(managed_torrent.retention_expires_at)
+    )
     if managed_torrent.state is ManagedTorrentState.READY:
         await extend_ready_torrent_retention(session, managed_torrent, now=timestamp)
+    retention_extended = managed_torrent.retention_expires_at is not None and (
+        previous_retention_expires_at is None
+        or _as_utc(managed_torrent.retention_expires_at) > previous_retention_expires_at
+    )
 
     apply_storage_accounting(
         accounting,
@@ -223,6 +233,7 @@ async def create_or_get_torrent_request(
         managed_torrent_created=inserted_managed_id is not None,
         request_created=inserted_request_id is not None,
         managed_torrent_reactivated=reactivated,
+        retention_extended=retention_extended,
         storage_pressure=accounting.pressure,
     )
 

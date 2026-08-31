@@ -12,6 +12,7 @@ class TorrentRequestV2Response(BaseModel):
     state: Literal["requested", "active", "ready", "cancelled", "expired", "error"]
     progress: float = Field(ge=0, le=1)
     error_code: str | None
+    retention_expires_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -41,6 +42,7 @@ class TorrentDownloadManifestResponse(BaseModel):
     file_count: int = Field(ge=1)
     total_size: int = Field(ge=0)
     archive_available: bool
+    retention_expires_at: datetime | None
     offset: int = Field(ge=0)
     limit: int = Field(ge=1, le=500)
     items: list[TorrentDownloadFileResponse]

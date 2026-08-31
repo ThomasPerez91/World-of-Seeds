@@ -18,6 +18,7 @@ import {
   type RecursiveTransferProgress,
   supportsRecursiveDirectoryDownload,
 } from "./recursiveDownload";
+import { RetentionWarning } from "./RetentionWarning";
 
 const PAGE_SIZE = 10;
 const FALLBACK_PAGE_SIZE = 50;
@@ -100,9 +101,14 @@ function TorrentRow({
         {error !== null && <small role="alert">{error}</small>}
       </td>
       <td data-label={t("downloads.status")}>
-        <span className={`torrent-primary-state ${torrent.state}`}>
-          {t(stateLabels[torrent.state])}
-        </span>
+        <div className="torrent-status-content">
+          <span className={`torrent-primary-state ${torrent.state}`}>
+            {t(stateLabels[torrent.state])}
+          </span>
+          {torrent.state === "ready" && (
+            <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />
+          )}
+        </div>
       </td>
       <td className="torrent-size-cell" data-label={t("files.size")}>{formatBytes(torrent.total_size)}</td>
       <td className="torrent-progress-cell" data-label={t("downloads.progress")}>
@@ -635,6 +641,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
               {t("common.close")}
             </button>
           </header>
+          <RetentionWarning retentionExpiresAt={fallback.snapshot.retention_expires_at} />
           {fallback.snapshot.archive_available && (
             <a
               className="download-fallback-archive"
