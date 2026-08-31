@@ -194,6 +194,7 @@ async def test_last_cancellation_schedules_purge_and_new_owner_revokes_it(
     assert first_cancelled is not None and first_cancelled.purge_scheduled is False
     assert second_cancelled is not None and second_cancelled.purge_scheduled is True
     assert first.managed_torrent.state is ManagedTorrentState.PURGE_PENDING
+    assert first.managed_torrent.purge_stop_pending is True
     purge = await db_session.scalar(
         select(TorrentJob).where(TorrentJob.job_type == "PURGE_TORRENT")
     )
@@ -213,8 +214,45 @@ async def test_last_cancellation_schedules_purge_and_new_owner_revokes_it(
     assert renewed.request.state is TorrentRequestState.READY
     assert renewed.managed_torrent.state is ManagedTorrentState.READY
     assert renewed.managed_torrent.purge_after is None
+    assert renewed.managed_torrent.purge_stop_pending is False
     purge_state = await db_session.scalar(select(TorrentJob.state).where(TorrentJob.id == purge_id))
     assert purge_state is TorrentJobState.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_last_owner_cancelling_downloading_torrent_persists_scheduler_stop(
+    db_session: AsyncSession,
+) -> None:
+    owner = await create_user(db_session, "downloading-cancel-owner")
+    created = await create_or_get_torrent_request(
+        db_session,
+        user_id=owner.id,
+        info_hash="d" * 40,
+        name="Partial download",
+        total_size=100,
+        now=NOW,
+    )
+    created.managed_torrent.state = ManagedTorrentState.DOWNLOADING
+    created.managed_torrent.progress = 0.4
+    created.managed_torrent.desired_active = True
+    created.managed_torrent.desired_priority = 0
+    created.request.state = TorrentRequestState.ACTIVE
+    await db_session.flush()
+
+    cancelled = await cancel_owned_torrent_request(
+        db_session,
+        user_id=owner.id,
+        torrent_request_id=created.request.id,
+        retention_hours=48,
+        now=NOW,
+    )
+
+    assert cancelled is not None and cancelled.purge_scheduled is True
+    assert created.managed_torrent.state is ManagedTorrentState.PURGE_PENDING
+    assert created.managed_torrent.desired_active is False
+    assert created.managed_torrent.desired_priority is None
+    assert created.managed_torrent.purge_stop_pending is True
+    assert created.managed_torrent.progress == 0.4
 
 
 @pytest.mark.asyncio

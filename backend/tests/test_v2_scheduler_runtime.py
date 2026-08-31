@@ -269,6 +269,112 @@ async def test_previously_admitted_torrent_without_active_request_is_stopped(
 
 
 @pytest.mark.asyncio
+async def test_purge_pending_download_is_durably_stopped_before_retention(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    async with sessions() as session, session.begin():
+        torrent = ManagedTorrent(
+            info_hash="9" * 40,
+            name="cancelled-downloading",
+            total_size=10,
+            progress=0.4,
+            state=ManagedTorrentState.PURGE_PENDING,
+            purge_after=NOW + timedelta(hours=48),
+            desired_active=False,
+            desired_priority=None,
+            purge_stop_pending=True,
+        )
+        session.add(torrent)
+    failing = SchedulerRuntime(
+        sessions,
+        FakeGateway(fail=True),
+        scheduler_id="scheduler-purge-stop-failure",
+        clock=lambda: NOW,
+        lease_ttl=timedelta(seconds=10),
+    )
+
+    with pytest.raises(RuntimeError, match="qb_unavailable"):
+        await failing.run_once()
+    async with sessions() as session:
+        pending = await session.get(ManagedTorrent, torrent.id)
+        assert pending is not None and pending.purge_stop_pending is True
+
+    gateway = FakeGateway()
+    recovered = SchedulerRuntime(
+        sessions,
+        gateway,
+        scheduler_id="scheduler-purge-stop-replay",
+        clock=lambda: NOW + timedelta(seconds=11),
+        lease_ttl=timedelta(seconds=10),
+    )
+    result = await recovered.run_once()
+
+    assert result.selected_torrent_ids == ()
+    assert len(gateway.calls) == 2
+    assert len(gateway.calls[0]) == 1
+    assert gateway.calls[0][0].run_state == "stopped"
+    assert gateway.calls[0][0].info_hash == "9" * 40
+    async with sessions() as session:
+        stopped = await session.get(ManagedTorrent, torrent.id)
+        assert stopped is not None
+        assert stopped.state is ManagedTorrentState.PURGE_PENDING
+        assert stopped.purge_stop_pending is False
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_purge_stop_batch_never_truncates_two_hundred_active_controls(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    async with sessions() as session, session.begin():
+        for index in range(200):
+            session.add(
+                ManagedTorrent(
+                    id=uuid.UUID(int=50_000 + index),
+                    info_hash=f"{60_000 + index:040x}",
+                    name=f"active-{index}",
+                    total_size=10,
+                    state=ManagedTorrentState.DOWNLOADING,
+                    desired_active=True,
+                    desired_priority=index,
+                )
+            )
+        pending = ManagedTorrent(
+            id=uuid.UUID(int=70_000),
+            info_hash=f"{70_000:040x}",
+            name="pending-stop",
+            total_size=10,
+            state=ManagedTorrentState.PURGE_PENDING,
+            purge_after=NOW,
+            desired_active=False,
+            purge_stop_pending=True,
+            lifecycle_generation=1,
+        )
+        session.add(pending)
+    gateway = FakeGateway()
+
+    await SchedulerRuntime(
+        sessions,
+        gateway,
+        scheduler_id="scheduler-full-active-plus-stop",
+        clock=lambda: NOW,
+    ).run_once()
+
+    assert [len(call) for call in gateway.calls] == [1, 200]
+    assert gateway.calls[0][0].info_hash == pending.info_hash
+    assert gateway.calls[0][0].run_state == "stopped"
+    assert {control.info_hash for control in gateway.calls[1]} == {
+        f"{60_000 + index:040x}" for index in range(200)
+    }
+    async with sessions() as session:
+        stored = await session.get(ManagedTorrent, pending.id)
+        assert stored is not None and stored.purge_stop_pending is False
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_ready_seeding_torrent_is_outside_download_slot_control(tmp_path: Path) -> None:
     engine, sessions = await _database(tmp_path)
     async with sessions() as session, session.begin():

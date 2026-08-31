@@ -16,6 +16,7 @@ from app.coordination import RedisCoordinator, TorrentEventType, TorrentRealtime
 from app.integrations.qbittorrent_v2 import (
     QBittorrentV2ControlResult,
     QBittorrentV2DesiredControl,
+    QBittorrentV2RunState,
 )
 from app.models import (
     ManagedTorrent,
@@ -114,6 +115,7 @@ class SchedulerRuntime:
             await self._options.initialize(session, now=now)
             options = await self._options.snapshot(session)
             policy = SchedulerPolicy.from_options(options)
+            purge_stops = await self._load_purge_stops(session)
             torrents = await self._load_control_set(session, state)
             requests = await self._load_active_requests(session, torrents)
             ledger = await load_scheduler_ledger(session, state)
@@ -136,14 +138,33 @@ class SchedulerRuntime:
                 for torrent in torrents
             )
             controls = build_qbittorrent_control_plan(selection, identities, options=options)
+            purge_controls = tuple(
+                QBittorrentV2DesiredControl(
+                    info_hash=torrent.info_hash,
+                    storage_key=torrent.storage_key,
+                    run_state=QBittorrentV2RunState.STOPPED,
+                    download_limit_bytes_per_second=0,
+                    qbittorrent_account_ref=torrent.qbittorrent_account_ref,
+                )
+                for torrent in purge_stops
+            )
             generation = state.desired_generation + 1
             previous_active = {torrent.id: torrent.desired_active for torrent in torrents}
+            purge_stop_generations = {
+                torrent.id: torrent.lifecycle_generation for torrent in purge_stops
+            }
             _persist_desired_controls(torrents, controls, generation=generation)
             realtime_targets = _control_event_targets(torrents, requests, previous_active)
             state.desired_generation = generation
             await persist_scheduler_ledger(session, state, selection.ledger, now=now)
 
-        control_result = await self._gateway.apply_managed_controls(controls)
+        purge_control_result = (
+            await self._gateway.apply_managed_controls(purge_controls)
+            if purge_controls
+            else QBittorrentV2ControlResult((), (), (), ())
+        )
+        scheduled_control_result = await self._gateway.apply_managed_controls(controls)
+        control_result = _merge_control_results(purge_control_result, scheduled_control_result)
 
         applied_at = self._clock()
         async with self._session_factory() as session, session.begin():
@@ -153,6 +174,24 @@ class SchedulerRuntime:
                 generation=generation,
                 now=applied_at,
             )
+            if purge_stop_generations:
+                stopped = tuple(
+                    (
+                        await session.scalars(
+                            select(ManagedTorrent)
+                            .where(
+                                ManagedTorrent.id.in_(purge_stop_generations),
+                                ManagedTorrent.state == ManagedTorrentState.PURGE_PENDING,
+                                ManagedTorrent.purge_stop_pending.is_(True),
+                            )
+                            .with_for_update()
+                        )
+                    ).all()
+                )
+                for torrent in stopped:
+                    if torrent.lifecycle_generation == purge_stop_generations[torrent.id]:
+                        torrent.purge_stop_pending = False
+                        torrent.updated_at = applied_at
         for user_id, request_id, event_type in realtime_targets:
             await self._redis.publish_torrent_event(
                 user_id,
@@ -197,6 +236,23 @@ class SchedulerRuntime:
         except Exception:
             logger.warning("scheduler_lease_renewal_failed")
             return False
+
+    @staticmethod
+    async def _load_purge_stops(session: AsyncSession) -> tuple[ManagedTorrent, ...]:
+        return tuple(
+            (
+                await session.scalars(
+                    select(ManagedTorrent)
+                    .where(
+                        ManagedTorrent.state == ManagedTorrentState.PURGE_PENDING,
+                        ManagedTorrent.purge_stop_pending.is_(True),
+                    )
+                    .order_by(ManagedTorrent.updated_at, ManagedTorrent.id)
+                    .with_for_update(skip_locked=True)
+                    .limit(MAX_SCHEDULER_CONTROL_SET)
+                )
+            ).all()
+        )
 
     @staticmethod
     async def _load_control_set(
@@ -335,6 +391,18 @@ def _remaining_bytes(total_size: int, progress: float | None) -> int | None:
     if progress >= 1:
         return 0
     return max(1, min(total_size, total_size - math.floor(total_size * progress)))
+
+
+def _merge_control_results(
+    first: QBittorrentV2ControlResult,
+    second: QBittorrentV2ControlResult,
+) -> QBittorrentV2ControlResult:
+    return QBittorrentV2ControlResult(
+        started=(*first.started, *second.started),
+        stopped=(*first.stopped, *second.stopped),
+        limits_updated=(*first.limits_updated, *second.limits_updated),
+        priorities_applied=(*first.priorities_applied, *second.priorities_applied),
+    )
 
 
 def _utc(value: datetime) -> datetime:

@@ -120,6 +120,7 @@ async def prepare_storage_accounting(
     policy: StorageAdmissionPolicy | None,
     disk: StorageDiskSnapshot | None,
     now: datetime,
+    physical_content_missing: bool | None = None,
 ) -> StorageAccountingContext:
     usage = await _usage_row(session, user_id, now=now)
     ledger = await _ledger_row(session, now=now)
@@ -136,9 +137,10 @@ async def prepare_storage_accounting(
             )
         )
 
-    physical_content_missing = (
-        existing_torrent is None or existing_torrent.state is ManagedTorrentState.PURGED
-    )
+    if physical_content_missing is None:
+        physical_content_missing = (
+            existing_torrent is None or existing_torrent.state is ManagedTorrentState.PURGED
+        )
     pressure = ledger.pressure
     if disk is not None:
         projected_free = disk.free_bytes - (total_size if physical_content_missing else 0)

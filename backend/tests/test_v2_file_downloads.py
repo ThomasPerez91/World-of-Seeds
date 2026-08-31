@@ -57,6 +57,8 @@ async def _ready_file(
         total_size=len(content),
         state=ManagedTorrentState.READY,
         progress=1.0,
+        ready_at=datetime(2026, 8, 1, tzinfo=UTC),
+        retention_expires_at=datetime(2030, 8, 1, tzinfo=UTC),
         manifest_version=1,
         manifest_checksum="e" * 64,
         manifest_file_count=1,
@@ -275,6 +277,58 @@ async def test_download_lease_cannot_renew_after_lifecycle_revocation(
 
     with pytest.raises(ManagedDownloadError):
         await manager.renew(lease.id)
+
+
+@pytest.mark.asyncio
+async def test_expired_retention_refuses_new_lease_but_engaged_download_can_renew(
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    owner, torrent, request, torrent_file, _ = await _ready_file(db_session, data_root)
+    expiry = datetime(2026, 8, 22, tzinfo=UTC)
+    clock = [expiry - timedelta(seconds=1)]
+    torrent.ready_at = expiry - timedelta(days=5)
+    torrent.retention_expires_at = expiry
+    await db_session.commit()
+    manager = DownloadLeaseManager(db_session, lease_seconds=60, clock=lambda: clock[0])
+
+    lease = await manager.acquire(
+        user_id=owner.id,
+        managed_torrent_id=torrent.id,
+        torrent_request_id=request.id,
+        torrent_file_id=torrent_file.id,
+        max_concurrent=1,
+    )
+    clock[0] = expiry
+    await manager.renew(lease.id)
+    assert lease.expires_at == expiry + timedelta(seconds=60)
+
+    torrent.state = ManagedTorrentState.PURGE_PENDING
+    torrent.purge_after = expiry
+    torrent.desired_active = False
+    torrent.desired_priority = None
+    torrent.purge_stop_pending = True
+    request.state = TorrentRequestState.EXPIRED
+    request.expires_at = expiry
+    await db_session.commit()
+
+    clock[0] = expiry + timedelta(seconds=1)
+    await manager.renew(lease.id)
+    assert lease.expires_at == expiry + timedelta(seconds=61)
+
+    torrent.state = ManagedTorrentState.READY
+    torrent.purge_after = None
+    torrent.purge_stop_pending = False
+    request.state = TorrentRequestState.READY
+    await db_session.commit()
+    with pytest.raises(ManagedDownloadError):
+        await manager.acquire(
+            user_id=owner.id,
+            managed_torrent_id=torrent.id,
+            torrent_request_id=request.id,
+            torrent_file_id=torrent_file.id,
+            max_concurrent=2,
+        )
 
 
 @pytest.mark.asyncio

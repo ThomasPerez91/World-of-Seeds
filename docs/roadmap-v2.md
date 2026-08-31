@@ -70,7 +70,8 @@ ou migration additive), **ÉLEVÉ** (concurrence, stockage, sécurité, déploie
 | V2-32 | ÉLEVÉ | V2-24,V2-28,V2-29 | Sécurité et charge : 100 comptes, pannes/latences, CPU/RAM/I/O, CSP, OWASP, scan dépendances/images et tests anti-famine. |
 | V2-32A | MOYEN | V2-24,V2-32 | Internationalisation FR/EN centralisée, contrats backend par codes stables, formatage locale et couverture responsive. |
 | V2-32B | MOYEN/ÉLEVÉ | V2-23,V2-28D,V2-32A | Frontend UX/UI et mobile : suppressions sans modale de confirmation, toasts unifiés, multi-upload torrent borné, design tokens, accessibilité et responsive complet. |
-| V2-33 | ÉLEVÉ | V2-30,V2-31,V2-32,V2-32A,V2-32B | Pilote Rise2 : données de test puis comptes pilotes, critères go/no-go, observation et retour arrière vérifié. |
+| V2-32C | ÉLEVÉ | V2-22,V2-28A,V2-32B | Rétention READY automatique : durée selon popularité historique, expiration PostgreSQL bornée, leases et arrêt qB durable avant purge. |
+| V2-33 | ÉLEVÉ | V2-30,V2-31,V2-32,V2-32A,V2-32B,V2-32C | Pilote Rise2 : données de test puis comptes pilotes, critères go/no-go, observation et retour arrière vérifié. |
 | V2-34 | ÉLEVÉ | V2-33 | Release candidate V2 : gel fonctionnel, migrations expand/contract, runbook, compatibilité digest précédent et validation complète. |
 | V2-35 | ÉLEVÉ | V2-34 | Release V2 stable : SemVer 2.0.0 seulement après approbation, bascule Rise2 progressive et conservation de la V1 pendant la fenêtre de rollback. |
 
@@ -288,6 +289,25 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 - V2-32B doit être acceptée et fusionnée dans `develop_V2` avant le démarrage ou la fusion du
   pilote V2-33.
 
+## V2-32C — Rétention automatique des contenus READY
+
+- Enregistrer durablement la première transition READY et une expiration automatique calculée à
+  partir des utilisateurs historiques distincts : 5 jours pour un utilisateur, puis 6, 7, 8 et
+  9 jours par paliers de deux utilisateurs, avec un plafond de 10 jours dès dix utilisateurs.
+- Conserver les demandes annulées ou expirées dans la popularité historique. Une nouvelle demande
+  distincte peut prolonger l'expiration depuis le premier READY, jamais la raccourcir.
+- Réclamer les expirations READY par lots PostgreSQL bornés et indexés. Expirer atomiquement les
+  droits actifs et leur accounting, passer le contenu en `PURGE_PENDING`, persister l'arrêt demandé
+  au scheduler et créer un unique job de purge immédiat ; Redis reste une optimisation.
+- Refuser toute nouvelle ouverture à partir de la borne exacte d'expiration. Une lease HTTP déjà
+  engagée peut finir, et le worker retente la purge physique jusqu'à la fin des leases.
+- Le scheduler reste l'unique autorité start/stop qBittorrent. L'annulation du dernier propriétaire
+  d'un téléchargement doit produire un STOP durable et idempotent sans supprimer immédiatement les
+  fichiers partiels ni toucher un torrent externe/non-WOS.
+- Tester tous les paliers de popularité, les bornes temporelles, les courses demande/expiration,
+  les redémarrages, la perte Redis, les leases, l'accounting, l'idempotence et la réactivation.
+- V2-32C doit être acceptée et fusionnée dans `develop_V2` avant toute reprise du pilote V2-33.
+
 ## Migrations et ruptures anticipées
 
 | Sujet | Changement | Compatibilité/traitement |
@@ -334,6 +354,6 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 
 ## Prochaine tâche
 
-Après la revue, la CI verte et la fusion de V2-32B, la prochaine tâche est
+Après la revue, la CI verte et la fusion de V2-32C, la prochaine tâche est
 `V2-33 — Pilote limité sur Rise2`. Le travail préparatoire déjà présent reste en brouillon et en
 pause ; il ne doit pas être repris, rebasé ou fusionné automatiquement.

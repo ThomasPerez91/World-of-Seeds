@@ -11,8 +11,13 @@ from app.torrents.deduplication import (
 )
 from app.torrents.lifecycle import (
     PURGE_TORRENT_JOB,
+    ExpiredTorrentRequest,
     TorrentCancellationResult,
+    TorrentExpirationResult,
     cancel_owned_torrent_request,
+    expire_ready_torrents_batch,
+    extend_ready_torrent_retention,
+    retention_days_for_popularity,
 )
 from app.torrents.manifest import (
     TorrentManifestChangedError,
@@ -38,10 +43,12 @@ from app.torrents.tracker_activity import (
 
 __all__ = [
     "ManagedTorrentRequestResult",
+    "ExpiredTorrentRequest",
     "ParsedTorrent",
     "PURGE_TORRENT_JOB",
     "TorrentContentFile",
     "TorrentCancellationResult",
+    "TorrentExpirationResult",
     "TorrentDeduplicationError",
     "TorrentDeduplicationRaceError",
     "TorrentMetadataConflictError",
@@ -57,9 +64,12 @@ __all__ = [
     "assign_managed_torrent_account_refs",
     "cancel_owned_torrent_request",
     "create_or_get_torrent_request",
+    "expire_ready_torrents_batch",
+    "extend_ready_torrent_retention",
     "list_torrent_manifest",
     "normalize_torrent",
     "sanitize_torrent",
     "record_tracker_activity",
+    "retention_days_for_popularity",
     "replace_torrent_manifest",
 ]
