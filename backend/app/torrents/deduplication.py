@@ -112,7 +112,11 @@ async def create_or_get_torrent_request(
     if managed_torrent.state is ManagedTorrentState.PURGING:
         raise TorrentPurgeInProgressError("managed torrent purge is in progress")
     if (
-        managed_torrent.state is ManagedTorrentState.READY
+        managed_torrent.state
+        in {
+            ManagedTorrentState.READY,
+            ManagedTorrentState.PURGE_PENDING,
+        }
         and managed_torrent.retention_expires_at is not None
         and _as_utc(timestamp) >= _as_utc(managed_torrent.retention_expires_at)
     ):

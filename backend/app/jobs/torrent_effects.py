@@ -395,6 +395,8 @@ class TorrentEffectHandlers:
                 return
             if torrent.purge_after is None or _as_utc(torrent.purge_after) > _as_utc(now):
                 raise TransientTorrentJobError("torrent_retention_active")
+            if torrent.purge_stop_pending:
+                raise TransientTorrentJobError("torrent_scheduler_stop_pending")
             active_leases = await session.scalar(
                 select(func.count())
                 .select_from(DownloadLease)

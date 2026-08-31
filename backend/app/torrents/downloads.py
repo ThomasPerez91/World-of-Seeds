@@ -394,8 +394,6 @@ class DownloadLeaseManager:
             ready_right = (
                 managed is not None
                 and managed.state is ManagedTorrentState.READY
-                and managed.retention_expires_at is not None
-                and _as_utc(managed.retention_expires_at) > _as_utc(now)
                 and request is not None
                 and request.state is TorrentRequestState.READY
             )

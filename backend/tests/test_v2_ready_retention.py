@@ -191,6 +191,45 @@ async def test_request_one_second_before_expiry_extends_but_exact_or_late_is_rej
         )
 
 
+@pytest.mark.asyncio
+async def test_manual_purge_pending_cannot_reactivate_after_ready_expiration(
+    db_session: AsyncSession,
+) -> None:
+    owner = await _user(db_session, "expired-manual-reactivation")
+    created = await create_or_get_torrent_request(
+        db_session,
+        user_id=owner.id,
+        info_hash="a" * 40,
+        name="Expired manual retention",
+        total_size=25,
+        now=NOW,
+    )
+    created.managed_torrent.state = ManagedTorrentState.READY
+    created.managed_torrent.progress = 1
+    created.request.state = TorrentRequestState.READY
+    await extend_ready_torrent_retention(db_session, created.managed_torrent, now=NOW)
+    expires_at = NOW + timedelta(days=5)
+    cancelled = await cancel_owned_torrent_request(
+        db_session,
+        user_id=owner.id,
+        torrent_request_id=created.request.id,
+        retention_hours=48,
+        now=expires_at - timedelta(hours=1),
+    )
+    assert cancelled is not None and cancelled.purge_after is not None
+    assert cancelled.purge_after > expires_at
+
+    with pytest.raises(TorrentPurgeInProgressError):
+        await create_or_get_torrent_request(
+            db_session,
+            user_id=owner.id,
+            info_hash="a" * 40,
+            name="Expired manual retention",
+            total_size=25,
+            now=expires_at,
+        )
+
+
 async def _seed_due_torrent(
     sessions: async_sessionmaker[AsyncSession],
     *,

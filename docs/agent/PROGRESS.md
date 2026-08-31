@@ -1391,12 +1391,20 @@
 - Added additive, reversible migration `20260831_22` with partial indexes for due retention and
   pending stop intents. Existing READY rows are backfilled from their best-known durable update
   time and historical distinct-owner count.
-- Local validation: PASS — 579 backend tests collected, 572 passed and 7 real-service integrations
+- Local validation: PASS — 582 backend tests collected, 575 passed and 7 real-service integrations
   deferred; full Ruff lint and format checks, strict mypy, 54 frontend tests, TypeScript, production
   build, one Alembic head, offline PostgreSQL upgrade/targeted downgrade SQL, and
   `git diff --check`. The exact request/expiration PostgreSQL race remains covered by CI.
-- PR `#106` functional head `d15268bbc59016734db047b6a853ebf1ed5c764b` contains the exact
-  locally validated tree. GitHub CI and review remain pending on the final documentation head.
+- PR `#106` initial documented head `47ee337489bb25563c666b60e0383d02540ba3d8`: backend,
+  frontend, migrations, dependency and image security passed in CI run `33372522601` (`#236`). The
+  complete-profile smoke exposed a fixture that forced `READY` without the new durable timestamps;
+  the fixture now records a five-day retention deadline before testing HTTP downloads.
+- Review follow-up fixes one P1 and three P2 findings: purge retries until the scheduler has
+  confirmed STOP; an existing lease renews while the reaper transition is pending; manual
+  `PURGE_PENDING` reactivation rejects the exact expired READY boundary; and purge STOPs use a
+  separate bounded qB batch so 200 already-active controls are never truncated. Each path has an
+  explicit regression, including the 200-active-plus-STOP boundary.
+- Corrected remote head, final CI, review resolution, and merge status: pending.
 
 ## Pre-pilot hardening audit for V2-33
 

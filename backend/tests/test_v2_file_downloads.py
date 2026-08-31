@@ -299,6 +299,10 @@ async def test_expired_retention_refuses_new_lease_but_engaged_download_can_rene
         torrent_file_id=torrent_file.id,
         max_concurrent=1,
     )
+    clock[0] = expiry
+    await manager.renew(lease.id)
+    assert lease.expires_at == expiry + timedelta(seconds=60)
+
     torrent.state = ManagedTorrentState.PURGE_PENDING
     torrent.purge_after = expiry
     torrent.desired_active = False
@@ -308,9 +312,9 @@ async def test_expired_retention_refuses_new_lease_but_engaged_download_can_rene
     request.expires_at = expiry
     await db_session.commit()
 
-    clock[0] = expiry
+    clock[0] = expiry + timedelta(seconds=1)
     await manager.renew(lease.id)
-    assert lease.expires_at == expiry + timedelta(seconds=60)
+    assert lease.expires_at == expiry + timedelta(seconds=61)
 
     torrent.state = ManagedTorrentState.READY
     torrent.purge_after = None

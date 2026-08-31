@@ -474,6 +474,49 @@ async def test_purge_handler_removes_content_manifest_and_accounting(
 
 
 @pytest.mark.asyncio
+async def test_purge_handler_waits_for_scheduler_stop_confirmation(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(
+        sessions,
+        state=ManagedTorrentState.READY,
+    )
+    async with sessions() as session, session.begin():
+        torrent = await session.get(ManagedTorrent, torrent_id)
+        request = await session.get(TorrentRequest, request_id)
+        assert torrent is not None and request is not None
+        torrent.state = ManagedTorrentState.PURGE_PENDING
+        torrent.purge_after = NOW - timedelta(seconds=1)
+        torrent.purge_stop_pending = True
+        request.state = TorrentRequestState.EXPIRED
+    inspector = FakeInspector(QBittorrentV2TorrentSnapshot(INFO_HASH, "uploading", 1))
+    effects = TorrentEffectHandlers(
+        sessions,
+        DeploymentAccountRouter(
+            sessions,
+            (
+                TorrentEffectRoute(
+                    TRACKER_ACCOUNT_REF,
+                    QBITTORRENT_ACCOUNT_REF,
+                    FakeAdder(),
+                    inspector,
+                ),
+            ),
+        ),
+        _payloads(tmp_path),
+        _content(tmp_path),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(TransientTorrentJobError) as failure:
+        await effects.purge_torrent(_snapshot(torrent_id, request_id, "PURGE_TORRENT"))
+
+    assert failure.value.error_code == "torrent_scheduler_stop_pending"
+    assert inspector.removed == []
+
+
+@pytest.mark.asyncio
 async def test_purge_handler_waits_for_active_download_lease(
     sessions: async_sessionmaker[AsyncSession],
     tmp_path: Path,

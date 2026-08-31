@@ -270,7 +270,8 @@ def main() -> int:
         file_name,
     )
     sql(
-        "UPDATE managed_torrents SET state = 'READY', progress = 1, updated_at = now() "
+        "UPDATE managed_torrents SET state = 'READY', progress = 1, ready_at = now(), "
+        "retention_expires_at = now() + interval '5 days', updated_at = now() "
         f"WHERE info_hash = '{info_hash}'; "
         "UPDATE torrent_requests SET state = 'READY', ready_at = now(), updated_at = now() "
         f"WHERE id = '{request_id}'::uuid;"
