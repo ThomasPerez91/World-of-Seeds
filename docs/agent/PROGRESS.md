@@ -1395,7 +1395,8 @@
   deferred; full Ruff lint and format checks, strict mypy, 54 frontend tests, TypeScript, production
   build, one Alembic head, offline PostgreSQL upgrade/targeted downgrade SQL, and
   `git diff --check`. The exact request/expiration PostgreSQL race remains covered by CI.
-- PR number, corrected head, and CI status: pending.
+- PR `#106` functional head `d15268bbc59016734db047b6a853ebf1ed5c764b` contains the exact
+  locally validated tree. GitHub CI and review remain pending on the final documentation head.
 
 ## Pre-pilot hardening audit for V2-33
 
