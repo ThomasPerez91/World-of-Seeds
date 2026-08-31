@@ -1404,6 +1404,10 @@
   `PURGE_PENDING` reactivation rejects the exact expired READY boundary; and purge STOPs use a
   separate bounded qB batch so 200 already-active controls are never truncated. Each path has an
   explicit regression, including the 200-active-plus-STOP boundary.
+- Corrected-head CI run `33373651931` (`#237`) passed backend, frontend, migrations, security, image
+  construction, and the complete smoke. Its load phase exposed the second synthetic READY fixture;
+  the 100-account fixture now calls the production retention calculator after qB verification,
+  producing the expected ten-day deadline instead of bypassing the new invariant.
 - Corrected remote head, final CI, review resolution, and merge status: pending.
 
 ## Pre-pilot hardening audit for V2-33
