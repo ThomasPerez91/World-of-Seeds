@@ -242,6 +242,103 @@ describe("UserDownloadsPage", () => {
     view.unmount();
   });
 
+  it("rejoue une invalidation reçue pendant une resynchronisation déjà en vol", async () => {
+    MockWebSocket.instances = [];
+    const initialDeadline = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString();
+    const extendedDeadline = new Date(Date.now() + 72 * 60 * 60 * 1_000).toISOString();
+    let requests = 0;
+    let releaseStale!: () => void;
+    let markStaleStarted!: () => void;
+    const stalePending = new Promise<void>((resolve) => { releaseStale = resolve; });
+    const staleStarted = new Promise<void>((resolve) => { markStaleStarted = resolve; });
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      requests += 1;
+      if (requests === 2) {
+        markStaleStarted();
+        await stalePending;
+      }
+      return response({
+        items: [torrent({
+          state: "ready",
+          progress: 1,
+          retention_expires_at: requests < 3 ? initialDeadline : extendedDeadline,
+        })],
+        offset: 0,
+        limit: 10,
+        total: 1,
+      });
+    }));
+    const view = renderPage();
+
+    expect(await screen.findByTestId("retention-warning")).toBeTruthy();
+    MockWebSocket.instances[0].message({
+      type: "torrent.ready",
+      request_id: torrent().id,
+      occurred_at: "2026-08-31T22:00:00Z",
+    });
+    await staleStarted;
+    MockWebSocket.instances[0].message({
+      type: "torrent.retention_extended",
+      request_id: torrent().id,
+      occurred_at: "2026-08-31T22:00:01Z",
+    });
+
+    releaseStale();
+    await waitFor(() => expect(requests).toBe(3));
+    await waitFor(() => expect(screen.queryByTestId("retention-warning")).toBeNull());
+    view.unmount();
+  });
+
+  it("resynchronise la deadline d’un manifeste ouvert après une prolongation", async () => {
+    MockWebSocket.instances = [];
+    const user = userEvent.setup();
+    const initialDeadline = new Date(Date.now() + 45 * 60 * 1_000).toISOString();
+    const extendedDeadline = new Date(Date.now() + 72 * 60 * 60 * 1_000).toISOString();
+    let manifestRequests = 0;
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("download-manifest")) {
+        manifestRequests += 1;
+        return response({
+          snapshot_id: "d".repeat(64),
+          manifest_version: 1,
+          file_count: 1,
+          total_size: 2,
+          archive_available: true,
+          retention_expires_at: manifestRequests === 1 ? initialDeadline : extendedDeadline,
+          offset: 0,
+          limit: 50,
+          items: [{ id: "root", file_index: 0, relative_path: "root.mkv", size: 2 }],
+        });
+      }
+      return response({
+        items: [torrent({
+          state: "ready",
+          progress: 1,
+          retention_expires_at: manifestRequests === 0 ? initialDeadline : extendedDeadline,
+        })],
+        offset: 0,
+        limit: 10,
+        total: 1,
+      });
+    }));
+    const view = renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Télécharger" }));
+    const fallback = view.container.querySelector(".download-fallback") as HTMLElement;
+    expect(within(fallback).getByText("Suppression imminente dans 45 min")).toBeTruthy();
+    MockWebSocket.instances[0].message({
+      type: "torrent.retention_extended",
+      request_id: torrent().id,
+      occurred_at: "2026-08-31T22:00:00Z",
+    });
+
+    await waitFor(() => expect(manifestRequests).toBe(2));
+    await waitFor(() => expect(within(fallback).queryByTestId("retention-warning")).toBeNull());
+    view.unmount();
+  });
+
   it("conserve l’état EXPIRED backend sans afficher de countdown négatif", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({
       items: [torrent({

@@ -1456,8 +1456,11 @@
   and discards any stale value.
 - Added deterministic boundary, local-clock, extension, shared-owner, expired-state, FR/EN,
   manifest-root, 200-plus-character name, 320/360/375/390/430/768/desktop, and axe coverage.
+- Review hardening queues one follow-up resync when an event overlaps an in-flight list refresh and
+  reloads an open compatibility manifest on a matching shared-deadline extension, so neither view
+  can retain the earlier authoritative value.
 - Local validation is green: 26 targeted backend tests, the complete backend suite (577 passed,
-  7 skipped), 46 targeted frontend tests, the complete frontend suite (75 passed), TypeScript,
+  7 skipped), 48 targeted frontend tests, the complete frontend suite (77 passed), TypeScript,
   Vite production build, Ruff check/format, mypy, and `git diff --check`.
 - No migration, retention-policy recalculation, qBittorrent/NewGreedy mutation, server polling,
   dependency, version change, V2-33 work, or final audit is included.
