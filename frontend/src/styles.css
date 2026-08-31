@@ -1538,6 +1538,76 @@ button:disabled {
   white-space: nowrap;
 }
 
+.torrent-status-content {
+  display: grid;
+  justify-items: start;
+  gap: 0.35rem;
+}
+
+.retention-warning {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: flex-start;
+  gap: 0.45rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid currentcolor;
+  border-radius: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.retention-warning.warning {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+}
+
+.retention-warning.danger {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+}
+
+.retention-warning svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+
+.retention-warning > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.retention-warning strong,
+.retention-warning time {
+  overflow-wrap: anywhere;
+}
+
+.retention-warning strong {
+  color: currentcolor;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.retention-warning time {
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+}
+
+.retention-warning.compact {
+  padding: 0.3rem 0.4rem;
+  border-radius: 0.5rem;
+}
+
+.retention-warning.compact svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+.retention-warning.compact strong {
+  font-size: 0.6rem;
+}
+
 .torrent-size-cell,
 .torrent-date-cell {
   overflow: hidden;
@@ -4025,6 +4095,11 @@ select:focus-visible {
 
   .torrent-table td:first-child::before {
     display: none;
+  }
+
+  .torrent-status-content,
+  .retention-warning {
+    width: 100%;
   }
 
   .torrent-progress-cell > div,

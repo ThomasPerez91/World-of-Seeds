@@ -58,6 +58,7 @@ function snapshot(): TorrentDownloadSnapshotV2 {
     file_count: 2,
     total_size: 6,
     archive_available: true,
+    retention_expires_at: null,
     offset: 0,
     limit: 500,
     items: [
@@ -219,6 +220,7 @@ describe("RecursiveDownloadController", () => {
         file_count: fileCount,
         total_size: 0,
         archive_available: false,
+        retention_expires_at: null,
         offset,
         limit: pageSize,
         items: items(offset),
@@ -233,6 +235,7 @@ describe("RecursiveDownloadController", () => {
         file_count: fileCount,
         total_size: 0,
         archive_available: false,
+        retention_expires_at: null,
         offset: 0,
         limit: pageSize,
         items: items(0),

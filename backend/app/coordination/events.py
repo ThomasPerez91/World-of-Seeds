@@ -15,6 +15,7 @@ class TorrentEventType(StrEnum):
     STALLED = "torrent.stalled"
     RESUMED = "torrent.resumed"
     READY = "torrent.ready"
+    RETENTION_EXTENDED = "torrent.retention_extended"
     FAILED = "torrent.failed"
     CANCELLED = "torrent.cancelled"
     EXPIRED = "torrent.expired"

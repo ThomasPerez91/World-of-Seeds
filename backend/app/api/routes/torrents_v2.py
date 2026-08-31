@@ -103,6 +103,14 @@ RequestState = Literal["requested", "active", "ready", "cancelled", "expired", "
 PressureState = Literal["normal", "warning", "critical"]
 
 
+def _utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _download_rate_limiter(request: Request) -> DownloadRateLimiter:
     limiter = request.app.state.download_rate_limiter
     if not isinstance(limiter, DownloadRateLimiter):
@@ -160,6 +168,11 @@ def _response(
         state=state,
         progress=torrent.progress,
         error_code=(error_code or "torrent_failed") if state == "error" else None,
+        retention_expires_at=(
+            _utc_datetime(torrent.retention_expires_at)
+            if state == "ready" and torrent.state is ManagedTorrentState.READY
+            else None
+        ),
         created_at=request.created_at,
         updated_at=max(request.updated_at, torrent.updated_at),
     )
@@ -282,6 +295,7 @@ async def get_torrent_download_manifest(
             managed_torrent.manifest_total_size <= archive_max_bytes
             and managed_torrent.manifest_file_count <= MAX_MANAGED_ARCHIVE_ENTRIES
         ),
+        retention_expires_at=_utc_datetime(managed_torrent.retention_expires_at),
         offset=offset,
         limit=limit,
         items=[
@@ -707,6 +721,7 @@ async def create_torrent_request(
 
     staged_key: uuid.UUID | None = None
     job_created = False
+    retention_event_targets: tuple[tuple[uuid.UUID, uuid.UUID], ...] = ()
     try:
         async with db.begin():
             result = await create_or_get_torrent_request(
@@ -762,6 +777,23 @@ async def create_torrent_request(
                 )
                 await db.flush()
                 job_created = True
+            if result.retention_extended:
+                retention_event_targets = tuple(
+                    (
+                        request.user_id,
+                        request.id,
+                    )
+                    for request in (
+                        await db.scalars(
+                            select(TorrentRequest)
+                            .where(
+                                TorrentRequest.managed_torrent_id == result.managed_torrent.id,
+                                TorrentRequest.state.in_(ACTIVE_REQUEST_STATES),
+                            )
+                            .order_by(TorrentRequest.user_id, TorrentRequest.id)
+                        )
+                    ).all()
+                )
     except HTTPException:
         if staged_key is not None:
             await run_in_threadpool(payload_store.remove, staged_key)
@@ -810,6 +842,15 @@ async def create_torrent_request(
             TorrentRealtimeEvent(
                 TorrentEventType.REQUESTED,
                 result.request.id,
+                datetime.now(UTC),
+            ),
+        )
+    for retention_user_id, retention_request_id in retention_event_targets:
+        await redis.publish_torrent_event(
+            retention_user_id,
+            TorrentRealtimeEvent(
+                TorrentEventType.RETENTION_EXTENDED,
+                retention_request_id,
                 datetime.now(UTC),
             ),
         )

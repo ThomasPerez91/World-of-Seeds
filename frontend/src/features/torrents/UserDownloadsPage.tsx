@@ -18,6 +18,7 @@ import {
   type RecursiveTransferProgress,
   supportsRecursiveDirectoryDownload,
 } from "./recursiveDownload";
+import { RetentionWarning } from "./RetentionWarning";
 
 const PAGE_SIZE = 10;
 const FALLBACK_PAGE_SIZE = 50;
@@ -100,9 +101,14 @@ function TorrentRow({
         {error !== null && <small role="alert">{error}</small>}
       </td>
       <td data-label={t("downloads.status")}>
-        <span className={`torrent-primary-state ${torrent.state}`}>
-          {t(stateLabels[torrent.state])}
-        </span>
+        <div className="torrent-status-content">
+          <span className={`torrent-primary-state ${torrent.state}`}>
+            {t(stateLabels[torrent.state])}
+          </span>
+          {torrent.state === "ready" && (
+            <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />
+          )}
+        </div>
       </td>
       <td className="torrent-size-cell" data-label={t("files.size")}>{formatBytes(torrent.total_size)}</td>
       <td className="torrent-progress-cell" data-label={t("downloads.progress")}>
@@ -173,6 +179,8 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
     name: string;
     snapshot: TorrentDownloadManifestPageV2;
   } | null>(null);
+  const fallbackRef = useRef(fallback);
+  fallbackRef.current = fallback;
   const [fallbackLoading, setFallbackLoading] = useState(false);
 
   useEffect(() => () => controllerRef.current?.cancel(), []);
@@ -209,11 +217,62 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
     let reconnectTimer: number | null = null;
     let hasConnected = false;
     let refreshPending = false;
+    let refreshQueued = false;
+    let fallbackRefreshPending = false;
+    let fallbackRefreshQueued = false;
+
+    const runRefresh = (signal?: AbortSignal) => {
+      if (!active) return;
+      refreshPending = true;
+      void load(offset, signal).finally(() => {
+        refreshPending = false;
+        if (!refreshQueued) return;
+        refreshQueued = false;
+        runRefresh();
+      });
+    };
 
     const refreshFromEvent = () => {
-      if (refreshPending || !active) return;
-      refreshPending = true;
-      void load(offset).finally(() => { refreshPending = false; });
+      if (!active) return;
+      if (refreshPending) {
+        refreshQueued = true;
+        return;
+      }
+      runRefresh();
+    };
+
+    const refreshOpenFallback = () => {
+      const current = fallbackRef.current;
+      if (!active || current === null) return;
+      if (fallbackRefreshPending) {
+        fallbackRefreshQueued = true;
+        return;
+      }
+      fallbackRefreshPending = true;
+      const targetId = current.torrentId;
+      void api.getTorrentDownloadManifestPageV2(
+        targetId,
+        current.snapshot.offset,
+        current.snapshot.snapshot_id,
+        undefined,
+        FALLBACK_PAGE_SIZE,
+      ).then((snapshot) => {
+        if (!active) return;
+        setFallback((latest) => latest?.torrentId === targetId ? { ...latest, snapshot } : latest);
+      }).catch((caught: unknown) => {
+        if (!active) return;
+        setFallback((latest) => latest?.torrentId === targetId ? null : latest);
+        if (caught instanceof ApiError && caught.status === 401) {
+          onSessionExpired();
+          return;
+        }
+        feedback.toast({ tone: "error", message: apiError(caught, "downloads.manifestFailed") });
+      }).finally(() => {
+        fallbackRefreshPending = false;
+        if (!fallbackRefreshQueued) return;
+        fallbackRefreshQueued = false;
+        refreshOpenFallback();
+      });
     };
 
     const connect = () => {
@@ -225,7 +284,12 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       };
       socket.onmessage = (event) => {
         const message = parseTorrentRealtimeMessage(event.data);
-        if (message !== null && message.type !== "heartbeat") refreshFromEvent();
+        if (message === null || message.type === "heartbeat") return;
+        refreshFromEvent();
+        if (
+          message.type === "torrent.retention_extended"
+          && fallbackRef.current?.torrentId === message.request_id
+        ) refreshOpenFallback();
       };
       socket.onerror = () => socket?.close();
       socket.onclose = () => {
@@ -234,7 +298,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       };
     };
 
-    void load(offset, controller.signal);
+    runRefresh(controller.signal);
     connect();
     return () => {
       active = false;
@@ -242,7 +306,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, [load, offset]);
+  }, [apiError, feedback, load, offset, onSessionExpired]);
 
   async function submitBatch(fileList: FileList | File[]) {
     if (uploading) return;
@@ -635,6 +699,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
               {t("common.close")}
             </button>
           </header>
+          <RetentionWarning retentionExpiresAt={fallback.snapshot.retention_expires_at} />
           {fallback.snapshot.archive_available && (
             <a
               className="download-fallback-archive"

@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -216,6 +217,122 @@ async def test_v2_listing_exposes_only_bounded_error_code(
     assert response.json()["items"][0]["error_code"] == "torrent_failed"
     assert "info_hash" not in response.json()["items"][0]
     assert "storage" not in response.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_ready_shared_deadline_is_authoritative_secret_free_and_realtime_extended(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    headers = await login(client)
+    redis = RecordingRedis()
+    app.state.redis_coordinator = redis
+    first = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+    assert first.status_code == 201
+
+    managed = await db_session.scalar(select(ManagedTorrent))
+    first_request = await db_session.scalar(select(TorrentRequest))
+    assert managed is not None and first_request is not None
+    ready_at = datetime.now(UTC)
+    initial_deadline = ready_at + timedelta(days=5)
+    managed.state = ManagedTorrentState.READY
+    managed.progress = 1
+    managed.ready_at = ready_at
+    managed.retention_expires_at = initial_deadline
+    first_request.state = TorrentRequestState.READY
+    first_request.ready_at = ready_at
+    second_owner = User(
+        username="alice",
+        password_hash=hash_password("correct-horse-battery"),
+    )
+    db_session.add(second_owner)
+    await db_session.flush()
+    owner_id = owner.id
+    owner_username = owner.username
+    second_owner_id = second_owner.id
+    await db_session.commit()
+    redis.events.clear()
+
+    second_headers = await login(client, "alice")
+    second = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=second_headers,
+    )
+    assert second.status_code == 201, second.text
+    extended_deadline = ready_at + timedelta(days=6)
+    assert datetime.fromisoformat(second.json()["retention_expires_at"]) == extended_deadline
+
+    retention_events = [
+        (user_id, event.request_id)
+        for user_id, event in redis.events
+        if event.event_type is TorrentEventType.RETENTION_EXTENDED
+    ]
+    assert {user_id for user_id, _ in retention_events} == {owner_id, second_owner_id}
+    assert len(retention_events) == 2
+    assert all(
+        set(event.payload()) == {"type", "request_id", "occurred_at"}
+        for _, event in redis.events
+        if event.event_type is TorrentEventType.RETENTION_EXTENDED
+    )
+
+    db_session.expire_all()
+    second_listing = await client.get("/api/v2/torrents")
+    assert second_listing.status_code == 200
+    second_item = second_listing.json()["items"][0]
+    assert datetime.fromisoformat(second_item["retention_expires_at"]) == extended_deadline
+
+    await login(client, owner_username)
+    first_listing = await client.get("/api/v2/torrents")
+    assert first_listing.status_code == 200
+    first_item = first_listing.json()["items"][0]
+    assert first_item["retention_expires_at"] == second_item["retention_expires_at"]
+    forbidden = {
+        "info_hash",
+        "storage_key",
+        "tracker_account_ref",
+        "qbittorrent_account_ref",
+        "passkey",
+        "path",
+    }
+    assert forbidden.isdisjoint(first_item)
+
+
+@pytest.mark.asyncio
+async def test_expired_request_never_exposes_a_stale_countdown(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    expired_at = datetime.now(UTC) - timedelta(minutes=1)
+    managed = ManagedTorrent(
+        info_hash="9" * 40,
+        name="Expired",
+        total_size=100,
+        state=ManagedTorrentState.READY,
+        progress=1,
+        ready_at=expired_at - timedelta(days=5),
+        retention_expires_at=expired_at,
+    )
+    request = TorrentRequest(
+        user_id=owner.id,
+        managed_torrent=managed,
+        state=TorrentRequestState.EXPIRED,
+    )
+    db_session.add(request)
+    await db_session.commit()
+    await login(client)
+
+    response = await client.get("/api/v2/torrents")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["state"] == "expired"
+    assert response.json()["items"][0]["retention_expires_at"] is None
 
 
 @pytest.mark.asyncio

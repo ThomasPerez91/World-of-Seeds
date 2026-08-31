@@ -412,6 +412,9 @@ async def test_download_manifest_is_owned_paginated_and_stable(
     assert manifest["file_count"] == 1
     assert manifest["total_size"] == len(CONTENT)
     assert manifest["archive_available"] is True
+    assert datetime.fromisoformat(manifest["retention_expires_at"]) == datetime(
+        2030, 8, 1, tzinfo=UTC
+    )
     assert manifest["items"] == [
         {
             "id": str(torrent_file_id),
@@ -421,6 +424,14 @@ async def test_download_manifest_is_owned_paginated_and_stable(
         }
     ]
     assert len(manifest["snapshot_id"]) == 64
+    assert {
+        "info_hash",
+        "storage_key",
+        "tracker_account_ref",
+        "qbittorrent_account_ref",
+        "passkey",
+        "path",
+    }.isdisjoint(manifest)
 
     replay = await client.get(base, params={"snapshot": manifest["snapshot_id"]})
     assert replay.status_code == 200

@@ -1423,6 +1423,48 @@
   smoke, bounded 100-account load, WebSockets, and monitoring are green. No review thread remains
   open. Squash merge into `develop_V2`: `552c4618ce26b89ac772e558631685dec7aa3d9c`.
 
+## V2-32D — NewGreedy purge cleanup (blocked)
+
+- Source inspection of NewGreedy v1.7.5 at commit
+  `bc864011c1652ac9388f44c6f322bffdf87c2257` confirmed that
+  `DELETE /api/stats/{ih}` truncates every supplied hash to eight hexadecimal characters.
+- NewGreedy's torrent statistics are keyed globally by that short prefix inside one service
+  instance, without route/passkey isolation, and the web endpoint edits the persisted JSON without
+  removing the proxy's authoritative in-memory entry. A later flush may restore the deleted row.
+- Exact, durable SHA-1 cleanup is therefore unsupported. WOS does not use a global reset, direct
+  storage edit, or prefix deletion as a workaround. V2-32D remains blocked until NewGreedy exposes
+  a full-hash, idempotent, in-memory-and-persistent deletion contract.
+- V2-32D is not a prerequisite for V2-32E or the Rise2 pilot unless an explicit later decision
+  changes that ordering. The existing draft V2-33 PR `#103` remains untouched and paused.
+
+## V2-32E — Visual READY expiration warnings
+
+- Added the existing PostgreSQL `retention_expires_at` deadline to owner-filtered V2 torrent-list,
+  create, and manifest responses. The field is normalized as an absolute UTC timestamp and no
+  infohash, storage key, tracker/qB account reference, passkey, URL, or host path is exposed.
+- Added semantic orange warnings from the exact 48-hour boundary through more than 24 hours, then
+  danger-red warnings from the exact 24-hour boundary until expiry. Icon, relative text, and an
+  absolute localized date make the warning independent of color.
+- The downloads list uses one compact badge per READY torrent. The compatibility manifest shows
+  one detailed warning at its root rather than repeating it for every file; ordinary file-manager
+  content outside the managed-torrent lifecycle remains unchanged.
+- A local deadline-aligned timer updates presentation without server polling or `aria-live`
+  countdown announcements. It hides an elapsed countdown but never changes READY to EXPIRED;
+  PostgreSQL and authoritative API/WebSocket resynchronization remain responsible for state.
+- Added the closed, secret-free `torrent.retention_extended` event. A real shared-deadline extension
+  publishes an invalidation to every active owner so each client reloads the same physical deadline
+  and discards any stale value.
+- Added deterministic boundary, local-clock, extension, shared-owner, expired-state, FR/EN,
+  manifest-root, 200-plus-character name, 320/360/375/390/430/768/desktop, and axe coverage.
+- Review hardening queues one follow-up resync when an event overlaps an in-flight list refresh and
+  reloads an open compatibility manifest on a matching shared-deadline extension, so neither view
+  can retain the earlier authoritative value.
+- Local validation is green: 26 targeted backend tests, the complete backend suite (577 passed,
+  7 skipped), 48 targeted frontend tests, the complete frontend suite (77 passed), TypeScript,
+  Vite production build, Ruff check/format, mypy, and `git diff --check`.
+- No migration, retention-policy recalculation, qBittorrent/NewGreedy mutation, server polling,
+  dependency, version change, V2-33 work, or final audit is included.
+
 ## Pre-pilot hardening audit for V2-33
 
 - Confirmed and fixed the public monitoring boundary: Rise2 ingress returns `404` for
@@ -1480,6 +1522,9 @@
 
 ## Next task
 
-- V2-32C is reviewed, green, and merged. The next roadmap task is `V2-33 — Pilote Rise2`.
+- V2-32E is the only active task. After its review, green CI, and merge, the next roadmap task is
+  `V2-33 — Pilote Rise2`; do not start it automatically.
+- V2-32D remains blocked by NewGreedy v1.7.5 and is not a pilot prerequisite unless explicitly
+  decided otherwise.
 - Do not continue, rebase, close, or merge the existing V2-33 draft PR `#103` automatically; its
   host phase requires a separate explicit decision and Rise2 authority.
