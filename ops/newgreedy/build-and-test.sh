@@ -246,13 +246,11 @@ if grep -RIlE '(C411|passkey|BEGIN ([A-Z]+ )?PRIVATE KEY)' "$context_dir" | grep
     fail "the sanitized build context contains secret-like material"
 fi
 
-base_digest="$(
-    docker buildx imagetools inspect "$base_tag" \
-        | awk '$1 == "Digest:" {print $2; exit}'
-)"
-[[ "$base_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "could not resolve the Python base digest"
-python_base="$base_tag@$base_digest"
-echo "Resolved Python base: $python_base"
+python_base="$(bash "$workspace/ops/newgreedy/resolve-python-base.sh" "$base_tag")" \
+    || fail "Python base resolution failed; aborting before dependency resolution or build"
+base_digest="${python_base##*@}"
+[[ "$python_base" =~ ^docker\.io/library/python@sha256:[0-9a-f]{64}$ ]] \
+    || fail "the Python base resolver did not return an immutable reference"
 
 docker run --rm --platform linux/amd64 \
     --mount "type=bind,src=$upstream_dir,dst=/src,readonly" \
