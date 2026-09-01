@@ -4,16 +4,14 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Literal
 
-from sqlalchemy import and_, case, func, literal, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import (
     ManagedTorrent,
     ManagedTorrentState,
-    SchedulerState,
     TorrentRequest,
     TorrentRequestState,
     User,
@@ -64,10 +62,10 @@ async def load_torrent_queue_visibility(
 ) -> Mapping[uuid.UUID, TorrentQueueVisibility]:
     """Load page-scoped visibility with one global, window-ranked queue query.
 
-    The numeric estimate is the physical torrent's next consideration rank from the
-    scheduler's persisted circular scan cursor. It deliberately does not claim to be a FIFO
-    admission order: weighted fairness, deficit, aging, size, cooldown, shared ownership and
-    available slots remain decisions of the real scheduler.
+    The numeric estimate uses the scheduler's real eligible physical backlog and deterministic
+    database scan order. It deliberately stays stable while the circular scan cursor advances and
+    does not claim to be a FIFO admission order: weighted fairness, deficit, aging, size, cooldown,
+    shared ownership and available slots remain decisions of the real scheduler.
     """
 
     timestamp = _utc(now)
@@ -84,22 +82,6 @@ async def load_torrent_queue_visibility(
     }
     if not waiting_ids:
         return visibility
-
-    scheduler = await session.get(SchedulerState, 1)
-    cursor_bucket: ColumnElement[Any] = literal(0)
-    if (
-        scheduler is not None
-        and scheduler.scan_cursor_created_at is not None
-        and scheduler.scan_cursor_id is not None
-    ):
-        after_cursor = or_(
-            ManagedTorrent.created_at > scheduler.scan_cursor_created_at,
-            and_(
-                ManagedTorrent.created_at == scheduler.scan_cursor_created_at,
-                ManagedTorrent.id > scheduler.scan_cursor_id,
-            ),
-        )
-        cursor_bucket = case((after_cursor, 0), else_=1)
 
     database_now = (
         timestamp.replace(tzinfo=None) if session.get_bind().dialect.name == "sqlite" else timestamp
@@ -119,7 +101,7 @@ async def load_torrent_queue_visibility(
         select(
             ManagedTorrent.id.label("managed_torrent_id"),
             func.row_number()
-            .over(order_by=(cursor_bucket, ManagedTorrent.created_at, ManagedTorrent.id))
+            .over(order_by=(ManagedTorrent.created_at, ManagedTorrent.id))
             .label("position_estimate"),
             func.count().over().label("total_estimate"),
         )

@@ -267,7 +267,6 @@ describe("UserDownloadsPage", () => {
     expect(await screen.findByText("Position estimée : ~9")).toBeTruthy();
     MockWebSocket.instances[0].message({
       type: "torrent.queue_changed",
-      request_id: torrent().id,
       occurred_at: "2026-09-01T12:00:00Z",
     });
 

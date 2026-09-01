@@ -155,6 +155,7 @@ class SchedulerRuntime:
             }
             _persist_desired_controls(torrents, controls, generation=generation)
             realtime_targets = _control_event_targets(torrents, requests, previous_active)
+            queue_changed = bool(realtime_targets)
             state.desired_generation = generation
             await persist_scheduler_ledger(session, state, selection.ledger, now=now)
 
@@ -197,6 +198,8 @@ class SchedulerRuntime:
                 user_id,
                 TorrentRealtimeEvent(event_type, request_id, applied_at),
             )
+        if queue_changed:
+            await self._redis.publish_torrent_queue_changed(applied_at)
         return SchedulerCycleResult(
             leader=True,
             generation=generation,
@@ -449,11 +452,4 @@ def _control_event_targets(
         else:
             event_type = TorrentEventType.PAUSED
         targets.append((request.user_id, request.id, event_type))
-    if targets:
-        invalidated_user_ids = {user_id for user_id, _, _ in targets}
-        for request in requests:
-            if request.user_id in invalidated_user_ids:
-                continue
-            targets.append((request.user_id, request.id, TorrentEventType.QUEUE_CHANGED))
-            invalidated_user_ids.add(request.user_id)
     return tuple(targets)

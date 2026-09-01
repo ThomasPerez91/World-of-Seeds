@@ -73,7 +73,7 @@ ou migration additive), **ÉLEVÉ** (concurrence, stockage, sécurité, déploie
 | V2-32C | ÉLEVÉ | V2-22,V2-28A,V2-32B | Rétention READY automatique : durée selon popularité historique, expiration PostgreSQL bornée, leases et arrêt qB durable avant purge. |
 | V2-32D | BLOQUÉ | V2-32C | Nettoyage exact NewGreedy lors de la purge définitive ; bloqué tant que NewGreedy v1.7.5 ne fournit pas une suppression durable par SHA-1 complet. Non bloquant pour V2-32E, V2-32F et le pilote sauf décision contraire explicite. |
 | V2-32E | MOYEN | V2-28D,V2-32A,V2-32B,V2-32C | Avertissements visuels FR/EN avant expiration READY depuis la deadline PostgreSQL autoritaire, avec timer local accessible et resynchronisation WebSocket. |
-| V2-32F | MOYEN | V2-20,V2-28C,V2-28D,V2-28E,V2-32A,V2-32B | Visibilité FR/EN des files : rang torrent indicatif fondé sur le curseur durable du scheduler non-FIFO et positions exactes de la file locale navigateur. |
+| V2-32F | MOYEN | V2-20,V2-28C,V2-28D,V2-28E,V2-32A,V2-32B | Visibilité FR/EN des files : rang indicatif du backlog physique éligible au scheduler non-FIFO et positions exactes de la file locale navigateur. |
 | V2-33 | ÉLEVÉ | V2-30,V2-31,V2-32,V2-32A,V2-32B,V2-32C,V2-32E,V2-32F | Pilote Rise2 : données de test puis comptes pilotes, critères go/no-go, observation et retour arrière vérifié. |
 | V2-34 | ÉLEVÉ | V2-33 | Release candidate V2 : gel fonctionnel, migrations expand/contract, runbook, compatibilité digest précédent et validation complète. |
 | V2-35 | ÉLEVÉ | V2-34 | Release V2 stable : SemVer 2.0.0 seulement après approbation, bascule Rise2 progressive et conservation de la V1 pendant la fenêtre de rollback. |
@@ -341,14 +341,16 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 
 ## V2-32F — Visibilité des files d'attente
 
-- Exposer depuis PostgreSQL un rang torrent indicatif partagé par `ManagedTorrent`, calculé dans
-  l'ordre circulaire de prochaine considération du curseur durable réellement utilisé par le
-  scheduler. Ce rang ne prédit pas la sélection : équité pondérée, déficit, vieillissement, octets
-  restants, slots, stall et cooldown restent exclusivement évalués par le scheduler réel.
+- Exposer depuis PostgreSQL un rang torrent indicatif partagé par `ManagedTorrent`, calculé sur
+  l'ensemble éligible dans l'ordre déterministe `(created_at, id)` réellement scanné par le
+  scheduler. Le rang reste stable pendant la rotation de son curseur et ne prédit pas la sélection :
+  équité pondérée, déficit, vieillissement, octets restants, slots, stall et cooldown restent
+  exclusivement évalués par le scheduler réel.
 - Garder le calcul en lecture seule, paginé côté réponse, sans N+1, sans mutation qBittorrent et
   sans exposer infohash, clé de stockage, ledger, déficit, autre propriétaire, route ou secret.
-  Une sélection significative publie une invalidation WebSocket au plus une fois par utilisateur
-  concerné ; le navigateur resynchronise l'API et ne calcule jamais le rang.
+  Une sélection significative publie une seule invalidation WebSocket globale secret-safe, y
+  compris pour les propriétaires hors de la fenêtre scheduler courante ; le navigateur
+  resynchronise l'API et ne calcule jamais le rang.
 - Afficher les positions exactes uniquement dans la file locale bornée que le contrôleur de
   récupération navigateur maîtrise réellement : fichiers actifs, en attente, en pause, terminés,
   échoués ou annulés. Aucune nouvelle file HTTP durable serveur n'est créée.

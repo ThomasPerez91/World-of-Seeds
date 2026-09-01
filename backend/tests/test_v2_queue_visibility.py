@@ -89,7 +89,7 @@ async def _queued(
 
 
 @pytest.mark.asyncio
-async def test_estimate_uses_durable_circular_scan_order_and_is_read_only(
+async def test_estimate_uses_stable_scheduler_scan_order_and_is_read_only(
     database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     engine, sessions = database
@@ -131,11 +131,24 @@ async def test_estimate_uses_durable_circular_scan_order_and_is_read_only(
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", count_statement)
 
-    assert result[second.id].position_estimate == 1
-    assert result[third.id].position_estimate == 2
-    assert result[first.id].position_estimate == 3
+    assert result[first.id].position_estimate == 1
+    assert result[second.id].position_estimate == 2
+    assert result[third.id].position_estimate == 3
     assert {item.total_estimate for item in result.values()} == {3}
-    assert visibility_queries == 2
+    assert visibility_queries == 1
+    initial_positions = {torrent_id: item.position_estimate for torrent_id, item in result.items()}
+    async with sessions() as session, session.begin():
+        scheduler = await session.get(SchedulerState, 1)
+        assert scheduler is not None
+        scheduler.scan_cursor_created_at = third.created_at
+        scheduler.scan_cursor_id = third.id
+    async with sessions() as session:
+        torrents = tuple((await session.scalars(select(ManagedTorrent))).all())
+        after_cursor_advance = await load_torrent_queue_visibility(session, torrents, now=NOW)
+    assert {
+        torrent_id: item.position_estimate for torrent_id, item in after_cursor_advance.items()
+    } == initial_positions
+
     async with sessions() as session:
         scheduler = await session.get(SchedulerState, 1)
         torrents = tuple((await session.scalars(select(ManagedTorrent))).all())

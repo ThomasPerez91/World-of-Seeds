@@ -15,7 +15,7 @@ from typing import Literal, Protocol, cast
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from app.coordination.events import TorrentRealtimeEvent
+from app.coordination.events import TorrentEventType, TorrentRealtimeEvent
 from app.core.config import Settings
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
@@ -65,9 +65,9 @@ class RedisSubscriptionUnavailable(RuntimeError):
 
 
 class TorrentEventSubscription:
-    def __init__(self, pubsub: RedisPubSub, channel: str) -> None:
+    def __init__(self, pubsub: RedisPubSub, channels: tuple[str, ...]) -> None:
         self._pubsub = pubsub
-        self._channel = channel
+        self._channels = channels
         self._closed = False
 
     async def next_event(self, *, timeout_seconds: float) -> TorrentRealtimeEvent | None:
@@ -94,7 +94,7 @@ class TorrentEventSubscription:
             return
         self._closed = True
         try:
-            await self._pubsub.unsubscribe(self._channel)
+            await self._pubsub.unsubscribe(*self._channels)
             await self._pubsub.aclose()
         except (RedisError, OSError, TimeoutError):
             return
@@ -193,6 +193,10 @@ class RedisCoordinator:
     def _torrent_event_channel(self, user_id: uuid.UUID) -> str:
         return self._key("events", "torrent", user_id.hex)
 
+    @property
+    def _torrent_queue_event_channel(self) -> str:
+        return f"{self._namespace}:events:torrent-queue"
+
     async def check_health(self) -> RedisHealth:
         checked_at = datetime.now(UTC)
         if self._client is None:
@@ -249,30 +253,49 @@ class RedisCoordinator:
             return False
         return True
 
+    async def publish_torrent_queue_changed(self, occurred_at: datetime) -> bool:
+        if self._client is None:
+            return False
+        event = TorrentRealtimeEvent(TorrentEventType.QUEUE_CHANGED, None, occurred_at)
+        try:
+            await self._client.publish(self._torrent_queue_event_channel, event.encode())
+        except (RedisError, OSError, TimeoutError):
+            return False
+        return True
+
     async def subscribe_torrent_events(
         self,
         user_id: uuid.UUID,
     ) -> TorrentEventSubscription | None:
         if self._client is None:
             return None
-        channel = self._torrent_event_channel(user_id)
+        channels = (self._torrent_event_channel(user_id), self._torrent_queue_event_channel)
         pubsub = self._client.pubsub()
         try:
-            await pubsub.subscribe(channel)
-            confirmation = await pubsub.get_message(False, 1)
+            await pubsub.subscribe(*channels)
+            confirmed: set[str] = set()
+            for _ in channels:
+                confirmation = await pubsub.get_message(False, 1)
+                if (
+                    confirmation is None
+                    or confirmation.get("type") != "subscribe"
+                    or confirmation.get("channel") not in channels
+                ):
+                    raise RedisSubscriptionUnavailable("torrent subscription was not confirmed")
+                confirmed.add(str(confirmation["channel"]))
         except (RedisError, OSError, TimeoutError):
             with suppress(RedisError, OSError, TimeoutError):
                 await pubsub.aclose()
             return None
-        if (
-            confirmation is None
-            or confirmation.get("type") != "subscribe"
-            or confirmation.get("channel") != channel
-        ):
+        except RedisSubscriptionUnavailable:
             with suppress(RedisError, OSError, TimeoutError):
                 await pubsub.aclose()
             return None
-        return TorrentEventSubscription(pubsub, channel)
+        if confirmed != set(channels):
+            with suppress(RedisError, OSError, TimeoutError):
+                await pubsub.aclose()
+            return None
+        return TorrentEventSubscription(pubsub, channels)
 
     async def cache_lookup(self, namespace: str, key: str) -> CacheLookup:
         redis_key = self._key("cache", namespace, key)

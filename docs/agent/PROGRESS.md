@@ -1471,19 +1471,20 @@
   owner-filtered V2 torrent responses. READY, EXPIRED, CANCELLED, and ERROR requests expose no
   queue position; selected, stalled, and cooling torrents expose only their accurate qualitative
   state rather than a misleading normal rank.
-- The numeric value is explicitly an estimate of one physical `ManagedTorrent`'s next
-  consideration rank in the scheduler's persisted circular scan order. One SQL window query ranks
-  the eligible physical waiting queue from `SchedulerState.scan_cursor_*` and returns only the
-  managed torrents present on the requested API page; one scheduler-state lookup plus that query
-  replaces any per-row lookup. It does not copy or predict weighted-fair selection.
+- The numeric value is explicitly an estimate of one physical `ManagedTorrent`'s rank in the
+  eligible backlog's deterministic `(created_at, id)` order, which is the bounded database order
+  scanned by the real scheduler. One SQL window query ranks the physical waiting set and returns
+  only managed torrents present on the requested API page. The public rank deliberately does not
+  rotate with the durable scan cursor and does not copy or predict weighted-fair selection.
 - All beneficiaries of a shared managed torrent receive the same physical estimate. The response
   contains no infohash, storage key, scheduler ledger/deficit, owner identity, qB/C411 route,
   passkey, tracker URL, or host path, and the read-only calculation cannot change scheduler state
   or qBittorrent controls.
-- Added the secret-free `torrent.queue_changed` invalidation after significant scheduler selection
-  changes. Existing STARTED/PAUSED events remain sufficient for their owners; remaining affected
-  owners receive at most one queue invalidation per scheduler cycle and resynchronize with the
-  authoritative GET. Progress and scan-cursor micro-changes do not create event storms or polling.
+- Added one secret-free global `torrent.queue_changed` invalidation after significant scheduler
+  selection changes. Every connected owner, including those beyond the current 200-torrent
+  scheduler window, resynchronizes with the authoritative GET; the global payload contains no
+  request or user identifier. Progress and scan-cursor micro-changes do not create events or
+  polling, and a selection cycle publishes at most one global invalidation.
 - “Mes téléchargements” now presents the estimated rank, “Prochainement” for rank one, qualitative
   selected/stall/cooldown labels, a non-FIFO disclaimer, and the total estimated waiting backlog in
   centralized FR/EN copy with text plus icon and existing design tokens.
@@ -1494,7 +1495,8 @@
 - Added a concise FR/EN atomic-torrent explanation. V2-32F does not add qBittorrent per-file
   priority or selective BitTorrent download: file choice remains available only after READY for
   transfer from the existing manifest to the user's device.
-- Coverage includes circular cursor/restart state, one and multiple waiting torrents, a 1,005-item
+- Coverage includes stable ranks across circular-cursor movement/restart, one and multiple waiting
+  torrents, a 1,005-item
   backlog, shared ownership, selected/stalled/cooldown/READY states, read-only query count,
   secret-safe API output, scheduler invalidation bounds, positions 1/9/158/1,005, authoritative
   WebSocket resync, local positions 1/2/3 with two active files, FR/EN, 200-plus-character names,
@@ -1509,6 +1511,11 @@
   tests, dependency/image security, production and V2 images, complete Compose smoke, bounded
   load, WebSocket, and monitoring validation are green. No review thread or review finding is
   open on that head.
+- PR `#108` review follow-up fixes both P2 findings: public ranks now stay stable while the bounded
+  scheduler scan cursor rotates, and one identifier-free global invalidation reaches connected
+  owners both inside and outside the current 200-torrent control window after a real selection
+  change. Explicit regressions cover cursor movement, global fan-out, closed payload shape, and one
+  event per selection cycle without a database owner scan.
 - No migration, dependency, configuration, version, NewGreedy, retention-policy, deployment, or
   V2-33 change is included. V2-32D remains blocked and non-blocking; draft PR `#103` remains
   untouched.

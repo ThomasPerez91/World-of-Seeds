@@ -113,7 +113,8 @@ export type TorrentRealtimeEventType =
   | "torrent.expired";
 
 export type TorrentRealtimeMessage =
-  | { type: TorrentRealtimeEventType; request_id: string; occurred_at: string }
+  | { type: Exclude<TorrentRealtimeEventType, "torrent.queue_changed">; request_id: string; occurred_at: string }
+  | { type: "torrent.queue_changed"; occurred_at: string }
   | { type: "heartbeat" | "resync_required" };
 
 const torrentRealtimeEventTypes = new Set<TorrentRealtimeEventType>([
@@ -142,6 +143,14 @@ export function parseTorrentRealtimeMessage(data: unknown): TorrentRealtimeMessa
   const record = payload as Record<string, unknown>;
   if (record.type === "heartbeat" || record.type === "resync_required") {
     return Object.keys(record).length === 1 ? { type: record.type } : null;
+  }
+  if (record.type === "torrent.queue_changed") {
+    if (
+      typeof record.occurred_at !== "string"
+      || !Number.isFinite(Date.parse(record.occurred_at))
+      || Object.keys(record).length !== 2
+    ) return null;
+    return { type: record.type, occurred_at: record.occurred_at };
   }
   if (
     typeof record.type !== "string" ||

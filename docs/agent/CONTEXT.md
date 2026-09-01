@@ -214,9 +214,10 @@ The stable V1 maintenance release documented here is `1.3.3`.
 ## Torrent user experience
 
 - A torrent queue number exposed to users is always an estimate of the physical
-  `ManagedTorrent`'s next consideration rank from the scheduler's durable circular scan cursor.
-  It is never a FIFO promise or a browser-side scheduling prediction; the real weighted-fair
-  selector remains the sole authority for admission and qBittorrent controls.
+  `ManagedTorrent`'s rank in the eligible backlog's deterministic `(created_at, id)` scan order.
+  It deliberately does not rotate with the scheduler's circular scan cursor and is never a FIFO
+  promise or browser-side scheduling prediction; the real weighted-fair selector remains the sole
+  authority for admission and qBittorrent controls.
 - Exact per-file positions exist only inside the bounded recursive-download queue controlled by
   the current browser. A `.torrent` remains an atomic BitTorrent acquisition; users may choose
   individual files only after READY when transferring manifest content to their own device.
