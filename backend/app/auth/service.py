@@ -403,10 +403,12 @@ async def delete_managed_user(db: AsyncSession, *, user_id: UUID) -> bool:
     if request_ids:
         options = await PostgresOptionsRegistry().snapshot(db)
         retention_hours = int(options["WOS_TORRENT_RETENTION_HOURS"])
-    queue_membership_changed = await user_active_status_changes_ranked_queue(
-        db,
-        user_id=user.id,
-        now=now,
+    queue_membership_changed = user.is_active and (
+        await user_active_status_changes_ranked_queue(
+            db,
+            user_id=user.id,
+            now=now,
+        )
     )
     for request_id in request_ids:
         await cancel_owned_torrent_request(
