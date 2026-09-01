@@ -74,6 +74,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Validate NewGreedy OPS base resolution (no build or publish)
+        run: |
+          set -Eeuo pipefail
+          bash -n ops/newgreedy/build-and-test.sh
+          bash -n ops/newgreedy/resolve-python-base.sh
+          shellcheck ops/newgreedy/build-and-test.sh ops/newgreedy/resolve-python-base.sh
+          python_base="$(bash ops/newgreedy/resolve-python-base.sh docker.io/library/python:3.11-slim)"
+          [[ "$python_base" =~ ^docker\.io/library/python@sha256:[0-9a-f]{64}$ ]]
+          [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$python_base")" == "linux/amd64" ]]
       - name: Validate deployment artifacts
         run: |
           bash -n \
