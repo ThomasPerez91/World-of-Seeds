@@ -89,3 +89,30 @@ async def test_toggling_sole_waiting_owner_changes_physical_queue_membership(
 
     assert disabled.queue_membership_changed is True
     assert enabled.queue_membership_changed is True
+
+
+@pytest.mark.asyncio
+async def test_deleting_inactive_owner_does_not_invalidate_physical_queue(
+    db_session: AsyncSession,
+) -> None:
+    await PostgresOptionsRegistry().initialize(db_session)
+    owner = User(username="inactive-delete-owner", password_hash="hash", is_active=False)
+    torrent = ManagedTorrent(
+        info_hash="8" * 40,
+        name="Inactive owner waiting torrent",
+        total_size=10,
+        state=ManagedTorrentState.PAUSED,
+        desired_active=False,
+    )
+    db_session.add(
+        TorrentRequest(
+            user=owner,
+            managed_torrent=torrent,
+            state=TorrentRequestState.ACTIVE,
+        )
+    )
+    await db_session.commit()
+
+    queue_membership_changed = await delete_managed_user(db_session, user_id=owner.id)
+
+    assert queue_membership_changed is False

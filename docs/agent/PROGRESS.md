@@ -1546,7 +1546,14 @@
   beneficiaries, add rollback, unconfigured Redis, stall/cooldown recovery, unchanged scheduler
   controls, rapid frontend invalidations, FR/EN, mobile wrapping, and axe. Existing 199/200/201/500/
   1,000 scheduler-window coverage remains unchanged.
-- Local validation: PASS — 597 backend tests collected (590 passed, 7 real-service integrations
+- A late automated review after PR `#109` merged identified two bounded edge cases. The scheduler
+  now consumes an elapsed waiting cooldown once, inside its existing bounded/locked window, so a
+  queue invalidation is emitted immediately after that transaction commits, before the fallible qB
+  gateway call, even when the selected torrent is unchanged. The durable clear prevents repeat
+  events and does not alter weighted fairness, deficits, aging, ordering, or slots.
+  Torrents without an active owner are excluded from this release signal. Deleting an already
+  inactive user likewise skips the queue-membership check and emits no false invalidation.
+- Local validation: PASS — 601 backend tests collected (594 passed, 7 real-service integrations
   deferred), 84 frontend tests including axe, TypeScript, Vite production build, Ruff check and
   format, strict mypy across app and tests, V2 version consistency, shell syntax, Compose/policy
   tests, and `git diff --check`. Docker is unavailable locally; real PostgreSQL/Redis, Compose,

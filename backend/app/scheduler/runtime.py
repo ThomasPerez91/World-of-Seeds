@@ -118,6 +118,7 @@ class SchedulerRuntime:
             purge_stops = await self._load_purge_stops(session)
             torrents = await self._load_control_set(session, state)
             requests = await self._load_active_requests(session, torrents)
+            cooldown_released = _release_elapsed_cooldowns(torrents, requests, now=now)
             ledger = await load_scheduler_ledger(session, state)
             candidates = _scheduler_candidates(torrents, requests, now=now)
             selection = select_torrents(
@@ -155,9 +156,12 @@ class SchedulerRuntime:
             }
             _persist_desired_controls(torrents, controls, generation=generation)
             realtime_targets = _control_event_targets(torrents, requests, previous_active)
-            queue_changed = bool(realtime_targets)
+            queue_changed_after_apply = bool(realtime_targets) and not cooldown_released
             state.desired_generation = generation
             await persist_scheduler_ledger(session, state, selection.ledger, now=now)
+
+        if cooldown_released:
+            await self._redis.publish_torrent_queue_changed(now)
 
         purge_control_result = (
             await self._gateway.apply_managed_controls(purge_controls)
@@ -198,7 +202,7 @@ class SchedulerRuntime:
                 user_id,
                 TorrentRealtimeEvent(event_type, request_id, applied_at),
             )
-        if queue_changed:
+        if queue_changed_after_apply:
             await self._redis.publish_torrent_queue_changed(applied_at)
         return SchedulerCycleResult(
             leader=True,
@@ -381,6 +385,30 @@ def _scheduler_candidates(
             )
         )
     return tuple(candidates)
+
+
+def _release_elapsed_cooldowns(
+    torrents: Sequence[ManagedTorrent],
+    requests: Sequence[TorrentRequest],
+    *,
+    now: datetime,
+) -> bool:
+    """Persist the first bounded scheduler observation of a waiting cooldown expiry."""
+
+    timestamp = _utc(now)
+    owned_torrent_ids = {request.managed_torrent_id for request in requests}
+    released = False
+    for torrent in torrents:
+        if (
+            not torrent.desired_active
+            and torrent.id in owned_torrent_ids
+            and torrent.scheduler_retry_at is not None
+            and _utc(torrent.scheduler_retry_at) <= timestamp
+        ):
+            torrent.scheduler_retry_at = None
+            torrent.updated_at = now
+            released = True
+    return released
 
 
 def _remaining_bytes(total_size: int, progress: float | None) -> int | None:

@@ -537,6 +537,169 @@ async def test_cooldown_survives_scheduler_restart(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_elapsed_waiting_cooldown_invalidates_once_without_selection_change(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    active = await _torrent(
+        sessions,
+        username="active-slot",
+        info_hash="2" * 40,
+        size=10,
+        created_at=NOW - timedelta(minutes=1),
+    )
+    cooling = await _torrent(
+        sessions,
+        username="elapsed-cooldown",
+        info_hash="3" * 40,
+        size=10,
+    )
+    async with sessions() as session, session.begin():
+        stored_active = await session.get(ManagedTorrent, active.id)
+        stored_cooling = await session.get(ManagedTorrent, cooling.id)
+        active_request = await session.scalar(
+            select(TorrentRequest).where(TorrentRequest.managed_torrent_id == active.id)
+        )
+        cooling_request = await session.scalar(
+            select(TorrentRequest).where(TorrentRequest.managed_torrent_id == cooling.id)
+        )
+        option = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+        assert stored_active is not None
+        assert stored_cooling is not None
+        assert active_request is not None
+        assert cooling_request is not None
+        assert option is not None
+        stored_active.desired_active = True
+        stored_active.desired_priority = 0
+        stored_cooling.scheduler_retry_at = NOW + timedelta(minutes=3)
+        cooling_request.user_id = active_request.user_id
+        option.integer_value = 1
+    redis = RecordingRedis()
+
+    before = await SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="scheduler-cooldown-threshold",
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW,
+        lease_ttl=timedelta(seconds=10),
+    ).run_once()
+    after = await SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="scheduler-cooldown-threshold",
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW + timedelta(minutes=3, seconds=1),
+        lease_ttl=timedelta(seconds=10),
+    ).run_once()
+    repeated = await SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="scheduler-cooldown-threshold",
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW + timedelta(minutes=3, seconds=2),
+        lease_ttl=timedelta(seconds=10),
+    ).run_once()
+
+    async with sessions() as session:
+        stored_cooling = await session.get(ManagedTorrent, cooling.id)
+    assert before.selected_torrent_ids == (active.id,)
+    assert after.selected_torrent_ids == before.selected_torrent_ids
+    assert repeated.selected_torrent_ids == before.selected_torrent_ids
+    assert stored_cooling is not None and stored_cooling.scheduler_retry_at is None
+    assert redis.queue_events == [NOW + timedelta(minutes=3, seconds=1)]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_elapsed_cooldown_without_active_owner_does_not_invalidate(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    cooling = await _torrent(
+        sessions,
+        username="inactive-cooldown-owner",
+        info_hash="4" * 40,
+        size=10,
+    )
+    retry_at = NOW - timedelta(seconds=1)
+    async with sessions() as session, session.begin():
+        stored = await session.get(ManagedTorrent, cooling.id)
+        owner = await session.scalar(
+            select(User)
+            .join(TorrentRequest, TorrentRequest.user_id == User.id)
+            .where(TorrentRequest.managed_torrent_id == cooling.id)
+        )
+        assert stored is not None
+        assert owner is not None
+        stored.scheduler_retry_at = retry_at
+        owner.is_active = False
+    redis = RecordingRedis()
+
+    result = await SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="scheduler-inactive-cooldown-owner",
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW,
+    ).run_once()
+
+    async with sessions() as session:
+        stored = await session.get(ManagedTorrent, cooling.id)
+    assert result.selected_torrent_ids == ()
+    assert stored is not None and stored.scheduler_retry_at == retry_at.replace(tzinfo=None)
+    assert redis.queue_events == []
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_elapsed_cooldown_invalidation_survives_gateway_failure(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    cooling = await _torrent(
+        sessions,
+        username="gateway-failure-cooldown",
+        info_hash="5" * 40,
+        size=10,
+    )
+    async with sessions() as session, session.begin():
+        stored = await session.get(ManagedTorrent, cooling.id)
+        assert stored is not None
+        stored.scheduler_retry_at = NOW - timedelta(seconds=1)
+    redis = RecordingRedis()
+
+    failing = SchedulerRuntime(
+        sessions,
+        FakeGateway(fail=True),
+        scheduler_id="scheduler-cooldown-gateway-failure",
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW,
+        lease_ttl=timedelta(seconds=10),
+    )
+    with pytest.raises(RuntimeError, match="qb_unavailable"):
+        await failing.run_once()
+
+    async with sessions() as session:
+        stored = await session.get(ManagedTorrent, cooling.id)
+    assert stored is not None and stored.scheduler_retry_at is None
+    assert redis.queue_events == [NOW]
+
+    recovered = SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="scheduler-cooldown-gateway-failure",
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW + timedelta(seconds=1),
+        lease_ttl=timedelta(seconds=10),
+    )
+    await recovered.run_once()
+
+    assert redis.queue_events == [NOW]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_two_slots_are_bounded_with_one_hundred_eligible_torrents(tmp_path: Path) -> None:
     engine, sessions = await _database(tmp_path)
     for index in range(100):
