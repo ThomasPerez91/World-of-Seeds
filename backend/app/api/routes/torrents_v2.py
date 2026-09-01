@@ -51,6 +51,11 @@ from app.models import (
     TorrentRequestState,
 )
 from app.options import DatabaseOptionsDriftError, PostgresOptionsRegistry
+from app.scheduler.queue_visibility import (
+    TorrentQueueVisibility,
+    load_torrent_queue_visibility,
+    torrent_queue_status,
+)
 from app.schemas.torrents_v2 import (
     TorrentDownloadFileResponse,
     TorrentDownloadManifestResponse,
@@ -155,12 +160,20 @@ def _response(
     torrent: ManagedTorrent,
     *,
     error_code: str | None = None,
+    queue_visibility: TorrentQueueVisibility | None = None,
 ) -> TorrentRequestV2Response:
     request_state = request.state.value.lower()
     state = cast(
         RequestState,
         "error" if torrent.state is ManagedTorrentState.ERROR else request_state,
     )
+    visible_queue = None
+    if request.state in {TorrentRequestState.REQUESTED, TorrentRequestState.ACTIVE}:
+        visible_queue = queue_visibility
+        if visible_queue is None:
+            queue_status = torrent_queue_status(torrent, now=datetime.now(UTC))
+            if queue_status is not None:
+                visible_queue = TorrentQueueVisibility(queue_status)
     return TorrentRequestV2Response(
         id=request.id,
         name=torrent.name,
@@ -173,6 +186,11 @@ def _response(
             if state == "ready" and torrent.state is ManagedTorrentState.READY
             else None
         ),
+        queue_position_estimate=(
+            visible_queue.position_estimate if visible_queue is not None else None
+        ),
+        queue_total_estimate=(visible_queue.total_estimate if visible_queue is not None else None),
+        queue_status=visible_queue.status if visible_queue is not None else None,
         created_at=request.created_at,
         updated_at=max(request.updated_at, torrent.updated_at),
     )
@@ -884,8 +902,20 @@ async def list_torrent_requests(
             .limit(limit)
         )
     ).all()
+    queue_visibility = await load_torrent_queue_visibility(
+        db,
+        tuple(managed for _, managed in rows),
+        now=datetime.now(UTC),
+    )
     return TorrentRequestV2ListingResponse(
-        items=[_response(request, managed) for request, managed in rows],
+        items=[
+            _response(
+                request,
+                managed,
+                queue_visibility=queue_visibility.get(managed.id),
+            )
+            for request, managed in rows
+        ],
         offset=offset,
         limit=limit,
         total=total or 0,

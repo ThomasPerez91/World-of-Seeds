@@ -233,6 +233,7 @@ async def test_invalidation_and_unconfigured_mode_are_best_effort() -> None:
 
     unconfigured = RedisCoordinator.unconfigured()
     assert await unconfigured.signal_job_available() is False
+    assert await unconfigured.publish_torrent_queue_changed(datetime.now(UTC)) is False
     assert (await unconfigured.check_health()).state == "unconfigured"
     assert await unconfigured.subscribe_torrent_events(uuid.uuid4()) is None
 
@@ -257,6 +258,20 @@ async def test_torrent_events_are_secret_safe_namespaced_and_fan_out_to_every_ta
     assert set(event.payload()) == {"type", "request_id", "occurred_at"}
     assert "passkey" not in payload.lower()
     assert user_id.hex not in payload
+
+    queue_changed_at = datetime.now(UTC)
+    queue_event = TorrentRealtimeEvent(
+        TorrentEventType.QUEUE_CHANGED,
+        None,
+        queue_changed_at,
+    )
+    assert await redis.publish_torrent_queue_changed(queue_changed_at) is True
+    assert (await first.next_event(timeout_seconds=0.1)) == queue_event
+    assert (await second.next_event(timeout_seconds=0.1)) == queue_event
+    assert (await other.next_event(timeout_seconds=0.1)) == queue_event
+    assert set(queue_event.payload()) == {"type", "occurred_at"}
+    assert "request_id" not in queue_event.encode()
+    assert TorrentRealtimeEvent.decode(queue_event.encode()) == queue_event
     await first.aclose()
     await second.aclose()
     await other.aclose()
@@ -285,6 +300,7 @@ async def test_torrent_event_fanout_remains_bounded_at_expected_connection_count
     assert received == [event] * connection_count
     await asyncio.gather(*(subscription.aclose() for subscription in subscriptions if subscription))
     assert client.subscribers[f"wos:test:events:torrent:{user_id.hex}"] == []
+    assert client.subscribers["wos:test:events:torrent-queue"] == []
 
 
 @pytest.mark.asyncio

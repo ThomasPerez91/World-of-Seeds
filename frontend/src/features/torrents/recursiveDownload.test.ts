@@ -113,12 +113,59 @@ describe("RecursiveDownloadController", () => {
     const root = directory.directories.get("Show");
     expect([...root?.files.get("a.bin")?.content ?? []]).toEqual([1, 2, 3]);
     expect([...root?.directories.get("sub")?.files.get("b.bin")?.content ?? []]).toEqual([4, 5, 6]);
-    expect(updates).toHaveBeenLastCalledWith({
+    expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({
       status: "completed",
       downloadedBytes: 6,
       completedFiles: 2,
       error: null,
+    }));
+  });
+
+  it("publie la file locale exacte avec actifs et positions d’attente", async () => {
+    const items = Array.from({ length: 5 }, (_, index) => ({
+      id: `file-${index}`,
+      file_index: index,
+      relative_path: `Folder/${"very-long-name-".repeat(16)}${index}.bin`,
+      size: 1,
+    }));
+    let releaseDownloads!: () => void;
+    let markStarted!: () => void;
+    const downloadsPending = new Promise<void>((resolve) => { releaseDownloads = resolve; });
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    let active = 0;
+    const updates: RecursiveTransferProgress[] = [];
+    const controller = new RecursiveDownloadController({
+      torrentRequestId: "request",
+      firstPage: {
+        ...snapshot(),
+        file_count: items.length,
+        total_size: items.length,
+        items,
+      },
+      directory: new MemoryDirectory(),
+      loadManifestPage: vi.fn(),
+      concurrency: 2,
+      fetcher: vi.fn(async () => {
+        active += 1;
+        if (active === 2) markStarted();
+        await downloadsPending;
+        active -= 1;
+        return fileResponse(new Uint8Array([1]), 200, 0, 1);
+      }),
+      onProgress: (progress) => updates.push(progress),
     });
+
+    const running = controller.start();
+    await started;
+    const visible = updates.at(-1)?.queue ?? [];
+    expect(visible.filter((item) => item.status === "active")).toHaveLength(2);
+    expect(visible.filter((item) => item.status === "waiting").map((item) => item.position))
+      .toEqual([1, 2, 3]);
+    expect(visible.every((item) => item.relativePath.length > 200)).toBe(true);
+
+    releaseDownloads();
+    await running;
+    expect(updates.at(-1)).toMatchObject({ status: "completed", completedFiles: 5 });
   });
 
   it("revérifie la taille locale avant de reprendre avec HTTP Range", async () => {
@@ -163,6 +210,10 @@ describe("RecursiveDownloadController", () => {
     });
 
     await pauseAfterChunk.start();
+    expect(progress.mock.calls.at(-1)?.[0].queue[0]).toMatchObject({
+      status: "paused",
+      position: null,
+    });
     const localFile = directory.files.get("file.bin");
     expect(localFile).toBeDefined();
     localFile!.content = new Uint8Array([1]);
@@ -170,12 +221,12 @@ describe("RecursiveDownloadController", () => {
 
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect([...directory.files.get("file.bin")?.content ?? []]).toEqual([1, 2, 3, 4]);
-    expect(progress).toHaveBeenLastCalledWith({
+    expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({
       status: "completed",
       downloadedBytes: 4,
       completedFiles: 1,
       error: null,
-    });
+    }));
   });
 
   it("commence immédiatement et garde deux pages au plus pour 50 000 fichiers", async () => {
@@ -255,7 +306,7 @@ describe("RecursiveDownloadController", () => {
 
     expect(loadManifestPage).toHaveBeenCalledTimes(99);
     expect(maximumPageLoads).toBe(1);
-    expect(lastProgress).toEqual({
+    expect(lastProgress).toMatchObject({
       status: "completed",
       downloadedBytes: 0,
       completedFiles: fileCount,
@@ -309,7 +360,7 @@ describe("RecursiveDownloadController", () => {
 
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect([...file.content]).toEqual([1, 2, 3]);
-    expect(updates.at(-1)).toEqual({
+    expect(updates.at(-1)).toMatchObject({
       status: "completed",
       downloadedBytes: 3,
       completedFiles: 1,
@@ -345,12 +396,13 @@ describe("RecursiveDownloadController", () => {
     });
 
     await controller.start();
-    expect(updates.at(-1)).toEqual({
+    expect(updates.at(-1)).toMatchObject({
       status: "error",
       downloadedBytes: 0,
       completedFiles: 0,
       error: "local_disk_full",
     });
+    expect(updates.at(-1)?.queue[0]).toMatchObject({ status: "error", position: null });
     failWrite = false;
     await controller.resume();
     expect(updates.at(-1)).toMatchObject({ status: "completed", downloadedBytes: 3 });
@@ -480,11 +532,12 @@ describe("RecursiveDownloadController", () => {
 
     expect(manifestAborted).toBe(true);
     expect(fileAborted).toBe(true);
-    expect(updates.at(-1)).toEqual({
+    expect(updates.at(-1)).toMatchObject({
       status: "cancelled",
       downloadedBytes: 0,
       completedFiles: 0,
       error: null,
     });
+    expect(updates.at(-1)?.queue.every((item) => item.status === "cancelled")).toBe(true);
   });
 });

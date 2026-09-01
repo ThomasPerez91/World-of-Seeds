@@ -71,9 +71,10 @@ ou migration additive), **ÉLEVÉ** (concurrence, stockage, sécurité, déploie
 | V2-32A | MOYEN | V2-24,V2-32 | Internationalisation FR/EN centralisée, contrats backend par codes stables, formatage locale et couverture responsive. |
 | V2-32B | MOYEN/ÉLEVÉ | V2-23,V2-28D,V2-32A | Frontend UX/UI et mobile : suppressions sans modale de confirmation, toasts unifiés, multi-upload torrent borné, design tokens, accessibilité et responsive complet. |
 | V2-32C | ÉLEVÉ | V2-22,V2-28A,V2-32B | Rétention READY automatique : durée selon popularité historique, expiration PostgreSQL bornée, leases et arrêt qB durable avant purge. |
-| V2-32D | BLOQUÉ | V2-32C | Nettoyage exact NewGreedy lors de la purge définitive ; bloqué tant que NewGreedy v1.7.5 ne fournit pas une suppression durable par SHA-1 complet. Non bloquant pour V2-32E et le pilote sauf décision contraire explicite. |
+| V2-32D | BLOQUÉ | V2-32C | Nettoyage exact NewGreedy lors de la purge définitive ; bloqué tant que NewGreedy v1.7.5 ne fournit pas une suppression durable par SHA-1 complet. Non bloquant pour V2-32E, V2-32F et le pilote sauf décision contraire explicite. |
 | V2-32E | MOYEN | V2-28D,V2-32A,V2-32B,V2-32C | Avertissements visuels FR/EN avant expiration READY depuis la deadline PostgreSQL autoritaire, avec timer local accessible et resynchronisation WebSocket. |
-| V2-33 | ÉLEVÉ | V2-30,V2-31,V2-32,V2-32A,V2-32B,V2-32C,V2-32E | Pilote Rise2 : données de test puis comptes pilotes, critères go/no-go, observation et retour arrière vérifié. |
+| V2-32F | MOYEN | V2-20,V2-28C,V2-28D,V2-28E,V2-32A,V2-32B | Visibilité FR/EN des files : rang indicatif du backlog physique éligible au scheduler non-FIFO et positions exactes de la file locale navigateur. |
+| V2-33 | ÉLEVÉ | V2-30,V2-31,V2-32,V2-32A,V2-32B,V2-32C,V2-32E,V2-32F | Pilote Rise2 : données de test puis comptes pilotes, critères go/no-go, observation et retour arrière vérifié. |
 | V2-34 | ÉLEVÉ | V2-33 | Release candidate V2 : gel fonctionnel, migrations expand/contract, runbook, compatibilité digest précédent et validation complète. |
 | V2-35 | ÉLEVÉ | V2-34 | Release V2 stable : SemVer 2.0.0 seulement après approbation, bascule Rise2 progressive et conservation de la V1 pendant la fenêtre de rollback. |
 
@@ -317,9 +318,9 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
   garantit pas la suppression durable de l'état conservé en mémoire.
 - WOS ne doit utiliser ni reset global, ni modification directe de `stats.json`, ni suppression par
   préfixe pour simuler une suppression exacte par SHA-1 canonique.
-- Ce blocage n'empêche ni V2-32E ni le pilote V2-33, sauf décision contraire explicite. La purge WOS
-  reste sûre côté qBittorrent, stockage et PostgreSQL ; seul l'état statistique NewGreedy peut rester
-  obsolète jusqu'à l'évolution de son contrat.
+- Ce blocage n'empêche ni V2-32E, ni V2-32F, ni le pilote V2-33, sauf décision contraire explicite.
+  La purge WOS reste sûre côté qBittorrent, stockage et PostgreSQL ; seul l'état statistique
+  NewGreedy peut rester obsolète jusqu'à l'évolution de son contrat.
 
 ## V2-32E — Avertissements avant expiration READY
 
@@ -337,6 +338,28 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
   fichier d'un grand contenu.
 - Valider les bornes exactes 48 h/24 h, les courtes durées, EXPIRED, prolongation partagée, FR/EN,
   axe, noms longs et les largeurs 320, 360, 375, 390, 430, 768 px et desktop sans polling serveur.
+
+## V2-32F — Visibilité des files d'attente
+
+- Exposer depuis PostgreSQL un rang torrent indicatif partagé par `ManagedTorrent`, calculé sur
+  l'ensemble éligible dans l'ordre déterministe `(created_at, id)` réellement scanné par le
+  scheduler. Le rang reste stable pendant la rotation de son curseur et ne prédit pas la sélection :
+  équité pondérée, déficit, vieillissement, octets restants, slots, stall et cooldown restent
+  exclusivement évalués par le scheduler réel.
+- Garder le calcul en lecture seule, paginé côté réponse, sans N+1, sans mutation qBittorrent et
+  sans exposer infohash, clé de stockage, ledger, déficit, autre propriétaire, route ou secret.
+  Une sélection significative publie une seule invalidation WebSocket globale secret-safe, y
+  compris pour les propriétaires hors de la fenêtre scheduler courante ; le navigateur
+  resynchronise l'API et ne calcule jamais le rang.
+- Afficher les positions exactes uniquement dans la file locale bornée que le contrôleur de
+  récupération navigateur maîtrise réellement : fichiers actifs, en attente, en pause, terminés,
+  échoués ou annulés. Aucune nouvelle file HTTP durable serveur n'est créée.
+- Le `.torrent` reste l'unité BitTorrent atomique. Le choix de fichiers reste possible uniquement
+  après READY, via le manifeste et les téléchargements vers l'appareil ; V2-32F n'ajoute aucune
+  priorité par fichier ni aucun selective download qBittorrent.
+- Valider backlog supérieur à 200, slots 1/2, équité non-FIFO, vieillissement, tailles, partage,
+  restart, stall/cooldown, FR/EN, WebSocket, positions 1/9/158/>999, file locale 1/2/3, axe, noms
+  longs et largeurs 320, 360, 375, 390, 430, 768 px et desktop.
 
 ## Migrations et ruptures anticipées
 
@@ -384,6 +407,6 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 
 ## Prochaine tâche
 
-Après la revue, la CI verte et la fusion de V2-32C, la prochaine tâche est
+Après la revue, la CI verte et la fusion de V2-32F, la prochaine tâche est
 `V2-33 — Pilote limité sur Rise2`. Le travail préparatoire déjà présent reste en brouillon et en
 pause ; il ne doit pas être repris, rebasé ou fusionné automatiquement.

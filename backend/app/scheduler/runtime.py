@@ -155,6 +155,7 @@ class SchedulerRuntime:
             }
             _persist_desired_controls(torrents, controls, generation=generation)
             realtime_targets = _control_event_targets(torrents, requests, previous_active)
+            queue_changed = bool(realtime_targets)
             state.desired_generation = generation
             await persist_scheduler_ledger(session, state, selection.ledger, now=now)
 
@@ -197,6 +198,8 @@ class SchedulerRuntime:
                 user_id,
                 TorrentRealtimeEvent(event_type, request_id, applied_at),
             )
+        if queue_changed:
+            await self._redis.publish_torrent_queue_changed(applied_at)
         return SchedulerCycleResult(
             leader=True,
             generation=generation,

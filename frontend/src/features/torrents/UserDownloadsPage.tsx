@@ -9,13 +9,20 @@ import {
   type TorrentDownloadManifestPageV2,
 } from "../../api/client";
 import { useFeedback } from "../../components/Feedback";
-import { DeleteIcon, DownloadIcon, RefreshIcon } from "../../components/icons";
+import {
+  DeleteIcon,
+  DownloadIcon,
+  InfoIcon,
+  QueueIcon,
+  RefreshIcon,
+} from "../../components/icons";
 import { useI18n, type MessageKey } from "../../i18n";
 import {
   pickDownloadDirectory,
   RecursiveDownloadController,
   type RecursiveTransferErrorCode,
   type RecursiveTransferProgress,
+  type LocalTransferQueueItem,
   supportsRecursiveDirectoryDownload,
 } from "./recursiveDownload";
 import { RetentionWarning } from "./RetentionWarning";
@@ -74,6 +81,49 @@ const transferErrorKeys: Record<RecursiveTransferErrorCode, MessageKey> = {
   local_transfer_failed: "downloads.failed",
 };
 
+function TorrentQueueVisibility({ torrent }: { torrent: TorrentRequestV2 }) {
+  const { t } = useI18n();
+  if (torrent.queue_status === null) return null;
+  let label: string;
+  if (torrent.queue_status === "downloading") {
+    label = t("downloads.queueDownloading");
+  } else if (torrent.queue_status === "stalled") {
+    label = t("downloads.queueStalled");
+  } else if (torrent.queue_status === "cooldown") {
+    label = t("downloads.queueCooldown");
+  } else if (torrent.queue_position_estimate === 1) {
+    label = t("downloads.queueSoon");
+  } else if (torrent.queue_position_estimate !== null) {
+    label = t("downloads.queuePosition", { position: torrent.queue_position_estimate });
+  } else {
+    label = t("downloads.queueEstimating");
+  }
+  return (
+    <span className={`torrent-queue-status ${torrent.queue_status}`}>
+      <QueueIcon />
+      <span>{label}</span>
+    </span>
+  );
+}
+
+function LocalQueueLabel({ item }: { item: LocalTransferQueueItem }) {
+  const { t } = useI18n();
+  if (item.status === "waiting" && item.position !== null) {
+    return t(
+      item.position === 1 ? "downloads.localWaitingFirst" : "downloads.localWaiting",
+      { position: item.position },
+    );
+  }
+  return t({
+    active: "downloads.queueDownloading",
+    paused: "downloads.localPaused",
+    completed: "downloads.localCompleted",
+    error: "downloads.localError",
+    cancelled: "downloads.localCancelled",
+    waiting: "downloads.localWaitingUnknown",
+  }[item.status] as MessageKey);
+}
+
 function TorrentRow({
   torrent,
   onRefresh,
@@ -108,6 +158,7 @@ function TorrentRow({
           {torrent.state === "ready" && (
             <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />
           )}
+          <TorrentQueueVisibility torrent={torrent} />
         </div>
       </td>
       <td className="torrent-size-cell" data-label={t("files.size")}>{formatBytes(torrent.total_size)}</td>
@@ -548,6 +599,9 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
 
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const queueTotal = torrents.find(
+    (torrent) => torrent.queue_total_estimate !== null,
+  )?.queue_total_estimate ?? null;
 
   return (
     <section className="user-downloads" aria-labelledby="user-downloads-title">
@@ -606,6 +660,10 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
           {t("downloads.upload")}
         </button>
       </div>
+      <p className="torrent-atomic-note">
+        <InfoIcon />
+        <span>{t("downloads.atomicTorrentHint")}</span>
+      </p>
 
       {uploadBatch !== null && (
         <section className="torrent-upload-batch" aria-labelledby="torrent-batch-title" aria-busy={!uploadBatch.done}>
@@ -664,6 +722,16 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
             max={Math.max(1, transfer.totalBytes)}
             aria-label={t("downloads.localNamed", { name: transfer.name })}
           />
+          {transfer.queue.length > 0 && (
+            <ul className="local-transfer-queue" aria-label={t("downloads.localQueue")}>
+              {transfer.queue.map((item) => (
+                <li key={`${item.id}-${item.status}`} className={item.status}>
+                  <span title={item.relativePath}>{item.relativePath}</span>
+                  <strong><LocalQueueLabel item={item} /></strong>
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="recursive-transfer-actions">
             {transfer.status === "running" && (
               <button type="button" className="secondary-button" onClick={() => controllerRef.current?.pause()}>
@@ -758,6 +826,15 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
         <p className="torrent-list-state">{t("downloads.empty")}</p>
       ) : (
         <>
+          {queueTotal !== null && (
+            <aside className="torrent-queue-summary">
+              <InfoIcon />
+              <div>
+                <strong>{t("downloads.queueTotal", { total: queueTotal })}</strong>
+                <span>{t("downloads.queueDisclaimer")}</span>
+              </div>
+            </aside>
+          )}
           <div className="torrent-table-wrap" aria-busy={refreshing}>
             <table className="torrent-table">
               <caption className="sr-only">{t("downloads.requests")}</caption>

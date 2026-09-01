@@ -1434,8 +1434,8 @@
 - Exact, durable SHA-1 cleanup is therefore unsupported. WOS does not use a global reset, direct
   storage edit, or prefix deletion as a workaround. V2-32D remains blocked until NewGreedy exposes
   a full-hash, idempotent, in-memory-and-persistent deletion contract.
-- V2-32D is not a prerequisite for V2-32E or the Rise2 pilot unless an explicit later decision
-  changes that ordering. The existing draft V2-33 PR `#103` remains untouched and paused.
+- V2-32D is not a prerequisite for V2-32E, V2-32F, or the Rise2 pilot unless an explicit later
+  decision changes that ordering. The existing draft V2-33 PR `#103` remains untouched and paused.
 
 ## V2-32E — Visual READY expiration warnings
 
@@ -1464,6 +1464,66 @@
   Vite production build, Ruff check/format, mypy, and `git diff --check`.
 - No migration, retention-policy recalculation, qBittorrent/NewGreedy mutation, server polling,
   dependency, version change, V2-33 work, or final audit is included.
+
+## V2-32F — Queue visibility
+
+- Added secret-free `queue_status`, `queue_position_estimate`, and `queue_total_estimate` fields to
+  owner-filtered V2 torrent responses. READY, EXPIRED, CANCELLED, and ERROR requests expose no
+  queue position; selected, stalled, and cooling torrents expose only their accurate qualitative
+  state rather than a misleading normal rank.
+- The numeric value is explicitly an estimate of one physical `ManagedTorrent`'s rank in the
+  eligible backlog's deterministic `(created_at, id)` order, which is the bounded database order
+  scanned by the real scheduler. One SQL window query ranks the physical waiting set and returns
+  only managed torrents present on the requested API page. The public rank deliberately does not
+  rotate with the durable scan cursor and does not copy or predict weighted-fair selection.
+- All beneficiaries of a shared managed torrent receive the same physical estimate. The response
+  contains no infohash, storage key, scheduler ledger/deficit, owner identity, qB/C411 route,
+  passkey, tracker URL, or host path, and the read-only calculation cannot change scheduler state
+  or qBittorrent controls.
+- Added one secret-free global `torrent.queue_changed` invalidation after significant scheduler
+  selection changes. Every connected owner, including those beyond the current 200-torrent
+  scheduler window, resynchronizes with the authoritative GET; the global payload contains no
+  request or user identifier. Progress and scan-cursor micro-changes do not create events or
+  polling, and a selection cycle publishes at most one global invalidation.
+- “Mes téléchargements” now presents the estimated rank, “Prochainement” for rank one, qualitative
+  selected/stall/cooldown labels, a non-FIFO disclaimer, and the total estimated waiting backlog in
+  centralized FR/EN copy with text plus icon and existing design tokens.
+- The bounded recursive browser controller now exposes up to eight active, exact waiting,
+  completed, paused, failed, or cancelled file entries. Waiting positions are exact only inside
+  the client-controlled queue; manifest paging, concurrency, resume integrity, and DownloadLease
+  authority are unchanged.
+- Added a concise FR/EN atomic-torrent explanation. V2-32F does not add qBittorrent per-file
+  priority or selective BitTorrent download: file choice remains available only after READY for
+  transfer from the existing manifest to the user's device.
+- Coverage includes stable ranks across circular-cursor movement/restart, one and multiple waiting
+  torrents, a 1,005-item
+  backlog, shared ownership, selected/stalled/cooldown/READY states, read-only query count,
+  secret-safe API output, scheduler invalidation bounds, positions 1/9/158/1,005, authoritative
+  WebSocket resync, local positions 1/2/3 with two active files, FR/EN, 200-plus-character names,
+  320/360/375/390/430/768/desktop layouts, and axe.
+- Local validation: PASS — 589 backend tests collected (582 passed, 7 real-service integrations
+  deferred), 82 frontend tests, TypeScript, Vite production build, Ruff check/format, strict mypy,
+  version consistency, deployment-script syntax, and `git diff --check`. Docker is unavailable in
+  this workspace, so Compose, real PostgreSQL/Redis, image, security, smoke, bounded-load,
+  WebSocket, and monitoring policies remain delegated to PR CI.
+- PR `#108` functional head `5c06650d326546955dd846efc35d23580d114e9c`: GitHub CI run
+  `33495898684` (`#246`) PASS — backend with real PostgreSQL/Redis and migrations, 82 frontend
+  tests, dependency/image security, production and V2 images, complete Compose smoke, bounded
+  load, WebSocket, and monitoring validation are green. No review thread or review finding is
+  open on that head.
+- PR `#108` review follow-up fixes both P2 findings: public ranks now stay stable while the bounded
+  scheduler scan cursor rotates, and one identifier-free global invalidation reaches connected
+  owners both inside and outside the current 200-torrent control window after a real selection
+  change. Explicit regressions cover cursor movement, global fan-out, closed payload shape, and one
+  event per selection cycle without a database owner scan.
+- PR `#108` corrected functional head `704cf0414ee7d0e79fb31da786bd24a085305d34`:
+  GitHub CI run `33497033306` (`#248`) PASS across backend with real PostgreSQL/Redis, migrations,
+  frontend, dependency/image security, production and V2 images, complete Compose smoke, bounded
+  load, WebSocket, and monitoring. Both P2 threads are answered and resolved; no open review thread
+  remains.
+- No migration, dependency, configuration, version, NewGreedy, retention-policy, deployment, or
+  V2-33 change is included. V2-32D remains blocked and non-blocking; draft PR `#103` remains
+  untouched.
 
 ## Pre-pilot hardening audit for V2-33
 
@@ -1522,7 +1582,7 @@
 
 ## Next task
 
-- V2-32E is the only active task. After its review, green CI, and merge, the next roadmap task is
+- V2-32F is the only active task. After its review, green CI, and merge, the next roadmap task is
   `V2-33 — Pilote Rise2`; do not start it automatically.
 - V2-32D remains blocked by NewGreedy v1.7.5 and is not a pilot prerequisite unless explicitly
   decided otherwise.

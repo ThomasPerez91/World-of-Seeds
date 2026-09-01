@@ -58,6 +58,7 @@ class FakeGateway:
 class RecordingRedis:
     def __init__(self) -> None:
         self.events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
+        self.queue_events: list[datetime] = []
 
     async def publish_torrent_event(
         self,
@@ -65,6 +66,10 @@ class RecordingRedis:
         event: TorrentRealtimeEvent,
     ) -> bool:
         self.events.append((user_id, event))
+        return True
+
+    async def publish_torrent_queue_changed(self, occurred_at: datetime) -> bool:
+        self.queue_events.append(occurred_at)
         return True
 
 
@@ -431,6 +436,41 @@ async def test_global_active_limit_is_reloaded_between_cycles_with_ten_queued(
 
     assert len(first.selected_torrent_ids) == 1
     assert len(second.selected_torrent_ids) == 2
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_selection_change_publishes_one_global_queue_invalidation(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    for index in range(3):
+        await _torrent(
+            sessions,
+            username=f"queue-event-{index}",
+            info_hash=f"{80 + index:040x}",
+            size=10 + index,
+        )
+    async with sessions() as session, session.begin():
+        option = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+        assert option is not None
+        option.integer_value = 1
+    redis = RecordingRedis()
+
+    await SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="scheduler-queue-events",
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW,
+    ).run_once()
+
+    assert len(redis.events) == 1
+    assert [event.event_type for _, event in redis.events].count(TorrentEventType.STARTED) == 1
+    assert redis.queue_events == [NOW]
+    assert all(
+        set(event.payload()) == {"type", "request_id", "occurred_at"} for _, event in redis.events
+    )
     await engine.dispose()
 
 

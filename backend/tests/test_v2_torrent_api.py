@@ -160,6 +160,55 @@ async def test_v2_listing_is_owned_paginated_and_database_only(
     assert response.json()["limit"] == 1
     assert [item["name"] for item in response.json()["items"]] == ["Owned"]
     assert response.json()["items"][0]["progress"] == pytest.approx(0.42)
+    assert response.json()["items"][0]["queue_status"] == "waiting"
+    assert response.json()["items"][0]["queue_position_estimate"] == 1
+    assert response.json()["items"][0]["queue_total_estimate"] == 1
+
+
+@pytest.mark.asyncio
+async def test_shared_torrent_exposes_one_physical_estimate_without_owner_data(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    first_owner = await prepare_user(db_session)
+    second_owner = User(
+        username="alice",
+        password_hash=hash_password("correct-horse-battery"),
+    )
+    shared = ManagedTorrent(
+        info_hash="7" * 40,
+        name="Shared queue",
+        total_size=100,
+        state=ManagedTorrentState.PAUSED,
+    )
+    db_session.add_all(
+        [
+            second_owner,
+            shared,
+            TorrentRequest(user=first_owner, managed_torrent=shared),
+            TorrentRequest(user=second_owner, managed_torrent=shared),
+        ]
+    )
+    await db_session.commit()
+
+    await login(client, first_owner.username)
+    first = (await client.get("/api/v2/torrents")).json()["items"][0]
+    await login(client, second_owner.username)
+    second = (await client.get("/api/v2/torrents")).json()["items"][0]
+
+    assert first["queue_position_estimate"] == second["queue_position_estimate"] == 1
+    assert first["queue_total_estimate"] == second["queue_total_estimate"] == 1
+    assert first["queue_status"] == second["queue_status"] == "waiting"
+    forbidden = {
+        "info_hash",
+        "storage_key",
+        "tracker_account_ref",
+        "qbittorrent_account_ref",
+        "passkey",
+        "user_id",
+    }
+    assert forbidden.isdisjoint(first)
+    assert forbidden.isdisjoint(second)
 
 
 @pytest.mark.asyncio
