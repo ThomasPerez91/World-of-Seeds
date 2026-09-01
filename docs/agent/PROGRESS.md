@@ -1516,6 +1516,11 @@
   owners both inside and outside the current 200-torrent control window after a real selection
   change. Explicit regressions cover cursor movement, global fan-out, closed payload shape, and one
   event per selection cycle without a database owner scan.
+- PR `#108` corrected functional head `704cf0414ee7d0e79fb31da786bd24a085305d34`:
+  GitHub CI run `33497033306` (`#248`) PASS across backend with real PostgreSQL/Redis, migrations,
+  frontend, dependency/image security, production and V2 images, complete Compose smoke, bounded
+  load, WebSocket, and monitoring. Both P2 threads are answered and resolved; no open review thread
+  remains.
 - No migration, dependency, configuration, version, NewGreedy, retention-policy, deployment, or
   V2-33 change is included. V2-32D remains blocked and non-blocking; draft PR `#103` remains
   untouched.
