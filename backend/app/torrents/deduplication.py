@@ -21,6 +21,7 @@ from app.models import (
     User,
 )
 from app.models.base import utc_now
+from app.scheduler.queue_visibility import is_ranked_queue_member
 from app.storage.accounting import (
     StorageAdmissionPolicy,
     StorageDiskSnapshot,
@@ -67,6 +68,7 @@ class ManagedTorrentRequestResult:
     managed_torrent_reactivated: bool
     retention_extended: bool
     storage_pressure: StoragePressureState
+    queue_membership_changed: bool = False
 
 
 async def create_or_get_torrent_request(
@@ -112,6 +114,7 @@ async def create_or_get_torrent_request(
         )
     if managed_torrent.state is ManagedTorrentState.PURGING:
         raise TorrentPurgeInProgressError("managed torrent purge is in progress")
+    was_ranked = await is_ranked_queue_member(session, managed_torrent, now=timestamp)
     if (
         managed_torrent.state
         in {
@@ -226,6 +229,12 @@ async def create_or_get_torrent_request(
         total_size=total_size,
         now=timestamp,
     )
+    await session.flush()
+    queue_membership_changed = was_ranked != await is_ranked_queue_member(
+        session,
+        managed_torrent,
+        now=timestamp,
+    )
 
     return ManagedTorrentRequestResult(
         managed_torrent=managed_torrent,
@@ -235,6 +244,7 @@ async def create_or_get_torrent_request(
         managed_torrent_reactivated=reactivated,
         retention_extended=retention_extended,
         storage_pressure=accounting.pressure,
+        queue_membership_changed=queue_membership_changed,
     )
 
 

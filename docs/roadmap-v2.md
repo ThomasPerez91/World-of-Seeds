@@ -348,12 +348,14 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
   exclusivement évalués par le scheduler réel.
 - Garder le calcul en lecture seule, paginé côté réponse, sans N+1, sans mutation qBittorrent et
   sans exposer infohash, clé de stockage, ledger, déficit, autre propriétaire, route ou secret.
-  Une sélection significative publie une seule invalidation WebSocket globale secret-safe, y
-  compris pour les propriétaires hors de la fenêtre scheduler courante ; le navigateur
-  resynchronise l'API et ne calcule jamais le rang.
+  Une sélection significative ou un changement réel de l'ensemble physique éligible publie une
+  seule invalidation WebSocket globale secret-safe après commit, y compris pour les propriétaires
+  hors de la fenêtre scheduler courante ; le navigateur resynchronise l'API et ne calcule jamais
+  le rang.
 - Afficher les positions exactes uniquement dans la file locale bornée que le contrôleur de
   récupération navigateur maîtrise réellement : fichiers actifs, en attente, en pause, terminés,
-  échoués ou annulés. Aucune nouvelle file HTTP durable serveur n'est créée.
+  échoués ou annulés. Cette file reste volatile et liée à l'onglet : fermeture ou actualisation
+  peut l'interrompre, sans persistance navigateur ni nouvelle file HTTP durable serveur.
 - Le `.torrent` reste l'unité BitTorrent atomique. Le choix de fichiers reste possible uniquement
   après READY, via le manifeste et les téléchargements vers l'appareil ; V2-32F n'ajoute aucune
   priorité par fichier ni aucun selective download qBittorrent.
@@ -407,6 +409,6 @@ import V1. Ces responsabilités restent respectivement dans V2-28 à V2-31.
 
 ## Prochaine tâche
 
-Après la revue, la CI verte et la fusion de V2-32F, la prochaine tâche est
-`V2-33 — Pilote limité sur Rise2`. Le travail préparatoire déjà présent reste en brouillon et en
-pause ; il ne doit pas être repris, rebasé ou fusionné automatiquement.
+Après la revue, la CI verte et la fusion de la correction post-V2-32F, le gel des features peut
+précéder `V2-33 — Pilote limité sur Rise2`. Le travail préparatoire déjà présent reste en brouillon
+et en pause ; il ne doit pas être repris, rebasé ou fusionné automatiquement.

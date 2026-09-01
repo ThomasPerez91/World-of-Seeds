@@ -722,6 +722,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
             max={Math.max(1, transfer.totalBytes)}
             aria-label={t("downloads.localNamed", { name: transfer.name })}
           />
+          <p className="local-transfer-volatility">{t("downloads.localQueueVolatility")}</p>
           {transfer.queue.length > 0 && (
             <ul className="local-transfer-queue" aria-label={t("downloads.localQueue")}>
               {transfer.queue.map((item) => (

@@ -854,6 +854,8 @@ async def create_torrent_request(
 
     if job_created:
         await redis.signal_job_available()
+    if result.queue_membership_changed:
+        await redis.publish_torrent_queue_changed(datetime.now(UTC))
     if result.request_created:
         await redis.publish_torrent_event(
             user_id,
@@ -968,4 +970,6 @@ async def cancel_torrent_request(
                 datetime.now(UTC),
             ),
         )
+    if result.queue_membership_changed:
+        await redis.publish_torrent_queue_changed(datetime.now(UTC))
     return Response(status_code=status.HTTP_204_NO_CONTENT)

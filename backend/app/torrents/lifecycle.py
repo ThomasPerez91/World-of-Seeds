@@ -17,6 +17,7 @@ from app.models import (
     User,
     UserStorageUsage,
 )
+from app.scheduler.queue_visibility import is_ranked_queue_member
 
 PURGE_TORRENT_JOB = "PURGE_TORRENT"
 ACTIVE_REQUEST_STATES = (
@@ -33,6 +34,7 @@ class TorrentCancellationResult:
     cancelled: bool
     purge_scheduled: bool
     purge_after: datetime | None
+    queue_membership_changed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +178,7 @@ async def cancel_owned_torrent_request(
     torrent_request_id: uuid.UUID,
     retention_hours: int,
     now: datetime | None = None,
+    detect_queue_membership: bool = True,
 ) -> TorrentCancellationResult | None:
     if not 1 <= retention_hours <= 2160:
         raise ValueError("torrent retention is invalid")
@@ -200,6 +203,11 @@ async def cancel_owned_torrent_request(
     if request.state not in ACTIVE_REQUEST_STATES:
         return None
 
+    was_ranked = (
+        await is_ranked_queue_member(session, torrent, now=timestamp)
+        if detect_queue_membership
+        else False
+    )
     request.state = TorrentRequestState.CANCELLED
     request.cancelled_at = timestamp
     request.updated_at = timestamp
@@ -218,7 +226,19 @@ async def cancel_owned_torrent_request(
     )
     if remaining is None or remaining > 0:
         await session.flush()
-        return TorrentCancellationResult(request.id, torrent.id, True, False, None)
+        is_ranked = (
+            await is_ranked_queue_member(session, torrent, now=timestamp)
+            if detect_queue_membership
+            else False
+        )
+        return TorrentCancellationResult(
+            request.id,
+            torrent.id,
+            True,
+            False,
+            None,
+            was_ranked != is_ranked,
+        )
 
     purge_after = timestamp + timedelta(hours=retention_hours)
     await _enter_purge_pending(
@@ -229,7 +249,19 @@ async def cancel_owned_torrent_request(
         now=timestamp,
     )
     await session.flush()
-    return TorrentCancellationResult(request.id, torrent.id, True, True, purge_after)
+    is_ranked = (
+        await is_ranked_queue_member(session, torrent, now=timestamp)
+        if detect_queue_membership
+        else False
+    )
+    return TorrentCancellationResult(
+        request.id,
+        torrent.id,
+        True,
+        True,
+        purge_after,
+        was_ranked != is_ranked,
+    )
 
 
 async def _enter_purge_pending(

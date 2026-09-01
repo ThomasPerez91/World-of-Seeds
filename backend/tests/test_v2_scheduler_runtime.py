@@ -475,6 +475,33 @@ async def test_selection_change_publishes_one_global_queue_invalidation(
 
 
 @pytest.mark.asyncio
+async def test_unchanged_desired_controls_do_not_double_publish_queue_invalidation(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    await _torrent(
+        sessions,
+        username="stable-selection",
+        info_hash="8" * 40,
+        size=10,
+    )
+    redis = RecordingRedis()
+    runtime = SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="scheduler-stable-queue-event",
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW,
+    )
+
+    await runtime.run_once()
+    await runtime.run_once()
+
+    assert redis.queue_events == [NOW]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_cooldown_survives_scheduler_restart(tmp_path: Path) -> None:
     engine, sessions = await _database(tmp_path)
     cooling = await _torrent(

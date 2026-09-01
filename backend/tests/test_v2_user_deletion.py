@@ -3,7 +3,7 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.service import delete_managed_user
+from app.auth.service import delete_managed_user, set_managed_user_active
 from app.models import (
     ManagedTorrent,
     ManagedTorrentState,
@@ -53,3 +53,39 @@ async def test_deleting_user_cancels_rights_and_preserves_shared_content(
     assert surviving_usage.logical_bytes == 10
     assert torrent.state is ManagedTorrentState.READY
     assert torrent.purge_after is None
+
+
+@pytest.mark.asyncio
+async def test_toggling_sole_waiting_owner_changes_physical_queue_membership(
+    db_session: AsyncSession,
+) -> None:
+    owner = User(username="status-owner", password_hash="hash")
+    torrent = ManagedTorrent(
+        info_hash="7" * 40,
+        name="Waiting",
+        total_size=10,
+        state=ManagedTorrentState.PAUSED,
+        desired_active=False,
+    )
+    db_session.add(
+        TorrentRequest(
+            user=owner,
+            managed_torrent=torrent,
+            state=TorrentRequestState.ACTIVE,
+        )
+    )
+    await db_session.commit()
+
+    disabled = await set_managed_user_active(
+        db_session,
+        user_id=owner.id,
+        is_active=False,
+    )
+    enabled = await set_managed_user_active(
+        db_session,
+        user_id=owner.id,
+        is_active=True,
+    )
+
+    assert disabled.queue_membership_changed is True
+    assert enabled.queue_membership_changed is True

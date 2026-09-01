@@ -8,6 +8,7 @@ from typing import Literal
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models import (
     ManagedTorrent,
@@ -52,6 +53,89 @@ def torrent_queue_status(
     if torrent.desired_active:
         return "downloading"
     return "waiting"
+
+
+async def is_ranked_queue_member(
+    session: AsyncSession,
+    torrent: ManagedTorrent,
+    *,
+    now: datetime,
+) -> bool:
+    """Return whether one physical torrent belongs to the public ranked waiting set."""
+
+    timestamp = _utc(now)
+    if (
+        torrent.state not in {ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED}
+        or torrent.desired_active
+        or (torrent.scheduler_retry_at is not None and _utc(torrent.scheduler_retry_at) > timestamp)
+    ):
+        return False
+    return bool(
+        await session.scalar(
+            select(TorrentRequest.id)
+            .join(User, User.id == TorrentRequest.user_id)
+            .where(
+                TorrentRequest.managed_torrent_id == torrent.id,
+                TorrentRequest.state.in_(
+                    (TorrentRequestState.REQUESTED, TorrentRequestState.ACTIVE)
+                ),
+                User.is_active.is_(True),
+                User.deleted_at.is_(None),
+            )
+            .limit(1)
+        )
+    )
+
+
+async def user_active_status_changes_ranked_queue(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    now: datetime,
+) -> bool:
+    """Detect whether toggling one owner changes any physical ranked membership."""
+
+    owner_request = aliased(TorrentRequest)
+    other_request = aliased(TorrentRequest)
+    other_user = aliased(User)
+    other_active_owner = (
+        select(other_request.id)
+        .join(other_user, other_user.id == other_request.user_id)
+        .where(
+            other_request.managed_torrent_id == ManagedTorrent.id,
+            other_request.user_id != user_id,
+            other_request.state.in_((TorrentRequestState.REQUESTED, TorrentRequestState.ACTIVE)),
+            other_user.is_active.is_(True),
+            other_user.deleted_at.is_(None),
+        )
+        .exists()
+    )
+    timestamp = _utc(now)
+    database_now = (
+        timestamp.replace(tzinfo=None) if session.get_bind().dialect.name == "sqlite" else timestamp
+    )
+    return bool(
+        await session.scalar(
+            select(ManagedTorrent.id)
+            .join(owner_request, owner_request.managed_torrent_id == ManagedTorrent.id)
+            .where(
+                owner_request.user_id == user_id,
+                owner_request.state.in_(
+                    (TorrentRequestState.REQUESTED, TorrentRequestState.ACTIVE)
+                ),
+                ManagedTorrent.state.in_(
+                    (ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED)
+                ),
+                ManagedTorrent.desired_active.is_(False),
+                or_(
+                    ManagedTorrent.scheduler_retry_at.is_(None),
+                    ManagedTorrent.scheduler_retry_at <= database_now,
+                ),
+                ~other_active_owner,
+            )
+            .limit(1)
+        )
+    )
 
 
 async def load_torrent_queue_visibility(

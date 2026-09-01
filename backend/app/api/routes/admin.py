@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated, Literal, Never, cast
 from uuid import UUID
 
@@ -20,6 +21,7 @@ from app.auth.service import (
     delete_managed_user,
     set_managed_user_active,
 )
+from app.coordination.dependencies import RedisCoordinatorDependency
 from app.core.config import Settings, get_settings
 from app.files import WorkspaceError
 from app.files.dependencies import WorkspaceManagerDependency
@@ -564,10 +566,11 @@ async def update_user_status(
     user_id: UUID,
     payload: UserStatusRequest,
     db: DbSession,
+    redis: RedisCoordinatorDependency,
     _: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> UserResponse:
     try:
-        user = await set_managed_user_active(db, user_id=user_id, is_active=payload.is_active)
+        result = await set_managed_user_active(db, user_id=user_id, is_active=payload.is_active)
     except ManagedUserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
     except ProtectedUserError as exc:
@@ -575,17 +578,20 @@ async def update_user_status(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrator accounts cannot be suspended",
         ) from exc
-    return UserResponse.model_validate(user)
+    if result.queue_membership_changed:
+        await redis.publish_torrent_queue_changed(datetime.now(UTC))
+    return UserResponse.model_validate(result.user)
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: UUID,
     db: DbSession,
+    redis: RedisCoordinatorDependency,
     _: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> Response:
     try:
-        await delete_managed_user(db, user_id=user_id)
+        queue_membership_changed = await delete_managed_user(db, user_id=user_id)
     except ManagedUserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
     except ProtectedUserError as exc:
@@ -593,6 +599,8 @@ async def delete_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrator accounts cannot be deleted",
         ) from exc
+    if queue_membership_changed:
+        await redis.publish_torrent_queue_changed(datetime.now(UTC))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
