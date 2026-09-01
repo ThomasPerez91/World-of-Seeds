@@ -1,0 +1,197 @@
+name: Publish NewGreedy image
+
+on:
+  workflow_dispatch:
+    inputs:
+      newgreedy_ref:
+        description: Explicit Mrt0t0/NewGreedy commit, tag, or ref
+        required: true
+        type: string
+      newgreedy_version:
+        description: Expected upstream version, for example 1.7.5
+        required: true
+        type: string
+
+permissions: {}
+
+# Serialize the complete validate -> immutable-tag check -> push sequence. The
+# image can depend on external package indexes, so two runs must never race to
+# publish different images for the same upstream commit.
+concurrency:
+  group: newgreedy-image-publication
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Build and validate the upstream image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      resolved_commit: ${{ steps.validate.outputs.resolved_commit }}
+      version: ${{ steps.validate.outputs.version }}
+      base_digest: ${{ steps.validate.outputs.base_digest }}
+      local_ref: ${{ steps.validate.outputs.local_ref }}
+      image_id: ${{ steps.validate.outputs.image_id }}
+      image_archive_sha: ${{ steps.validate.outputs.image_archive_sha }}
+      lock_sha: ${{ steps.validate.outputs.lock_sha }}
+      ca_a_before: ${{ steps.validate.outputs.ca_a_before }}
+      ca_a_after: ${{ steps.validate.outputs.ca_a_after }}
+      ca_b: ${{ steps.validate.outputs.ca_b }}
+    steps:
+      - name: Check out the trusted OPS builder
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Require the default branch workflow
+        run: |
+          set -Eeuo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/${{ github.event.repository.default_branch }}" ]]
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Resolve, build, and test once
+        id: validate
+        env:
+          NEWGREEDY_REF: ${{ inputs.newgreedy_ref }}
+          NEWGREEDY_VERSION: ${{ inputs.newgreedy_version }}
+        run: bash ops/newgreedy/build-and-test.sh
+
+      - name: Export the exact tested image and evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: newgreedy-validated-${{ steps.validate.outputs.resolved_commit }}
+          path: newgreedy-artifacts/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  publish:
+    name: Publish the exact validated image
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Download the validated image artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: newgreedy-validated-${{ needs.validate.outputs.resolved_commit }}
+          path: newgreedy-artifacts
+
+      - name: Verify and load without rebuilding
+        id: image
+        env:
+          EXPECTED_COMMIT: ${{ needs.validate.outputs.resolved_commit }}
+          EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
+          EXPECTED_IMAGE_ID: ${{ needs.validate.outputs.image_id }}
+          EXPECTED_ARCHIVE_SHA: ${{ needs.validate.outputs.image_archive_sha }}
+        run: |
+          set -Eeuo pipefail
+          cd newgreedy-artifacts
+          sha256sum --check tested-image.tar.gz.sha256
+          actual_archive_sha="$(sha256sum tested-image.tar.gz | awk '{print $1}')"
+          [[ "$actual_archive_sha" == "$EXPECTED_ARCHIVE_SHA" ]]
+
+          source build-metadata.env
+          [[ "$RESOLVED_COMMIT" == "$EXPECTED_COMMIT" ]]
+          [[ "$REQUESTED_VERSION" == "$EXPECTED_VERSION" ]]
+          [[ "$IMAGE_ID" == "$EXPECTED_IMAGE_ID" ]]
+          [[ "$IMAGE_ARCHIVE_SHA256" == "$EXPECTED_ARCHIVE_SHA" ]]
+
+          gzip --decompress --stdout tested-image.tar.gz | docker load
+          loaded_id="$(docker image inspect --format '{{.Id}}' "$LOCAL_REF")"
+          [[ "$loaded_id" == "$EXPECTED_IMAGE_ID" ]]
+          [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$LOCAL_REF")" == "linux/amd64" ]]
+          [[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$LOCAL_REF")" == "https://github.com/Mrt0t0/NewGreedy" ]]
+          [[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$LOCAL_REF")" == "$EXPECTED_COMMIT" ]]
+          [[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$LOCAL_REF")" == "$EXPECTED_VERSION" ]]
+
+          remote_ref="ghcr.io/thomasperez91/world-of-seeds-newgreedy:sha-$EXPECTED_COMMIT"
+          {
+            echo "local_ref=$LOCAL_REF"
+            echo "remote_ref=$remote_ref"
+            echo "image_id=$loaded_id"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx for registry inspection
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR after all validation
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Refuse to overwrite an immutable SHA tag
+        env:
+          REMOTE_REF: ${{ steps.image.outputs.remote_ref }}
+        run: |
+          set -Eeuo pipefail
+          set +e
+          manifest_output="$(docker manifest inspect "$REMOTE_REF" 2>&1)"
+          manifest_status=$?
+          set -e
+
+          if (( manifest_status == 0 )); then
+            echo "The immutable SHA tag already exists: $REMOTE_REF" >&2
+            exit 1
+          fi
+
+          # Docker does not expose a dedicated exit code for registry 404s.
+          # Continue only for its explicit manifest-absence errors; auth,
+          # network, registry, timeout, rate-limit, and unknown failures abort.
+          if grep -Eqi '(unauthorized|denied|forbidden|too many requests|rate.?limit|timeout|timed out|TLS|connection|no such host|temporary failure|unexpected status|server error|service unavailable|(^|[^A-Za-z])EOF([^A-Za-z]|$))' \
+              <<<"$manifest_output"; then
+            echo "Indeterminate registry error while checking $REMOTE_REF:" >&2
+            printf '%s\n' "$manifest_output" >&2
+            exit 1
+          fi
+          if grep -Eqi '(^|: )(manifest unknown)(:|$)|^no such manifest: ' \
+              <<<"$manifest_output"; then
+            echo "Confirmed that the immutable SHA tag is absent: $REMOTE_REF"
+          else
+            echo "Indeterminate registry error while checking $REMOTE_REF:" >&2
+            printf '%s\n' "$manifest_output" >&2
+            exit 1
+          fi
+
+      - name: Tag and push the exact tested image
+        id: publish
+        env:
+          LOCAL_REF: ${{ steps.image.outputs.local_ref }}
+          REMOTE_REF: ${{ steps.image.outputs.remote_ref }}
+          EXPECTED_IMAGE_ID: ${{ steps.image.outputs.image_id }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$(docker image inspect --format '{{.Id}}' "$LOCAL_REF")" == "$EXPECTED_IMAGE_ID" ]]
+          docker tag "$LOCAL_REF" "$REMOTE_REF"
+          [[ "$(docker image inspect --format '{{.Id}}' "$REMOTE_REF")" == "$EXPECTED_IMAGE_ID" ]]
+          docker push "$REMOTE_REF" | tee push.log
+
+          remote_digest="$(
+            docker buildx imagetools inspect "$REMOTE_REF" \
+              | awk '$1 == "Digest:" {print $2; exit}'
+          )"
+          [[ "$remote_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker buildx imagetools inspect "$REMOTE_REF" | tee remote-manifest.txt
+          docker pull --platform linux/amd64 "$REMOTE_REF"
+          [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$REMOTE_REF")" == "linux/amd64" ]]
+          [[ "$(docker image inspect --format '{{.Id}}' "$REMOTE_REF")" == "$EXPECTED_IMAGE_ID" ]]
+
+          echo "digest=$remote_digest" >>"$GITHUB_OUTPUT"
+          {
+            echo "## Published NewGreedy image"
+            echo
+            echo "- Image tested equals image published: **yes**"
+            echo "- Image ID: \`$EXPECTED_IMAGE_ID\`"
+            echo "- Reference: \`$REMOTE_REF\`"
+            echo "- Registry digest: \`$remote_digest\`"
+            echo "- Platform: \`linux/amd64\`"
+            echo "- No rebuild occurred after validation."
+            echo "- Build metadata, dependency lock and package inventories are retained in the validation artifact."
+            echo "- BuildKit registry attestations are intentionally not attached because that would require a second build/export path."
+          } >>"$GITHUB_STEP_SUMMARY"
