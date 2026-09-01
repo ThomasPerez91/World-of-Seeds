@@ -1,0 +1,78 @@
+name: Publish V2 integration image
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - develop_V2
+
+permissions: {}
+
+concurrency:
+  group: world-of-seeds-v2-image
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build immutable V2 image
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'develop_V2'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Validate the V2 revision
+        env:
+          V2_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$V2_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out the validated V2 revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Validate the V2 prerelease version
+        id: version
+        run: |
+          set -Eeuo pipefail
+          version="$(python3 scripts/versioning.py check \
+            --channel v2 --print-version)"
+          printf 'version=%s\n' "$version" >>"$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish the isolated V2 image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/thomasperez91/world-of-seeds-v2:sha-${{ github.event.workflow_run.head_sha }}
+          build-args: |
+            WOS_APP_VERSION=${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.ref.name=develop_V2
+          cache-from: type=gha,scope=v2
+          cache-to: type=gha,mode=max,scope=v2
+          provenance: mode=max
+          sbom: true
