@@ -1525,6 +1525,36 @@
   V2-33 change is included. V2-32D remains blocked and non-blocking; draft PR `#103` remains
   untouched.
 
+## Post-V2-32F corrections — Queue invalidation and local volatility
+
+- Fixed the post-audit P2 gap without changing scheduler selection: the exact public ranked-set
+  predicate is now reused for one locked physical torrent before and after add, cancellation,
+  deduplication reactivation, sync stall/cooldown/state transitions, and durable worker failure or
+  retry transitions. Owner activation/deletion batches use one bounded existence decision and
+  still publish at most one global invalidation.
+- `torrent.queue_changed` remains the closed `{type, occurred_at}` global payload. Publication is
+  performed only after the owning transaction context or service commit returns successfully;
+  Redis remains best-effort, PostgreSQL authoritative, and rollback emits nothing.
+- A 50-beneficiary shared torrent causes one physical invalidation, not one event per owner.
+  Existing scheduler selection invalidation remains one event per cycle; frontend in-flight resync
+  coalescence reduces several rapid events to one queued follow-up GET.
+- Added the accepted P3 disclosure in the existing local-transfer region, in centralized FR/EN
+  copy, without modal, toast, permanent `aria-live`, browser persistence, server queue, polling, or
+  DownloadLease change. The responsive style uses existing muted text tokens and wraps long text.
+- Explicit regressions cover 12 torrents with two unchanged selected slots followed by a 13th
+  eligible torrent (total 10 to 11 and exactly one event), last shared-owner removal, 50 shared
+  beneficiaries, add rollback, unconfigured Redis, stall/cooldown recovery, unchanged scheduler
+  controls, rapid frontend invalidations, FR/EN, mobile wrapping, and axe. Existing 199/200/201/500/
+  1,000 scheduler-window coverage remains unchanged.
+- Local validation: PASS — 597 backend tests collected (590 passed, 7 real-service integrations
+  deferred), 84 frontend tests including axe, TypeScript, Vite production build, Ruff check and
+  format, strict mypy across app and tests, V2 version consistency, shell syntax, Compose/policy
+  tests, and `git diff --check`. Docker is unavailable locally; real PostgreSQL/Redis, Compose,
+  image/security, bounded-load, WebSocket, and monitoring checks remain delegated to PR CI.
+- No migration, dependency, configuration, version, qBittorrent control, weighted-fair/deficit/
+  aging/slot change, NewGreedy/V2-32D work, V2-33 work, or Rise2 deployment is included. Draft PR
+  `#103` remains untouched.
+
 ## Pre-pilot hardening audit for V2-33
 
 - Confirmed and fixed the public monitoring boundary: Rise2 ingress returns `404` for
@@ -1582,8 +1612,9 @@
 
 ## Next task
 
-- V2-32F is the only active task. After its review, green CI, and merge, the next roadmap task is
-  `V2-33 — Pilote Rise2`; do not start it automatically.
+- The post-V2-32F P2/P3 correction is the only active task. After its review, green CI, and merge,
+  the feature-freeze candidate may proceed to the separately authorized `V2-33 — Pilote Rise2`;
+  do not start it automatically.
 - V2-32D remains blocked by NewGreedy v1.7.5 and is not a pilot prerequisite unless explicitly
   decided otherwise.
 - Do not continue, rebase, close, or merge the existing V2-33 draft PR `#103` automatically; its

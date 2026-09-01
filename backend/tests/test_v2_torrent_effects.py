@@ -40,6 +40,7 @@ from app.models import (
     TrackerActivity,
     User,
 )
+from app.scheduler.queue_visibility import load_torrent_queue_visibility
 from app.storage import SharedContentStore
 
 NOW = datetime(2026, 8, 21, 20, tzinfo=UTC)
@@ -222,6 +223,7 @@ def _missing_router(
 class RecordingRedis:
     def __init__(self) -> None:
         self.events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
+        self.queue_events: list[datetime] = []
 
     async def publish_torrent_event(
         self,
@@ -229,6 +231,10 @@ class RecordingRedis:
         event: TorrentRealtimeEvent,
     ) -> bool:
         self.events.append((user_id, event))
+        return True
+
+    async def publish_torrent_queue_changed(self, occurred_at: datetime) -> bool:
+        self.queue_events.append(occurred_at)
         return True
 
 
@@ -338,7 +344,7 @@ def test_payload_store_refuses_symlink_payload(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_add_handler_transitions_requests_and_removes_staged_payload(
+async def test_add_handler_transitions_requests_and_tolerates_unconfigured_redis(
     sessions: async_sessionmaker[AsyncSession],
     tmp_path: Path,
 ) -> None:
@@ -380,6 +386,167 @@ async def test_add_handler_transitions_requests_and_removes_staged_payload(
     assert b"private-user-passkey" not in adder.contents[0]
     with pytest.raises(TorrentPayloadStoreError):
         payloads.read(STORAGE_KEY)
+
+
+@pytest.mark.asyncio
+async def test_add_thirteenth_eligible_torrent_invalidates_unchanged_two_slot_queue_once(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(sessions)
+    waiting_id: uuid.UUID | None = None
+    async with sessions() as session, session.begin():
+        for index in range(12):
+            user = User(username=f"queue-owner-{index}", password_hash="hash")
+            torrent = ManagedTorrent(
+                info_hash=f"{index + 1:040x}",
+                name=f"queue-{index}",
+                total_size=100 + index,
+                state=ManagedTorrentState.PAUSED,
+                desired_active=index < 2,
+                desired_priority=index if index < 2 else None,
+                created_at=NOW + timedelta(microseconds=index),
+                updated_at=NOW,
+            )
+            request = TorrentRequest(
+                user=user,
+                managed_torrent=torrent,
+                state=TorrentRequestState.ACTIVE,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+            session.add(request)
+            await session.flush()
+            if index == 2:
+                waiting_id = torrent.id
+    assert waiting_id is not None
+
+    async with sessions() as session:
+        waiting = await session.get(ManagedTorrent, waiting_id)
+        assert waiting is not None
+        before = (await load_torrent_queue_visibility(session, (waiting,), now=NOW))[waiting.id]
+        selected_before = tuple(
+            (
+                await session.scalars(
+                    select(ManagedTorrent.id)
+                    .where(ManagedTorrent.desired_active.is_(True))
+                    .order_by(ManagedTorrent.desired_priority)
+                )
+            ).all()
+        )
+    assert before.total_estimate == 10
+
+    payloads = _payloads(tmp_path)
+    payloads.stage(_torrent(), storage_key=STORAGE_KEY)
+    redis = RecordingRedis()
+    effects = TorrentEffectHandlers(
+        sessions,
+        _router(
+            sessions,
+            FakeAdder(),
+            QBittorrentV2TorrentSnapshot(INFO_HASH, "downloading", 0.2),
+        ),
+        payloads,
+        _content(tmp_path),
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW,
+    )
+
+    await effects.add_torrent(_snapshot(torrent_id, request_id, "ADD_TORRENT"))
+
+    async with sessions() as session:
+        waiting = await session.get(ManagedTorrent, waiting_id)
+        assert waiting is not None
+        after = (await load_torrent_queue_visibility(session, (waiting,), now=NOW))[waiting.id]
+        selected_after = tuple(
+            (
+                await session.scalars(
+                    select(ManagedTorrent.id)
+                    .where(ManagedTorrent.desired_active.is_(True))
+                    .order_by(ManagedTorrent.desired_priority)
+                )
+            ).all()
+        )
+    assert after.total_estimate == 11
+    assert selected_after == selected_before
+    assert redis.queue_events == [NOW]
+
+
+@pytest.mark.asyncio
+async def test_one_shared_physical_add_publishes_one_queue_invalidation(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(sessions)
+    async with sessions() as session, session.begin():
+        for index in range(49):
+            session.add(
+                TorrentRequest(
+                    user=User(username=f"shared-owner-{index}", password_hash="hash"),
+                    managed_torrent_id=torrent_id,
+                    state=TorrentRequestState.REQUESTED,
+                )
+            )
+    payloads = _payloads(tmp_path)
+    payloads.stage(_torrent(), storage_key=STORAGE_KEY)
+    redis = RecordingRedis()
+    effects = TorrentEffectHandlers(
+        sessions,
+        _router(
+            sessions,
+            FakeAdder(),
+            QBittorrentV2TorrentSnapshot(INFO_HASH, "downloading", 0.2),
+        ),
+        payloads,
+        _content(tmp_path),
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW,
+    )
+
+    await effects.add_torrent(_snapshot(torrent_id, request_id, "ADD_TORRENT"))
+
+    assert len(redis.events) == 50
+    assert redis.queue_events == [NOW]
+
+
+@pytest.mark.asyncio
+async def test_add_transaction_rollback_publishes_no_queue_invalidation(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torrent_id, request_id = await _create_domain(sessions)
+    payloads = _payloads(tmp_path)
+    payloads.stage(_torrent(), storage_key=STORAGE_KEY)
+    redis = RecordingRedis()
+    effects = TorrentEffectHandlers(
+        sessions,
+        _router(
+            sessions,
+            FakeAdder(),
+            QBittorrentV2TorrentSnapshot(INFO_HASH, "downloading", 0.2),
+        ),
+        payloads,
+        _content(tmp_path),
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW,
+    )
+
+    async def fail_tracker_activity(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("forced_transaction_rollback")
+
+    monkeypatch.setattr(
+        "app.jobs.torrent_effects.record_tracker_activity",
+        fail_tracker_activity,
+    )
+
+    with pytest.raises(RuntimeError, match="forced_transaction_rollback"):
+        await effects.add_torrent(_snapshot(torrent_id, request_id, "ADD_TORRENT"))
+
+    async with sessions() as session:
+        torrent = await session.get(ManagedTorrent, torrent_id)
+    assert torrent is not None and torrent.state is ManagedTorrentState.ADDING
+    assert redis.queue_events == []
 
 
 @pytest.mark.asyncio
@@ -736,6 +903,47 @@ async def test_sync_handler_persists_stall_backoff_and_resets_on_real_progress(
     assert recovered.stall_count == 0
     assert recovered.scheduler_retry_at is None
     assert recovered.last_downloaded_bytes == 991
+
+
+@pytest.mark.asyncio
+async def test_waiting_stall_and_cooldown_recovery_each_invalidate_once(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(
+        sessions,
+        state=ManagedTorrentState.DOWNLOADING,
+    )
+    redis = RecordingRedis()
+    payloads = _payloads(tmp_path)
+    content = _content(tmp_path)
+
+    async def sync(at: datetime) -> None:
+        effects = TorrentEffectHandlers(
+            sessions,
+            _router(
+                sessions,
+                FakeAdder(),
+                QBittorrentV2TorrentSnapshot(INFO_HASH, "stalledDL", 0.5, 500),
+            ),
+            payloads,
+            content,
+            redis=redis,  # type: ignore[arg-type]
+            clock=lambda: at,
+        )
+        await effects.sync_torrent(_snapshot(torrent_id, request_id, "SYNC_TORRENT"))
+
+    await sync(NOW)
+    assert redis.queue_events == []
+
+    stalled_at = NOW + timedelta(seconds=61)
+    await sync(stalled_at)
+    await sync(NOW + timedelta(minutes=2))
+    assert redis.queue_events == [stalled_at]
+
+    recovered_at = NOW + timedelta(minutes=4, seconds=2)
+    await sync(recovered_at)
+    assert redis.queue_events == [stalled_at, recovered_at]
 
 
 @pytest.mark.asyncio

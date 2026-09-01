@@ -59,6 +59,7 @@ from app.models import (
     TrackerActivityOutcome,
     TrackerActivityType,
 )
+from app.scheduler.queue_visibility import is_ranked_queue_member
 from app.storage import SharedContentStore, SharedContentStoreError
 from app.torrents import (
     PURGE_TORRENT_JOB,
@@ -252,6 +253,7 @@ class TorrentEffectHandlers:
 
         now = self._clock()
         realtime_events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
+        queue_changed = False
         async with self._session_factory() as session, session.begin():
             managed = await session.get(
                 ManagedTorrent,
@@ -270,6 +272,7 @@ class TorrentEffectHandlers:
                 except TorrentPayloadStoreError:
                     logger.warning("torrent_worker_payload_cleanup_failed")
                 return
+            was_ranked = await is_ranked_queue_member(session, managed, now=now)
             managed.state = ManagedTorrentState.PAUSED
             managed.qb_state = "stoppeddl"
             managed.retry_at = None
@@ -305,7 +308,15 @@ class TorrentEffectHandlers:
                 diagnostic_code=None,
                 occurred_at=now,
             )
-        await self._publish_realtime_events(realtime_events)
+            await session.flush()
+            queue_changed = was_ranked != await is_ranked_queue_member(
+                session,
+                managed,
+                now=now,
+            )
+        await self._publish_realtime_events(
+            realtime_events, queue_changed_at=now if queue_changed else None
+        )
         try:
             await asyncio.to_thread(self._payloads.remove, torrent.storage_key)
         except TorrentPayloadStoreError:
@@ -529,6 +540,7 @@ class TorrentEffectHandlers:
         now = self._clock()
         state, safe_qb_state = _domain_state(snapshot)
         realtime_events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
+        queue_changed = False
         async with self._session_factory() as session, session.begin():
             torrent = await session.get(
                 ManagedTorrent,
@@ -545,6 +557,7 @@ class TorrentEffectHandlers:
                 ManagedTorrentState.PURGED,
             }:
                 return
+            was_ranked = await is_ranked_queue_member(session, torrent, now=now)
             previous_qb_state = torrent.qb_state
             previous_state = torrent.state
             previous_retry_at = torrent.scheduler_retry_at
@@ -607,14 +620,33 @@ class TorrentEffectHandlers:
                     )
                     for request in requests
                 )
-        await self._publish_realtime_events(realtime_events)
+            await session.flush()
+            is_ranked = await is_ranked_queue_member(
+                session,
+                torrent,
+                now=now,
+            )
+            cooldown_released = (
+                previous_retry_at is not None
+                and _as_utc(previous_retry_at) <= _as_utc(now)
+                and torrent.scheduler_retry_at is None
+                and is_ranked
+            )
+            queue_changed = was_ranked != is_ranked or cooldown_released
+        await self._publish_realtime_events(
+            realtime_events, queue_changed_at=now if queue_changed else None
+        )
 
     async def _publish_realtime_events(
         self,
         events: list[tuple[uuid.UUID, TorrentRealtimeEvent]],
+        *,
+        queue_changed_at: datetime | None = None,
     ) -> None:
         for user_id, event in events:
             await self._redis.publish_torrent_event(user_id, event)
+        if queue_changed_at is not None:
+            await self._redis.publish_torrent_queue_changed(queue_changed_at)
 
 
 class TorrentSyncEnqueuer:

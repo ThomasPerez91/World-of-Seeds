@@ -22,6 +22,7 @@ from app.core.config import Settings
 from app.files import WorkspaceAlreadyExistsError, WorkspaceError, WorkspaceManager
 from app.models import LoginThrottle, TorrentRequest, TorrentRequestState, User, UserSession
 from app.options import PostgresOptionsRegistry
+from app.scheduler.queue_visibility import user_active_status_changes_ranked_queue
 from app.torrents import cancel_owned_torrent_request
 
 
@@ -50,6 +51,12 @@ class SessionTokens:
     session_token: str
     csrf_token: str
     expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedUserStatusResult:
+    user: User
+    queue_membership_changed: bool
 
 
 def ensure_utc(value: datetime) -> datetime:
@@ -344,7 +351,7 @@ async def set_managed_user_active(
     *,
     user_id: UUID,
     is_active: bool,
-) -> User:
+) -> ManagedUserStatusResult:
     user = await db.scalar(select(User).where(User.id == user_id).with_for_update())
     if user is None or user.deleted_at is not None:
         raise ManagedUserNotFoundError
@@ -352,6 +359,9 @@ async def set_managed_user_active(
         raise ProtectedUserError
 
     now = datetime.now(UTC)
+    queue_membership_changed = user.is_active != is_active and (
+        await user_active_status_changes_ranked_queue(db, user_id=user.id, now=now)
+    )
     user.is_active = is_active
     user.updated_at = now
     if not is_active:
@@ -362,10 +372,10 @@ async def set_managed_user_active(
         )
     await db.commit()
     await db.refresh(user)
-    return user
+    return ManagedUserStatusResult(user, queue_membership_changed)
 
 
-async def delete_managed_user(db: AsyncSession, *, user_id: UUID) -> None:
+async def delete_managed_user(db: AsyncSession, *, user_id: UUID) -> bool:
     user = await db.scalar(select(User).where(User.id == user_id).with_for_update())
     if user is None or user.deleted_at is not None:
         raise ManagedUserNotFoundError
@@ -393,6 +403,11 @@ async def delete_managed_user(db: AsyncSession, *, user_id: UUID) -> None:
     if request_ids:
         options = await PostgresOptionsRegistry().snapshot(db)
         retention_hours = int(options["WOS_TORRENT_RETENTION_HOURS"])
+    queue_membership_changed = await user_active_status_changes_ranked_queue(
+        db,
+        user_id=user.id,
+        now=now,
+    )
     for request_id in request_ids:
         await cancel_owned_torrent_request(
             db,
@@ -400,6 +415,7 @@ async def delete_managed_user(db: AsyncSession, *, user_id: UUID) -> None:
             torrent_request_id=request_id,
             retention_hours=retention_hours,
             now=now,
+            detect_queue_membership=False,
         )
     user.is_active = False
     user.deleted_at = now
@@ -410,6 +426,7 @@ async def delete_managed_user(db: AsyncSession, *, user_id: UUID) -> None:
         .values(revoked_at=now)
     )
     await db.commit()
+    return queue_membership_changed
 
 
 async def purge_expired_sessions(db: AsyncSession) -> int:

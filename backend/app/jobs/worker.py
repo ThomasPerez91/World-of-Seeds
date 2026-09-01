@@ -32,6 +32,7 @@ from app.models import (
     TorrentRequest,
     TorrentRequestState,
 )
+from app.scheduler.queue_visibility import is_ranked_queue_member
 
 logger = logging.getLogger(__name__)
 
@@ -330,6 +331,7 @@ class TorrentWorker:
     ) -> None:
         now = self._clock()
         realtime_events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
+        queue_changed = False
         async with self._session_factory() as session, session.begin():
             job = await self._owned_job(session, snapshot.id)
             if job.cancel_requested_at is not None:
@@ -362,6 +364,7 @@ class TorrentWorker:
                     with_for_update=True,
                 )
                 if managed is not None:
+                    was_ranked = await is_ranked_queue_member(session, managed, now=now)
                     if job.state is TorrentJobState.FAILED:
                         managed.state = ManagedTorrentState.ERROR
                         managed.retry_at = None
@@ -393,8 +396,16 @@ class TorrentWorker:
                             )
                             for request in requests
                         )
+                    await session.flush()
+                    queue_changed = was_ranked != await is_ranked_queue_member(
+                        session,
+                        managed,
+                        now=now,
+                    )
         for user_id, event in realtime_events:
             await self._redis.publish_torrent_event(user_id, event)
+        if queue_changed:
+            await self._redis.publish_torrent_queue_changed(now)
 
     async def _owned_job(self, session: AsyncSession, job_id: uuid.UUID) -> TorrentJob:
         job = await session.scalar(

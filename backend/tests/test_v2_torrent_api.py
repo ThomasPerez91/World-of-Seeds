@@ -25,6 +25,7 @@ from app.options import PostgresOptionsRegistry
 class RecordingRedis:
     def __init__(self) -> None:
         self.events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
+        self.queue_events: list[datetime] = []
         self.signals = 0
 
     async def signal_job_available(self) -> bool:
@@ -37,6 +38,10 @@ class RecordingRedis:
         event: TorrentRealtimeEvent,
     ) -> bool:
         self.events.append((user_id, event))
+        return True
+
+    async def publish_torrent_queue_changed(self, occurred_at: datetime) -> bool:
+        self.queue_events.append(occurred_at)
         return True
 
 
@@ -430,6 +435,61 @@ async def test_v2_cancellation_schedules_retained_purge_and_is_idempotent(
     )
     assert len(jobs) == 1
     assert jobs[0].state is TorrentJobState.QUEUED
+
+
+@pytest.mark.asyncio
+async def test_only_last_shared_waiting_owner_cancellation_invalidates_queue_once(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    first_owner = await prepare_user(db_session)
+    second_owner = User(
+        username="alice",
+        password_hash=hash_password("correct-horse-battery"),
+    )
+    managed = ManagedTorrent(
+        info_hash="e" * 40,
+        name="Shared waiting",
+        total_size=100,
+        state=ManagedTorrentState.PAUSED,
+        desired_active=False,
+    )
+    first_request = TorrentRequest(
+        user_id=first_owner.id,
+        managed_torrent=managed,
+        state=TorrentRequestState.ACTIVE,
+    )
+    second_request = TorrentRequest(
+        user=second_owner,
+        managed_torrent=managed,
+        state=TorrentRequestState.ACTIVE,
+    )
+    db_session.add_all((first_request, second_request))
+    await db_session.commit()
+    first_request_id = first_request.id
+    second_request_id = second_request.id
+    redis = RecordingRedis()
+    app.state.redis_coordinator = redis
+
+    first_headers = await login(client)
+    first = await client.delete(
+        f"/api/v2/torrents/{first_request_id}",
+        headers=first_headers,
+    )
+    second_headers = await login(client, "alice")
+    second = await client.delete(
+        f"/api/v2/torrents/{second_request_id}",
+        headers=second_headers,
+    )
+
+    assert first.status_code == second.status_code == 204
+    assert len(redis.queue_events) == 1
+    payload = TorrentRealtimeEvent(
+        TorrentEventType.QUEUE_CHANGED,
+        None,
+        redis.queue_events[0],
+    ).payload()
+    assert set(payload) == {"type", "occurred_at"}
 
 
 @pytest.mark.asyncio

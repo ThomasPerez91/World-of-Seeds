@@ -276,6 +276,42 @@ describe("UserDownloadsPage", () => {
     view.unmount();
   });
 
+  it("coalesce plusieurs invalidations globales pendant un resync", async () => {
+    MockWebSocket.instances = [];
+    let requests = 0;
+    let releaseRefresh!: () => void;
+    let markRefreshStarted!: () => void;
+    const refreshPending = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    const refreshStarted = new Promise<void>((resolve) => { markRefreshStarted = resolve; });
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      requests += 1;
+      if (requests === 2) {
+        markRefreshStarted();
+        await refreshPending;
+      }
+      return response({ items: [torrent()], offset: 0, limit: 10, total: 1 });
+    }));
+    const view = renderPage();
+
+    await screen.findByText("En cours");
+    const event = {
+      type: "torrent.queue_changed",
+      occurred_at: "2026-09-01T12:00:00Z",
+    };
+    MockWebSocket.instances[0].message(event);
+    await refreshStarted;
+    MockWebSocket.instances[0].message(event);
+    MockWebSocket.instances[0].message(event);
+    MockWebSocket.instances[0].message(event);
+    releaseRefresh();
+
+    await waitFor(() => expect(requests).toBe(3));
+    await act(async () => Promise.resolve());
+    expect(requests).toBe(3);
+    view.unmount();
+  });
+
   it("affiche le contrat de file en anglais", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({
       items: [torrent({
@@ -641,12 +677,58 @@ describe("UserDownloadsPage", () => {
     expect(screen.getByText("En attente — 2e")).toBeTruthy();
     expect(screen.getByText("En attente — 3e")).toBeTruthy();
     expect(screen.getByRole("list", { name: "File de récupération vers cet appareil" })).toBeTruthy();
+    expect(screen.getByText("La file de récupération est liée à cet onglet. Le fermer ou actualiser la page peut interrompre la file ; les téléchargements pourront être relancés.")).toBeTruthy();
     expect(screen.getAllByText("Téléchargement en cours")).toHaveLength(2);
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
     expect(view.container.querySelector("[style]")).toBeNull();
 
     releaseDownloads();
     expect(await screen.findByText("« Film.mkv » a été téléchargé.")).toBeTruthy();
+  });
+
+  it("explique la volatilité de la file locale en anglais sans annonce dynamique", async () => {
+    vi.stubGlobal("showDirectoryPicker", vi.fn(async () => ({
+      getFileHandle: vi.fn(async () => ({
+        createWritable: vi.fn(async () => ({
+          seek: vi.fn(),
+          write: vi.fn(),
+          close: vi.fn(),
+        })),
+      })),
+    })));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("download-manifest")) {
+        return response({
+          snapshot_id: "f".repeat(64),
+          manifest_version: 1,
+          file_count: 1,
+          total_size: 1,
+          archive_available: true,
+          retention_expires_at: null,
+          offset: 0,
+          limit: 500,
+          items: [{ id: "file", file_index: 0, relative_path: "file.bin", size: 1 }],
+        });
+      }
+      if (String(input).includes("/files/")) {
+        return new Response(new Uint8Array([1]).buffer, {
+          headers: { "X-WOS-Manifest-Version": "1" },
+        });
+      }
+      return response({
+        items: [torrent({ state: "ready", progress: 1 })],
+        offset: 0,
+        limit: 10,
+        total: 1,
+      });
+    }));
+    const view = renderPage("en");
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Download" }));
+
+    const notice = await screen.findByText("The transfer queue belongs to this tab. Closing it or refreshing the page may interrupt the queue; downloads can be started again.");
+    expect(notice.closest("[aria-live]")).toBeNull();
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
   it("propose les fichiers et le ZIP streamé sans File System Access API", async () => {

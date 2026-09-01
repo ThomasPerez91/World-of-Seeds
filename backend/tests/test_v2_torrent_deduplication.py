@@ -1,7 +1,7 @@
 import asyncio
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import delete, func, select
@@ -253,6 +253,50 @@ async def test_last_owner_cancelling_downloading_torrent_persists_scheduler_stop
     assert created.managed_torrent.desired_priority is None
     assert created.managed_torrent.purge_stop_pending is True
     assert created.managed_torrent.progress == 0.4
+
+
+@pytest.mark.asyncio
+async def test_new_owner_reactivating_retained_partial_torrent_changes_queue_membership(
+    db_session: AsyncSession,
+) -> None:
+    first_owner = await create_user(db_session, "retained-partial-first")
+    second_owner = await create_user(db_session, "retained-partial-second")
+    created = await create_or_get_torrent_request(
+        db_session,
+        user_id=first_owner.id,
+        info_hash="f" * 40,
+        name="Retained partial",
+        total_size=100,
+        now=NOW,
+    )
+    created.managed_torrent.state = ManagedTorrentState.DOWNLOADING
+    created.managed_torrent.progress = 0.4
+    created.managed_torrent.desired_active = True
+    created.managed_torrent.desired_priority = 0
+    created.request.state = TorrentRequestState.ACTIVE
+    await db_session.flush()
+    cancelled = await cancel_owned_torrent_request(
+        db_session,
+        user_id=first_owner.id,
+        torrent_request_id=created.request.id,
+        retention_hours=48,
+        now=NOW,
+    )
+    assert cancelled is not None and cancelled.purge_scheduled is True
+
+    resumed = await create_or_get_torrent_request(
+        db_session,
+        user_id=second_owner.id,
+        info_hash="f" * 40,
+        name="Retained partial",
+        total_size=100,
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert resumed.managed_torrent.state is ManagedTorrentState.DOWNLOADING
+    assert resumed.managed_torrent.desired_active is False
+    assert resumed.request.state is TorrentRequestState.ACTIVE
+    assert resumed.queue_membership_changed is True
 
 
 @pytest.mark.asyncio
