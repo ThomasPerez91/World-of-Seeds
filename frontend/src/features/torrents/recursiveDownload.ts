@@ -5,6 +5,7 @@ import type {
 
 const MAX_MANIFEST_PAGE_SIZE = 500;
 const MAX_BUFFERED_MANIFEST_PAGES = 2;
+const MAX_VISIBLE_QUEUE_ITEMS = 8;
 
 export interface WritableFileHandle {
   write(data: Uint8Array): Promise<void>;
@@ -51,6 +52,22 @@ export interface RecursiveTransferProgress {
   downloadedBytes: number;
   completedFiles: number;
   error: RecursiveTransferErrorCode | null;
+  queue: readonly LocalTransferQueueItem[];
+}
+
+export type LocalTransferQueueItemStatus =
+  | "active"
+  | "waiting"
+  | "paused"
+  | "completed"
+  | "error"
+  | "cancelled";
+
+export interface LocalTransferQueueItem {
+  id: string;
+  relativePath: string;
+  status: LocalTransferQueueItemStatus;
+  position: number | null;
 }
 
 type ManifestPageLoader = (
@@ -96,6 +113,9 @@ export class RecursiveDownloadController {
   private readonly offsets = new Map<string, number>();
   private readonly activeRequests = new Set<AbortController>();
   private readonly pendingFiles: TorrentDownloadFileV2[];
+  private readonly activeFiles = new Map<string, TorrentDownloadFileV2>();
+  private readonly recentlyCompleted: TorrentDownloadFileV2[] = [];
+  private failedFileId: string | null = null;
   private readonly maxBufferedFiles: number;
   private status: RecursiveTransferStatus = "paused";
   private error: RecursiveTransferErrorCode | null = null;
@@ -175,17 +195,25 @@ export class RecursiveDownloadController {
       while (this.status === "running") {
         const file = await this.takeNextFile();
         if (file === null) return;
+        if (this.failedFileId === file.id) this.failedFileId = null;
+        this.activeFiles.set(file.id, file);
+        this.emit();
         try {
           await this.downloadFile(file);
           this.completedFiles += 1;
           this.offsets.delete(file.id);
-          this.emit();
+          this.recentlyCompleted.unshift(file);
+          this.recentlyCompleted.splice(2);
         } catch (error) {
           this.pendingFiles.unshift(file);
           if (error instanceof DOMException && error.name === "AbortError") return;
           if (this.status !== "running") return;
+          this.failedFileId = file.id;
           this.fail(error);
           return;
+        } finally {
+          this.activeFiles.delete(file.id);
+          this.emit();
         }
       }
     };
@@ -418,6 +446,46 @@ export class RecursiveDownloadController {
       downloadedBytes: this.downloadedBytes,
       completedFiles: this.completedFiles,
       error,
+      queue: this.queueSnapshot(),
     });
+  }
+
+  private queueSnapshot(): readonly LocalTransferQueueItem[] {
+    const activeStatus: LocalTransferQueueItemStatus = this.status === "paused"
+      ? "paused"
+      : this.status === "error"
+        ? "error"
+        : this.status === "cancelled"
+          ? "cancelled"
+          : "active";
+    const active = [...this.activeFiles.values()].map((file) => ({
+      id: file.id,
+      relativePath: file.relative_path,
+      status: activeStatus,
+      position: null,
+    }));
+    const completed = this.recentlyCompleted.map((file) => ({
+      id: file.id,
+      relativePath: file.relative_path,
+      status: "completed" as const,
+      position: null,
+    }));
+    const remaining = Math.max(0, MAX_VISIBLE_QUEUE_ITEMS - active.length - completed.length);
+    const waiting = this.pendingFiles.slice(0, remaining).map((file, index) => {
+      const status: LocalTransferQueueItemStatus = this.status === "cancelled"
+        ? "cancelled"
+        : this.status === "paused"
+          ? "paused"
+        : file.id === this.failedFileId
+          ? "error"
+          : "waiting";
+      return {
+        id: file.id,
+        relativePath: file.relative_path,
+        status,
+        position: status === "waiting" ? index + 1 : null,
+      };
+    });
+    return [...active, ...waiting, ...completed].slice(0, MAX_VISIBLE_QUEUE_ITEMS);
   }
 }

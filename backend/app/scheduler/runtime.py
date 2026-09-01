@@ -449,4 +449,11 @@ def _control_event_targets(
         else:
             event_type = TorrentEventType.PAUSED
         targets.append((request.user_id, request.id, event_type))
+    if targets:
+        invalidated_user_ids = {user_id for user_id, _, _ in targets}
+        for request in requests:
+            if request.user_id in invalidated_user_ids:
+                continue
+            targets.append((request.user_id, request.id, TorrentEventType.QUEUE_CHANGED))
+            invalidated_user_ids.add(request.user_id)
     return tuple(targets)

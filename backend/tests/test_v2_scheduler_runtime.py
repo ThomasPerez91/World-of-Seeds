@@ -435,6 +435,43 @@ async def test_global_active_limit_is_reloaded_between_cycles_with_ten_queued(
 
 
 @pytest.mark.asyncio
+async def test_selection_change_invalidates_other_queue_owners_without_event_storm(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    for index in range(3):
+        await _torrent(
+            sessions,
+            username=f"queue-event-{index}",
+            info_hash=f"{80 + index:040x}",
+            size=10 + index,
+        )
+    async with sessions() as session, session.begin():
+        option = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+        assert option is not None
+        option.integer_value = 1
+    redis = RecordingRedis()
+
+    await SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="scheduler-queue-events",
+        redis=redis,  # type: ignore[arg-type]
+        clock=lambda: NOW,
+    ).run_once()
+
+    assert len(redis.events) == 3
+    assert [event.event_type for _, event in redis.events].count(TorrentEventType.STARTED) == 1
+    assert [event.event_type for _, event in redis.events].count(
+        TorrentEventType.QUEUE_CHANGED
+    ) == 2
+    assert all(
+        set(event.payload()) == {"type", "request_id", "occurred_at"} for _, event in redis.events
+    )
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_cooldown_survives_scheduler_restart(tmp_path: Path) -> None:
     engine, sessions = await _database(tmp_path)
     cooling = await _torrent(

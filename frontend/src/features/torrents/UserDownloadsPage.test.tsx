@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { auditAccessibility } from "../../test/accessibility";
 import { FeedbackProvider } from "../../components/Feedback";
+import { I18nProvider, type Locale } from "../../i18n";
 import {
   MAX_TORRENT_BATCH_FILES,
   TORRENT_UPLOAD_CONCURRENCY,
@@ -26,17 +27,23 @@ function torrent(overrides: Record<string, unknown> = {}) {
     state: "active",
     error_code: null,
     retention_expires_at: null,
+    queue_position_estimate: null,
+    queue_total_estimate: null,
+    queue_status: null,
     created_at: "2026-08-20T10:00:00Z",
     updated_at: "2026-08-20T10:05:00Z",
     ...overrides,
   };
 }
 
-function renderPage() {
+function renderPage(locale: Locale = "fr") {
+  window.localStorage.setItem("wos.preferred-locale", locale);
   return render(
-    <FeedbackProvider>
-      <UserDownloadsPage onSessionExpired={vi.fn()} />
-    </FeedbackProvider>,
+    <I18nProvider>
+      <FeedbackProvider>
+        <UserDownloadsPage onSessionExpired={vi.fn()} />
+      </FeedbackProvider>
+    </I18nProvider>,
   );
 }
 
@@ -209,6 +216,87 @@ describe("UserDownloadsPage", () => {
     view.unmount();
   });
 
+  it("affiche les rangs estimés, états qualitatifs et disclaimer sans inventer un FIFO", async () => {
+    const rows = [
+      torrent({ id: crypto.randomUUID(), name: "Premier", queue_status: "waiting", queue_position_estimate: 1, queue_total_estimate: 1_005 }),
+      torrent({ id: crypto.randomUUID(), name: "Neuvième", queue_status: "waiting", queue_position_estimate: 9, queue_total_estimate: 1_005 }),
+      torrent({ id: crypto.randomUUID(), name: "Lointain", queue_status: "waiting", queue_position_estimate: 158, queue_total_estimate: 1_005 }),
+      torrent({ id: crypto.randomUUID(), name: "Très lointain", queue_status: "waiting", queue_position_estimate: 1_005, queue_total_estimate: 1_005 }),
+      torrent({ id: crypto.randomUUID(), name: "Sélectionné", queue_status: "downloading" }),
+      torrent({ id: crypto.randomUUID(), name: "Sans sources", queue_status: "stalled" }),
+      torrent({ id: crypto.randomUUID(), name: "Nouvelle tentative", queue_status: "cooldown" }),
+      torrent({ id: crypto.randomUUID(), name: "Prêt", state: "ready", progress: 1 }),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => response({
+      items: rows, offset: 0, limit: 10, total: rows.length,
+    })));
+    const view = renderPage();
+
+    expect(await screen.findByText("Prochainement")).toBeTruthy();
+    expect(screen.getByText("Position estimée : ~9")).toBeTruthy();
+    expect(screen.getByText("Position estimée : ~158")).toBeTruthy();
+    expect(screen.getByText("Position estimée : ~1005")).toBeTruthy();
+    expect(screen.getByText("Téléchargement en cours")).toBeTruthy();
+    expect(screen.getByText("En attente de sources")).toBeTruthy();
+    expect(screen.getByText("Nouvelle tentative en attente")).toBeTruthy();
+    expect(screen.getByText("1005 torrents en attente")).toBeTruthy();
+    expect(screen.getByText("La position peut évoluer selon l’équité, la taille et la disponibilité.")).toBeTruthy();
+    expect(within(screen.getByText("Prêt").closest("tr") as HTMLElement).queryByText(/Position|Prochainement/)).toBeNull();
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
+  it("remplace un rang estimé après une invalidation scheduler et resync", async () => {
+    MockWebSocket.instances = [];
+    let requests = 0;
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      requests += 1;
+      return response({
+        items: [torrent({
+          queue_status: requests === 1 ? "waiting" : "downloading",
+          queue_position_estimate: requests === 1 ? 9 : null,
+          queue_total_estimate: requests === 1 ? 12 : null,
+        })],
+        offset: 0,
+        limit: 10,
+        total: 1,
+      });
+    }));
+    const view = renderPage();
+
+    expect(await screen.findByText("Position estimée : ~9")).toBeTruthy();
+    MockWebSocket.instances[0].message({
+      type: "torrent.queue_changed",
+      request_id: torrent().id,
+      occurred_at: "2026-09-01T12:00:00Z",
+    });
+
+    expect(await screen.findByText("Téléchargement en cours")).toBeTruthy();
+    expect(screen.queryByText("Position estimée : ~9")).toBeNull();
+    expect(requests).toBe(2);
+    view.unmount();
+  });
+
+  it("affiche le contrat de file en anglais", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({
+      items: [torrent({
+        queue_status: "waiting",
+        queue_position_estimate: 9,
+        queue_total_estimate: 12,
+      })],
+      offset: 0,
+      limit: 10,
+      total: 1,
+    })));
+    const view = renderPage("en");
+
+    expect(await screen.findByText("Estimated position: ~9")).toBeTruthy();
+    expect(screen.getByText("12 torrents waiting")).toBeTruthy();
+    expect(screen.getByText("The position may change with fairness, size, and availability.")).toBeTruthy();
+    expect(screen.getByText(/WOS downloads the complete torrent/)).toBeTruthy();
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
   it("remplace la deadline partagée après un événement de prolongation et resync", async () => {
     MockWebSocket.instances = [];
     const initialDeadline = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString();
@@ -364,20 +452,30 @@ describe("UserDownloadsPage", () => {
       const expiresAt = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString();
       expect(longName.length).toBeGreaterThan(200);
       vi.stubGlobal("fetch", vi.fn(async () => response({
-        items: [torrent({
-          name: longName,
-          state: "ready",
-          progress: 1,
-          retention_expires_at: expiresAt,
-        })],
+        items: [
+          torrent({
+            name: longName,
+            state: "ready",
+            progress: 1,
+            retention_expires_at: expiresAt,
+          }),
+          torrent({
+            id: crypto.randomUUID(),
+            name: `queued-${longName}`,
+            queue_status: "waiting",
+            queue_position_estimate: 1_005,
+            queue_total_estimate: 1_005,
+          }),
+        ],
         offset: 0,
         limit: 10,
-        total: 1,
+        total: 2,
       })));
       const view = renderPage();
 
       expect(await screen.findByTitle(longName)).toBeTruthy();
       expect(screen.getByTestId("retention-warning").classList.contains("compact")).toBe(true);
+      expect(screen.getByText("Position estimée : ~1005")).toBeTruthy();
       expect(screen.getByText(/Expiration le/, { selector: ".sr-only" })).toBeTruthy();
       expect(view.container.querySelector("[style]")).toBeNull();
       expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
@@ -477,6 +575,79 @@ describe("UserDownloadsPage", () => {
     expect(screen.getByText("1/1 fichiers · 3 o sur 3 o")).toBeTruthy();
     expect(writes).toEqual([1, 2, 3]);
     expect(view.container.querySelector("[style]")).toBeNull();
+  });
+
+  it("rend la file locale active et les positions 1/2/3 sur mobile", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+    const longPath = `${"Folder/very-long-episode-name-".repeat(9)}`;
+    const items = Array.from({ length: 5 }, (_, index) => ({
+      id: `file-${index}`,
+      file_index: index,
+      relative_path: `${longPath}${index}.mkv`,
+      size: 1,
+    }));
+    let releaseDownloads!: () => void;
+    let markStarted!: () => void;
+    const downloadsPending = new Promise<void>((resolve) => { releaseDownloads = resolve; });
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    let active = 0;
+    const fileHandle = {
+      createWritable: vi.fn(async () => ({
+        seek: vi.fn(),
+        write: vi.fn(),
+        close: vi.fn(),
+      })),
+    };
+    const directory = {
+      getDirectoryHandle: vi.fn(async () => directory),
+      getFileHandle: vi.fn(async () => fileHandle),
+    };
+    vi.stubGlobal("showDirectoryPicker", vi.fn(async () => directory));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("download-manifest")) {
+        return response({
+          snapshot_id: "e".repeat(64),
+          manifest_version: 1,
+          file_count: items.length,
+          total_size: items.length,
+          archive_available: true,
+          retention_expires_at: null,
+          offset: 0,
+          limit: 500,
+          items,
+        });
+      }
+      if (url.includes("/files/")) {
+        active += 1;
+        if (active === 2) markStarted();
+        await downloadsPending;
+        active -= 1;
+        return new Response(new Uint8Array([1]).buffer, {
+          headers: { "X-WOS-Manifest-Version": "1" },
+        });
+      }
+      return response({
+        items: [torrent({ state: "ready", progress: 1 })],
+        offset: 0,
+        limit: 10,
+        total: 1,
+      });
+    }));
+    const view = renderPage();
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Télécharger" }));
+    await started;
+    expect(await screen.findByText("En attente — 1er")).toBeTruthy();
+    expect(screen.getByText("En attente — 2e")).toBeTruthy();
+    expect(screen.getByText("En attente — 3e")).toBeTruthy();
+    expect(screen.getByRole("list", { name: "File de récupération vers cet appareil" })).toBeTruthy();
+    expect(screen.getAllByText("Téléchargement en cours")).toHaveLength(2);
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+    expect(view.container.querySelector("[style]")).toBeNull();
+
+    releaseDownloads();
+    expect(await screen.findByText("« Film.mkv » a été téléchargé.")).toBeTruthy();
   });
 
   it("propose les fichiers et le ZIP streamé sans File System Access API", async () => {

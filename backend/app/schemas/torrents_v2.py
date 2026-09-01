@@ -13,6 +13,9 @@ class TorrentRequestV2Response(BaseModel):
     progress: float = Field(ge=0, le=1)
     error_code: str | None
     retention_expires_at: datetime | None
+    queue_position_estimate: int | None = Field(default=None, ge=1)
+    queue_total_estimate: int | None = Field(default=None, ge=1)
+    queue_status: Literal["waiting", "downloading", "stalled", "cooldown"] | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -80,6 +80,9 @@ export interface TorrentRequestV2 {
   progress: number;
   error_code: string | null;
   retention_expires_at: string | null;
+  queue_position_estimate: number | null;
+  queue_total_estimate: number | null;
+  queue_status: "waiting" | "downloading" | "stalled" | "cooldown" | null;
   created_at: string;
   updated_at: string;
 }
@@ -104,6 +107,7 @@ export type TorrentRealtimeEventType =
   | "torrent.resumed"
   | "torrent.ready"
   | "torrent.retention_extended"
+  | "torrent.queue_changed"
   | "torrent.failed"
   | "torrent.cancelled"
   | "torrent.expired";
@@ -120,6 +124,7 @@ const torrentRealtimeEventTypes = new Set<TorrentRealtimeEventType>([
   "torrent.resumed",
   "torrent.ready",
   "torrent.retention_extended",
+  "torrent.queue_changed",
   "torrent.failed",
   "torrent.cancelled",
   "torrent.expired",
