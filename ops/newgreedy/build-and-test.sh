@@ -39,9 +39,8 @@ fail() {
 wait_healthy() {
     local container="$1"
     local status
-    local attempt
 
-    for attempt in $(seq 1 60); do
+    for _ in {1..60}; do
         status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container")"
         case "$status" in
             healthy)
@@ -61,6 +60,59 @@ wait_healthy() {
 
     docker logs "$container" >&2
     fail "$container did not become healthy in time"
+}
+
+verify_runtime_ca() {
+    local container="$1"
+    local cert_public_key
+    local private_public_key
+
+    docker exec "$container" test -s /root/.mitmproxy/mitmproxy-ca-cert.pem
+    docker exec "$container" test -s /root/.mitmproxy/mitmproxy-ca.pem
+    docker exec "$container" grep -Eq 'BEGIN (RSA |EC )?PRIVATE KEY' \
+        /root/.mitmproxy/mitmproxy-ca.pem
+
+    cert_public_key="$(
+        docker exec "$container" sh -euc '
+            work="$(mktemp -d)"
+            trap '\''rm -rf "$work"'\'' EXIT
+            openssl x509 -in /root/.mitmproxy/mitmproxy-ca-cert.pem \
+                -pubkey -noout >"$work/cert-public.pem"
+            openssl pkey -pubin -in "$work/cert-public.pem" \
+                -outform DER >"$work/cert-public.der" 2>/dev/null
+            sha256sum "$work/cert-public.der" | cut -d " " -f 1
+        '
+    )"
+    private_public_key="$(
+        docker exec "$container" sh -euc '
+            work="$(mktemp -d)"
+            trap '\''rm -rf "$work"'\'' EXIT
+            openssl pkey -in /root/.mitmproxy/mitmproxy-ca.pem \
+                -pubout -outform DER >"$work/private-public.der" 2>/dev/null
+            sha256sum "$work/private-public.der" | cut -d " " -f 1
+        '
+    )"
+    [[ "$cert_public_key" =~ ^[0-9a-f]{64}$ ]] \
+        || fail "the runtime CA certificate public key is invalid"
+    [[ "$private_public_key" == "$cert_public_key" ]] \
+        || fail "the runtime CA certificate and private key do not match"
+}
+
+test_https_proxy() {
+    local container="$1"
+
+    docker exec "$container" sh -euc '
+        response="$(mktemp)"
+        trap '\''rm -f "$response"'\'' EXIT
+        curl --fail --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --proxy http://127.0.0.1:3456 \
+            --cacert /root/.mitmproxy/mitmproxy-ca-cert.pem \
+            --output "$response" \
+            https://example.com/
+        grep -Fq "Example Domain" "$response"
+    '
 }
 
 start_runtime() {
@@ -83,8 +135,6 @@ start_runtime() {
     host_port="$(docker port "$container" 8080/tcp | awk -F: 'END {print $NF}')"
     [[ "$host_port" =~ ^[0-9]+$ ]] || fail "could not resolve the web port for $container"
     curl -fsS "http://127.0.0.1:$host_port/api/health" >/dev/null
-    docker exec "$container" python3 -c \
-        'import socket; socket.create_connection(("127.0.0.1", 3456), 5).close()'
 }
 
 prepare_runtime() {
@@ -252,10 +302,8 @@ docker volume create "$volume_a" >/dev/null
 docker volume create "$volume_b" >/dev/null
 
 start_runtime "$container_a" "$volume_a" "$runtime_a"
-docker exec "$container_a" test -s /root/.mitmproxy/mitmproxy-ca-cert.pem
-docker exec "$container_a" test -s /root/.mitmproxy/mitmproxy-ca.pem
-docker exec "$container_a" grep -Eq 'BEGIN (RSA |EC )?PRIVATE KEY' \
-    /root/.mitmproxy/mitmproxy-ca.pem
+verify_runtime_ca "$container_a"
+test_https_proxy "$container_a"
 ca_a_before="$(docker exec "$container_a" sha256sum /root/.mitmproxy/mitmproxy-ca-cert.pem | awk '{print $1}')"
 [[ "$ca_a_before" =~ ^[0-9a-f]{64}$ ]] || fail "the first CA fingerprint is invalid"
 
@@ -264,16 +312,14 @@ wait_healthy "$container_a"
 restart_port="$(docker port "$container_a" 8080/tcp | awk -F: 'END {print $NF}')"
 [[ "$restart_port" =~ ^[0-9]+$ ]] || fail "could not resolve the web port after restart"
 curl -fsS "http://127.0.0.1:$restart_port/api/health" >/dev/null
-docker exec "$container_a" python3 -c \
-    'import socket; socket.create_connection(("127.0.0.1", 3456), 5).close()'
+verify_runtime_ca "$container_a"
+test_https_proxy "$container_a"
 ca_a_after="$(docker exec "$container_a" sha256sum /root/.mitmproxy/mitmproxy-ca-cert.pem | awk '{print $1}')"
 [[ "$ca_a_after" == "$ca_a_before" ]] || fail "the CA changed after a restart with the same volume"
 
 start_runtime "$container_b" "$volume_b" "$runtime_b"
-docker exec "$container_b" test -s /root/.mitmproxy/mitmproxy-ca-cert.pem
-docker exec "$container_b" test -s /root/.mitmproxy/mitmproxy-ca.pem
-docker exec "$container_b" grep -Eq 'BEGIN (RSA |EC )?PRIVATE KEY' \
-    /root/.mitmproxy/mitmproxy-ca.pem
+verify_runtime_ca "$container_b"
+test_https_proxy "$container_b"
 ca_b="$(docker exec "$container_b" sha256sum /root/.mitmproxy/mitmproxy-ca-cert.pem | awk '{print $1}')"
 [[ "$ca_b" =~ ^[0-9a-f]{64}$ ]] || fail "the second CA fingerprint is invalid"
 [[ "$ca_b" != "$ca_a_before" ]] || fail "a fresh volume reused the first runtime CA"
@@ -331,6 +377,7 @@ REQUIREMENTS_LOCK_SHA256=$lock_sha
 CA_A_BEFORE=$ca_a_before
 CA_A_AFTER=$ca_a_after
 CA_B=$ca_b
+HTTPS_PROXY_TESTS=3
 EOF
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
@@ -361,6 +408,8 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 - CA fingerprint before restart: \`$ca_a_before\`
 - CA fingerprint after restart: \`$ca_a_after\`
 - Fresh-volume CA fingerprint: \`$ca_b\`
+- HTTPS requests validated through the MITM proxy with the runtime CA: **3/3 passed**
+- Runtime CA certificate/private-key matches: **3/3 passed**
 - Raw layers and the exported root filesystem contain no NewGreedy runtime CA, config or state files.
 - The exact tested Docker image was exported for the publish job; no rebuild is permitted.
 EOF

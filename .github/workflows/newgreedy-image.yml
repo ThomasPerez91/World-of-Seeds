@@ -14,6 +14,13 @@ on:
 
 permissions: {}
 
+# Serialize the complete validate -> immutable-tag check -> push sequence. The
+# image can depend on external package indexes, so two runs must never race to
+# publish different images for the same upstream commit.
+concurrency:
+  group: newgreedy-image-publication
+  cancel-in-progress: false
+
 jobs:
   validate:
     name: Build and validate the upstream image
@@ -66,7 +73,6 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       packages: write
     steps:
       - name: Download the validated image artifact
@@ -125,8 +131,31 @@ jobs:
           REMOTE_REF: ${{ steps.image.outputs.remote_ref }}
         run: |
           set -Eeuo pipefail
-          if docker manifest inspect "$REMOTE_REF" >/dev/null 2>&1; then
+          set +e
+          manifest_output="$(docker manifest inspect "$REMOTE_REF" 2>&1)"
+          manifest_status=$?
+          set -e
+
+          if (( manifest_status == 0 )); then
             echo "The immutable SHA tag already exists: $REMOTE_REF" >&2
+            exit 1
+          fi
+
+          # Docker does not expose a dedicated exit code for registry 404s.
+          # Continue only for its explicit manifest-absence errors; auth,
+          # network, registry, timeout, rate-limit, and unknown failures abort.
+          if grep -Eqi '(unauthorized|denied|forbidden|too many requests|rate.?limit|timeout|timed out|TLS|connection|no such host|temporary failure|unexpected status|server error|service unavailable|(^|[^A-Za-z])EOF([^A-Za-z]|$))' \
+              <<<"$manifest_output"; then
+            echo "Indeterminate registry error while checking $REMOTE_REF:" >&2
+            printf '%s\n' "$manifest_output" >&2
+            exit 1
+          fi
+          if grep -Eqi '(^|: )(manifest unknown)(:|$)|^no such manifest: ' \
+              <<<"$manifest_output"; then
+            echo "Confirmed that the immutable SHA tag is absent: $REMOTE_REF"
+          else
+            echo "Indeterminate registry error while checking $REMOTE_REF:" >&2
+            printf '%s\n' "$manifest_output" >&2
             exit 1
           fi
 
