@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import hashlib
 import hmac
 import json
 import os
 import secrets
 import stat
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -113,7 +115,9 @@ def _password_hash(password: str, *, salt: bytes | None = None) -> str:
 def _render(username: str, password: str, *, salt: bytes | None = None) -> str:
     settings = dict(_STATIC_SETTINGS)
     settings[("Preferences", r"WebUI\Username")] = username
-    settings[("Preferences", r"WebUI\Password_PBKDF2")] = f'"{_password_hash(password, salt=salt)}"'
+    settings[("Preferences", r"WebUI\Password_PBKDF2")] = (
+        f'"{_password_hash(password, salt=salt)}"'
+    )
 
     sections: dict[str, list[tuple[str, str]]] = {}
     for (section, key), value in settings.items():
@@ -155,7 +159,7 @@ def _verify_password(stored: str, password: str) -> bool:
         salt64, key64 = payload.split(":", 1)
         salt = base64.b64decode(salt64, validate=True)
         stored_key = base64.b64decode(key64, validate=True)
-    except (ValueError, base64.binascii.Error):
+    except (ValueError, binascii.Error):
         return False
     if len(salt) != PBKDF2_SALT_BYTES or len(stored_key) != PBKDF2_KEY_BYTES:
         return False
@@ -180,6 +184,13 @@ def _matches(text: str, username: str, password: str) -> bool:
     return stored is not None and _verify_password(stored, password)
 
 
+def _set_metadata(path: Path, uid: int, gid: int) -> None:
+    os.chmod(path, 0o600)
+    metadata = path.stat()
+    if metadata.st_uid != uid or metadata.st_gid != gid:
+        os.chown(path, uid, gid)
+
+
 def ensure_bootstrap(
     compose_config: dict[str, Any],
     output: Path,
@@ -195,8 +206,7 @@ def ensure_bootstrap(
             raise BootstrapError("qBittorrent bootstrap path must be a regular file")
         current = output.read_text(encoding="utf-8")
         if _matches(current, username, password):
-            os.chmod(output, 0o600)
-            os.chown(output, uid, gid)
+            _set_metadata(output, uid, gid)
             return False
     elif output.is_symlink():
         raise BootstrapError("qBittorrent bootstrap path must not be a symlink")
@@ -210,7 +220,9 @@ def ensure_bootstrap(
     temporary = Path(temporary_name)
     try:
         os.fchmod(fd, 0o600)
-        os.fchown(fd, uid, gid)
+        metadata = os.fstat(fd)
+        if metadata.st_uid != uid or metadata.st_gid != gid:
+            os.fchown(fd, uid, gid)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             fd = -1
             handle.write(rendered)
@@ -222,6 +234,7 @@ def ensure_bootstrap(
             os.close(fd)
         temporary.unlink(missing_ok=True)
 
+    _set_metadata(output, uid, gid)
     if stat.S_IMODE(output.stat().st_mode) != 0o600:
         raise BootstrapError("qBittorrent bootstrap mode is invalid after write")
     return True
@@ -235,7 +248,9 @@ def _positive_int(value: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Render the secret-bearing Rise2 qBittorrent bootstrap")
+    parser = argparse.ArgumentParser(
+        description="Render the secret-bearing Rise2 qBittorrent bootstrap"
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--uid", type=_positive_int, required=True)
     parser.add_argument("--gid", type=_positive_int, required=True)
@@ -254,11 +269,13 @@ def main() -> int:
     except (BootstrapError, json.JSONDecodeError, OSError) as exc:
         parser.error(str(exc))
 
-    print("Rise2 qBittorrent bootstrap rendered." if changed else "Rise2 qBittorrent bootstrap verified.")
+    print(
+        "Rise2 qBittorrent bootstrap rendered."
+        if changed
+        else "Rise2 qBittorrent bootstrap verified."
+    )
     return 0
 
 
 if __name__ == "__main__":
-    import sys
-
     raise SystemExit(main())
