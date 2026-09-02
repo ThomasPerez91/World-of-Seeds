@@ -53,17 +53,61 @@ def _valid_config() -> dict[str, Any]:
             "image": "qbittorrentofficial/qbittorrent-nox:5.2.3-1",
             "networks": {"torrent": None},
         },
+        "newgreedy-init": {
+            "image": newgreedy_digest,
+            "network_mode": "none",
+            "cap_drop": ["ALL"],
+            "security_opt": ["no-new-privileges:true"],
+            "read_only": True,
+            "command": [
+                "prepare stats.json torrent_registry.json newgreedy.log purge_pending.json"
+            ],
+            "volumes": [
+                {
+                    "type": "bind",
+                    "source": "/srv/world-of-seeds-v2/newgreedy-state",
+                    "target": "/state",
+                    "bind": {"create_host_path": False},
+                }
+            ],
+        },
         "newgreedy": {
             "image": newgreedy_digest,
             "networks": {"torrent": None},
             "cap_drop": ["ALL"],
+            "security_opt": ["no-new-privileges:true"],
+            "read_only": True,
+            "group_add": ["10003"],
+            "tmpfs": ["/tmp:rw,noexec,nosuid,nodev,size=32m"],
+            "depends_on": {"newgreedy-init": {"condition": "service_completed_successfully"}},
+            "healthcheck": {"test": ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]},
             "volumes": [
                 {
                     "type": "bind",
                     "source": "/etc/world-of-seeds-v2/config.ini",
                     "target": "/app/config.ini",
                     "read_only": True,
-                }
+                    "bind": {"create_host_path": False},
+                },
+                *[
+                    {
+                        "type": "bind",
+                        "source": f"/srv/world-of-seeds-v2/newgreedy-state/{name}",
+                        "target": f"/app/{name}",
+                        "bind": {"create_host_path": False},
+                    }
+                    for name in (
+                        "stats.json",
+                        "torrent_registry.json",
+                        "newgreedy.log",
+                        "purge_pending.json",
+                    )
+                ],
+                {
+                    "type": "volume",
+                    "source": "world-of-seeds-v2-rise2_newgreedy_v2_ca",
+                    "target": "/root/.mitmproxy",
+                },
             ],
         },
         "prometheus": {
@@ -104,7 +148,7 @@ def _valid_config() -> dict[str, Any]:
                 "postgres_v2_data",
                 "redis_v2_data",
                 "qbittorrent_v2_config",
-                "newgreedy_v2_data",
+                "newgreedy_v2_ca",
                 "prometheus_v2_data",
                 "grafana_v2_data",
                 "caddy_v2_data",
@@ -119,6 +163,14 @@ def test_rise2_policy_accepts_complete_isolated_stack() -> None:
     validate(_valid_config())
 
 
+def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
+    repository = Path(__file__).resolve().parents[2]
+    script = (repository / "scripts/rise2_v2_newgreedy_smoke.sh").read_text(encoding="utf-8")
+
+    assert 'readonly project_name="world-of-seeds-v2-rise2-smoke-$run_suffix"' in script
+    assert 'docker compose --project-name "$project_name"' in script
+
+
 @pytest.mark.parametrize(
     "break_policy",
     [
@@ -129,11 +181,23 @@ def test_rise2_policy_accepts_complete_isolated_stack() -> None:
         ),
         lambda config: config["services"]["api"].update({"command": ["uvicorn", "--workers", "2"]}),
         lambda config: config["services"]["newgreedy"].update({"privileged": True}),
+        lambda config: config["services"]["newgreedy"].update({"user": "10003:10003"}),
+        lambda config: config["services"]["newgreedy"].update({"security_opt": []}),
         lambda config: config["services"]["cadvisor"].update({"privileged": False}),
         lambda config: config["services"]["prometheus"].update({"privileged": True}),
         lambda config: config["services"]["newgreedy"].update(
             {"volumes": [{"type": "bind", "target": "/app/config.ini"}]}
         ),
+        lambda config: config["services"]["newgreedy"]["volumes"].append(
+            {"type": "tmpfs", "target": "/app/stats.json"}
+        ),
+        lambda config: config["services"]["newgreedy"]["volumes"][0]["bind"].update(
+            {"create_host_path": True}
+        ),
+        lambda config: config["services"]["newgreedy"]["volumes"].__setitem__(
+            -1, {"type": "tmpfs", "target": "/root/.mitmproxy"}
+        ),
+        lambda config: config["services"]["newgreedy-init"].update({"network_mode": "bridge"}),
         lambda config: config["services"]["api"].update({"image": "example.invalid/wos:latest"}),
         lambda config: config["services"]["worker"]["environment"].update(
             {"WOS_INTEGRATION_ACCOUNTS_JSON": ""}

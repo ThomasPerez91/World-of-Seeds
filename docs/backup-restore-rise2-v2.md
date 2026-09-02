@@ -9,7 +9,7 @@ ne monte et ne modifie jamais `/srv/seedbox` ni un volume V1.
 | --- | --- | --- | --- |
 | PostgreSQL | dump custom `pg_dump` dans l'archive chiffrée | snapshot transactionnel PostgreSQL | 14 quotidiennes + 8 hebdomadaires |
 | environnement et configs | copie normalisée dans l'archive `age` | même fenêtre que le dump | identique au dump |
-| qBittorrent et NewGreedy | état des volumes copié conteneurs arrêtés | consumers, qB et NewGreedy arrêtés | identique au dump |
+| qBittorrent et NewGreedy | état qB, quatre fichiers runtime NewGreedy et volume CA copiés conteneurs arrêtés | consumers, qB et NewGreedy arrêtés | identique au dump |
 | contenu `/srv/world-of-seeds-v2/data` | snapshot bloc/filesystem externe | créé pendant la même fenêtre d'arrêt | 7 points quotidiens minimum |
 | monitoring | provisioning Git ; données métriques non bloquantes | reconstruction autorisée | selon la rétention Prometheus |
 
@@ -68,7 +68,9 @@ scripts/rise2_v2_backup.py verify \
 
 Le manifeste chiffré recense les composants et les SHA-256 de chaque fichier. Le sidecar public ne
 contient que le SHA-256 du ciphertext et son nom ; l'authenticité du contenu reste assurée par
-`age` lors du déchiffrement.
+`age` lors du déchiffrement. Le schéma manifeste 2 identifie explicitement les quatre fichiers
+d'état NewGreedy et la CA ; l'ancien payload `/app/data` n'est pas accepté comme sauvegarde
+complète de cette image.
 
 ## Restaurer sans toucher à la production
 
@@ -94,9 +96,10 @@ effacé après l'exercice conformément à la procédure de l'hôte.
 ## Exercice de restauration obligatoire
 
 L'exercice restaure réellement `postgres.dump` dans un conteneur PostgreSQL dédié, sans réseau et
-sur un volume au nom unique. Il vérifie les modes des configs et la présence des états qB/NewGreedy,
-puis détruit automatiquement le conteneur et le volume jetables. Il ne démarre aucun service WOS
-et ne publie aucun port.
+sur un volume au nom unique. Il vérifie les modes des configs, les quatre fichiers d'état
+NewGreedy, ainsi que le certificat et la clé CA nécessaires à la continuité de confiance, puis
+détruit automatiquement le conteneur et le volume jetables. Il ne démarre aucun service WOS et ne
+publie aucun port.
 
 ```bash
 report=/var/lib/world-of-seeds-v2/restore-reports/$snapshot_id.json
@@ -108,7 +111,8 @@ Compléter l'exercice sur l'environnement de reprise vierge :
 1. restaurer le snapshot de contenu exact vers un nouveau chemin V2 isolé ;
 2. contrôler un échantillon de canaris par taille et SHA-256, sans écrire leurs noms dans le rapport ;
 3. installer les configs restaurées avec leurs modes `0600`/`0640` et les UID/GID dédiés ;
-4. créer uniquement les nouveaux volumes Rise2, restaurer PostgreSQL puis les états qB/NewGreedy ;
+4. créer uniquement les nouveaux volumes Rise2, restaurer PostgreSQL, l'état qB, les quatre binds
+   NewGreedy et son volume CA sans régénérer la CA ;
 5. exécuter le préflight, les migrations, la réconciliation par infohash et les tests de health ;
 6. chronométrer l'ensemble, comparer au RTO et faire approuver le rapport sans secret ;
 7. conserver l'ancienne pile et ses volumes intacts jusqu'à la décision de bascule.

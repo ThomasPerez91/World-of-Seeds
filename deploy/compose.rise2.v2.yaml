@@ -228,23 +228,80 @@ services:
       retries: 12
       start_period: 20s
 
+  newgreedy-init:
+    image: ${WOS_V2_NEWGREEDY_IMAGE:?set immutable WOS_V2_NEWGREEDY_IMAGE digest}
+    pull_policy: always
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        for name in stats.json torrent_registry.json newgreedy.log purge_pending.json; do
+          path="/state/$$name"
+          test ! -L "$$path"
+          if [ ! -e "$$path" ]; then
+            case "$$name" in
+              newgreedy.log) : >"$$path" ;;
+              purge_pending.json) printf '[]\n' >"$$path" ;;
+              *) printf '{}\n' >"$$path" ;;
+            esac
+          fi
+          test -f "$$path"
+          chmod 0600 "$$path"
+        done
+    volumes:
+      - type: bind
+        source: ${WOS_V2_NEWGREEDY_STATE_HOST_PATH:?set WOS_V2_NEWGREEDY_STATE_HOST_PATH}
+        target: /state
+        bind: {create_host_path: false}
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+
   newgreedy:
     image: ${WOS_V2_NEWGREEDY_IMAGE:?set immutable WOS_V2_NEWGREEDY_IMAGE digest}
     pull_policy: always
     restart: unless-stopped
-    user: "${WOS_V2_NEWGREEDY_UID:?set WOS_V2_NEWGREEDY_UID}:${WOS_V2_NEWGREEDY_GID:?set WOS_V2_NEWGREEDY_GID}"
+    depends_on:
+      newgreedy-init:
+        condition: service_completed_successfully
+    group_add:
+      - "${WOS_V2_NEWGREEDY_GID:?set WOS_V2_NEWGREEDY_GID}"
+    read_only: true
     volumes:
       - type: bind
         source: ${WOS_V2_NEWGREEDY_CONFIG_PATH:?set WOS_V2_NEWGREEDY_CONFIG_PATH}
         target: /app/config.ini
         read_only: true
-      - newgreedy_v2_data:/app/data
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${WOS_V2_NEWGREEDY_STATE_HOST_PATH:?set WOS_V2_NEWGREEDY_STATE_HOST_PATH}/stats.json
+        target: /app/stats.json
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${WOS_V2_NEWGREEDY_STATE_HOST_PATH:?set WOS_V2_NEWGREEDY_STATE_HOST_PATH}/torrent_registry.json
+        target: /app/torrent_registry.json
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${WOS_V2_NEWGREEDY_STATE_HOST_PATH:?set WOS_V2_NEWGREEDY_STATE_HOST_PATH}/newgreedy.log
+        target: /app/newgreedy.log
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${WOS_V2_NEWGREEDY_STATE_HOST_PATH:?set WOS_V2_NEWGREEDY_STATE_HOST_PATH}/purge_pending.json
+        target: /app/purge_pending.json
+        bind: {create_host_path: false}
+      - type: volume
+        source: newgreedy_v2_ca
+        target: /root/.mitmproxy
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
     networks: [torrent]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 128
     healthcheck:
-      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8080/api/health"]
+      test: [CMD, curl, -fsS, http://127.0.0.1:8080/api/health]
       interval: 10s
       timeout: 3s
       retries: 12
@@ -347,7 +404,7 @@ volumes:
   postgres_v2_data:
   redis_v2_data:
   qbittorrent_v2_config:
-  newgreedy_v2_data:
+  newgreedy_v2_ca:
   prometheus_v2_data:
   grafana_v2_data:
   caddy_v2_data:

@@ -55,6 +55,13 @@ The stable V1 maintenance release documented here is `1.3.3`.
 - The V2 target is a separate Rise2 stack integrating WOS API/workers, PostgreSQL, Redis,
   qBittorrent, NewGreedy, ingress, Prometheus, Grafana, node-exporter, and cAdvisor.
 - Rise2 uses secrets, networks, volumes, storage, and monitoring isolated from V1.
+- The pinned NewGreedy 1.7.5 runtime keeps its writable CA in a dedicated volume mounted at
+  `/root/.mitmproxy`. Its config is a read-only `/app/config.ini` bind, while `stats.json`,
+  `torrent_registry.json`, `newgreedy.log`, and `purge_pending.json` are individually backed by
+  one root-owned persistent state directory. Do not replace these paths with `/app/data`, mount a
+  volume over `/app`, or force the service away from the image's validated root user. NewGreedy
+  retains all dropped capabilities, no-new-privileges, a read-only root filesystem, and no host
+  port.
 
 ## Authentication and authorization
 

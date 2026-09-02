@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PROJECT_NAME = "world-of-seeds-v2-rise2"
 REPOSITORY = Path(__file__).resolve().parents[1]
 COMPOSE_FILE = REPOSITORY / "deploy/compose.rise2.v2.yaml"
@@ -29,6 +29,7 @@ REQUIRED_ENV = {
     "WOS_V2_POSTGRES_USER",
     "WOS_V2_QBITTORRENT_CONFIG_PATH",
     "WOS_V2_NEWGREEDY_CONFIG_PATH",
+    "WOS_V2_NEWGREEDY_STATE_HOST_PATH",
 }
 PRIVATE_MODES = {
     "environment": 0o600,
@@ -42,7 +43,8 @@ COMPONENTS = {
     "qbittorrent_bootstrap": "qBittorrent.conf",
     "qbittorrent_state": "qbittorrent-config",
     "newgreedy_config": "newgreedy/config.ini",
-    "newgreedy_state": "newgreedy-data",
+    "newgreedy_state": "newgreedy-state",
+    "newgreedy_ca": "newgreedy-ca",
 }
 
 
@@ -108,6 +110,17 @@ def validate_environment_paths(
         Path(values["WOS_V2_QBITTORRENT_CONFIG_PATH"]), "qBittorrent bootstrap config"
     )
     newgreedy = _resolved_file(Path(values["WOS_V2_NEWGREEDY_CONFIG_PATH"]), "NewGreedy config")
+    newgreedy_state = Path(values["WOS_V2_NEWGREEDY_STATE_HOST_PATH"])
+    try:
+        resolved_newgreedy_state = newgreedy_state.resolve(strict=True)
+    except OSError as exc:
+        raise BackupError("NewGreedy state directory does not exist") from exc
+    if (
+        newgreedy_state.is_symlink()
+        or not resolved_newgreedy_state.is_dir()
+        or not _is_relative_to(resolved_newgreedy_state, Path("/srv/world-of-seeds-v2"))
+    ):
+        raise BackupError("NewGreedy state must be a real V2 directory")
     for path, label in (
         (environment, "environment"),
         (qbittorrent, "qBittorrent"),
@@ -127,6 +140,7 @@ def validate_environment_paths(
         "storage": storage,
         "qbittorrent": qbittorrent,
         "newgreedy": newgreedy,
+        "newgreedy_state": resolved_newgreedy_state,
     }
 
 
@@ -308,21 +322,45 @@ def create_backup(
             ),
             label="qBittorrent state copy",
         )
+        newgreedy_state = stage / "newgreedy-state"
+        newgreedy_state.mkdir(mode=0o700)
+        for filename in (
+            "stats.json",
+            "torrent_registry.json",
+            "newgreedy.log",
+            "purge_pending.json",
+        ):
+            _run(
+                _compose(
+                    paths["environment"],
+                    "cp",
+                    f"newgreedy:/app/{filename}",
+                    str(newgreedy_state / filename),
+                ),
+                label=f"NewGreedy {filename} copy",
+            )
         _run(
             _compose(
                 paths["environment"],
                 "cp",
-                "newgreedy:/app/data/.",
-                str(stage / "newgreedy-data"),
+                "newgreedy:/root/.mitmproxy/.",
+                str(stage / "newgreedy-ca"),
             ),
-            label="NewGreedy state copy",
+            label="NewGreedy CA copy",
         )
         _write_manifest(stage, content_snapshot_id)
         tar_path = temporary / "backup.tar"
         _create_tar(stage, tar_path)
         try:
             _run(
-                ["age", "--recipient", age_recipient, "--output", str(target), str(tar_path)],
+                [
+                    "age",
+                    "--recipient",
+                    age_recipient,
+                    "--output",
+                    str(target),
+                    str(tar_path),
+                ],
                 label="age encryption",
             )
         except BackupError:
@@ -386,9 +424,18 @@ def validate_payload(stage: Path, expected_snapshot_id: str | None = None) -> di
         raise BackupError("backup manifest contains no file checksums")
     if manifest.get("components") != COMPONENTS:
         raise BackupError("backup manifest component map is incomplete")
-    for relative in ("qbittorrent-config", "newgreedy-data"):
+    for relative in ("qbittorrent-config", "newgreedy-state", "newgreedy-ca"):
         if not (stage / relative).is_dir() or (stage / relative).is_symlink():
             raise BackupError(f"backup payload component is missing: {relative}")
+    for relative in (
+        "newgreedy-state/stats.json",
+        "newgreedy-state/torrent_registry.json",
+        "newgreedy-state/newgreedy.log",
+        "newgreedy-state/purge_pending.json",
+        "newgreedy-ca/mitmproxy-ca-cert.pem",
+        "newgreedy-ca/mitmproxy-ca.pem",
+    ):
+        _resolved_file(stage / relative, f"backup payload {relative}")
     postgres_dump = _resolved_file(stage / "postgres.dump", "PostgreSQL dump")
     with postgres_dump.open("rb") as stream:
         if stream.read(5) != b"PGDMP":

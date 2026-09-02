@@ -18,10 +18,19 @@ read-only côté V1 et dry-run par défaut, décrite dans [`import-v1-v2.md`](im
 4. Installer le bootstrap qBittorrent en `0600`, propriété de l'UID/GID qB V2. Il doit activer une
    authentification WebUI cohérente avec le registre d'intégration et fixer le save path à `/data`.
 5. Installer `config.ini` NewGreedy en `0640`, propriété de l'UID applicatif WOS et du groupe GID
-   NewGreedy. Le service le monte en lecture seule, avec `cap_drop: ALL`.
+   NewGreedy. Créer le répertoire `WOS_V2_NEWGREEDY_STATE_HOST_PATH` en `0700`, propriété de
+   `root:root`, sans préparer ses fichiers à la main.
 6. Exécuter `scripts/rise2_v2_preflight.sh /etc/world-of-seeds-v2/environment`. Le préflight
-   valide la pile normalisée puis exécute `test -r /app/config.ini` avec l'UID/GID et les
-   capabilities réels du conteneur NewGreedy.
+   valide la pile normalisée, initialise idempotemment `stats.json`, `torrent_registry.json`,
+   `newgreedy.log` et `purge_pending.json` en `0600`, puis vérifie leurs accès réels ainsi que
+   celui du `config.ini` monté en lecture seule.
+
+L'image NewGreedy 1.7.5 publiée est validée avec son utilisateur root par défaut, car mitmproxy
+génère et conserve sa CA sous `/root/.mitmproxy`. Le service NewGreedy ne force donc plus l'UID
+`10003`; il ajoute uniquement le GID NewGreedy pour lire le `config.ini` en `0640`. Il conserve
+`cap_drop: ALL`, `no-new-privileges`, un rootfs en lecture seule et aucun port hôte. Les quatre
+fichiers d'état sont des binds persistants explicites et la CA utilise le volume nommé
+`newgreedy_v2_ca`; aucun volume n'est monté sur `/app` et l'ancien `/app/data` n'est plus utilisé.
 
 La pile publie uniquement Caddy sur 80/443. API, PostgreSQL, Redis, qBittorrent, NewGreedy,
 Prometheus, Grafana et les exporters n'ont aucun port hôte. Grafana est routé par son hostname TLS
@@ -67,6 +76,7 @@ script ne doit appliquer récursivement `chown` ou `chmod` à un chemin existant
 ### 3. qBittorrent et NewGreedy isolés
 
 - déployer des profils et volumes V2 ne contenant aucun état V1 ;
+- vérifier la persistance des fichiers d'état NewGreedy et de sa CA après restart et recreate ;
 - limiter leurs APIs au réseau torrent interne ;
 - vérifier catégorie WOS, save path fixe et absence de port WebUI public ;
 - tester ajout, réponse ambiguë, redémarrage, réconciliation et suppression contrôlée ;

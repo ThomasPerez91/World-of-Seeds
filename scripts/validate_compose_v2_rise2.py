@@ -19,6 +19,7 @@ SERVICES = {
     "redis",
     "qbittorrent-init",
     "qbittorrent",
+    "newgreedy-init",
     "newgreedy",
     "prometheus",
     "grafana",
@@ -30,7 +31,7 @@ VOLUMES = {
     "postgres_v2_data",
     "redis_v2_data",
     "qbittorrent_v2_config",
-    "newgreedy_v2_data",
+    "newgreedy_v2_ca",
     "prometheus_v2_data",
     "grafana_v2_data",
     "caddy_v2_data",
@@ -73,6 +74,18 @@ def _network_names(service: Mapping[str, Any]) -> set[str]:
     return {str(item) for item in _sequence(value, "service.networks")}
 
 
+def _mounts_by_target(service: Mapping[str, Any], name: str) -> dict[str, Mapping[str, Any]]:
+    mounts = _sequence(service.get("volumes"), f"{name}.volumes")
+    result: dict[str, Mapping[str, Any]] = {}
+    for raw in mounts:
+        mount = _mapping(raw, f"{name}.volume")
+        target = mount.get("target")
+        if not isinstance(target, str) or target in result:
+            raise ComposeRise2PolicyError(f"{name} volumes must have unique targets")
+        result[target] = mount
+    return result
+
+
 def validate_config(config: Mapping[str, Any]) -> None:
     if config.get("name") != "world-of-seeds-v2-rise2":
         raise ComposeRise2PolicyError("Rise2 must use its dedicated project name")
@@ -91,7 +104,14 @@ def validate_config(config: Mapping[str, Any]) -> None:
     for name, image in PINNED_IMAGES.items():
         if _mapping(services[name], name).get("image") != image:
             raise ComposeRise2PolicyError(f"{name} image must retain its approved pin")
-    for name in ("api", "worker", "scheduler", "migrate", "newgreedy"):
+    for name in (
+        "api",
+        "worker",
+        "scheduler",
+        "migrate",
+        "newgreedy-init",
+        "newgreedy",
+    ):
         image = str(_mapping(services[name], name).get("image", ""))
         if not DIGEST_IMAGE.fullmatch(image):
             raise ComposeRise2PolicyError(f"{name} image must be immutable by digest")
@@ -154,12 +174,15 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ComposeRise2PolicyError(f"{name} runtime hardening is incomplete")
     if _mapping(services["api"], "api").get("command") is not None:
         raise ComposeRise2PolicyError("api must retain the measured single-process entry point")
-    api_environment = _mapping(_mapping(services["api"], "api").get("environment"), "api.environment")
+    api_environment = _mapping(
+        _mapping(services["api"], "api").get("environment"), "api.environment"
+    )
     if api_environment.get("FORWARDED_ALLOW_IPS") != "172.30.0.2":
         raise ComposeRise2PolicyError("api must trust only the fixed ingress address")
     ingress_networks = _mapping(ingress.get("networks"), "ingress.networks")
     api_networks = _mapping(_mapping(services["api"], "api").get("networks"), "api.networks")
-    if _mapping(ingress_networks.get("edge"), "ingress.networks.edge").get("ipv4_address") != "172.30.0.2":
+    ingress_edge = _mapping(ingress_networks.get("edge"), "ingress.networks.edge")
+    if ingress_edge.get("ipv4_address") != "172.30.0.2":
         raise ComposeRise2PolicyError("ingress must retain its trusted edge address")
     if _mapping(api_networks.get("edge"), "api.networks.edge").get("ipv4_address") != "172.30.0.3":
         raise ComposeRise2PolicyError("api must retain its fixed edge address")
@@ -170,19 +193,100 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ComposeRise2PolicyError("edge must retain its dedicated trusted-proxy subnet")
 
     newgreedy = _mapping(services["newgreedy"], "newgreedy")
-    if newgreedy.get("cap_drop") != ["ALL"] or newgreedy.get("privileged") is True:
-        raise ComposeRise2PolicyError("NewGreedy must remain unprivileged")
-    mounts = _sequence(newgreedy.get("volumes"), "newgreedy.volumes")
-    config_mounts = [
-        _mapping(item, "newgreedy.volume")
-        for item in mounts
-        if isinstance(item, dict) and item.get("target") == "/app/config.ini"
-    ]
-    if len(config_mounts) != 1 or config_mounts[0].get("read_only") is not True:
+    if (
+        newgreedy.get("cap_drop") != ["ALL"]
+        or newgreedy.get("privileged") is True
+        or newgreedy.get("security_opt") != ["no-new-privileges:true"]
+        or newgreedy.get("read_only") is not True
+    ):
+        raise ComposeRise2PolicyError("NewGreedy runtime hardening is incomplete")
+    if newgreedy.get("user") not in (None, ""):
+        raise ComposeRise2PolicyError("NewGreedy must retain the validated image root user")
+    groups = _sequence(newgreedy.get("group_add"), "newgreedy.group_add")
+    if len(groups) != 1 or re.fullmatch(r"[1-9][0-9]*", str(groups[0])) is None:
+        raise ComposeRise2PolicyError("NewGreedy may add only its numeric config-reader group")
+
+    mounts = _mounts_by_target(newgreedy, "newgreedy")
+    config_mount = mounts.get("/app/config.ini", {})
+    if config_mount.get("type") != "bind" or config_mount.get("read_only") is not True:
         raise ComposeRise2PolicyError("NewGreedy config must be one read-only bind")
+    config_bind = _mapping(config_mount.get("bind"), "newgreedy config bind")
+    # Compose omits an explicit false from normalized JSON. Reject only an
+    # explicit true; preflight verifies every source exists before any run.
+    if config_bind.get("create_host_path") is True:
+        raise ComposeRise2PolicyError("NewGreedy config bind must fail when its source is absent")
+    state_targets = {
+        "/app/stats.json": "stats.json",
+        "/app/torrent_registry.json": "torrent_registry.json",
+        "/app/newgreedy.log": "newgreedy.log",
+        "/app/purge_pending.json": "purge_pending.json",
+    }
+    state_parents: set[str] = set()
+    for target, filename in state_targets.items():
+        mount = mounts.get(target, {})
+        source = str(mount.get("source", ""))
+        if mount.get("type") != "bind" or mount.get("read_only") is True:
+            raise ComposeRise2PolicyError(f"NewGreedy state must be a writable bind: {target}")
+        bind = _mapping(mount.get("bind"), f"NewGreedy state bind: {target}")
+        if bind.get("create_host_path") is True:
+            raise ComposeRise2PolicyError(f"NewGreedy state bind must fail if absent: {target}")
+        if not source.endswith(f"/{filename}"):
+            raise ComposeRise2PolicyError(f"NewGreedy state source is invalid: {target}")
+        state_parents.add(source[: -len(filename) - 1])
+    if len(state_parents) != 1:
+        raise ComposeRise2PolicyError("NewGreedy state files must share one persistent directory")
+    ca_mount = mounts.get("/root/.mitmproxy", {})
+    if (
+        ca_mount.get("type") != "volume"
+        or not str(ca_mount.get("source", "")).endswith("newgreedy_v2_ca")
+        or ca_mount.get("read_only") is True
+    ):
+        raise ComposeRise2PolicyError("NewGreedy CA must use its writable persistent volume")
+    forbidden_tmpfs = set(state_targets) | {"/app/config.ini", "/root/.mitmproxy"}
+    for item in _sequence(newgreedy.get("tmpfs", []), "newgreedy.tmpfs"):
+        if str(item).split(":", 1)[0] in forbidden_tmpfs:
+            raise ComposeRise2PolicyError("NewGreedy persistent paths must not use tmpfs")
+    healthcheck = _mapping(newgreedy.get("healthcheck"), "newgreedy.healthcheck")
+    health_test = list(_sequence(healthcheck.get("test"), "newgreedy.healthcheck.test"))
+    if health_test != ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]:
+        raise ComposeRise2PolicyError("NewGreedy healthcheck must use the bundled curl client")
+    depends_on = _mapping(newgreedy.get("depends_on"), "newgreedy.depends_on")
+    init_dependency = _mapping(depends_on.get("newgreedy-init"), "newgreedy init dependency")
+    if init_dependency.get("condition") != "service_completed_successfully":
+        raise ComposeRise2PolicyError("NewGreedy must wait for successful state initialization")
+
+    newgreedy_init = _mapping(services["newgreedy-init"], "newgreedy-init")
+    if newgreedy_init.get("image") != newgreedy.get("image"):
+        raise ComposeRise2PolicyError("NewGreedy init must use the exact runtime image digest")
+    if (
+        newgreedy_init.get("network_mode") != "none"
+        or newgreedy_init.get("cap_drop") != ["ALL"]
+        or newgreedy_init.get("security_opt") != ["no-new-privileges:true"]
+        or newgreedy_init.get("read_only") is not True
+        or newgreedy_init.get("privileged") is True
+    ):
+        raise ComposeRise2PolicyError("NewGreedy init hardening is incomplete")
+    init_mounts = _mounts_by_target(newgreedy_init, "newgreedy-init")
+    state_mount = init_mounts.get("/state", {})
+    if state_mount.get("type") != "bind" or state_mount.get("read_only") is True:
+        raise ComposeRise2PolicyError("NewGreedy init requires one writable state bind")
+    state_bind = _mapping(state_mount.get("bind"), "newgreedy init state bind")
+    if state_bind.get("create_host_path") is True:
+        raise ComposeRise2PolicyError("NewGreedy init state bind must fail when absent")
+    if str(state_mount.get("source", "")) not in state_parents:
+        raise ComposeRise2PolicyError("NewGreedy init and runtime must share the state directory")
+    command = json.dumps(newgreedy_init.get("command", ""))
+    for filename in state_targets.values():
+        if filename not in command:
+            raise ComposeRise2PolicyError(f"NewGreedy init must prepare {filename}")
 
     payload = json.dumps(config, sort_keys=True)
-    for forbidden in ("/srv/seedbox", "local-test-passkey", "chmod 777", "docker.sock:/"):
+    for forbidden in (
+        "/srv/seedbox",
+        "local-test-passkey",
+        "chmod 777",
+        "docker.sock:/",
+    ):
         if forbidden in payload:
             raise ComposeRise2PolicyError(f"Rise2 reuses forbidden V1 or unsafe state: {forbidden}")
 
