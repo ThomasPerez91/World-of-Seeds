@@ -8,7 +8,7 @@ root=${QBT_CONFIG_ROOT:-/config}
 uid=${QBT_UID:-${PUID:?qB UID required}}
 gid=${QBT_GID:-${PGID:?qB GID required}}
 case "$uid:$gid" in *[!0-9:]*|:*|*:) fail "invalid identity" ;; esac
-[ "$uid" -gt 0 ] && [ "$gid" -gt 0 ] || fail "non-root qB identity required"
+if [ "$uid" -le 0 ] || [ "$gid" -le 0 ]; then fail "non-root qB identity required"; fi
 for path in "$root" "$root/qBittorrent" "$root/qBittorrent/config"; do
     [ ! -L "$path" ] || fail "profile directory is a symlink"
     if [ ! -e "$path" ]; then
@@ -19,8 +19,9 @@ done
 config="$root/qBittorrent/config/qBittorrent.conf"
 [ ! -L "$config" ] || fail "profile config is a symlink"
 for file in policy.conf qBittorrent.conf reconcile.awk; do
-    [ -f "$bootstrap/$file" ] && [ ! -L "$bootstrap/$file" ] && [ -s "$bootstrap/$file" ] \
-        || fail "missing bootstrap input; run preflight"
+    if [ ! -f "$bootstrap/$file" ] || [ -L "$bootstrap/$file" ] || [ ! -s "$bootstrap/$file" ]; then
+        fail "missing bootstrap input; run preflight"
+    fi
 done
 # Compose can rerun the init dependency while an existing qB is still running.
 # Never edit a live profile from another container: the runtime reconciles it
