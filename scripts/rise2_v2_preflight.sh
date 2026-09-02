@@ -33,6 +33,10 @@ newgreedy_gid=$(env_value WOS_V2_NEWGREEDY_GID)
 qbittorrent_uid=$(env_value WOS_V2_QBITTORRENT_UID)
 qbittorrent_gid=$(env_value WOS_V2_QBITTORRENT_GID)
 
+compose() {
+  docker compose --env-file "$environment" -f "$compose_file" "$@"
+}
+
 case "$allowed_hosts" in
   *'"127.0.0.1"'*) ;;
   *) fail "WOS_V2_ALLOWED_HOSTS must include 127.0.0.1 for the local API healthcheck" ;;
@@ -76,6 +80,19 @@ esac
 [ "$(stat -c '%u:%g' "$newgreedy_state")" = "0:0" ] \
   || fail "NewGreedy state directory must be owned by root"
 
+case "$qbittorrent_config" in
+  /etc/world-of-seeds-v2/*) ;;
+  *) fail "qBittorrent bootstrap must be inside /etc/world-of-seeds-v2" ;;
+esac
+[ -d "$(dirname -- "$qbittorrent_config")" ] || fail "qBittorrent config parent not found"
+[ ! -L "$(dirname -- "$qbittorrent_config")" ] || fail "qBittorrent config parent must not be a symlink"
+
+compose config --format json \
+  | python3 "$repository/scripts/rise2_v2_qbittorrent_bootstrap.py" \
+      --output "$qbittorrent_config" \
+      --uid "$qbittorrent_uid" \
+      --gid "$qbittorrent_gid"
+
 [ -f "$qbittorrent_config" ] || fail "qBittorrent bootstrap config not found"
 [ ! -L "$qbittorrent_config" ] || fail "qBittorrent config must not be a symlink"
 [ "$(stat -c '%a' "$qbittorrent_config")" = "600" ] \
@@ -84,10 +101,6 @@ esac
   || fail "qBittorrent config owner must match its container UID"
 [ "$(stat -c '%g' "$qbittorrent_config")" = "$qbittorrent_gid" ] \
   || fail "qBittorrent config group must match its container GID"
-
-compose() {
-  docker compose --env-file "$environment" -f "$compose_file" "$@"
-}
 
 compose config --format json | python3 "$repository/scripts/validate_compose_v2_rise2.py"
 sh "$repository/scripts/rise2_v2_storage_smoke.sh" "$environment"
