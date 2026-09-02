@@ -24,6 +24,9 @@ cleanup() {
     if [[ -f "$environment" ]]; then
         compose down --volumes --remove-orphans >/dev/null 2>&1
     fi
+    if mountpoint -q -- "$smoke_root/data"; then
+        sudo umount -- "$smoke_root/data"
+    fi
     case "$smoke_root" in
         /srv/world-of-seeds-v2/ci-newgreedy-*) sudo rm -rf -- "$smoke_root" ;;
     esac
@@ -61,6 +64,9 @@ sudo install -d -o 0 -g 0 -m 0755 /srv/world-of-seeds-v2
 sudo install -d -o 0 -g 0 -m 0755 "$smoke_root" "$smoke_root/newgreedy"
 sudo install -d -o 0 -g 0 -m 0700 "$state_dir"
 sudo install -d -o 10001 -g 10001 -m 0750 "$smoke_root/data"
+sudo mount -t tmpfs -o size=16m,mode=0750,uid=10001,gid=10001 \
+    tmpfs "$smoke_root/data"
+mountpoint -q -- "$smoke_root/data" || fail "CI storage tmpfs mount failed"
 
 sudo tee "$config_file" >/dev/null <<'EOF'
 [proxy]
