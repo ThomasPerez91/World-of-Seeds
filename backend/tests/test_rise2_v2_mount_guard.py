@@ -4,6 +4,7 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[2]
 PREFLIGHT = REPOSITORY / "scripts" / "rise2_v2_preflight.sh"
 SYSTEMD_UNIT = REPOSITORY / "deploy" / "world-of-seeds-v2-rise2.service"
+NEWGREEDY_SMOKE = REPOSITORY / "scripts" / "rise2_v2_newgreedy_smoke.sh"
 
 
 def test_preflight_checks_mountpoint_before_compose() -> None:
@@ -49,3 +50,18 @@ def test_systemd_stop_preserves_pilot_state() -> None:
     assert " down" not in unit
     assert "--volumes" not in unit
     assert "docker.sock" not in unit
+
+
+def test_newgreedy_ci_smoke_uses_a_real_temporary_mount() -> None:
+    script = NEWGREEDY_SMOKE.read_text(encoding="utf-8")
+    mount = (
+        "sudo mount -t tmpfs -o size=16m,mode=0750,uid=10001,gid=10001 "
+        '\\\n    tmpfs "$smoke_root/data"'
+    )
+
+    assert mount in script
+    assert 'mountpoint -q -- "$smoke_root/data" || fail "CI storage tmpfs mount failed"' in script
+    assert 'sudo umount -- "$smoke_root/data"' in script
+    assert script.index('sudo umount -- "$smoke_root/data"') < script.index(
+        'sudo rm -rf -- "$smoke_root"'
+    )
