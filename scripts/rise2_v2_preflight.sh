@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repository=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repository=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 environment=${1:-/etc/world-of-seeds-v2/environment}
 compose_file="$repository/deploy/compose.rise2.v2.yaml"
 
@@ -76,6 +76,10 @@ esac
 [ "$(stat -c '%u:%g' "$newgreedy_state")" = "0:0" ] \
   || fail "NewGreedy state directory must be owned by root"
 
+# Derive the private bootstrap from the same registry used by WOS. Never source
+# the environment as shell code or print its JSON/credentials.
+python3 "$repository/scripts/rise2_v2_qb_bootstrap.py" "$environment"
+python3 "$repository/scripts/rise2_v2_qb_bootstrap.py" "$environment" --check
 [ -f "$qbittorrent_config" ] || fail "qBittorrent bootstrap config not found"
 [ ! -L "$qbittorrent_config" ] || fail "qBittorrent config must not be a symlink"
 [ "$(stat -c '%a' "$qbittorrent_config")" = "600" ] \
@@ -89,7 +93,10 @@ compose() {
   docker compose --env-file "$environment" -f "$compose_file" "$@"
 }
 
-compose config --format json | python3 "$repository/scripts/validate_compose_v2_rise2.py"
+# Normalize the production name for policy only. Runtime commands still honor a
+# caller's isolated COMPOSE_PROJECT_NAME (used by disposable acceptance tests).
+compose --project-name world-of-seeds-v2-rise2 config --format json \
+  | python3 "$repository/scripts/validate_compose_v2_rise2.py"
 sh "$repository/scripts/rise2_v2_storage_smoke.sh" "$environment"
 compose run --rm --no-deps newgreedy-init
 
@@ -103,6 +110,8 @@ for name in stats.json torrent_registry.json newgreedy.log purge_pending.json; d
     || fail "NewGreedy state file must be owned by root: $name"
 done
 
+# Expand these identity checks inside the container, not on the host.
+# shellcheck disable=SC2016
 compose run --rm --no-deps --entrypoint /bin/sh \
   --env WOS_EXPECTED_GID="$newgreedy_gid" \
   newgreedy -ec \

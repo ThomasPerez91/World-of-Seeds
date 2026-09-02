@@ -1630,6 +1630,33 @@
   the persistent CA instead of the obsolete `/app/data` path. No WOS/NewGreedy image rebuild,
   application change, Rise2 deployment, V2-33 work, or draft PR `#103` change is included.
 
+## Post-freeze Rise2 correction — Reproducible qB authentication bootstrap
+
+- Base audited: `9e57a224ed2eeae0c51c7efa7d3e1eb21c97ad4a`; draft #103 is untouched.
+- The old one-time external config copy did not reconstruct the pilot's manually repaired
+  Host allowlist, WebUI credentials or NewGreedy tracker-only proxy after a fresh qB volume.
+- Preflight now derives a private PBKDF2 bootstrap from the existing integration registry.
+  qB 5.2.3 source confirms SHA-512/100000/16-byte salt/64-byte key and the actual policy keys.
+  No plaintext credential is written to the qB config or exposed by Compose normalization.
+- First install initializes the profile; each qB container start reconciles only managed keys
+  before starting qB, preserving unrelated preferences and torrent state. Init does not mutate
+  an existing potentially live profile. Host/CSRF remain enabled; Docker hostname is explicit;
+  HTTP NewGreedy handles BitTorrent tracker traffic and peers remain unproxied.
+- Worker/scheduler load a mode-0600 preflight-derived registry at runtime; application and
+  NewGreedy images are unchanged. Public-CA export and qB runtime trust are preserved.
+- Fresh seeds carry qB 5.2.3's migration version 8, avoiding historical migration of the
+  already-modern proxy fields. Existing profile migration markers are preserved.
+- Codex review found stale file-bind inodes on credential rotation and pre-v6 migrations
+  overwriting proxy policy. Stable private directory mounts plus migration-compatible legacy
+  inputs address both without weakening permissions or suppressing unrelated qB migrations.
+  The real smoke also exercises rotation in existing qB/worker/scheduler containers and restored
+  profiles with absent/pre-v6 migration markers.
+- Added static/secret/hash/policy regressions and a separate real Docker wipe/recreate smoke.
+  Local namespace cannot map production UIDs; real ownership and runtime checks are required
+  on the disposable CI runner. Real smoke run `33685310128` passed fresh auth, wrong-password
+  rejection, Host/CSRF, proxy/CA, restart, force-recreate, qB-only volume wipe and reconstruction.
+  Full PR CI/review acceptance is pending; no deployment is performed.
+
 ## Known constraints
 
 - `master` and `develop` remain V1-only; V2 branches and PRs target `develop_V2`.
@@ -1645,7 +1672,7 @@
 
 ## Next task
 
-- The post-freeze NewGreedy runtime correction is the only active task. After review, green CI,
+- The post-freeze qB authentication/bootstrap correction is the only active task. After review, green CI,
   and merge, rerun the Rise2 preflight with the already published immutable WOS/NewGreedy digests;
   do not deploy or start V2-33 automatically.
 - V2-32D remains blocked by NewGreedy v1.7.5 and is not a pilot prerequisite unless explicitly
