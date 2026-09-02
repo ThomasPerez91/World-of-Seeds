@@ -33,6 +33,16 @@ def test_rise2_qbittorrent_init_cannot_mutate_shared_storage() -> None:
     assert "target: /bootstrap/qBittorrent.conf" in init
 
 
+def test_rise2_qbittorrent_runtime_keeps_only_required_entrypoint_capabilities() -> None:
+    compose = (_repository() / "deploy" / "compose.rise2.v2.yaml").read_text(encoding="utf-8")
+    runtime = compose.split("\n  qbittorrent:\n", 1)[1].split("\n  newgreedy-init:", 1)[0]
+
+    assert "cap_drop: [ALL]" in runtime
+    assert "cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]" in runtime
+    assert "SYS_ADMIN" not in runtime
+    assert "NET_ADMIN" not in runtime
+
+
 def test_rise2_storage_smoke_exercises_both_immutable_runtime_identities() -> None:
     script = (_repository() / "scripts" / "rise2_v2_storage_smoke.sh").read_text(encoding="utf-8")
 
