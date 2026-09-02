@@ -171,7 +171,9 @@ jobs:
         run: |
           bash -n \
             deploy/deploy-world-of-seeds \
-            deploy/world-of-seeds-deploy-command
+            deploy/world-of-seeds-deploy-command \
+            scripts/rise2_v2_qbittorrent_bootstrap_smoke.sh
+          python3 -m py_compile scripts/rise2_v2_qbittorrent_bootstrap.py
           python3 - <<'PY'
           from pathlib import Path
           for name in (
@@ -239,6 +241,9 @@ jobs:
           docker compose --env-file deploy/.env.rise2.v2.example \
             -f deploy/compose.rise2.v2.yaml config --format json \
             | python3 scripts/validate_compose_v2_rise2.py
+      - name: Smoke generated qBittorrent Rise2 bootstrap
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: sh scripts/rise2_v2_qbittorrent_bootstrap_smoke.sh
       - name: Smoke immutable NewGreedy Rise2 runtime
         if: env.WOS_VERSION_CHANNEL == 'v2'
         run: scripts/rise2_v2_newgreedy_smoke.sh
