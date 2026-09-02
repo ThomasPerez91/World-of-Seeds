@@ -78,7 +78,7 @@ sudo tee "$qbittorrent_config" >/dev/null <<'EOF'
 [Preferences]
 WebUI\Enabled=true
 EOF
-sudo chown 10002:10002 "$qbittorrent_config"
+sudo chown 10001:10002 "$qbittorrent_config"
 sudo chmod 0600 "$qbittorrent_config"
 
 sudo tee "$environment" >/dev/null <<EOF
@@ -97,7 +97,7 @@ WOS_V2_NEWGREEDY_CONFIG_PATH=$config_file
 WOS_V2_NEWGREEDY_STATE_HOST_PATH=$state_dir
 WOS_V2_APP_UID=10001
 WOS_V2_APP_GID=10001
-WOS_V2_QBITTORRENT_UID=10002
+WOS_V2_QBITTORRENT_UID=10001
 WOS_V2_QBITTORRENT_GID=10002
 WOS_V2_NEWGREEDY_GID=10003
 WOS_V2_WORKER_REPLICAS=2
