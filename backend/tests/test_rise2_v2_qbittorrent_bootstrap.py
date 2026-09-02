@@ -159,8 +159,8 @@ def test_qbittorrent_bootstrap_rejects_inconsistent_local_credentials(tmp_path: 
     second["qbittorrent_account_ref"] = "33333333-3333-4333-8333-333333333333"
     second["qbittorrent_password"] = "different-password"
     registry["routes"].append(second)
-    config["services"]["scheduler"]["environment"]["WOS_INTEGRATION_ACCOUNTS_JSON"] = (
-        json.dumps(registry, separators=(",", ":"))
+    config["services"]["scheduler"]["environment"]["WOS_INTEGRATION_ACCOUNTS_JSON"] = json.dumps(
+        registry, separators=(",", ":")
     )
 
     with pytest.raises(bootstrap_error, match="share one qBittorrent WebUI credential"):
@@ -183,8 +183,8 @@ def test_qbittorrent_bootstrap_rejects_non_internal_qbittorrent_url(tmp_path: Pa
         config["services"]["scheduler"]["environment"]["WOS_INTEGRATION_ACCOUNTS_JSON"]
     )
     registry["routes"][0]["qbittorrent_url"] = "http://example.invalid:8080"
-    config["services"]["scheduler"]["environment"]["WOS_INTEGRATION_ACCOUNTS_JSON"] = (
-        json.dumps(registry, separators=(",", ":"))
+    config["services"]["scheduler"]["environment"]["WOS_INTEGRATION_ACCOUNTS_JSON"] = json.dumps(
+        registry, separators=(",", ":")
     )
 
     with pytest.raises(bootstrap_error, match="internal qBittorrent service"):
