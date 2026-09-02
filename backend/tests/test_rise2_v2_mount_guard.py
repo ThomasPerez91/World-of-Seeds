@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REPOSITORY = Path(__file__).resolve().parents[2]
 PREFLIGHT = REPOSITORY / "scripts" / "rise2_v2_preflight.sh"
 SYSTEMD_UNIT = REPOSITORY / "deploy" / "world-of-seeds-v2-rise2.service"
