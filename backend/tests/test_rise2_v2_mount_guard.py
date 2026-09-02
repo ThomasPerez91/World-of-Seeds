@@ -54,13 +54,15 @@ def test_systemd_stop_preserves_pilot_state() -> None:
 
 def test_newgreedy_ci_smoke_uses_a_real_temporary_mount() -> None:
     script = NEWGREEDY_SMOKE.read_text(encoding="utf-8")
-    mount = (
-        "sudo mount -t tmpfs -o size=16m,mode=0750,uid=10001,gid=10001 "
-        '\\\n    tmpfs "$smoke_root/data"'
+    mount_command = "sudo mount -t tmpfs -o size=16m,mode=0750,uid=10001,gid=10001 \\"
+    mounted_guard = (
+        'mountpoint -q -- "$smoke_root/data" '
+        '|| fail "CI storage tmpfs mount failed"'
     )
 
-    assert mount in script
-    assert 'mountpoint -q -- "$smoke_root/data" || fail "CI storage tmpfs mount failed"' in script
+    assert mount_command in script
+    assert 'tmpfs "$smoke_root/data"' in script
+    assert mounted_guard in script
     assert 'sudo umount -- "$smoke_root/data"' in script
     assert script.index('sudo umount -- "$smoke_root/data"') < script.index(
         'sudo rm -rf -- "$smoke_root"'
