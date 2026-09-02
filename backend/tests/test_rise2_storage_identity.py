@@ -24,11 +24,9 @@ def test_rise2_preflight_rejects_an_incompatible_storage_identity() -> None:
 
 
 def test_rise2_storage_smoke_exercises_both_immutable_runtime_identities() -> None:
-    script = (_repository() / "scripts" / "rise2_v2_storage_smoke.sh").read_text(
-        encoding="utf-8"
-    )
+    script = (_repository() / "scripts" / "rise2_v2_storage_smoke.sh").read_text(encoding="utf-8")
 
-    assert "WorkspaceManager(Path(\"/data\"))" in script
+    assert 'WorkspaceManager(Path("/data"))' in script
     assert "manager.create(username)" in script
     assert "mode != 0o750" in script
     assert '--user "$qbittorrent_uid:$qbittorrent_gid"' in script
