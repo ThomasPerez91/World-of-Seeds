@@ -14,16 +14,24 @@ read-only côté V1 et dry-run par défaut, décrite dans [`import-v1-v2.md`](im
 2. Utiliser uniquement des images WOS/NewGreedy épinglées par digest et des secrets distincts de
    V1. Le JSON des comptes d'intégration reste dans ce fichier non versionné et ne doit jamais être
    affiché dans les journaux ou commandes de diagnostic.
-3. Créer `/srv/world-of-seeds-v2/data` sans lien symbolique, avec l'UID/GID WOS V2 dédiés.
+3. Créer `/srv/world-of-seeds-v2/data` sans lien symbolique, avec l'UID/GID WOS V2 dédiés. Ce chemin
+   doit être le point de montage actif du filesystem de données ; un simple répertoire présent sur
+   le filesystem racine n'est jamais un stockage V2 valide.
 4. Installer le bootstrap qBittorrent en `0600`, propriété de l'UID/GID qB V2. Il doit activer une
    authentification WebUI cohérente avec le registre d'intégration et fixer le save path à `/data`.
 5. Installer `config.ini` NewGreedy en `0640`, propriété de l'UID applicatif WOS et du groupe GID
    NewGreedy. Créer le répertoire `WOS_V2_NEWGREEDY_STATE_HOST_PATH` en `0700`, propriété de
    `root:root`, sans préparer ses fichiers à la main.
 6. Exécuter `scripts/rise2_v2_preflight.sh /etc/world-of-seeds-v2/environment`. Le préflight
-   valide la pile normalisée, initialise idempotemment `stats.json`, `torrent_registry.json`,
+   refuse maintenant le démarrage si le stockage configuré n'est pas un point de montage actif,
+   valide ensuite la pile normalisée, initialise idempotemment `stats.json`, `torrent_registry.json`,
    `newgreedy.log` et `purge_pending.json` en `0600`, puis vérifie leurs accès réels ainsi que
    celui du `config.ini` monté en lecture seule.
+7. Pour un démarrage supervisé, installer `deploy/world-of-seeds-v2-rise2.service` sous
+   `/etc/systemd/system/`, exécuter `systemctl daemon-reload`, puis n'activer l'unité qu'après
+   autorisation du démarrage complet. L'unité ajoute `RequiresMountsFor=/srv/world-of-seeds-v2/data`,
+   un contrôle `mountpoint` avant tout Compose et le préflight complet avant `docker compose up`.
+   Pendant la qualification manuelle, l'unité peut rester désactivée.
 
 L'image NewGreedy 1.7.5 publiée est validée avec son utilisateur root par défaut, car mitmproxy
 génère et conserve sa CA sous `/root/.mitmproxy`. Le service NewGreedy ne force donc plus l'UID
@@ -53,7 +61,9 @@ réseaux Compose wos-v2-*      # ingress, backend, torrent, monitoring
 ```
 
 Les chemins exacts sont des variables d'infrastructure validées avant création. Aucun
-script ne doit appliquer récursivement `chown` ou `chmod` à un chemin existant.
+script ne doit appliquer récursivement `chown` ou `chmod` à un chemin existant. Le stockage de
+données doit rester un montage distinct : ni le préflight ni l'unité systemd ne doivent accepter
+le répertoire de repli créé sur `/` quand le filesystem de données est absent.
 
 ## Phases
 
@@ -140,5 +150,6 @@ précédent ne peut plus lire le schéma courant, la release ne doit pas atteind
 - aucune file durable perdue après redémarrage de Redis/worker ;
 - absence de famine dans les scénarios scheduler convenus ;
 - quotas, pression disque, leases et purge validés en concurrence ;
+- le préflight et le démarrage systemd refusent le stack si le point de montage de données est absent ;
 - rollback chronométré sous le RTO accepté ;
 - approbation explicite avant DNS, import réel ou release `2.0.0`.
