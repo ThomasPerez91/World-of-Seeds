@@ -26,7 +26,15 @@ SERVICES = {
     "node-exporter",
     "cadvisor",
 }
-NETWORKS = {"edge", "backend", "torrent", "monitoring", "monitoring-edge"}
+NETWORKS = {
+    "edge",
+    "backend",
+    "torrent",
+    "torrent-egress",
+    "monitoring",
+    "monitoring-edge",
+}
+INTERNAL_NETWORKS = {"backend", "torrent", "monitoring", "monitoring-edge"}
 VOLUMES = {
     "postgres_v2_data",
     "redis_v2_data",
@@ -95,9 +103,11 @@ def validate_config(config: Mapping[str, Any]) -> None:
     networks = _mapping(config.get("networks"), "networks")
     if set(networks) != NETWORKS:
         raise ComposeRise2PolicyError("Rise2 network set is incomplete or unexpected")
-    for name in NETWORKS - {"edge"}:
+    for name in INTERNAL_NETWORKS:
         if _mapping(networks[name], f"networks.{name}").get("internal") is not True:
             raise ComposeRise2PolicyError(f"{name} must be internal")
+    if _mapping(networks["torrent-egress"], "networks.torrent-egress").get("internal") is True:
+        raise ComposeRise2PolicyError("torrent-egress must provide external connectivity")
     if set(_mapping(config.get("volumes"), "volumes")) != VOLUMES:
         raise ComposeRise2PolicyError("Rise2 volume set is incomplete or unexpected")
 
@@ -131,13 +141,16 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ComposeRise2PolicyError(f"{name} must not publish a host port")
 
     expected_networks = {
+        "migrate": {"backend"},
         "api": {"edge", "backend"},
         "worker": {"backend", "torrent"},
         "scheduler": {"backend", "torrent"},
         "postgres": {"backend"},
         "redis": {"backend"},
-        "qbittorrent": {"torrent"},
-        "newgreedy": {"torrent"},
+        "qbittorrent-init": {"torrent"},
+        "qbittorrent": {"torrent", "torrent-egress"},
+        "newgreedy-init": set(),
+        "newgreedy": {"torrent", "torrent-egress"},
         "prometheus": {"backend", "monitoring"},
         "grafana": {"monitoring", "monitoring-edge"},
         "node-exporter": {"monitoring"},
@@ -146,6 +159,13 @@ def validate_config(config: Mapping[str, Any]) -> None:
     for name, expected in expected_networks.items():
         if _network_names(_mapping(services[name], name)) != expected:
             raise ComposeRise2PolicyError(f"{name} networks violate Rise2 isolation")
+
+    qbittorrent = _mapping(services["qbittorrent"], "qbittorrent")
+    qbittorrent_environment = _mapping(
+        qbittorrent.get("environment"), "qbittorrent.environment"
+    )
+    if qbittorrent_environment.get("UMASK") != "077":
+        raise ComposeRise2PolicyError("qBittorrent must retain a private runtime umask")
 
     for name, raw in services.items():
         privileged = _mapping(raw, name).get("privileged") is True

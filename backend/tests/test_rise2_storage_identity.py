@@ -31,6 +31,7 @@ def test_rise2_qbittorrent_init_cannot_mutate_shared_storage() -> None:
     assert 'chown "$$QBT_UID:$$QBT_GID" /data' not in init
     assert "qbittorrent_v2_config:/config" in init
     assert "target: /bootstrap/qBittorrent.conf" in init
+    assert "chmod 0600 /config/qBittorrent/config/qBittorrent.conf" in init
 
 
 def test_rise2_qbittorrent_runtime_keeps_only_required_entrypoint_capabilities() -> None:
@@ -39,8 +40,22 @@ def test_rise2_qbittorrent_runtime_keeps_only_required_entrypoint_capabilities()
 
     assert "cap_drop: [ALL]" in runtime
     assert "cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]" in runtime
+    assert 'UMASK: "077"' in runtime
+    assert "networks: [torrent, torrent-egress]" in runtime
     assert "SYS_ADMIN" not in runtime
     assert "NET_ADMIN" not in runtime
+
+
+def test_rise2_newgreedy_and_qbittorrent_are_the_only_torrent_egress_members() -> None:
+    compose = (_repository() / "deploy" / "compose.rise2.v2.yaml").read_text(encoding="utf-8")
+
+    worker = compose.split("  worker:", 1)[1].split("\n  scheduler:", 1)[0]
+    scheduler = compose.split("  scheduler:", 1)[1].split("\n  postgres:", 1)[0]
+    newgreedy = compose.split("\n  newgreedy:\n", 1)[1].split("\n  prometheus:", 1)[0]
+
+    assert "torrent-egress" not in worker
+    assert "torrent-egress" not in scheduler
+    assert "networks: [torrent, torrent-egress]" in newgreedy
 
 
 def test_rise2_storage_smoke_exercises_both_immutable_runtime_identities() -> None:
