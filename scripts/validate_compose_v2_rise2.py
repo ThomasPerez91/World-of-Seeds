@@ -21,6 +21,7 @@ SERVICES = {
     "qbittorrent",
     "newgreedy-init",
     "newgreedy",
+    "newgreedy-ca-export",
     "prometheus",
     "grafana",
     "node-exporter",
@@ -40,6 +41,7 @@ VOLUMES = {
     "redis_v2_data",
     "qbittorrent_v2_config",
     "newgreedy_v2_ca",
+    "newgreedy_v2_public_ca",
     "prometheus_v2_data",
     "grafana_v2_data",
     "caddy_v2_data",
@@ -121,6 +123,7 @@ def validate_config(config: Mapping[str, Any]) -> None:
         "migrate",
         "newgreedy-init",
         "newgreedy",
+        "newgreedy-ca-export",
     ):
         image = str(_mapping(services[name], name).get("image", ""))
         if not DIGEST_IMAGE.fullmatch(image):
@@ -151,6 +154,7 @@ def validate_config(config: Mapping[str, Any]) -> None:
         "qbittorrent": {"torrent", "torrent-egress"},
         "newgreedy-init": set(),
         "newgreedy": {"torrent", "torrent-egress"},
+        "newgreedy-ca-export": set(),
         "prometheus": {"backend", "monitoring"},
         "grafana": {"monitoring", "monitoring-edge"},
         "node-exporter": {"monitoring"},
@@ -166,6 +170,40 @@ def validate_config(config: Mapping[str, Any]) -> None:
     )
     if qbittorrent_environment.get("UMASK") != "077":
         raise ComposeRise2PolicyError("qBittorrent must retain a private runtime umask")
+    qbittorrent_mounts = _mounts_by_target(qbittorrent, "qbittorrent")
+    public_ca_mount = qbittorrent_mounts.get("/wos-ca", {})
+    if (
+        public_ca_mount.get("type") != "volume"
+        or not str(public_ca_mount.get("source", "")).endswith("newgreedy_v2_public_ca")
+        or public_ca_mount.get("read_only") is not True
+    ):
+        raise ComposeRise2PolicyError("qBittorrent may mount only the exported public CA volume")
+    for mount in qbittorrent_mounts.values():
+        if str(mount.get("source", "")).endswith("newgreedy_v2_ca"):
+            raise ComposeRise2PolicyError("qBittorrent must never mount the private NewGreedy CA volume")
+    entrypoint = list(
+        _sequence(qbittorrent.get("entrypoint"), "qbittorrent.entrypoint")
+    )
+    if entrypoint != ["/bin/sh", "-ec"]:
+        raise ComposeRise2PolicyError("qBittorrent CA wrapper entrypoint is missing")
+    qbittorrent_command = json.dumps(qbittorrent.get("command", ""))
+    for required in (
+        "/wos-ca/mitmproxy-ca-cert.pem",
+        "/etc/ssl/certs/ca-certificates.crt",
+        "PRIVATE KEY",
+        "exec /sbin/tini -g -- /entrypoint.sh",
+    ):
+        if required not in qbittorrent_command:
+            raise ComposeRise2PolicyError("qBittorrent public CA bootstrap is incomplete")
+    qbittorrent_depends_on = _mapping(
+        qbittorrent.get("depends_on"), "qbittorrent.depends_on"
+    )
+    ca_export_dependency = _mapping(
+        qbittorrent_depends_on.get("newgreedy-ca-export"),
+        "qbittorrent NewGreedy CA export dependency",
+    )
+    if ca_export_dependency.get("condition") != "service_completed_successfully":
+        raise ComposeRise2PolicyError("qBittorrent must wait for public CA export")
 
     for name, raw in services.items():
         privileged = _mapping(raw, name).get("privileged") is True
@@ -299,6 +337,51 @@ def validate_config(config: Mapping[str, Any]) -> None:
     for filename in state_targets.values():
         if filename not in command:
             raise ComposeRise2PolicyError(f"NewGreedy init must prepare {filename}")
+
+    ca_export = _mapping(services["newgreedy-ca-export"], "newgreedy-ca-export")
+    if ca_export.get("image") != newgreedy.get("image"):
+        raise ComposeRise2PolicyError("NewGreedy CA export must use the runtime image digest")
+    if (
+        ca_export.get("network_mode") != "none"
+        or ca_export.get("cap_drop") != ["ALL"]
+        or ca_export.get("security_opt") != ["no-new-privileges:true"]
+        or ca_export.get("read_only") is not True
+        or ca_export.get("privileged") is True
+    ):
+        raise ComposeRise2PolicyError("NewGreedy CA export hardening is incomplete")
+    export_mounts = _mounts_by_target(ca_export, "newgreedy-ca-export")
+    if set(export_mounts) != {"/private", "/public"}:
+        raise ComposeRise2PolicyError("NewGreedy CA export mounts are unexpected")
+    private_mount = export_mounts["/private"]
+    if (
+        private_mount.get("type") != "volume"
+        or not str(private_mount.get("source", "")).endswith("newgreedy_v2_ca")
+        or private_mount.get("read_only") is not True
+    ):
+        raise ComposeRise2PolicyError("CA export source must be the read-only private CA volume")
+    exported_mount = export_mounts["/public"]
+    if (
+        exported_mount.get("type") != "volume"
+        or not str(exported_mount.get("source", "")).endswith("newgreedy_v2_public_ca")
+        or exported_mount.get("read_only") is True
+    ):
+        raise ComposeRise2PolicyError("CA export target must be the writable public CA volume")
+    export_command = json.dumps(ca_export.get("command", ""))
+    for required in (
+        "/private/mitmproxy-ca-cert.pem",
+        "/public/mitmproxy-ca-cert.pem",
+        "PRIVATE KEY",
+    ):
+        if required not in export_command:
+            raise ComposeRise2PolicyError("NewGreedy public CA export is incomplete")
+    if "mitmproxy-ca.pem" in export_command:
+        raise ComposeRise2PolicyError("CA export must never copy the private-key-bearing CA file")
+    export_depends_on = _mapping(ca_export.get("depends_on"), "newgreedy-ca-export.depends_on")
+    newgreedy_dependency = _mapping(
+        export_depends_on.get("newgreedy"), "NewGreedy CA export dependency"
+    )
+    if newgreedy_dependency.get("condition") != "service_healthy":
+        raise ComposeRise2PolicyError("CA export must wait for healthy NewGreedy")
 
     payload = json.dumps(config, sort_keys=True)
     for forbidden in (
