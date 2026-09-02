@@ -54,6 +54,8 @@ def _valid_config() -> dict[str, Any]:
             "networks": {"torrent": None, "torrent-egress": None},
             "environment": {"UMASK": "077"},
             "entrypoint": ["/bin/sh", "-ec"],
+            "cap_drop": ["ALL"],
+            "cap_add": ["CHOWN", "DAC_OVERRIDE", "KILL", "SETGID", "SETUID"],
             "command": [
                 "/wos-ca/mitmproxy-ca-cert.pem /etc/ssl/certs/ca-certificates.crt "
                 "PRIVATE KEY exec /sbin/tini -g -- /entrypoint.sh"
@@ -244,6 +246,21 @@ def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
             {"networks": {"torrent-egress": None}}
         ),
         lambda config: config["services"]["qbittorrent"]["environment"].update({"UMASK": "022"}),
+        lambda config: config["services"]["qbittorrent"].update(
+            {"cap_add": ["CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"]}
+        ),
+        lambda config: config["services"]["qbittorrent"].update(
+            {
+                "cap_add": [
+                    "CHOWN",
+                    "DAC_OVERRIDE",
+                    "KILL",
+                    "NET_ADMIN",
+                    "SETGID",
+                    "SETUID",
+                ]
+            }
+        ),
         lambda config: config["services"]["qbittorrent"]["volumes"].append(
             {
                 "type": "volume",
