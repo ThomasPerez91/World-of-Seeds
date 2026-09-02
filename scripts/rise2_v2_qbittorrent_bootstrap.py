@@ -23,6 +23,7 @@ EXPECTED_QBITTORRENT_URL = "http://qbittorrent:8080"
 _STATIC_SETTINGS: dict[tuple[str, str], str] = {
     ("BitTorrent", r"Session\DefaultSavePath"): "/data",
     ("BitTorrent", r"Session\ProxyPeerConnections"): "false",
+    ("Meta", "MigrationVersion"): "8",
     ("Network", r"Proxy\AuthEnabled"): "false",
     ("Network", r"Proxy\HostnameLookupEnabled"): "false",
     ("Network", r"Proxy\IP"): "newgreedy",
