@@ -141,12 +141,15 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ComposeRise2PolicyError(f"{name} must not publish a host port")
 
     expected_networks = {
+        "migrate": {"backend"},
         "api": {"edge", "backend"},
         "worker": {"backend", "torrent"},
         "scheduler": {"backend", "torrent"},
         "postgres": {"backend"},
         "redis": {"backend"},
+        "qbittorrent-init": {"torrent"},
         "qbittorrent": {"torrent", "torrent-egress"},
+        "newgreedy-init": set(),
         "newgreedy": {"torrent", "torrent-egress"},
         "prometheus": {"backend", "monitoring"},
         "grafana": {"monitoring", "monitoring-edge"},
