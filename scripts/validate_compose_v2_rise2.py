@@ -107,11 +107,9 @@ def validate_config(config: Mapping[str, Any]) -> None:
     except (RuntimeError, ValueError, OSError):
         raise ComposeRise2PolicyError("qB bootstrap Host/CSRF/proxy policy is unsafe") from None
     secrets = _mapping(config.get("secrets"), "secrets")
-    if (
-        set(secrets) != {"integration_registry"}
-        or _mapping(secrets["integration_registry"], "registry secret").get("environment")
-        != "WOS_V2_INTEGRATION_ACCOUNTS_JSON"
-    ):
+    if set(secrets) != {"integration_registry"} or set(
+        _mapping(secrets["integration_registry"], "registry secret")
+    ) - {"name", "file"}:
         raise ComposeRise2PolicyError(
             "integration secret must reuse the Rise2 environment registry"
         )
@@ -197,6 +195,11 @@ def validate_config(config: Mapping[str, Any]) -> None:
             "qBittorrent must retain only the validated runtime and signal-forwarding capabilities"
         )
     qbittorrent_mounts = _mounts_by_target(qbittorrent, "qbittorrent")
+    if secrets["integration_registry"].get("file") != (
+        str(qbittorrent_mounts.get("/bootstrap/qBittorrent.conf", {}).get("source", ""))
+        + ".integration.json"
+    ):
+        raise ComposeRise2PolicyError("integration secret must use the preflight-derived file")
     qb_init = _mapping(services["qbittorrent-init"], "qbittorrent-init")
     if qb_init.get("entrypoint") != ["/bin/sh", "-ec"] or qb_init.get("command") != [
         "exec /bin/sh /bootstrap/reconcile.sh --init\n"

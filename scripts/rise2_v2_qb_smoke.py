@@ -35,6 +35,19 @@ def run(command: list[str], label: str, *, stdin: str | None = None) -> str:
                 ("qB probe failed:", "qB bootstrap failed:", "Rise2 V2 preflight failed:")
             )
         ]
+        for marker in (
+            "read-only",
+            "read only",
+            "secret",
+            "environment variable",
+            "permission denied",
+            "executable file not found",
+            "no such file",
+            "network",
+            "OCI runtime",
+        ):
+            if marker in (result.stdout + result.stderr).lower():
+                safe.append("diagnostic category=" + marker)
         raise RuntimeError(label + " failed" + (": " + " ".join(safe) if safe else ""))
     return result.stdout
 
@@ -46,6 +59,8 @@ def smoke() -> None:
     parent.mkdir(parents=True, exist_ok=True)
     root = Path(tempfile.mkdtemp(prefix="ci-qb-", dir=parent))
     project = "world-of-seeds-v2-qb-smoke-" + secrets.token_hex(6)
+    # Include the real preflight's nested Compose invocations in this project.
+    os.environ["COMPOSE_PROJECT_NAME"] = project
     environment = root / "environment"
     data = root / "data"
     compose = [

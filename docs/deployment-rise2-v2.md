@@ -59,8 +59,11 @@ PBKDF2-HMAC-SHA512, 100 000 itérations, sel aléatoire de 16 octets, sortie de 
 `@ByteArray(base64(sel):base64(dérivé))`. Un hash déjà conforme est conservé. Le résultat
 est écrit atomiquement en `0600`, avec l'UID/GID qB, sans password en clair.
 
-Le registre est fourni aux seuls workers/scheduler par un secret Compose issu de la même
-variable, puis chargé dans leur environnement **dans le processus**, sans rebuild WOS.
+Le préflight dérive aussi `${WOS_V2_QBITTORRENT_CONFIG_PATH}.integration.json` depuis la même
+variable : fichier privé `0600`, UID/GID WOS, jamais une seconde autorité à éditer. Il est
+fourni aux seuls workers/scheduler par un secret Compose **file**, puis chargé dans leur
+environnement **dans le processus**, sans rebuild WOS. Le type secret `environment` n'est pas
+compatible avec les services Compose `read_only`; leur durcissement reste inchangé.
 `docker compose config` n'affiche plus le JSON, le username ou le password qB. Le fichier
 d'environnement et les sorties `config --environment`, `inspect` de processus et diagnostics
 généraux restent sensibles : ne jamais les publier. Aucun secret n'est fourni à l'API.

@@ -471,7 +471,7 @@ networks:
 
 secrets:
   integration_registry:
-    environment: WOS_V2_INTEGRATION_ACCOUNTS_JSON
+    file: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}.integration.json
 
 volumes:
   postgres_v2_data:

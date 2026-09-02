@@ -224,7 +224,7 @@ def _valid_config() -> dict[str, Any]:
     ]
     return {
         "name": "world-of-seeds-v2-rise2",
-        "secrets": {"integration_registry": {"environment": "WOS_V2_INTEGRATION_ACCOUNTS_JSON"}},
+        "secrets": {"integration_registry": {"file": "/bootstrap/qBittorrent.conf.integration.json"}},
         "services": services,
         "networks": {
             "edge": {"ipam": {"config": [{"subnet": "172.30.0.0/24"}]}},

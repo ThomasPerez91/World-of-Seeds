@@ -193,15 +193,43 @@ def render(existing: str, username: str, password: str) -> str:
     return "\n".join(lines)
 
 
+def write_private(target: Path, content: str, uid: int, gid: int) -> None:
+    for parent in (target, *target.parents):
+        if parent.is_symlink():
+            raise BootstrapError("symlink in private output path")
+    if target.exists():
+        existing = read_private(target)
+        if existing == content and (target.stat().st_uid, target.stat().st_gid) == (uid, gid):
+            return
+    fd, name = tempfile.mkstemp(prefix=".qb-bootstrap-", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            output.write(content)
+            output.flush()
+            os.fchmod(output.fileno(), 0o600)
+            os.fchown(output.fileno(), uid, gid)
+            os.fsync(output.fileno())
+        os.replace(name, target)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
 def prepare(environment: Path, *, check: bool = False) -> None:
     values = environment_values(environment)
     try:
         username, password = credentials(values["WOS_V2_INTEGRATION_ACCOUNTS_JSON"])
         target = Path(values["WOS_V2_QBITTORRENT_CONFIG_PATH"])
         uid, gid = int(values["WOS_V2_QBITTORRENT_UID"]), int(values["WOS_V2_QBITTORRENT_GID"])
+        app_uid, app_gid = int(values["WOS_V2_APP_UID"]), int(values["WOS_V2_APP_GID"])
     except (KeyError, ValueError):
         raise BootstrapError("missing qB bootstrap environment contract") from None
-    if not target.is_absolute() or target == environment or uid <= 0 or gid <= 0:
+    registry_target = Path(str(target) + ".integration.json")
+    if (
+        not target.is_absolute()
+        or environment in (target, registry_target)
+        or min(uid, gid, app_uid, app_gid) <= 0
+    ):
         raise BootstrapError("invalid bootstrap path or identity")
     for parent in (target, *target.parents):
         if parent.is_symlink():
@@ -218,21 +246,14 @@ def prepare(environment: Path, *, check: bool = False) -> None:
             raise BootstrapError("qB bootstrap is absent or stale; run preflight first")
         if (target.stat().st_uid, target.stat().st_gid) != (uid, gid):
             raise BootstrapError("qB bootstrap ownership is incorrect")
+        if read_private(registry_target) != values["WOS_V2_INTEGRATION_ACCOUNTS_JSON"] or (
+            registry_target.stat().st_uid,
+            registry_target.stat().st_gid,
+        ) != (app_uid, app_gid):
+            raise BootstrapError("derived integration secret is absent or stale")
         return
-    if result == existing and (target.stat().st_uid, target.stat().st_gid) == (uid, gid):
-        return
-    fd, name = tempfile.mkstemp(prefix=".qb-bootstrap-", dir=target.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as output:
-            output.write(result)
-            output.flush()
-            os.fchmod(output.fileno(), 0o600)
-            os.fchown(output.fileno(), uid, gid)
-            os.fsync(output.fileno())
-        os.replace(name, target)
-    finally:
-        if os.path.exists(name):
-            os.unlink(name)
+    write_private(registry_target, values["WOS_V2_INTEGRATION_ACCOUNTS_JSON"], app_uid, app_gid)
+    write_private(target, result, uid, gid)
 
 
 def main() -> int:

@@ -93,7 +93,10 @@ compose() {
   docker compose --env-file "$environment" -f "$compose_file" "$@"
 }
 
-compose config --format json | python3 "$repository/scripts/validate_compose_v2_rise2.py"
+# Normalize the production name for policy only. Runtime commands still honor a
+# caller's isolated COMPOSE_PROJECT_NAME (used by disposable acceptance tests).
+compose --project-name world-of-seeds-v2-rise2 config --format json \
+  | python3 "$repository/scripts/validate_compose_v2_rise2.py"
 sh "$repository/scripts/rise2_v2_storage_smoke.sh" "$environment"
 compose run --rm --no-deps newgreedy-init
 
