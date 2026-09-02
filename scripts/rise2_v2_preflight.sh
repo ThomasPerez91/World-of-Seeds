@@ -22,6 +22,7 @@ env_value() {
 [ "$(stat -c '%a' "$environment")" = "600" ] || fail "environment file mode must be 0600"
 
 storage=$(env_value WOS_V2_STORAGE_HOST_PATH)
+allowed_hosts=$(env_value WOS_V2_ALLOWED_HOSTS)
 newgreedy_config=$(env_value WOS_V2_NEWGREEDY_CONFIG_PATH)
 newgreedy_state=$(env_value WOS_V2_NEWGREEDY_STATE_HOST_PATH)
 newgreedy_image=$(env_value WOS_V2_NEWGREEDY_IMAGE)
@@ -31,6 +32,11 @@ app_gid=$(env_value WOS_V2_APP_GID)
 newgreedy_gid=$(env_value WOS_V2_NEWGREEDY_GID)
 qbittorrent_uid=$(env_value WOS_V2_QBITTORRENT_UID)
 qbittorrent_gid=$(env_value WOS_V2_QBITTORRENT_GID)
+
+case "$allowed_hosts" in
+  *'"127.0.0.1"'*) ;;
+  *) fail "WOS_V2_ALLOWED_HOSTS must include 127.0.0.1 for the local API healthcheck" ;;
+esac
 
 case "$storage" in
   /srv/world-of-seeds-v2/*) ;;
