@@ -39,7 +39,7 @@ def test_rise2_qbittorrent_runtime_keeps_only_required_entrypoint_capabilities()
     runtime = compose.split("\n  qbittorrent:\n", 1)[1].split("\n  newgreedy-init:", 1)[0]
 
     assert "cap_drop: [ALL]" in runtime
-    assert "cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]" in runtime
+    assert "cap_add: [CHOWN, DAC_OVERRIDE, KILL, SETGID, SETUID]" in runtime
     assert 'UMASK: "077"' in runtime
     assert "networks: [torrent, torrent-egress]" in runtime
     assert "SYS_ADMIN" not in runtime
