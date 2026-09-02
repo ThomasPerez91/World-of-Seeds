@@ -8,10 +8,7 @@ NEWGREEDY_SMOKE = REPOSITORY / "scripts" / "rise2_v2_newgreedy_smoke.sh"
 
 def test_preflight_checks_mountpoint_before_compose() -> None:
     script = PREFLIGHT.read_text(encoding="utf-8")
-    guard = (
-        'mountpoint -q -- "$storage" '
-        '|| fail "storage directory must be an active mountpoint"'
-    )
+    guard = 'mountpoint -q -- "$storage" || fail "storage directory must be an active mountpoint"'
 
     assert guard in script
     assert script.index(guard) < script.index("compose() {")
@@ -54,10 +51,7 @@ def test_systemd_stop_preserves_pilot_state() -> None:
 def test_newgreedy_ci_smoke_uses_a_real_temporary_mount() -> None:
     script = NEWGREEDY_SMOKE.read_text(encoding="utf-8")
     mount_command = "sudo mount -t tmpfs -o size=16m,mode=0750,uid=10001,gid=10001 \\"
-    mounted_guard = (
-        'mountpoint -q -- "$smoke_root/data" '
-        '|| fail "CI storage tmpfs mount failed"'
-    )
+    mounted_guard = 'mountpoint -q -- "$smoke_root/data" || fail "CI storage tmpfs mount failed"'
 
     assert mount_command in script
     assert 'tmpfs "$smoke_root/data"' in script
