@@ -18,7 +18,7 @@ for path in "$root" "$root/qBittorrent" "$root/qBittorrent/config"; do
 done
 config="$root/qBittorrent/config/qBittorrent.conf"
 [ ! -L "$config" ] || fail "profile config is a symlink"
-for file in policy.conf qBittorrent.conf reconcile.awk; do
+for file in policy.conf private/qBittorrent.conf reconcile.awk; do
     if [ ! -f "$bootstrap/$file" ] || [ -L "$bootstrap/$file" ] || [ ! -s "$bootstrap/$file" ]; then
         fail "missing bootstrap input; run preflight"
     fi
@@ -35,11 +35,18 @@ seed="$temporary.seed"
 trap 'rm -f "$temporary" "$seed"' EXIT HUP INT TERM
 source="$config"
 if [ ! -e "$source" ]; then
-    cp "$bootstrap/qBittorrent.conf" "$seed"
+    cp "$bootstrap/private/qBittorrent.conf" "$seed"
     source="$seed"
 fi
 [ -f "$source" ] || fail "profile config is not a regular file"
-awk -f "$bootstrap/reconcile.awk" "$bootstrap/policy.conf" "$bootstrap/qBittorrent.conf" "$source" >"$temporary" \
+migration=$(awk '
+    /^\[/ { meta=($0 == "[Meta]") }
+    meta && /^MigrationVersion=/ { sub(/^MigrationVersion=/, ""); version=$0 }
+    END { print version == "" ? "0" : version }
+' "$source")
+case "$migration" in 0|1|2|3|4|5|6|7|8) ;; *) fail "unsupported profile migration version" ;; esac
+awk -v migration="$migration" -f "$bootstrap/reconcile.awk" \
+    "$bootstrap/policy.conf" "$bootstrap/private/qBittorrent.conf" "$source" >"$temporary" \
     || fail "profile reconciliation rejected"
 chmod 0600 "$temporary"
 chown "$uid:$gid" "$temporary"

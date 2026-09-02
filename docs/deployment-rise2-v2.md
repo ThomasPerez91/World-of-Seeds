@@ -59,11 +59,14 @@ PBKDF2-HMAC-SHA512, 100 000 itérations, sel aléatoire de 16 octets, sortie de 
 `@ByteArray(base64(sel):base64(dérivé))`. Un hash déjà conforme est conservé. Le résultat
 est écrit atomiquement en `0600`, avec l'UID/GID qB, sans password en clair.
 
-Le préflight dérive aussi `${WOS_V2_QBITTORRENT_CONFIG_PATH}.integration.json` depuis la même
-variable : fichier privé `0600`, UID/GID WOS, jamais une seconde autorité à éditer. Il est
-fourni aux seuls workers/scheduler par un secret Compose **file**, puis chargé dans leur
-environnement **dans le processus**, sans rebuild WOS. Le type secret `environment` n'est pas
-compatible avec les services Compose `read_only`; leur durcissement reste inchangé.
+Le préflight dérive aussi deux répertoires privés stables sous
+`${WOS_V2_QBITTORRENT_CONFIG_PATH}.runtime` : `qb` contient uniquement le bootstrap haché,
+`wos` uniquement le registre JSON. Répertoires `0700`, fichiers `0600`, UID/GID de leur lecteur,
+jamais des autorités à éditer. Chaque consommateur reçoit son seul répertoire en bind **read-only**.
+Les remplacements atomiques des fichiers deviennent ainsi visibles dans les conteneurs existants,
+contrairement aux binds de fichiers qui restent sur l'ancien inode. Ne jamais remplacer ces
+répertoires pendant qu'ils sont montés. Le registre est chargé dans l'environnement WOS uniquement
+**dans le processus**, sans rebuild WOS. Les conteneurs restent `read_only` et sans capacité ajoutée.
 `docker compose config` n'affiche plus le JSON, le username ou le password qB. Le fichier
 d'environnement et les sorties `config --environment`, `inspect` de processus et diagnostics
 généraux restent sensibles : ne jamais les publier. Aucun secret n'est fourni à l'API.
@@ -77,6 +80,9 @@ refusés. Le healthcheck sonde la page de connexion sans désactiver l'authentif
 Le seed vierge porte `Meta/MigrationVersion=8`, version des réglages qB 5.2.3 : sans ce marqueur,
 sa migration historique réécrit les profils proxy modernes au premier lancement. Le marqueur
 d'un profil existant n'est jamais écrasé par le réconciliateur.
+Pour un marqueur absent/antérieur à 6, les entrées historiques `Proxy/OnlyForTorrents=true` et
+`Session/ProxyHostnameLookup=true` préparent la migration qB; les anciens alias des clés gérées
+sont retirés avant la migration pré-v2. Les migrations des autres préférences restent exécutées.
 
 Contrat contrôlé (clés vérifiées dans les sources qB 5.2.3 et par son API réelle) :
 
@@ -114,6 +120,11 @@ de test ; il nécessite root pour son stockage tmpfs isolé et nettoie ses propr
    n'est fournie par ce correctif.
 5. Confirmer santé, authentification depuis `http://qbittorrent:8080`, protections Host/CSRF,
    proxy trackers et peers directs. Sur un profil vide, `inventory_items=0` est attendu.
+
+Rotation ultérieure : arrêter **tous** les workers, le scheduler, puis qB; modifier uniquement
+le registre autoritaire et exécuter le préflight; redémarrer qB, attendre sa santé puis redémarrer
+workers/scheduler. Avec les nouveaux mounts de répertoires, un restart suffit (testé sur les mêmes
+conteneurs). Ne jamais redémarrer seulement une partie des consommateurs après une rotation.
 
 Le backup **schema 2 reste inchangé** : environnement et bootstrap sont déjà archivés chiffrés,
 ainsi que le volume `qbittorrent-config`. Deployment + secrets reconstruisent la configuration

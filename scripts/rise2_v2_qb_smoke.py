@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
@@ -253,6 +254,113 @@ def smoke() -> None:
         qb_id = healthy()
         probe("--sentinel")
         print("PASS: force-recreate and existing profile preserved", flush=True)
+
+        # Hold worker/scheduler mounts across an atomic credential rotation.
+        readers = []
+        for service in ("worker", "scheduler"):
+            reader = project + "-rotation-" + service
+            run(
+                compose
+                + [
+                    "run",
+                    "-d",
+                    "--no-deps",
+                    "--name",
+                    reader,
+                    "--entrypoint",
+                    "python",
+                    service,
+                    "-c",
+                    "import time; time.sleep(600)",
+                ],
+                "persistent credential reader creation",
+            )
+            readers.append(reader)
+        run(compose + ["stop", "qbittorrent"], "coordinated rotation qB stop")
+        run(["docker", "stop", *readers], "coordinated rotation WOS stop")
+        payload = json.loads(registry)
+        password = secrets.token_urlsafe(32) + "$rotated"
+        payload["routes"][0]["qbittorrent_password"] = password
+        registry = json.dumps(payload)
+        values["WOS_V2_INTEGRATION_ACCOUNTS_JSON"] = "'" + registry + "'"
+        environment.write_text("\n".join(key + "=" + value for key, value in values.items()) + "\n")
+        run(
+            ["sh", str(REPOSITORY / "scripts/rise2_v2_preflight.sh"), str(environment)],
+            "credential rotation preflight",
+        )
+        run(
+            compose + ["up", "-d", "--no-deps", "--wait", "--wait-timeout", "180", "qbittorrent"],
+            "credential rotation qB restart",
+        )
+        if healthy() != qb_id:
+            raise RuntimeError("rotation must exercise the existing qB container mount")
+        run(["docker", "start", *readers], "credential rotation WOS restart")
+        for reader in readers:
+            fingerprint = run(
+                [
+                    "docker",
+                    "exec",
+                    reader,
+                    "python",
+                    "-c",
+                    "import hashlib; from pathlib import Path; "
+                    "print(hashlib.sha256(Path('/run/secrets/integration_registry').read_bytes()).hexdigest())",
+                ],
+                "existing WOS mount freshness",
+            ).strip()
+            if fingerprint != hashlib.sha256(registry.encode()).hexdigest():
+                raise RuntimeError("existing WOS container retained stale credential inode")
+            run(
+                ["docker", "exec", "-i", reader, "python", "-", "--sentinel"],
+                "rotated existing WOS authentication",
+                stdin=probe_source,
+            )
+        run(["docker", "rm", "-f", *readers], "disposable credential readers cleanup")
+        print("PASS: atomic rotation reaches existing qB, worker and scheduler mounts", flush=True)
+
+        for migration in (None, 5):
+            run(compose + ["stop", "qbittorrent"], "legacy test profile stop")
+            legacy = (
+                (root / "qBittorrent.conf")
+                .read_text()
+                .replace("MigrationVersion=8", "" if migration is None else "MigrationVersion=5")
+                .replace(
+                    "[Preferences]",
+                    "[Preferences]\nConnection\\ProxyType=0\n"
+                    "Connection\\Proxy\\IP=obsolete.invalid\nConnection\\Proxy\\Port=9\n"
+                    "Connection\\ProxyOnlyForTorrents=false\nConnection\\ProxyPeerConnections=true\n"
+                    "Downloads\\SavePath=/obsolete",
+                )
+                .replace("[Network]", "[Network]\nProxy\\OnlyForTorrents=false")
+            )
+            legacy = legacy.replace(
+                "[BitTorrent]",
+                "[BitTorrent]\nSession\\ProxyHostnameLookup=false\nSession\\MaxConnections=137",
+            )
+            run(
+                compose
+                + [
+                    "run",
+                    "--rm",
+                    "--no-deps",
+                    "-T",
+                    "--entrypoint",
+                    "/bin/sh",
+                    "qbittorrent-init",
+                    "-ec",
+                    "cat > /config/qBittorrent/config/qBittorrent.conf",
+                ],
+                "disposable legacy profile restoration",
+                stdin=legacy,
+            )
+            run(
+                compose
+                + ["up", "-d", "--no-deps", "--wait", "--wait-timeout", "180", "qbittorrent"],
+                "legacy profile migration startup",
+            )
+            healthy()
+            probe("--sentinel")
+        print("PASS: absent/pre-v6 migration markers preserve policy on first startup", flush=True)
         info = json.loads(run(["docker", "inspect", qb_id], "test volume resolution"))[0]
         volume = next(
             m["Name"]

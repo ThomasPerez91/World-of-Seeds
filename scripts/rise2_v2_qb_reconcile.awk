@@ -6,8 +6,24 @@ function emit(group, key) {
     for (key in desired) if (groups[key] == group) print names[key] "=" desired[key]
     emitted[group]=1
 }
+function compatibility(group, name, value, key) {
+    key=group SUBSEP name
+    desired[key]=value; groups[key]=group; names[key]=name; found[key]=1; compat[key]=1
+}
+function obsolete(group, key) {
+    if (migration >= 2 || group != "Preferences") return 0
+    return key == "Downloads\\SavePath" || key == "Connection\\ProxyPeerConnections" || key == "Connection\\ProxyOnlyForTorrents" || key == "Connection\\ProxyType" || index(key, "Connection\\Proxy\\") == 1
+}
 BEGIN { section="" }
-FNR == 1 { section="" }
+FNR == 1 {
+    section=""
+    # qB upgrade.cpp migration <6 overwrites modern proxy profiles/hostname DNS.
+    # Supply its legacy inputs without skipping unrelated upstream migrations.
+    if (FILENAME == ARGV[2] && migration < 6) {
+        compatibility("Network", "Proxy\\OnlyForTorrents", "true")
+        compatibility("BitTorrent", "Session\\ProxyHostnameLookup", "true")
+    }
+}
 {
     line=trim($0)
     if (line ~ /^\[.*\]$/) {
@@ -32,7 +48,7 @@ FNR == 1 { section="" }
         desired[identity]=value; groups[identity]=section; names[identity]=key
     } else if (FILENAME == ARGV[2]) {
         if (identity in desired) {
-            if (value != desired[identity]) fail()
+            if (!(identity in compat) && value != desired[identity]) fail()
             found[identity]=1
         } else if (section == "Preferences" && key == "WebUI\\Username") {
             if (value !~ /^[A-Za-z0-9_.@-]+$/) fail()
@@ -41,7 +57,7 @@ FNR == 1 { section="" }
             if (value !~ /^"@ByteArray\([A-Za-z0-9+\/=]+:[A-Za-z0-9+\/=]+\)"$/) fail()
             desired[identity]=value; groups[identity]=section; names[identity]=key; found[identity]=1
         }
-    } else if (!(identity in desired) && !(section == "Preferences" && (key == "WebUI\\Password" || key == "WebUI\\Password_ha1"))) {
+    } else if (!(identity in desired) && !obsolete(section, key) && !(section == "Preferences" && (key == "WebUI\\Password" || key == "WebUI\\Password_ha1"))) {
         print $0
     }
 }

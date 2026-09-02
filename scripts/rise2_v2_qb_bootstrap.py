@@ -229,7 +229,9 @@ def prepare(environment: Path, *, check: bool = False) -> None:
         app_uid, app_gid = int(values["WOS_V2_APP_UID"]), int(values["WOS_V2_APP_GID"])
     except (KeyError, ValueError):
         raise BootstrapError("missing qB bootstrap environment contract") from None
-    registry_target = Path(str(target) + ".integration.json")
+    runtime = Path(str(target) + ".runtime")
+    runtime_qb = runtime / "qb" / "qBittorrent.conf"
+    registry_target = runtime / "wos" / "integration_registry"
     if (
         not target.is_absolute()
         or environment in (target, registry_target)
@@ -252,14 +254,33 @@ def prepare(environment: Path, *, check: bool = False) -> None:
             raise BootstrapError("qB bootstrap is absent or stale; run preflight first")
         if (target.stat().st_uid, target.stat().st_gid) != (uid, gid):
             raise BootstrapError("qB bootstrap ownership is incorrect")
+        if read_private(runtime_qb) != existing:
+            raise BootstrapError("runtime qB bootstrap is absent or stale")
         if read_private(registry_target) != values["WOS_V2_INTEGRATION_ACCOUNTS_JSON"] or (
             registry_target.stat().st_uid,
             registry_target.stat().st_gid,
         ) != (app_uid, app_gid):
             raise BootstrapError("derived integration secret is absent or stale")
         return
+    # Mount these stable directories, never individual replaceable file inodes.
+    # Atomic updates are then visible when existing containers restart.
+    for directory, owner, group, mode in (
+        (runtime, os.getuid(), os.getgid(), 0o700),
+        (runtime / "qb", uid, gid, 0o700),
+        (runtime / "wos", app_uid, app_gid, 0o700),
+    ):
+        for parent in (directory, *directory.parents):
+            if parent.is_symlink():
+                raise BootstrapError("symlink in private runtime directory")
+        directory.mkdir(exist_ok=True, mode=mode)
+        metadata = directory.stat()
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise BootstrapError("private runtime path must be a directory")
+        os.chmod(directory, mode)
+        os.chown(directory, owner, group)
     write_private(registry_target, values["WOS_V2_INTEGRATION_ACCOUNTS_JSON"], app_uid, app_gid)
     write_private(target, result, uid, gid)
+    write_private(runtime_qb, result, uid, gid)
 
 
 def main() -> int:

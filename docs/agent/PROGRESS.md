@@ -1642,10 +1642,15 @@
   before starting qB, preserving unrelated preferences and torrent state. Init does not mutate
   an existing potentially live profile. Host/CSRF remain enabled; Docker hostname is explicit;
   HTTP NewGreedy handles BitTorrent tracker traffic and peers remain unproxied.
-- Worker/scheduler load a mode-0600 preflight-derived file secret at runtime; application and
+- Worker/scheduler load a mode-0600 preflight-derived registry at runtime; application and
   NewGreedy images are unchanged. Public-CA export and qB runtime trust are preserved.
 - Fresh seeds carry qB 5.2.3's migration version 8, avoiding historical migration of the
   already-modern proxy fields. Existing profile migration markers are preserved.
+- Codex review found stale file-bind inodes on credential rotation and pre-v6 migrations
+  overwriting proxy policy. Stable private directory mounts plus migration-compatible legacy
+  inputs address both without weakening permissions or suppressing unrelated qB migrations.
+  The real smoke also exercises rotation in existing qB/worker/scheduler containers and restored
+  profiles with absent/pre-v6 migration markers.
 - Added static/secret/hash/policy regressions and a separate real Docker wipe/recreate smoke.
   Local namespace cannot map production UIDs; real ownership and runtime checks are required
   on the disposable CI runner. Real smoke run `33685310128` passed fresh auth, wrong-password

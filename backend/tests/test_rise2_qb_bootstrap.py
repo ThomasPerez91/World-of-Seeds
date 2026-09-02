@@ -126,9 +126,10 @@ def reconcile(
     ns = module()
     inputs = tmp_path / "bootstrap"
     inputs.mkdir(exist_ok=True)
+    (inputs / "private").mkdir(exist_ok=True)
     (inputs / "policy.conf").write_text(ns["POLICY"].read_text())
     user, password = ns["credentials"](registry())
-    (inputs / "qBittorrent.conf").write_text(ns["render"]("", user, password))
+    (inputs / "private/qBittorrent.conf").write_text(ns["render"]("", user, password))
     (inputs / "reconcile.awk").write_text(
         (REPOSITORY / "scripts/rise2_v2_qb_reconcile.awk").read_text()
     )
@@ -221,6 +222,8 @@ def test_awk_reconciles_and_is_idempotent_without_root(tmp_path: Path) -> None:
     )
     command = [
         "awk",
+        "-v",
+        "migration=7",
         "-f",
         str(REPOSITORY / "scripts/rise2_v2_qb_reconcile.awk"),
         str(ns["POLICY"]),

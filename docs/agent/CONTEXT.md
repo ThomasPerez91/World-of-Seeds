@@ -126,10 +126,11 @@ The stable V1 maintenance release documented here is `1.3.3`.
   no independent WebUI credential source or manual UI initialization is required. Host validation
   and CSRF stay enabled, `qbittorrent` is explicitly allowed, and NewGreedy proxies trackers but
   never peers. Runtime reconciliation occurs before qB starts and preserves unrelated profile state.
-- Workers/scheduler read the existing registry through a Compose secret at process startup, keeping
+- Workers/scheduler read the existing registry through a private read-only directory at startup, keeping
   it out of normalized Compose environment output. The API never receives that secret.
-  Preflight derives the mode-0600 file `${WOS_V2_QBITTORRENT_CONFIG_PATH}.integration.json`
-  from the registry; Compose environment-backed secrets cannot serve read-only containers.
+  Preflight derives mode-0600 files under stable `${WOS_V2_QBITTORRENT_CONFIG_PATH}.runtime/{qb,wos}`
+  directories. Each consumer receives only its directory. Atomic rotation remains visible through
+  existing mounts; stop all credential consumers before rotation and restart them together.
 
 - qBittorrent login must support the documented Web API response variants.
 - HTTP 204 and a body equal to `Ok.` are accepted login results.

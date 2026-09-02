@@ -193,7 +193,6 @@ def _valid_config() -> dict[str, Any]:
     services["api"]["networks"]["edge"] = {"ipv4_address": "172.30.0.3"}
     services["api"]["environment"]["FORWARDED_ALLOW_IPS"] = "172.30.0.2"
     for name, module in (("worker", "app.worker"), ("scheduler", "app.scheduler_service")):
-        services[name]["secrets"] = [{"source": "integration_registry"}]
         services[name]["command"] = ["python", "/bootstrap/integration-entrypoint.py", module]
         services[name]["volumes"] = [
             {
@@ -201,13 +200,20 @@ def _valid_config() -> dict[str, Any]:
                 "source": "/repo/scripts/rise2_v2_integration_entrypoint.py",
                 "target": "/bootstrap/integration-entrypoint.py",
                 "read_only": True,
-            }
+            },
+            {
+                "type": "bind",
+                "source": "/bootstrap/qBittorrent.conf.runtime/wos",
+                "target": "/run/secrets",
+                "read_only": True,
+                "bind": {"create_host_path": False},
+            },
         ]
     for target, filename in (
         ("policy.conf", "qbittorrent.rise2.conf"),
         ("reconcile.sh", "rise2_v2_qb_reconcile.sh"),
         ("reconcile.awk", "rise2_v2_qb_reconcile.awk"),
-        ("qBittorrent.conf", "qBittorrent.conf"),
+        ("private", "qBittorrent.conf.runtime/qb"),
     ):
         services["qbittorrent"]["volumes"].append(
             {
@@ -224,9 +230,6 @@ def _valid_config() -> dict[str, Any]:
     ]
     return {
         "name": "world-of-seeds-v2-rise2",
-        "secrets": {
-            "integration_registry": {"file": "/bootstrap/qBittorrent.conf.integration.json"}
-        },
         "services": services,
         "networks": {
             "edge": {"ipam": {"config": [{"subnet": "172.30.0.0/24"}]}},

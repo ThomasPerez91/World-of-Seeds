@@ -101,7 +101,6 @@ services:
     stop_grace_period: 35s
     environment:
       <<: *wos-environment
-    secrets: [integration_registry]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -117,6 +116,11 @@ services:
         target: /bootstrap/integration-entrypoint.py
         read_only: true
       - type: bind
+        source: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}.runtime/wos
+        target: /run/secrets
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
         source: ${WOS_V2_STORAGE_HOST_PATH:?set isolated WOS_V2_STORAGE_HOST_PATH}
         target: /data
     networks: [backend, torrent]
@@ -131,7 +135,6 @@ services:
     stop_grace_period: 35s
     environment:
       <<: *wos-environment
-    secrets: [integration_registry]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -142,6 +145,11 @@ services:
         source: ../scripts/rise2_v2_integration_entrypoint.py
         target: /bootstrap/integration-entrypoint.py
         read_only: true
+      - type: bind
+        source: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}.runtime/wos
+        target: /run/secrets
+        read_only: true
+        bind: {create_host_path: false}
       - type: bind
         source: ${WOS_V2_STORAGE_HOST_PATH:?set isolated WOS_V2_STORAGE_HOST_PATH}
         target: /data
@@ -190,8 +198,8 @@ services:
     volumes:
       - qbittorrent_v2_config:/config
       - type: bind
-        source: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}
-        target: /bootstrap/qBittorrent.conf
+        source: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}.runtime/qb
+        target: /bootstrap/private
         read_only: true
         bind: {create_host_path: false}
       - {type: bind, source: ./qbittorrent.rise2.conf, target: /bootstrap/policy.conf, read_only: true}
@@ -236,8 +244,8 @@ services:
     volumes:
       - qbittorrent_v2_config:/config
       - type: bind
-        source: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}
-        target: /bootstrap/qBittorrent.conf
+        source: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}.runtime/qb
+        target: /bootstrap/private
         read_only: true
         bind: {create_host_path: false}
       - {type: bind, source: ./qbittorrent.rise2.conf, target: /bootstrap/policy.conf, read_only: true}
@@ -468,10 +476,6 @@ networks:
   torrent-egress: {}
   monitoring: {internal: true}
   monitoring-edge: {internal: true}
-
-secrets:
-  integration_registry:
-    file: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}.integration.json
 
 volumes:
   postgres_v2_data:

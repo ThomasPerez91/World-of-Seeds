@@ -106,13 +106,8 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ValueError
     except (RuntimeError, ValueError, OSError):
         raise ComposeRise2PolicyError("qB bootstrap Host/CSRF/proxy policy is unsafe") from None
-    secrets = _mapping(config.get("secrets"), "secrets")
-    if set(secrets) != {"integration_registry"} or set(
-        _mapping(secrets["integration_registry"], "registry secret")
-    ) - {"name", "file"}:
-        raise ComposeRise2PolicyError(
-            "integration secret must reuse the Rise2 environment registry"
-        )
+    if config.get("secrets"):
+        raise ComposeRise2PolicyError("credentials require stable private directory mounts")
     if config.get("name") != "world-of-seeds-v2-rise2":
         raise ComposeRise2PolicyError("Rise2 must use its dedicated project name")
     services = _mapping(config.get("services"), "services")
@@ -195,11 +190,10 @@ def validate_config(config: Mapping[str, Any]) -> None:
             "qBittorrent must retain only the validated runtime and signal-forwarding capabilities"
         )
     qbittorrent_mounts = _mounts_by_target(qbittorrent, "qbittorrent")
-    if secrets["integration_registry"].get("file") != (
-        str(qbittorrent_mounts.get("/bootstrap/qBittorrent.conf", {}).get("source", ""))
-        + ".integration.json"
-    ):
-        raise ComposeRise2PolicyError("integration secret must use the preflight-derived file")
+    private_source = str(qbittorrent_mounts.get("/bootstrap/private", {}).get("source", ""))
+    if not private_source.endswith(".runtime/qb"):
+        raise ComposeRise2PolicyError("qB requires its preflight-derived private directory")
+    registry_source = private_source[:-2] + "wos"
     qb_init = _mapping(services["qbittorrent-init"], "qbittorrent-init")
     if qb_init.get("entrypoint") != ["/bin/sh", "-ec"] or qb_init.get("command") != [
         "exec /bin/sh /bootstrap/reconcile.sh --init\n"
@@ -210,7 +204,7 @@ def validate_config(config: Mapping[str, Any]) -> None:
         "/bootstrap/policy.conf": "qbittorrent.rise2.conf",
         "/bootstrap/reconcile.sh": "rise2_v2_qb_reconcile.sh",
         "/bootstrap/reconcile.awk": "rise2_v2_qb_reconcile.awk",
-        "/bootstrap/qBittorrent.conf": None,
+        "/bootstrap/private": None,
     }
     for mounts in (qbittorrent_mounts, init_mounts_qb):
         for target, filename in bootstrap_sources.items():
@@ -308,13 +302,21 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ComposeRise2PolicyError(
                 "integration credentials must not appear in Compose environment"
             )
-        secret_names = {
-            item.get("source") if isinstance(item, dict) else item
-            for item in service.get("secrets", [])
-        }
+        if service.get("secrets"):
+            raise ComposeRise2PolicyError("replaceable credential file mounts are forbidden")
+        credentials_mount = (
+            _mounts_by_target(service, name).get("/run/secrets", {})
+            if service.get("volumes")
+            else {}
+        )
         if name in {"worker", "scheduler"}:
-            if secret_names != {"integration_registry"}:
-                raise ComposeRise2PolicyError(f"{name} requires the integration registry secret")
+            if (
+                credentials_mount.get("type") != "bind"
+                or credentials_mount.get("read_only") is not True
+                or credentials_mount.get("source") != registry_source
+                or credentials_mount.get("bind", {}).get("create_host_path") is True
+            ):
+                raise ComposeRise2PolicyError(f"{name} requires the private registry directory")
             module = "app.worker" if name == "worker" else "app.scheduler_service"
             if service.get("command") != ["python", "/bootstrap/integration-entrypoint.py", module]:
                 raise ComposeRise2PolicyError(
@@ -326,7 +328,7 @@ def validate_config(config: Mapping[str, Any]) -> None:
                 or Path(str(entry.get("source", ""))).name != "rise2_v2_integration_entrypoint.py"
             ):
                 raise ComposeRise2PolicyError("integration secret loader mount is missing")
-        elif secret_names:
+        elif credentials_mount:
             raise ComposeRise2PolicyError(f"{name} must not receive integration credentials")
         if service.get("read_only") is not True or service.get("cap_drop") != ["ALL"]:
             raise ComposeRise2PolicyError(f"{name} runtime hardening is incomplete")
