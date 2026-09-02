@@ -181,6 +181,7 @@ services:
           install -o "$$QBT_UID" -g "$$QBT_GID" -m 0600 \
             /bootstrap/qBittorrent.conf /config/qBittorrent/config/qBittorrent.conf
         fi
+        chmod 0600 /config/qBittorrent/config/qBittorrent.conf
     environment:
       QBT_UID: ${WOS_V2_QBITTORRENT_UID:?set WOS_V2_QBITTORRENT_UID}
       QBT_GID: ${WOS_V2_QBITTORRENT_GID:?set WOS_V2_QBITTORRENT_GID}
@@ -209,12 +210,13 @@ services:
       PGID: ${WOS_V2_QBITTORRENT_GID:?set WOS_V2_QBITTORRENT_GID}
       QBT_LEGAL_NOTICE: confirm
       QBT_WEBUI_PORT: "8080"
+      UMASK: "077"
     volumes:
       - qbittorrent_v2_config:/config
       - type: bind
         source: ${WOS_V2_STORAGE_HOST_PATH:?set isolated WOS_V2_STORAGE_HOST_PATH}
         target: /data
-    networks: [torrent]
+    networks: [torrent, torrent-egress]
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
@@ -293,7 +295,7 @@ services:
         target: /root/.mitmproxy
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=32m
-    networks: [torrent]
+    networks: [torrent, torrent-egress]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 128
@@ -394,6 +396,7 @@ networks:
         - subnet: 172.30.0.0/24
   backend: {internal: true}
   torrent: {internal: true}
+  torrent-egress: {}
   monitoring: {internal: true}
   monitoring-edge: {internal: true}
 
