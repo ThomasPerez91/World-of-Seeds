@@ -245,6 +245,7 @@ def prepare(environment: Path, *, check: bool = False) -> None:
         actual = settings(existing)
         if (
             any(actual.get(key) != value for key, value in REQUIRED.items())
+            or actual.get(("Meta", "MigrationVersion")) != "8"
             or actual.get(USERNAME) != username
             or not password_matches(actual.get(PASSWORD, ""), password)
         ):

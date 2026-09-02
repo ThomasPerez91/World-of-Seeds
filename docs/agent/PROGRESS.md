@@ -1642,11 +1642,15 @@
   before starting qB, preserving unrelated preferences and torrent state. Init does not mutate
   an existing potentially live profile. Host/CSRF remain enabled; Docker hostname is explicit;
   HTTP NewGreedy handles BitTorrent tracker traffic and peers remain unproxied.
-- Worker/scheduler load the same registry through a Compose secret at runtime; application and
+- Worker/scheduler load a mode-0600 preflight-derived file secret at runtime; application and
   NewGreedy images are unchanged. Public-CA export and qB runtime trust are preserved.
+- Fresh seeds carry qB 5.2.3's migration version 8, avoiding historical migration of the
+  already-modern proxy fields. Existing profile migration markers are preserved.
 - Added static/secret/hash/policy regressions and a separate real Docker wipe/recreate smoke.
   Local namespace cannot map production UIDs; real ownership and runtime checks are required
-  on the disposable CI runner. CI/review acceptance is pending; no deployment is performed.
+  on the disposable CI runner. Real smoke run `33685310128` passed fresh auth, wrong-password
+  rejection, Host/CSRF, proxy/CA, restart, force-recreate, qB-only volume wipe and reconstruction.
+  Full PR CI/review acceptance is pending; no deployment is performed.
 
 ## Known constraints
 
@@ -1663,7 +1667,7 @@
 
 ## Next task
 
-- The post-freeze NewGreedy runtime correction is the only active task. After review, green CI,
+- The post-freeze qB authentication/bootstrap correction is the only active task. After review, green CI,
   and merge, rerun the Rise2 preflight with the already published immutable WOS/NewGreedy digests;
   do not deploy or start V2-33 automatically.
 - V2-32D remains blocked by NewGreedy v1.7.5 and is not a pilot prerequisite unless explicitly

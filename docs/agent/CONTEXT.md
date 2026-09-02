@@ -128,6 +128,8 @@ The stable V1 maintenance release documented here is `1.3.3`.
   never peers. Runtime reconciliation occurs before qB starts and preserves unrelated profile state.
 - Workers/scheduler read the existing registry through a Compose secret at process startup, keeping
   it out of normalized Compose environment output. The API never receives that secret.
+  Preflight derives the mode-0600 file `${WOS_V2_QBITTORRENT_CONFIG_PATH}.integration.json`
+  from the registry; Compose environment-backed secrets cannot serve read-only containers.
 
 - qBittorrent login must support the documented Web API response variants.
 - HTTP 204 and a body equal to `Ok.` are accepted login results.

@@ -74,6 +74,9 @@ conteneur qB **avant** son démarrage normal, puis la CA publique NewGreedy est 
 `tini` lance qB. La réconciliation remplace uniquement les clés gérées, conserve les autres
 préférences et ne touche ni aux torrents ni à leurs données. Les symlinks et INI ambigus sont
 refusés. Le healthcheck sonde la page de connexion sans désactiver l'authentification locale.
+Le seed vierge porte `Meta/MigrationVersion=8`, version des réglages qB 5.2.3 : sans ce marqueur,
+sa migration historique réécrit les profils proxy modernes au premier lancement. Le marqueur
+d'un profil existant n'est jamais écrasé par le réconciliateur.
 
 Contrat contrôlé (clés vérifiées dans les sources qB 5.2.3 et par son API réelle) :
 

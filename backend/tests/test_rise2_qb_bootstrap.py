@@ -60,6 +60,7 @@ def test_render_is_idempotent_and_preserves_unrelated_preferences() -> None:
     assert "General\\Locale=fr" in result
     assert "legacy-test-only" not in result
     assert password not in result
+    assert ns["settings"](result)[("Meta", "MigrationVersion")] == "8"
     assert all(ns["settings"](result)[key] == value for key, value in ns["REQUIRED"].items())
 
 
@@ -216,6 +217,7 @@ def test_awk_reconciles_and_is_idempotent_without_root(tmp_path: Path) -> None:
     existing.write_text(
         "[Preferences]\nGeneral\\Locale=fr\nWebUI\\Password=legacy-test-only\n"
         "WebUI\\HostHeaderValidation=false\n[BitTorrent]\nSession\\MaxConnections=137\n"
+        "[Meta]\nMigrationVersion=7\n"
     )
     command = [
         "awk",
@@ -229,6 +231,7 @@ def test_awk_reconciles_and_is_idempotent_without_root(tmp_path: Path) -> None:
     assert "legacy-test-only" not in result
     assert "General\\Locale=fr" in result
     assert "Session\\MaxConnections=137" in result
+    assert ns["settings"](result)[("Meta", "MigrationVersion")] == "7"
     assert all(ns["settings"](result)[key] == value for key, value in ns["REQUIRED"].items())
     existing.write_text(result)
     assert subprocess.run(command, capture_output=True, text=True, check=True).stdout == result

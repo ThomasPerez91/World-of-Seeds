@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repository=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repository=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 environment=${1:-/etc/world-of-seeds-v2/environment}
 compose_file="$repository/deploy/compose.rise2.v2.yaml"
 
@@ -110,6 +110,8 @@ for name in stats.json torrent_registry.json newgreedy.log purge_pending.json; d
     || fail "NewGreedy state file must be owned by root: $name"
 done
 
+# Expand these identity checks inside the container, not on the host.
+# shellcheck disable=SC2016
 compose run --rm --no-deps --entrypoint /bin/sh \
   --env WOS_EXPECTED_GID="$newgreedy_gid" \
   newgreedy -ec \
