@@ -30,7 +30,20 @@ do
   [ -f "$required" ] || { echo "Restore payload is incomplete" >&2; exit 1; }
 done
 [ -d "$restore_dir/qbittorrent-config" ] || { echo "qBittorrent state is missing" >&2; exit 1; }
-[ -d "$restore_dir/newgreedy-data" ] || { echo "NewGreedy state is missing" >&2; exit 1; }
+[ -d "$restore_dir/newgreedy-state" ] || { echo "NewGreedy state is missing" >&2; exit 1; }
+[ -d "$restore_dir/newgreedy-ca" ] || { echo "NewGreedy CA is missing" >&2; exit 1; }
+for required in stats.json torrent_registry.json newgreedy.log purge_pending.json; do
+  [ -f "$restore_dir/newgreedy-state/$required" ] || {
+    echo "NewGreedy state is incomplete" >&2
+    exit 1
+  }
+done
+for required in mitmproxy-ca-cert.pem mitmproxy-ca.pem; do
+  [ -f "$restore_dir/newgreedy-ca/$required" ] || {
+    echo "NewGreedy CA is incomplete" >&2
+    exit 1
+  }
+done
 
 python3 - "$restore_dir/manifest.json" "$snapshot_id" <<'PY'
 import json
@@ -139,13 +152,14 @@ case "$table_count" in
 esac
 
 qb_file_count=$(find "$restore_dir/qbittorrent-config" -type f -print | wc -l | tr -d ' ')
-newgreedy_file_count=$(find "$restore_dir/newgreedy-data" -type f -print | wc -l | tr -d ' ')
+newgreedy_file_count=$(find "$restore_dir/newgreedy-state" -type f -print | wc -l | tr -d ' ')
+newgreedy_ca_file_count=$(find "$restore_dir/newgreedy-ca" -type f -print | wc -l | tr -d ' ')
 finished_at=$(date +%s)
 duration_seconds=$((finished_at - started_at))
 
 umask 077
 python3 - "$report_path" "$snapshot_id" "$duration_seconds" "$table_count" \
-  "$qb_file_count" "$newgreedy_file_count" <<'PY'
+  "$qb_file_count" "$newgreedy_file_count" "$newgreedy_ca_file_count" <<'PY'
 import json
 import sys
 from datetime import UTC, datetime
@@ -159,6 +173,7 @@ report = {
     "postgres_public_table_count": int(sys.argv[4]),
     "qbittorrent_state_file_count": int(sys.argv[5]),
     "newgreedy_state_file_count": int(sys.argv[6]),
+    "newgreedy_ca_file_count": int(sys.argv[7]),
     "secrets_included": False,
     "filenames_included": False,
 }

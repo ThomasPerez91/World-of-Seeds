@@ -23,6 +23,7 @@ def _environment(path: Path, *, storage: str = "/srv/world-of-seeds-v2/data") ->
                 "WOS_V2_POSTGRES_USER=wos_v2",
                 "WOS_V2_QBITTORRENT_CONFIG_PATH=/etc/world-of-seeds-v2/qBittorrent.conf",
                 "WOS_V2_NEWGREEDY_CONFIG_PATH=/etc/world-of-seeds-v2/newgreedy/config.ini",
+                "WOS_V2_NEWGREEDY_STATE_HOST_PATH=/srv/world-of-seeds-v2/newgreedy-state",
             )
         )
         + "\n",
@@ -45,7 +46,12 @@ def _payload(root: Path, snapshot_id: str = "zfs-rise2-20260828T010000Z") -> Pat
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
     (stage / "qbittorrent-config").mkdir()
-    (stage / "newgreedy-data").mkdir()
+    (stage / "newgreedy-state").mkdir()
+    for name in ("stats.json", "torrent_registry.json", "newgreedy.log", "purge_pending.json"):
+        (stage / "newgreedy-state" / name).write_text("{}\n", encoding="utf-8")
+    (stage / "newgreedy-ca").mkdir()
+    (stage / "newgreedy-ca/mitmproxy-ca-cert.pem").write_text("certificate\n", encoding="utf-8")
+    (stage / "newgreedy-ca/mitmproxy-ca.pem").write_text("private-key\n", encoding="utf-8")
     namespace["_write_manifest"](stage, snapshot_id)
     return stage
 
@@ -119,11 +125,15 @@ def test_manifest_requires_matching_external_content_snapshot(tmp_path: Path) ->
 def test_manifest_rejects_missing_state_or_non_custom_postgres_dump(tmp_path: Path) -> None:
     namespace = _backup_namespace()
     stage = _payload(tmp_path)
-    (stage / "newgreedy-data").rmdir()
+    for path in (stage / "newgreedy-state").iterdir():
+        path.unlink()
+    (stage / "newgreedy-state").rmdir()
     with pytest.raises(namespace["BackupError"], match="component is missing"):
         namespace["validate_payload"](stage, "zfs-rise2-20260828T010000Z")
 
-    (stage / "newgreedy-data").mkdir()
+    (stage / "newgreedy-state").mkdir()
+    for name in ("stats.json", "torrent_registry.json", "newgreedy.log", "purge_pending.json"):
+        (stage / "newgreedy-state" / name).write_text("{}\n", encoding="utf-8")
     (stage / "postgres.dump").write_bytes(b"plain SQL")
     namespace["_write_manifest"](stage, "zfs-rise2-20260828T010000Z")
     with pytest.raises(namespace["BackupError"], match="custom format"):
@@ -188,3 +198,19 @@ def test_restore_drill_is_disposable_isolated_and_never_reads_v1() -> None:
     assert "/srv/seedbox" not in script
     assert 'cat "$restore_dir/environment"' not in script
     assert '"secrets_included": False' in script
+    assert '"$restore_dir/newgreedy-state"' in script
+    assert '"$restore_dir/newgreedy-ca"' in script
+
+
+def test_backup_tracks_exact_newgreedy_state_and_ca_paths() -> None:
+    repository = Path(__file__).resolve().parents[2]
+    script = (repository / "scripts/rise2_v2_backup.py").read_text(encoding="utf-8")
+
+    assert "newgreedy:/app/data/." not in script
+    for source in (
+        "newgreedy:/app/{filename}",
+        "newgreedy:/root/.mitmproxy/.",
+        '"newgreedy_state": "newgreedy-state"',
+        '"newgreedy_ca": "newgreedy-ca"',
+    ):
+        assert source in script

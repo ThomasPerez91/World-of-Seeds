@@ -239,6 +239,9 @@ jobs:
           docker compose --env-file deploy/.env.rise2.v2.example \
             -f deploy/compose.rise2.v2.yaml config --format json \
             | python3 scripts/validate_compose_v2_rise2.py
+      - name: Smoke immutable NewGreedy Rise2 runtime
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: scripts/rise2_v2_newgreedy_smoke.sh
       - name: Build and start production stack
         run: |
           cp .env.example .env

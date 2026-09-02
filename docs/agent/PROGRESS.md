@@ -1604,6 +1604,32 @@
   security, production image, complete Compose profile, bounded load, WebSocket, and monitoring
   validation are green. Docker remains unavailable only in the local workspace.
 
+## Post-freeze Rise2 correction — NewGreedy runtime contract
+
+- The first real Rise2 preflight exposed `PermissionError: /app/newgreedy.log`. The production
+  Compose forced NewGreedy to `10003:10003` and mounted only a writable `/app/data`, although
+  upstream 1.7.5 writes directly to `/app/stats.json`, `/app/torrent_registry.json`,
+  `/app/newgreedy.log`, and `/app/purge_pending.json`, while mitmproxy owns its runtime CA under
+  `/root/.mitmproxy`.
+- The immutable published image has no `USER` directive and was validated with the image's root
+  default. Rise2 now preserves that user only for NewGreedy, adds the configured NewGreedy group
+  solely to read the existing `0640` config, and retains `cap_drop: ALL`, no-new-privileges, a
+  read-only root filesystem, the internal torrent network, and no published port.
+- A one-shot, networkless `newgreedy-init` service idempotently creates the four root-owned `0600`
+  state files in one host-side persistent directory. NewGreedy binds those exact files read-write;
+  a dedicated `newgreedy_v2_ca` named volume backs `/root/.mitmproxy`. The false `/app/data`
+  contract and unused NewGreedy UID variable are removed.
+- Compose policy and preflight now fail closed on a mutable image, missing/wrong state or CA
+  backing, tmpfs persistence, forced non-root user, missing hardening, host port, wrong network,
+  unreadable config, unsafe state metadata, or failed initialization. The healthcheck uses `curl`,
+  which is present in the published image, instead of absent `wget`.
+- CI runs a targeted Docker smoke against the unchanged NewGreedy digest. It exercises preflight,
+  health, writable state, CA generation, restart, force-recreate, state sentinel persistence, CA
+  fingerprint stability, and the absence of a host port under a unique disposable Compose project.
+  The encrypted backup and restore drill now capture and validate the four exact state files plus
+  the persistent CA instead of the obsolete `/app/data` path. No WOS/NewGreedy image rebuild,
+  application change, Rise2 deployment, V2-33 work, or draft PR `#103` change is included.
+
 ## Known constraints
 
 - `master` and `develop` remain V1-only; V2 branches and PRs target `develop_V2`.
@@ -1619,9 +1645,9 @@
 
 ## Next task
 
-- The post-V2-32F P2/P3 correction is the only active task. After its review, green CI, and merge,
-  the feature-freeze candidate may proceed to the separately authorized `V2-33 — Pilote Rise2`;
-  do not start it automatically.
+- The post-freeze NewGreedy runtime correction is the only active task. After review, green CI,
+  and merge, rerun the Rise2 preflight with the already published immutable WOS/NewGreedy digests;
+  do not deploy or start V2-33 automatically.
 - V2-32D remains blocked by NewGreedy v1.7.5 and is not a pilot prerequisite unless explicitly
   decided otherwise.
 - Do not continue, rebase, close, or merge the existing V2-33 draft PR `#103` automatically; its

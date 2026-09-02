@@ -23,6 +23,8 @@ env_value() {
 
 storage=$(env_value WOS_V2_STORAGE_HOST_PATH)
 newgreedy_config=$(env_value WOS_V2_NEWGREEDY_CONFIG_PATH)
+newgreedy_state=$(env_value WOS_V2_NEWGREEDY_STATE_HOST_PATH)
+newgreedy_image=$(env_value WOS_V2_NEWGREEDY_IMAGE)
 qbittorrent_config=$(env_value WOS_V2_QBITTORRENT_CONFIG_PATH)
 app_uid=$(env_value WOS_V2_APP_UID)
 newgreedy_gid=$(env_value WOS_V2_NEWGREEDY_GID)
@@ -36,6 +38,9 @@ esac
 [ -d "$storage" ] || fail "storage directory not found"
 [ ! -L "$storage" ] || fail "storage directory must not be a symlink"
 
+printf '%s\n' "$newgreedy_image" | grep -Eq '^.+@sha256:[0-9a-f]{64}$' \
+  || fail "NewGreedy image must use an immutable sha256 digest"
+
 [ -f "$newgreedy_config" ] || fail "NewGreedy config not found"
 [ ! -L "$newgreedy_config" ] || fail "NewGreedy config must not be a symlink"
 [ "$(stat -c '%a' "$newgreedy_config")" = "640" ] || fail "NewGreedy config mode must be 0640"
@@ -43,6 +48,17 @@ esac
   || fail "NewGreedy config owner must be the WOS application UID"
 [ "$(stat -c '%g' "$newgreedy_config")" = "$newgreedy_gid" ] \
   || fail "NewGreedy config group must match the container GID"
+
+case "$newgreedy_state" in
+  /srv/world-of-seeds-v2/*) ;;
+  *) fail "NewGreedy state must be inside /srv/world-of-seeds-v2" ;;
+esac
+[ -d "$newgreedy_state" ] || fail "NewGreedy state directory not found"
+[ ! -L "$newgreedy_state" ] || fail "NewGreedy state directory must not be a symlink"
+[ "$(stat -c '%a' "$newgreedy_state")" = "700" ] \
+  || fail "NewGreedy state directory mode must be 0700"
+[ "$(stat -c '%u:%g' "$newgreedy_state")" = "0:0" ] \
+  || fail "NewGreedy state directory must be owned by root"
 
 [ -f "$qbittorrent_config" ] || fail "qBittorrent bootstrap config not found"
 [ ! -L "$qbittorrent_config" ] || fail "qBittorrent config must not be a symlink"
@@ -58,10 +74,28 @@ compose() {
 }
 
 compose config --format json | python3 "$repository/scripts/validate_compose_v2_rise2.py"
+compose run --rm --no-deps newgreedy-init
+
+for name in stats.json torrent_registry.json newgreedy.log purge_pending.json; do
+  state_file="$newgreedy_state/$name"
+  [ -f "$state_file" ] || fail "NewGreedy state file is missing: $name"
+  [ ! -L "$state_file" ] || fail "NewGreedy state file must not be a symlink: $name"
+  [ "$(stat -c '%a' "$state_file")" = "600" ] \
+    || fail "NewGreedy state file mode must be 0600: $name"
+  [ "$(stat -c '%u:%g' "$state_file")" = "0:0" ] \
+    || fail "NewGreedy state file must be owned by root: $name"
+done
+
 compose run --rm --no-deps --entrypoint /bin/sh \
-  --env WOS_EXPECTED_UID="$(env_value WOS_V2_NEWGREEDY_UID)" \
   --env WOS_EXPECTED_GID="$newgreedy_gid" \
   newgreedy -ec \
-  'test "$(id -u)" = "$WOS_EXPECTED_UID" && test "$(id -g)" = "$WOS_EXPECTED_GID" && test -r /app/config.ini'
+  'test "$(id -u)" = "0"
+   case " $(id -G) " in *" $WOS_EXPECTED_GID "*) ;; *) exit 1 ;; esac
+   test -r /app/config.ini
+   test -w /app/stats.json
+   test -w /app/torrent_registry.json
+   test -w /app/newgreedy.log
+   test -w /app/purge_pending.json
+   test -w /root/.mitmproxy'
 
 echo "Rise2 V2 preflight passed."
