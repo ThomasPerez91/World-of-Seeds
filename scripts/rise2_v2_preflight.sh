@@ -27,6 +27,7 @@ newgreedy_state=$(env_value WOS_V2_NEWGREEDY_STATE_HOST_PATH)
 newgreedy_image=$(env_value WOS_V2_NEWGREEDY_IMAGE)
 qbittorrent_config=$(env_value WOS_V2_QBITTORRENT_CONFIG_PATH)
 app_uid=$(env_value WOS_V2_APP_UID)
+app_gid=$(env_value WOS_V2_APP_GID)
 newgreedy_gid=$(env_value WOS_V2_NEWGREEDY_GID)
 qbittorrent_uid=$(env_value WOS_V2_QBITTORRENT_UID)
 qbittorrent_gid=$(env_value WOS_V2_QBITTORRENT_GID)
@@ -37,6 +38,14 @@ case "$storage" in
 esac
 [ -d "$storage" ] || fail "storage directory not found"
 [ ! -L "$storage" ] || fail "storage directory must not be a symlink"
+[ "$qbittorrent_uid" = "$app_uid" ] \
+  || fail "qBittorrent UID must equal the WOS application UID for shared 0750 workspaces"
+[ "$(stat -c '%u' "$storage")" = "$app_uid" ] \
+  || fail "storage root owner must match the shared WOS/qBittorrent UID"
+[ "$(stat -c '%g' "$storage")" = "$app_gid" ] \
+  || fail "storage root group must match the WOS application GID"
+[ "$(stat -c '%a' "$storage")" = "750" ] \
+  || fail "storage root mode must be 0750"
 
 printf '%s\n' "$newgreedy_image" | grep -Eq '^.+@sha256:[0-9a-f]{64}$' \
   || fail "NewGreedy image must use an immutable sha256 digest"
@@ -74,6 +83,7 @@ compose() {
 }
 
 compose config --format json | python3 "$repository/scripts/validate_compose_v2_rise2.py"
+"$repository/scripts/rise2_v2_storage_smoke.sh" "$environment"
 compose run --rm --no-deps newgreedy-init
 
 for name in stats.json torrent_registry.json newgreedy.log purge_pending.json; do
