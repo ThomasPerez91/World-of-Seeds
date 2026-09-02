@@ -181,15 +181,11 @@ services:
           install -o "$$QBT_UID" -g "$$QBT_GID" -m 0600 \
             /bootstrap/qBittorrent.conf /config/qBittorrent/config/qBittorrent.conf
         fi
-        chown "$$QBT_UID:$$QBT_GID" /data
     environment:
       QBT_UID: ${WOS_V2_QBITTORRENT_UID:?set WOS_V2_QBITTORRENT_UID}
       QBT_GID: ${WOS_V2_QBITTORRENT_GID:?set WOS_V2_QBITTORRENT_GID}
     volumes:
       - qbittorrent_v2_config:/config
-      - type: bind
-        source: ${WOS_V2_STORAGE_HOST_PATH:?set isolated WOS_V2_STORAGE_HOST_PATH}
-        target: /data
       - type: bind
         source: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}
         target: /bootstrap/qBittorrent.conf
