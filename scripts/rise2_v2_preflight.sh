@@ -38,6 +38,7 @@ case "$storage" in
 esac
 [ -d "$storage" ] || fail "storage directory not found"
 [ ! -L "$storage" ] || fail "storage directory must not be a symlink"
+mountpoint -q -- "$storage" || fail "storage directory must be an active mountpoint"
 [ "$qbittorrent_uid" = "$app_uid" ] \
   || fail "qBittorrent UID must equal the WOS application UID for shared 0750 workspaces"
 [ "$(stat -c '%u' "$storage")" = "$app_uid" ] \
