@@ -83,7 +83,7 @@ compose() {
 }
 
 compose config --format json | python3 "$repository/scripts/validate_compose_v2_rise2.py"
-"$repository/scripts/rise2_v2_storage_smoke.sh" "$environment"
+sh "$repository/scripts/rise2_v2_storage_smoke.sh" "$environment"
 compose run --rm --no-deps newgreedy-init
 
 for name in stats.json torrent_registry.json newgreedy.log purge_pending.json; do
