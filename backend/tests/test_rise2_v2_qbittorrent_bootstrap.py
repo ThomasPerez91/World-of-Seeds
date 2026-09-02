@@ -57,6 +57,7 @@ def test_qbittorrent_bootstrap_renders_required_safe_runtime_settings(tmp_path: 
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
     values = parse_ini(output.read_text(encoding="utf-8"))
+    assert values[("Meta", "MigrationVersion")] == "8"
     assert values[("Preferences", r"WebUI\Username")] == "wos-v2"
     assert values[("Preferences", r"WebUI\ServerDomains")] == "qbittorrent"
     assert values[("Preferences", r"WebUI\HostHeaderValidation")] == "true"
