@@ -145,9 +145,7 @@ def _valid_config() -> dict[str, Any]:
             "security_opt": ["no-new-privileges:true"],
             "read_only": True,
             "depends_on": {"newgreedy": {"condition": "service_healthy"}},
-            "command": [
-                "/private/mitmproxy-ca-cert.pem /public/mitmproxy-ca-cert.pem PRIVATE KEY"
-            ],
+            "command": ["/private/mitmproxy-ca-cert.pem /public/mitmproxy-ca-cert.pem PRIVATE KEY"],
             "volumes": [
                 {
                     "type": "volume",
