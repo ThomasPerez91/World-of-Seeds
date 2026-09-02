@@ -183,6 +183,13 @@ def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
             {"networks": {"backend": None, "torrent": None, "edge": None}}
         ),
         lambda config: config["services"]["worker"]["networks"].update({"torrent-egress": None}),
+        lambda config: config["services"]["migrate"]["networks"].update({"torrent-egress": None}),
+        lambda config: config["services"]["qbittorrent-init"]["networks"].update(
+            {"torrent-egress": None}
+        ),
+        lambda config: config["services"]["newgreedy-init"].update(
+            {"networks": {"torrent-egress": None}}
+        ),
         lambda config: config["services"]["qbittorrent"]["environment"].update({"UMASK": "022"}),
         lambda config: config["services"]["api"].update({"command": ["uvicorn", "--workers", "2"]}),
         lambda config: config["services"]["newgreedy"].update({"privileged": True}),
