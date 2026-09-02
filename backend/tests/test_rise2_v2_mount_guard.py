@@ -6,15 +6,18 @@ PREFLIGHT = REPOSITORY / "scripts" / "rise2_v2_preflight.sh"
 SYSTEMD_UNIT = REPOSITORY / "deploy" / "world-of-seeds-v2-rise2.service"
 
 
-def test_rise2_preflight_rejects_an_unmounted_storage_directory_before_compose() -> None:
+def test_preflight_checks_mountpoint_before_compose() -> None:
     script = PREFLIGHT.read_text(encoding="utf-8")
-    guard = 'mountpoint -q -- "$storage" || fail "storage directory must be an active mountpoint"'
+    guard = (
+        'mountpoint -q -- "$storage" '
+        '|| fail "storage directory must be an active mountpoint"'
+    )
 
     assert guard in script
     assert script.index(guard) < script.index("compose() {")
 
 
-def test_rise2_systemd_unit_requires_the_storage_mount_before_starting_compose() -> None:
+def test_systemd_unit_requires_storage_mount_before_compose() -> None:
     unit = SYSTEMD_UNIT.read_text(encoding="utf-8")
     lines = unit.splitlines()
 
@@ -40,7 +43,7 @@ def test_rise2_systemd_unit_requires_the_storage_mount_before_starting_compose()
     assert "TimeoutStopSec=35min" in lines
 
 
-def test_rise2_systemd_stop_preserves_pilot_state() -> None:
+def test_systemd_stop_preserves_pilot_state() -> None:
     unit = SYSTEMD_UNIT.read_text(encoding="utf-8")
 
     assert " down" not in unit
