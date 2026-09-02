@@ -1630,6 +1630,24 @@
   the persistent CA instead of the obsolete `/app/data` path. No WOS/NewGreedy image rebuild,
   application change, Rise2 deployment, V2-33 work, or draft PR `#103` change is included.
 
+## Post-freeze Rise2 correction — Reproducible qB authentication bootstrap
+
+- Base audited: `9e57a224ed2eeae0c51c7efa7d3e1eb21c97ad4a`; draft #103 is untouched.
+- The old one-time external config copy did not reconstruct the pilot's manually repaired
+  Host allowlist, WebUI credentials or NewGreedy tracker-only proxy after a fresh qB volume.
+- Preflight now derives a private PBKDF2 bootstrap from the existing integration registry.
+  qB 5.2.3 source confirms SHA-512/100000/16-byte salt/64-byte key and the actual policy keys.
+  No plaintext credential is written to the qB config or exposed by Compose normalization.
+- First install initializes the profile; each qB container start reconciles only managed keys
+  before starting qB, preserving unrelated preferences and torrent state. Init does not mutate
+  an existing potentially live profile. Host/CSRF remain enabled; Docker hostname is explicit;
+  HTTP NewGreedy handles BitTorrent tracker traffic and peers remain unproxied.
+- Worker/scheduler load the same registry through a Compose secret at runtime; application and
+  NewGreedy images are unchanged. Public-CA export and qB runtime trust are preserved.
+- Added static/secret/hash/policy regressions and a separate real Docker wipe/recreate smoke.
+  Local namespace cannot map production UIDs; real ownership and runtime checks are required
+  on the disposable CI runner. CI/review acceptance is pending; no deployment is performed.
+
 ## Known constraints
 
 - `master` and `develop` remain V1-only; V2 branches and PRs target `develop_V2`.

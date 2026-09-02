@@ -31,7 +31,9 @@ def test_rise2_qbittorrent_init_cannot_mutate_shared_storage() -> None:
     assert 'chown "$$QBT_UID:$$QBT_GID" /data' not in init
     assert "qbittorrent_v2_config:/config" in init
     assert "target: /bootstrap/qBittorrent.conf" in init
-    assert "chmod 0600 /config/qBittorrent/config/qBittorrent.conf" in init
+    assert "exec /bin/sh /bootstrap/reconcile.sh" in init
+    reconciler = (_repository() / "scripts/rise2_v2_qb_reconcile.sh").read_text()
+    assert 'chmod 0600 "$temporary"' in reconciler
 
 
 def test_rise2_qbittorrent_runtime_keeps_only_required_entrypoint_capabilities() -> None:

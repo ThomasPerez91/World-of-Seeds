@@ -76,6 +76,10 @@ esac
 [ "$(stat -c '%u:%g' "$newgreedy_state")" = "0:0" ] \
   || fail "NewGreedy state directory must be owned by root"
 
+# Derive the private bootstrap from the same registry used by WOS. Never source
+# the environment as shell code or print its JSON/credentials.
+python3 "$repository/scripts/rise2_v2_qb_bootstrap.py" "$environment"
+python3 "$repository/scripts/rise2_v2_qb_bootstrap.py" "$environment" --check
 [ -f "$qbittorrent_config" ] || fail "qBittorrent bootstrap config not found"
 [ ! -L "$qbittorrent_config" ] || fail "qBittorrent config must not be a symlink"
 [ "$(stat -c '%a' "$qbittorrent_config")" = "600" ] \

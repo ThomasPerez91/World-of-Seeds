@@ -96,12 +96,12 @@ services:
 
   worker:
     <<: *wos-runtime
-    command: ["python", "-m", "app.worker"]
+    command: ["python", "/bootstrap/integration-entrypoint.py", "app.worker"]
     restart: unless-stopped
     stop_grace_period: 35s
     environment:
       <<: *wos-environment
-      WOS_INTEGRATION_ACCOUNTS_JSON: ${WOS_V2_INTEGRATION_ACCOUNTS_JSON:?set WOS_V2_INTEGRATION_ACCOUNTS_JSON}
+    secrets: [integration_registry]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -113,6 +113,10 @@ services:
         condition: service_healthy
     volumes:
       - type: bind
+        source: ../scripts/rise2_v2_integration_entrypoint.py
+        target: /bootstrap/integration-entrypoint.py
+        read_only: true
+      - type: bind
         source: ${WOS_V2_STORAGE_HOST_PATH:?set isolated WOS_V2_STORAGE_HOST_PATH}
         target: /data
     networks: [backend, torrent]
@@ -122,18 +126,22 @@ services:
 
   scheduler:
     <<: *wos-runtime
-    command: ["python", "-m", "app.scheduler_service"]
+    command: ["python", "/bootstrap/integration-entrypoint.py", "app.scheduler_service"]
     restart: unless-stopped
     stop_grace_period: 35s
     environment:
       <<: *wos-environment
-      WOS_INTEGRATION_ACCOUNTS_JSON: ${WOS_V2_INTEGRATION_ACCOUNTS_JSON:?set WOS_V2_INTEGRATION_ACCOUNTS_JSON}
+    secrets: [integration_registry]
     depends_on:
       migrate:
         condition: service_completed_successfully
       qbittorrent:
         condition: service_healthy
     volumes:
+      - type: bind
+        source: ../scripts/rise2_v2_integration_entrypoint.py
+        target: /bootstrap/integration-entrypoint.py
+        read_only: true
       - type: bind
         source: ${WOS_V2_STORAGE_HOST_PATH:?set isolated WOS_V2_STORAGE_HOST_PATH}
         target: /data
@@ -175,13 +183,7 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
-        test -s /bootstrap/qBittorrent.conf
-        install -d -o "$$QBT_UID" -g "$$QBT_GID" -m 0700 /config/qBittorrent/config
-        if [ ! -e /config/qBittorrent/config/qBittorrent.conf ]; then
-          install -o "$$QBT_UID" -g "$$QBT_GID" -m 0600 \
-            /bootstrap/qBittorrent.conf /config/qBittorrent/config/qBittorrent.conf
-        fi
-        chmod 0600 /config/qBittorrent/config/qBittorrent.conf
+        exec /bin/sh /bootstrap/reconcile.sh --init
     environment:
       QBT_UID: ${WOS_V2_QBITTORRENT_UID:?set WOS_V2_QBITTORRENT_UID}
       QBT_GID: ${WOS_V2_QBITTORRENT_GID:?set WOS_V2_QBITTORRENT_GID}
@@ -191,6 +193,10 @@ services:
         source: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}
         target: /bootstrap/qBittorrent.conf
         read_only: true
+        bind: {create_host_path: false}
+      - {type: bind, source: ./qbittorrent.rise2.conf, target: /bootstrap/policy.conf, read_only: true}
+      - {type: bind, source: ../scripts/rise2_v2_qb_reconcile.sh, target: /bootstrap/reconcile.sh, read_only: true}
+      - {type: bind, source: ../scripts/rise2_v2_qb_reconcile.awk, target: /bootstrap/reconcile.awk, read_only: true}
     networks: [torrent]
     user: "0:0"
     restart: "no"
@@ -210,6 +216,7 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
+        /bin/sh /bootstrap/reconcile.sh
         public_ca=/wos-ca/mitmproxy-ca-cert.pem
         system_bundle=/etc/ssl/certs/ca-certificates.crt
         test -s "$$public_ca"
@@ -229,6 +236,14 @@ services:
     volumes:
       - qbittorrent_v2_config:/config
       - type: bind
+        source: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}
+        target: /bootstrap/qBittorrent.conf
+        read_only: true
+        bind: {create_host_path: false}
+      - {type: bind, source: ./qbittorrent.rise2.conf, target: /bootstrap/policy.conf, read_only: true}
+      - {type: bind, source: ../scripts/rise2_v2_qb_reconcile.sh, target: /bootstrap/reconcile.sh, read_only: true}
+      - {type: bind, source: ../scripts/rise2_v2_qb_reconcile.awk, target: /bootstrap/reconcile.awk, read_only: true}
+      - type: bind
         source: ${WOS_V2_STORAGE_HOST_PATH:?set isolated WOS_V2_STORAGE_HOST_PATH}
         target: /data
       - type: volume
@@ -240,7 +255,7 @@ services:
     cap_add: [CHOWN, DAC_OVERRIDE, KILL, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     healthcheck:
-      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8080/api/v2/app/version"]
+      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8080/"]
       interval: 10s
       timeout: 3s
       retries: 12
@@ -453,6 +468,10 @@ networks:
   torrent-egress: {}
   monitoring: {internal: true}
   monitoring-edge: {internal: true}
+
+secrets:
+  integration_registry:
+    environment: WOS_V2_INTEGRATION_ACCOUNTS_JSON
 
 volumes:
   postgres_v2_data:

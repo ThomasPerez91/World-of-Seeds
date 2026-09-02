@@ -1,0 +1,29 @@
+name: Rise2 qB bootstrap
+
+on:
+  push:
+    branches: [fix/v2-rise2-qbittorrent-bootstrap, develop_V2]
+  pull_request:
+    branches: [develop_V2]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rise2-qb-bootstrap-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  wipe-smoke:
+    name: qB fresh-volume restart recreate wipe
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate deployment scripts
+        run: |
+          bash -n scripts/rise2_v2_preflight.sh scripts/rise2_v2_qb_reconcile.sh
+          shellcheck scripts/rise2_v2_qb_reconcile.sh
+          python3 -m py_compile scripts/rise2_v2_qb_bootstrap.py scripts/rise2_v2_qb_probe.py scripts/rise2_v2_qb_smoke.py scripts/rise2_v2_integration_entrypoint.py
+      - name: Real immutable-image smoke (no build, publish or deployment)
+        run: sudo python3 scripts/rise2_v2_qb_smoke.py

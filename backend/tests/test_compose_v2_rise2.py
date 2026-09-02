@@ -48,16 +48,26 @@ def _valid_config() -> dict[str, Any]:
         "qbittorrent-init": {
             "image": "qbittorrentofficial/qbittorrent-nox:5.2.3-1",
             "networks": {"torrent": None},
+            "entrypoint": ["/bin/sh", "-ec"],
+            "command": ["exec /bin/sh /bootstrap/reconcile.sh --init\n"],
+            "environment": {"QBT_UID": "10001", "QBT_GID": "10002"},
         },
         "qbittorrent": {
             "image": "qbittorrentofficial/qbittorrent-nox:5.2.3-1",
             "networks": {"torrent": None, "torrent-egress": None},
-            "environment": {"UMASK": "077"},
+            "environment": {
+                "UMASK": "077",
+                "PUID": "10001",
+                "PGID": "10002",
+                "QBT_LEGAL_NOTICE": "confirm",
+                "QBT_WEBUI_PORT": "8080",
+            },
             "entrypoint": ["/bin/sh", "-ec"],
             "cap_drop": ["ALL"],
             "cap_add": ["CHOWN", "DAC_OVERRIDE", "KILL", "SETGID", "SETUID"],
             "command": [
-                "/wos-ca/mitmproxy-ca-cert.pem /etc/ssl/certs/ca-certificates.crt "
+                "/bin/sh /bootstrap/reconcile.sh /wos-ca/mitmproxy-ca-cert.pem "
+                "/etc/ssl/certs/ca-certificates.crt "
                 "PRIVATE KEY exec /sbin/tini -g -- /entrypoint.sh"
             ],
             "depends_on": {
@@ -182,10 +192,39 @@ def _valid_config() -> dict[str, Any]:
     }
     services["api"]["networks"]["edge"] = {"ipv4_address": "172.30.0.3"}
     services["api"]["environment"]["FORWARDED_ALLOW_IPS"] = "172.30.0.2"
-    services["worker"]["environment"]["WOS_INTEGRATION_ACCOUNTS_JSON"] = '{"routes":[]}'
-    services["scheduler"]["environment"]["WOS_INTEGRATION_ACCOUNTS_JSON"] = '{"routes":[]}'
+    for name, module in (("worker", "app.worker"), ("scheduler", "app.scheduler_service")):
+        services[name]["secrets"] = [{"source": "integration_registry"}]
+        services[name]["command"] = ["python", "/bootstrap/integration-entrypoint.py", module]
+        services[name]["volumes"] = [
+            {
+                "type": "bind",
+                "source": "/repo/scripts/rise2_v2_integration_entrypoint.py",
+                "target": "/bootstrap/integration-entrypoint.py",
+                "read_only": True,
+            }
+        ]
+    for target, filename in (
+        ("policy.conf", "qbittorrent.rise2.conf"),
+        ("reconcile.sh", "rise2_v2_qb_reconcile.sh"),
+        ("reconcile.awk", "rise2_v2_qb_reconcile.awk"),
+        ("qBittorrent.conf", "qBittorrent.conf"),
+    ):
+        services["qbittorrent"]["volumes"].append(
+            {
+                "type": "bind",
+                "source": "/bootstrap/" + filename,
+                "target": "/bootstrap/" + target,
+                "read_only": True,
+            }
+        )
+    services["qbittorrent-init"]["volumes"] = [
+        copy.deepcopy(m)
+        for m in services["qbittorrent"]["volumes"]
+        if m["target"] not in {"/data", "/wos-ca"}
+    ]
     return {
         "name": "world-of-seeds-v2-rise2",
+        "secrets": {"integration_registry": {"environment": "WOS_V2_INTEGRATION_ACCOUNTS_JSON"}},
         "services": services,
         "networks": {
             "edge": {"ipam": {"config": [{"subnet": "172.30.0.0/24"}]}},

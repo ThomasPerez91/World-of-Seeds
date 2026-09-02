@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import json
 import re
+import runpy
 import sys
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 SERVICES = {
@@ -97,6 +99,22 @@ def _mounts_by_target(service: Mapping[str, Any], name: str) -> dict[str, Mappin
 
 
 def validate_config(config: Mapping[str, Any]) -> None:
+    bootstrap = runpy.run_path(str(Path(__file__).with_name("rise2_v2_qb_bootstrap.py")))
+    try:
+        policy = bootstrap["settings"](bootstrap["POLICY"].read_text(encoding="utf-8"))
+        if policy != bootstrap["REQUIRED"]:
+            raise ValueError
+    except (RuntimeError, ValueError, OSError):
+        raise ComposeRise2PolicyError("qB bootstrap Host/CSRF/proxy policy is unsafe") from None
+    secrets = _mapping(config.get("secrets"), "secrets")
+    if (
+        set(secrets) != {"integration_registry"}
+        or _mapping(secrets["integration_registry"], "registry secret").get("environment")
+        != "WOS_V2_INTEGRATION_ACCOUNTS_JSON"
+    ):
+        raise ComposeRise2PolicyError(
+            "integration secret must reuse the Rise2 environment registry"
+        )
     if config.get("name") != "world-of-seeds-v2-rise2":
         raise ComposeRise2PolicyError("Rise2 must use its dedicated project name")
     services = _mapping(config.get("services"), "services")
@@ -165,9 +183,7 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ComposeRise2PolicyError(f"{name} networks violate Rise2 isolation")
 
     qbittorrent = _mapping(services["qbittorrent"], "qbittorrent")
-    qbittorrent_environment = _mapping(
-        qbittorrent.get("environment"), "qbittorrent.environment"
-    )
+    qbittorrent_environment = _mapping(qbittorrent.get("environment"), "qbittorrent.environment")
     if qbittorrent_environment.get("UMASK") != "077":
         raise ComposeRise2PolicyError("qBittorrent must retain a private runtime umask")
     if qbittorrent.get("cap_drop") != ["ALL"] or qbittorrent.get("cap_add") != [
@@ -181,6 +197,52 @@ def validate_config(config: Mapping[str, Any]) -> None:
             "qBittorrent must retain only the validated runtime and signal-forwarding capabilities"
         )
     qbittorrent_mounts = _mounts_by_target(qbittorrent, "qbittorrent")
+    qb_init = _mapping(services["qbittorrent-init"], "qbittorrent-init")
+    if qb_init.get("entrypoint") != ["/bin/sh", "-ec"] or qb_init.get("command") != [
+        "exec /bin/sh /bootstrap/reconcile.sh --init\n"
+    ]:
+        raise ComposeRise2PolicyError("qB init must run the versioned reconciler")
+    init_mounts_qb = _mounts_by_target(qb_init, "qbittorrent-init")
+    bootstrap_sources = {
+        "/bootstrap/policy.conf": "qbittorrent.rise2.conf",
+        "/bootstrap/reconcile.sh": "rise2_v2_qb_reconcile.sh",
+        "/bootstrap/reconcile.awk": "rise2_v2_qb_reconcile.awk",
+        "/bootstrap/qBittorrent.conf": None,
+    }
+    for mounts in (qbittorrent_mounts, init_mounts_qb):
+        for target, filename in bootstrap_sources.items():
+            mount = mounts.get(target, {})
+            if (
+                mount.get("type") != "bind"
+                or mount.get("read_only") is not True
+                or not mount.get("source")
+            ):
+                raise ComposeRise2PolicyError("qB bootstrap inputs must be read-only binds")
+            if filename and Path(str(mount["source"])).name != filename:
+                raise ComposeRise2PolicyError(
+                    "qB bootstrap must use its versioned policy and reconciler"
+                )
+            if mount.get("source") != qbittorrent_mounts.get(target, {}).get("source"):
+                raise ComposeRise2PolicyError("qB init and runtime must share bootstrap inputs")
+        profile = mounts.get("/config", {})
+        if (
+            profile.get("type") != "volume"
+            or not str(profile.get("source", "")).endswith("qbittorrent_v2_config")
+            or profile.get("read_only") is True
+        ):
+            raise ComposeRise2PolicyError("qB profile must retain its persistent writable volume")
+    if set(init_mounts_qb) != {"/config", *bootstrap_sources}:
+        raise ComposeRise2PolicyError("qB init must not access unrelated state")
+    if set(qbittorrent_environment) != {
+        "PUID",
+        "PGID",
+        "QBT_LEGAL_NOTICE",
+        "QBT_WEBUI_PORT",
+        "UMASK",
+    }:
+        raise ComposeRise2PolicyError("qB must not receive inline credentials or policy overrides")
+    if qb_init.get("environment", {}).keys() != {"QBT_UID", "QBT_GID"}:
+        raise ComposeRise2PolicyError("qB init must not receive inline credentials")
     public_ca_mount = qbittorrent_mounts.get("/wos-ca", {})
     if (
         public_ca_mount.get("type") != "volume"
@@ -190,14 +252,15 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ComposeRise2PolicyError("qBittorrent may mount only the exported public CA volume")
     for mount in qbittorrent_mounts.values():
         if str(mount.get("source", "")).endswith("newgreedy_v2_ca"):
-            raise ComposeRise2PolicyError("qBittorrent must never mount the private NewGreedy CA volume")
-    entrypoint = list(
-        _sequence(qbittorrent.get("entrypoint"), "qbittorrent.entrypoint")
-    )
+            raise ComposeRise2PolicyError(
+                "qBittorrent must never mount the private NewGreedy CA volume"
+            )
+    entrypoint = list(_sequence(qbittorrent.get("entrypoint"), "qbittorrent.entrypoint"))
     if entrypoint != ["/bin/sh", "-ec"]:
         raise ComposeRise2PolicyError("qBittorrent CA wrapper entrypoint is missing")
     qbittorrent_command = json.dumps(qbittorrent.get("command", ""))
     for required in (
+        "/bin/sh /bootstrap/reconcile.sh",
         "/wos-ca/mitmproxy-ca-cert.pem",
         "/etc/ssl/certs/ca-certificates.crt",
         "PRIVATE KEY",
@@ -205,9 +268,14 @@ def validate_config(config: Mapping[str, Any]) -> None:
     ):
         if required not in qbittorrent_command:
             raise ComposeRise2PolicyError("qBittorrent public CA bootstrap is incomplete")
-    qbittorrent_depends_on = _mapping(
-        qbittorrent.get("depends_on"), "qbittorrent.depends_on"
-    )
+    qbittorrent_depends_on = _mapping(qbittorrent.get("depends_on"), "qbittorrent.depends_on")
+    if (
+        _mapping(qbittorrent_depends_on.get("qbittorrent-init"), "qB init dependency").get(
+            "condition"
+        )
+        != "service_completed_successfully"
+    ):
+        raise ComposeRise2PolicyError("qB must wait for successful bootstrap")
     ca_export_dependency = _mapping(
         qbittorrent_depends_on.get("newgreedy-ca-export"),
         "qbittorrent NewGreedy CA export dependency",
@@ -233,10 +301,29 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ComposeRise2PolicyError(f"{name} must require secure cookies")
         if environment.get("WOS_REDIS_URL") != "redis://redis:6379/0":
             raise ComposeRise2PolicyError(f"{name} must use internal Redis")
-        registry = environment.get("WOS_INTEGRATION_ACCOUNTS_JSON")
-        if name in {"worker", "scheduler"} and not registry:
-            raise ComposeRise2PolicyError(f"{name} requires the integration registry")
-        if name in {"api", "migrate"} and registry:
+        if "WOS_INTEGRATION_ACCOUNTS_JSON" in environment:
+            raise ComposeRise2PolicyError(
+                "integration credentials must not appear in Compose environment"
+            )
+        secret_names = {
+            item.get("source") if isinstance(item, dict) else item
+            for item in service.get("secrets", [])
+        }
+        if name in {"worker", "scheduler"}:
+            if secret_names != {"integration_registry"}:
+                raise ComposeRise2PolicyError(f"{name} requires the integration registry secret")
+            module = "app.worker" if name == "worker" else "app.scheduler_service"
+            if service.get("command") != ["python", "/bootstrap/integration-entrypoint.py", module]:
+                raise ComposeRise2PolicyError(
+                    "integration process must load its secret only at runtime"
+                )
+            entry = _mounts_by_target(service, name).get("/bootstrap/integration-entrypoint.py", {})
+            if (
+                entry.get("read_only") is not True
+                or Path(str(entry.get("source", ""))).name != "rise2_v2_integration_entrypoint.py"
+            ):
+                raise ComposeRise2PolicyError("integration secret loader mount is missing")
+        elif secret_names:
             raise ComposeRise2PolicyError(f"{name} must not receive integration credentials")
         if service.get("read_only") is not True or service.get("cap_drop") != ["ALL"]:
             raise ComposeRise2PolicyError(f"{name} runtime hardening is incomplete")
