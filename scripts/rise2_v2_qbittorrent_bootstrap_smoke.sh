@@ -12,6 +12,14 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+fail_with_logs() {
+  echo "qBittorrent bootstrap smoke failed: $1" >&2
+  docker logs "$container" 2>&1 \
+    | grep -Ei 'WebUI|WebAPI|login|Host header|Origin header|Referer header' >&2 \
+    || true
+  exit 1
+}
+
 mkdir -p "$workdir/config/qBittorrent/config"
 
 python3 - "$password" <<'PY' \
@@ -63,8 +71,8 @@ gid=$(id -g)
 
 docker run --detach \
   --name "$container" \
-  --publish 127.0.0.1::8080 \
-  --add-host newgreedy:127.0.0.1 \
+  --hostname qbittorrent \
+  --publish 127.0.0.1:0:8080 \
   --env "PUID=$uid" \
   --env "PGID=$gid" \
   --env QBT_LEGAL_NOTICE=confirm \
@@ -82,40 +90,20 @@ for _ in $(seq 1 30); do
   fi
   sleep 1
 done
-[ "$ready" = true ] || {
-  docker logs "$container" >&2
-  echo "qBittorrent bootstrap smoke: WebUI did not become ready" >&2
-  exit 1
-}
+[ "$ready" = true ] || fail_with_logs "WebUI did not become ready"
 
-published=$(docker port "$container" 8080/tcp | head -n 1)
-port=${published##*:}
-base="http://127.0.0.1:$port"
-cookie="$workdir/cookie"
+# Localhost bypass is deliberately retained for the container healthcheck. Use it
+# to prove that qBittorrent 5.2.3 actually parsed the generated settings before
+# testing the authenticated Docker-service hostname path.
+docker exec "$container" \
+  curl -fsS \
+    -H 'Origin: http://127.0.0.1:8080' \
+    -H 'Referer: http://127.0.0.1:8080/' \
+    http://127.0.0.1:8080/api/v2/app/preferences \
+  >"$workdir/preferences.json" \
+  || fail_with_logs "could not read local preferences"
 
-status=$(curl --silent --show-error \
-  --output "$workdir/login-body" \
-  --write-out '%{http_code}' \
-  --cookie-jar "$cookie" \
-  --header 'Host: qbittorrent:8080' \
-  --header 'Origin: http://qbittorrent:8080' \
-  --header 'Referer: http://qbittorrent:8080/' \
-  --data-urlencode 'username=wos-v2' \
-  --data-urlencode "password=$password" \
-  "$base/api/v2/auth/login")
-
-[ "$status" = "200" ]
-[ "$(cat "$workdir/login-body")" = "Ok." ]
-
-curl --fail --silent --show-error \
-  --cookie "$cookie" \
-  --header 'Host: qbittorrent:8080' \
-  --header 'Origin: http://qbittorrent:8080' \
-  --header 'Referer: http://qbittorrent:8080/' \
-  "$base/api/v2/app/preferences" \
-  >"$workdir/preferences.json"
-
-python3 - "$workdir/preferences.json" <<'PY'
+python3 - "$workdir/preferences.json" <<'PY' || fail_with_logs "generated preferences differ"
 import json
 import sys
 
@@ -140,6 +128,48 @@ for key, value in expected.items():
     actual = preferences.get(key)
     if actual != value:
         raise SystemExit(f"unexpected qBittorrent preference {key}: {actual!r}")
+PY
+
+published=$(docker port "$container" 8080/tcp | head -n 1)
+port=${published##*:}
+[ -n "$port" ] || fail_with_logs "published WebUI port is missing"
+base="http://127.0.0.1:$port"
+cookie="$workdir/cookie"
+
+status=$(curl --silent --show-error \
+  --output "$workdir/login-body" \
+  --write-out '%{http_code}' \
+  --cookie-jar "$cookie" \
+  --header 'Host: qbittorrent:8080' \
+  --header 'Origin: http://qbittorrent:8080' \
+  --header 'Referer: http://qbittorrent:8080/' \
+  --data-urlencode 'username=wos-v2' \
+  --data-urlencode "password=$password" \
+  "$base/api/v2/auth/login") \
+  || fail_with_logs "login request failed"
+
+if [ "$status" != "200" ] || [ "$(cat "$workdir/login-body")" != "Ok." ]; then
+  echo "qBittorrent bootstrap smoke login HTTP=$status body=$(cat "$workdir/login-body")" >&2
+  fail_with_logs "authenticated Docker-service login was rejected"
+fi
+
+curl --fail --silent --show-error \
+  --cookie "$cookie" \
+  --header 'Host: qbittorrent:8080' \
+  --header 'Origin: http://qbittorrent:8080' \
+  --header 'Referer: http://qbittorrent:8080/' \
+  "$base/api/v2/torrents/info?limit=1&offset=0&sort=hash&reverse=false" \
+  >"$workdir/inventory.json" \
+  || fail_with_logs "authenticated inventory request failed"
+
+python3 - "$workdir/inventory.json" <<'PY' || fail_with_logs "inventory response is invalid"
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+if not isinstance(payload, list) or len(payload) > 1:
+    raise SystemExit("unexpected bounded qBittorrent inventory response")
 PY
 
 echo "Rise2 qBittorrent bootstrap smoke passed."
