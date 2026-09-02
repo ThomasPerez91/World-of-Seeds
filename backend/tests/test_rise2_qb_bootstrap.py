@@ -261,3 +261,42 @@ def test_integration_entrypoint_injects_secret_only_into_authorized_process(
     runpy.run_path(str(REPOSITORY / "scripts/rise2_v2_integration_entrypoint.py"))
     assert os.environ["WOS_INTEGRATION_ACCOUNTS_JSON"] == expected
     assert launched == [[sys.executable, "-m", process]]
+
+
+@pytest.mark.parametrize("migration", [0, 5, 8])
+def test_legacy_proxy_migration_inputs_are_reconciled(tmp_path: Path, migration: int) -> None:
+    ns = module()
+    user, password = ns["credentials"](registry())
+    bootstrap = tmp_path / "bootstrap.conf"
+    bootstrap.write_text(ns["render"]("", user, password))
+    profile = tmp_path / "profile.conf"
+    profile.write_text(
+        "[Preferences]\nConnection\\ProxyType=0\nConnection\\ProxyPeerConnections=true\n"
+        "[Network]\nProxy\\OnlyForTorrents=false\n"
+        "[BitTorrent]\nSession\\ProxyHostnameLookup=false\n"
+        f"[Meta]\nMigrationVersion={migration}\n"
+    )
+    result = subprocess.run(
+        [
+            "awk",
+            "-v",
+            f"migration={migration}",
+            "-f",
+            str(REPOSITORY / "scripts/rise2_v2_qb_reconcile.awk"),
+            str(ns["POLICY"]),
+            str(bootstrap),
+            str(profile),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    settings = ns["settings"](result.stdout)
+    assert settings[("Meta", "MigrationVersion")] == str(migration)
+    assert all(settings[key] == value for key, value in ns["REQUIRED"].items())
+    if migration < 6:
+        assert settings[("Network", r"Proxy\OnlyForTorrents")] == "true"
+        assert settings[("BitTorrent", r"Session\ProxyHostnameLookup")] == "true"
+    if migration < 2:
+        assert ("Preferences", r"Connection\ProxyType") not in settings
+        assert ("Preferences", r"Connection\ProxyPeerConnections") not in settings
