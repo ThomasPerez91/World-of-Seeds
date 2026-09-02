@@ -237,7 +237,7 @@ services:
         read_only: true
     networks: [torrent, torrent-egress]
     cap_drop: [ALL]
-    cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
+    cap_add: [CHOWN, DAC_OVERRIDE, KILL, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8080/api/v2/app/version"]
