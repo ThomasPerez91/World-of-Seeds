@@ -23,6 +23,16 @@ def test_rise2_preflight_rejects_an_incompatible_storage_identity() -> None:
     assert 'sh "$repository/scripts/rise2_v2_storage_smoke.sh" "$environment"' in script
 
 
+def test_rise2_qbittorrent_init_cannot_mutate_shared_storage() -> None:
+    compose = (_repository() / "deploy" / "compose.rise2.v2.yaml").read_text(encoding="utf-8")
+    init = compose.split("  qbittorrent-init:", 1)[1].split("\n  qbittorrent:", 1)[0]
+
+    assert "target: /data" not in init
+    assert 'chown "$$QBT_UID:$$QBT_GID" /data' not in init
+    assert "qbittorrent_v2_config:/config" in init
+    assert "target: /bootstrap/qBittorrent.conf" in init
+
+
 def test_rise2_storage_smoke_exercises_both_immutable_runtime_identities() -> None:
     script = (_repository() / "scripts" / "rise2_v2_storage_smoke.sh").read_text(encoding="utf-8")
 
