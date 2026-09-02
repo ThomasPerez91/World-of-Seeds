@@ -51,7 +51,8 @@ def _valid_config() -> dict[str, Any]:
         },
         "qbittorrent": {
             "image": "qbittorrentofficial/qbittorrent-nox:5.2.3-1",
-            "networks": {"torrent": None},
+            "networks": {"torrent": None, "torrent-egress": None},
+            "environment": {"UMASK": "077"},
         },
         "newgreedy-init": {
             "image": newgreedy_digest,
@@ -73,7 +74,7 @@ def _valid_config() -> dict[str, Any]:
         },
         "newgreedy": {
             "image": newgreedy_digest,
-            "networks": {"torrent": None},
+            "networks": {"torrent": None, "torrent-egress": None},
             "cap_drop": ["ALL"],
             "security_opt": ["no-new-privileges:true"],
             "read_only": True,
@@ -139,6 +140,7 @@ def _valid_config() -> dict[str, Any]:
             "edge": {"ipam": {"config": [{"subnet": "172.30.0.0/24"}]}},
             "backend": {"internal": True},
             "torrent": {"internal": True},
+            "torrent-egress": {},
             "monitoring": {"internal": True},
             "monitoring-edge": {"internal": True},
         },
@@ -176,8 +178,15 @@ def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
     [
         lambda config: config["services"]["postgres"].update({"ports": [5432]}),
         lambda config: config["networks"]["torrent"].update({"internal": False}),
+        lambda config: config["networks"]["torrent-egress"].update({"internal": True}),
         lambda config: config["services"]["worker"].update(
             {"networks": {"backend": None, "torrent": None, "edge": None}}
+        ),
+        lambda config: config["services"]["worker"]["networks"].update(
+            {"torrent-egress": None}
+        ),
+        lambda config: config["services"]["qbittorrent"]["environment"].update(
+            {"UMASK": "022"}
         ),
         lambda config: config["services"]["api"].update({"command": ["uvicorn", "--workers", "2"]}),
         lambda config: config["services"]["newgreedy"].update({"privileged": True}),
