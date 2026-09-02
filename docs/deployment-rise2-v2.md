@@ -17,21 +17,36 @@ read-only côté V1 et dry-run par défaut, décrite dans [`import-v1-v2.md`](im
 3. Créer `/srv/world-of-seeds-v2/data` sans lien symbolique, avec l'UID/GID WOS V2 dédiés. Ce chemin
    doit être le point de montage actif du filesystem de données ; un simple répertoire présent sur
    le filesystem racine n'est jamais un stockage V2 valide.
-4. Installer le bootstrap qBittorrent en `0600`, propriété de l'UID/GID qB V2. Il doit activer une
-   authentification WebUI cohérente avec le registre d'intégration et fixer le save path à `/data`.
+4. Laisser `WOS_V2_QBITTORRENT_CONFIG_PATH` pointer vers
+   `/etc/world-of-seeds-v2/qBittorrent.conf`. Le préflight génère ou réconcilie ce bootstrap en
+   `0600` à partir du registre d'intégration réellement normalisé par Compose, sans afficher le
+   mot de passe. Il fixe l'authentification WebUI, le save path `/data`, la validation Host exacte
+   `qbittorrent`, la protection CSRF et le proxy HTTP NewGreedy `newgreedy:3456`, tout en laissant
+   les connexions peers hors proxy.
 5. Installer `config.ini` NewGreedy en `0640`, propriété de l'UID applicatif WOS et du groupe GID
    NewGreedy. Créer le répertoire `WOS_V2_NEWGREEDY_STATE_HOST_PATH` en `0700`, propriété de
    `root:root`, sans préparer ses fichiers à la main.
 6. Exécuter `scripts/rise2_v2_preflight.sh /etc/world-of-seeds-v2/environment`. Le préflight
    refuse maintenant le démarrage si le stockage configuré n'est pas un point de montage actif,
-   valide ensuite la pile normalisée, initialise idempotemment `stats.json`, `torrent_registry.json`,
-   `newgreedy.log` et `purge_pending.json` en `0600`, puis vérifie leurs accès réels ainsi que
-   celui du `config.ini` monté en lecture seule.
+   rend le bootstrap qBittorrent idempotent à partir des mêmes credentials que le scheduler,
+   valide ensuite la pile normalisée, initialise idempotemment `stats.json`,
+   `torrent_registry.json`, `newgreedy.log` et `purge_pending.json` en `0600`, puis vérifie leurs
+   accès réels ainsi que celui du `config.ini` monté en lecture seule.
 7. Pour un démarrage supervisé, installer `deploy/world-of-seeds-v2-rise2.service` sous
    `/etc/systemd/system/`, exécuter `systemctl daemon-reload`, puis n'activer l'unité qu'après
    autorisation du démarrage complet. L'unité ajoute `RequiresMountsFor=/srv/world-of-seeds-v2/data`,
    un contrôle `mountpoint` avant tout Compose et le préflight complet avant `docker compose up`.
    Pendant la qualification manuelle, l'unité peut rester désactivée.
+
+Le bootstrap qBittorrent est un artefact secret local, jamais versionné. Le renderer lit le JSON
+`WOS_INTEGRATION_ACCOUNTS_JSON` depuis la sortie normalisée de `docker compose config`, afin de
+utiliser exactement la valeur que recevront les workers et le scheduler, y compris après le
+traitement de l'env-file par Compose. Tous les comptes Rise2 doivent pointer vers
+`http://qbittorrent:8080` et partager un unique couple WebUI ; sinon le préflight échoue fermé. Le
+mot de passe est stocké uniquement sous le hash PBKDF2 natif qBittorrent. Le bootstrap autorise le
+hostname Docker exact `qbittorrent` sans wildcard, conserve Host-header validation et CSRF, active
+le proxy HTTP `newgreedy:3456` pour le profil BitTorrent, désactive le proxy des connexions peers,
+RSS et usages généraux, et ne modifie pas le port d'écoute BitTorrent.
 
 L'image NewGreedy 1.7.5 publiée est validée avec son utilisateur root par défaut, car mitmproxy
 génère et conserve sa CA sous `/root/.mitmproxy`. Le service NewGreedy ne force donc plus l'UID
