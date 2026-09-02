@@ -170,6 +170,16 @@ def validate_config(config: Mapping[str, Any]) -> None:
     )
     if qbittorrent_environment.get("UMASK") != "077":
         raise ComposeRise2PolicyError("qBittorrent must retain a private runtime umask")
+    if qbittorrent.get("cap_drop") != ["ALL"] or qbittorrent.get("cap_add") != [
+        "CHOWN",
+        "DAC_OVERRIDE",
+        "KILL",
+        "SETGID",
+        "SETUID",
+    ]:
+        raise ComposeRise2PolicyError(
+            "qBittorrent must retain only the validated runtime and signal-forwarding capabilities"
+        )
     qbittorrent_mounts = _mounts_by_target(qbittorrent, "qbittorrent")
     public_ca_mount = qbittorrent_mounts.get("/wos-ca", {})
     if (
