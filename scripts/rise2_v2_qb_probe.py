@@ -69,6 +69,7 @@ def main() -> None:
         "proxy_ip": "newgreedy",
         "proxy_port": 3456,
         "proxy_auth_enabled": False,
+        "proxy_hostname_lookup": True,
         "proxy_bittorrent": True,
         "proxy_peer_connections": False,
         "proxy_rss": False,

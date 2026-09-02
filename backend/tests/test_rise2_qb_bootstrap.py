@@ -186,3 +186,72 @@ def test_duplicate_ini_refused_without_values_in_error() -> None:
     ns = module()
     with pytest.raises(ns["BootstrapError"], match="duplicate"):
         ns["settings"]("[Preferences]\nkey=private-test\nkey=other-test\n")
+
+
+def test_private_derived_file_is_atomic_idempotent_and_rejects_symlinks(tmp_path: Path) -> None:
+    ns = module()
+    target = tmp_path / "registry.json"
+    ns["write_private"](target, registry(), os.getuid(), os.getgid())
+    inode = target.stat().st_ino
+    assert target.stat().st_mode & 0o777 == 0o600
+    ns["write_private"](target, registry(), os.getuid(), os.getgid())
+    assert target.stat().st_ino == inode
+    changed = registry("rotated-disposable-test-password")
+    ns["write_private"](target, changed, os.getuid(), os.getgid())
+    assert target.read_text() == changed
+    assert target.stat().st_ino != inode
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    with pytest.raises(ns["BootstrapError"], match="symlink"):
+        ns["write_private"](link, "not-written", os.getuid(), os.getgid())
+    assert target.read_text() == changed
+
+
+def test_awk_reconciles_and_is_idempotent_without_root(tmp_path: Path) -> None:
+    ns = module()
+    username, password = ns["credentials"](registry())
+    bootstrap = tmp_path / "bootstrap.conf"
+    bootstrap.write_text(ns["render"]("", username, password))
+    existing = tmp_path / "existing.conf"
+    existing.write_text(
+        "[Preferences]\nGeneral\\Locale=fr\nWebUI\\Password=legacy-test-only\n"
+        "WebUI\\HostHeaderValidation=false\n[BitTorrent]\nSession\\MaxConnections=137\n"
+    )
+    command = [
+        "awk",
+        "-f",
+        str(REPOSITORY / "scripts/rise2_v2_qb_reconcile.awk"),
+        str(ns["POLICY"]),
+        str(bootstrap),
+        str(existing),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=True).stdout
+    assert "legacy-test-only" not in result
+    assert "General\\Locale=fr" in result
+    assert "Session\\MaxConnections=137" in result
+    assert all(ns["settings"](result)[key] == value for key, value in ns["REQUIRED"].items())
+    existing.write_text(result)
+    assert subprocess.run(command, capture_output=True, text=True, check=True).stdout == result
+    bootstrap.write_text(
+        bootstrap.read_text().replace("CSRFProtection=true", "CSRFProtection=false")
+    )
+    rejected = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert rejected.returncode != 0
+    assert password not in rejected.stderr
+
+
+@pytest.mark.parametrize("process", ["app.worker", "app.scheduler_service"])
+def test_integration_entrypoint_injects_secret_only_into_authorized_process(
+    monkeypatch: pytest.MonkeyPatch, process: str
+) -> None:
+    import sys
+
+    expected = registry()
+    monkeypatch.setattr(sys, "argv", ["integration-entrypoint.py", process])
+    monkeypatch.setattr(Path, "read_text", lambda self, **kwargs: expected)
+    monkeypatch.setenv("WOS_INTEGRATION_ACCOUNTS_JSON", "before-test")
+    launched: list[list[str]] = []
+    monkeypatch.setattr(os, "execv", lambda executable, args: launched.append(args))
+    runpy.run_path(str(REPOSITORY / "scripts/rise2_v2_integration_entrypoint.py"))
+    assert os.environ["WOS_INTEGRATION_ACCOUNTS_JSON"] == expected
+    assert launched == [[sys.executable, "-m", process]]

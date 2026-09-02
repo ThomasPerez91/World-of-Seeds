@@ -183,6 +183,11 @@ def render(existing: str, username: str, password: str) -> str:
     old.pop(("Preferences", r"WebUI\Password"), None)
     old.pop(("Preferences", r"WebUI\Password_ha1"), None)
     old.update(desired)
+    # Only the fresh-profile seed carries this marker. qB 5.2.3 upgrade.cpp
+    # otherwise treats an explicit modern config as pre-v4 and overwrites its
+    # proxy profiles. The runtime reconciler leaves an existing profile's Meta
+    # section untouched, so genuine upstream migrations are never suppressed.
+    old[("Meta", "MigrationVersion")] = "8"
     lines = []
     for section in sorted({section for section, _ in old}):
         lines.append(f"[{section}]")
