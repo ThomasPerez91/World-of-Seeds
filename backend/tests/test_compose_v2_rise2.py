@@ -53,6 +53,33 @@ def _valid_config() -> dict[str, Any]:
             "image": "qbittorrentofficial/qbittorrent-nox:5.2.3-1",
             "networks": {"torrent": None, "torrent-egress": None},
             "environment": {"UMASK": "077"},
+            "entrypoint": ["/bin/sh", "-ec"],
+            "command": [
+                "/wos-ca/mitmproxy-ca-cert.pem /etc/ssl/certs/ca-certificates.crt "
+                "PRIVATE KEY exec /sbin/tini -g -- /entrypoint.sh"
+            ],
+            "depends_on": {
+                "qbittorrent-init": {"condition": "service_completed_successfully"},
+                "newgreedy-ca-export": {"condition": "service_completed_successfully"},
+            },
+            "volumes": [
+                {
+                    "type": "volume",
+                    "source": "world-of-seeds-v2-rise2_qbittorrent_v2_config",
+                    "target": "/config",
+                },
+                {
+                    "type": "bind",
+                    "source": "/srv/world-of-seeds-v2/data",
+                    "target": "/data",
+                },
+                {
+                    "type": "volume",
+                    "source": "world-of-seeds-v2-rise2_newgreedy_v2_public_ca",
+                    "target": "/wos-ca",
+                    "read_only": True,
+                },
+            ],
         },
         "newgreedy-init": {
             "image": newgreedy_digest,
@@ -111,6 +138,30 @@ def _valid_config() -> dict[str, Any]:
                 },
             ],
         },
+        "newgreedy-ca-export": {
+            "image": newgreedy_digest,
+            "network_mode": "none",
+            "cap_drop": ["ALL"],
+            "security_opt": ["no-new-privileges:true"],
+            "read_only": True,
+            "depends_on": {"newgreedy": {"condition": "service_healthy"}},
+            "command": [
+                "/private/mitmproxy-ca-cert.pem /public/mitmproxy-ca-cert.pem PRIVATE KEY"
+            ],
+            "volumes": [
+                {
+                    "type": "volume",
+                    "source": "world-of-seeds-v2-rise2_newgreedy_v2_ca",
+                    "target": "/private",
+                    "read_only": True,
+                },
+                {
+                    "type": "volume",
+                    "source": "world-of-seeds-v2-rise2_newgreedy_v2_public_ca",
+                    "target": "/public",
+                },
+            ],
+        },
         "prometheus": {
             "image": "prom/prometheus:v3.14.0",
             "networks": {"backend": None, "monitoring": None},
@@ -151,6 +202,7 @@ def _valid_config() -> dict[str, Any]:
                 "redis_v2_data",
                 "qbittorrent_v2_config",
                 "newgreedy_v2_ca",
+                "newgreedy_v2_public_ca",
                 "prometheus_v2_data",
                 "grafana_v2_data",
                 "caddy_v2_data",
@@ -190,7 +242,27 @@ def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
         lambda config: config["services"]["newgreedy-init"].update(
             {"networks": {"torrent-egress": None}}
         ),
+        lambda config: config["services"]["newgreedy-ca-export"].update(
+            {"networks": {"torrent-egress": None}}
+        ),
         lambda config: config["services"]["qbittorrent"]["environment"].update({"UMASK": "022"}),
+        lambda config: config["services"]["qbittorrent"]["volumes"].append(
+            {
+                "type": "volume",
+                "source": "world-of-seeds-v2-rise2_newgreedy_v2_ca",
+                "target": "/leaked-private-ca",
+                "read_only": True,
+            }
+        ),
+        lambda config: config["services"]["qbittorrent"]["depends_on"][
+            "newgreedy-ca-export"
+        ].update({"condition": "service_started"}),
+        lambda config: config["services"]["newgreedy-ca-export"]["volumes"][0].update(
+            {"read_only": False}
+        ),
+        lambda config: config["services"]["newgreedy-ca-export"].update(
+            {"command": ["cat /private/mitmproxy-ca.pem > /public/ca.pem PRIVATE KEY"]}
+        ),
         lambda config: config["services"]["api"].update({"command": ["uvicorn", "--workers", "2"]}),
         lambda config: config["services"]["newgreedy"].update({"privileged": True}),
         lambda config: config["services"]["newgreedy"].update({"user": "10003:10003"}),
