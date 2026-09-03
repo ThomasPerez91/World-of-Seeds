@@ -44,16 +44,34 @@ ALERTS = {
     "WOSMetricsTargetDown",
     "WOSJobQueueStalled",
     "WOSJobFailures",
+    "WOSJobRetriesIncreasing",
+    "WOSSchedulerDrift",
     "WOSStorageCritical",
     "WOSQbittorrentUnavailable",
+    "WOSQbittorrentSlow",
     "WOSRedisUnavailable",
     "WOSApiServerErrors",
     "WOSDatabaseUnavailable",
+    "WOSDatabaseMetricsSlow",
     "WOSHostCpuSaturated",
     "WOSHostMemorySaturated",
+    "WOSHostSwapSaturated",
     "WOSHostDiskFilling",
+    "WOSHostInodesFilling",
     "WOSHostIoSaturated",
+    "WOSHostBlockedProcesses",
+    "WOSRaidMd10Missing",
+    "WOSRaidMd10Degraded",
+    "WOSRaidMd10FailedDisk",
+    "WOSHostNetworkErrors",
     "WOSContainerRestarting",
+    "WOSNewGreedyContainerMissing",
+}
+DASHBOARDS = {
+    "world-of-seeds-v2",
+    "rise2-host",
+    "rise2-docker",
+    "wos-v2-operations",
 }
 
 
@@ -157,10 +175,20 @@ def main() -> int:
         f"http://127.0.0.1:{port}/api/search?query=World%20of%20Seeds",
         authorization=authorization,
     )
-    if not any(item.get("uid") == "world-of-seeds-v2" for item in dashboards):
-        raise RuntimeError("the World of Seeds V2 dashboard was not provisioned")
+    dashboard_uids = {item.get("uid") for item in dashboards}
+    if not DASHBOARDS.issubset(dashboard_uids):
+        raise RuntimeError(f"missing provisioned dashboards: {sorted(DASHBOARDS - dashboard_uids)}")
 
-    print(json.dumps({"grafana": "ok", "prometheus_targets": targets, "alerts": len(alert_names)}))
+    print(
+        json.dumps(
+            {
+                "grafana": "ok",
+                "prometheus_targets": targets,
+                "alerts": len(alert_names),
+                "dashboards": len(DASHBOARDS),
+            }
+        )
+    )
     return 0
 
 
