@@ -6,9 +6,9 @@ def _repository() -> Path:
 
 
 def test_rise2_observability_overlay_keeps_exporters_internal_and_pinned() -> None:
-    overlay = (
-        _repository() / "deploy" / "compose.rise2.observability.v2.yaml"
-    ).read_text(encoding="utf-8")
+    overlay = (_repository() / "deploy" / "compose.rise2.observability.v2.yaml").read_text(
+        encoding="utf-8"
+    )
 
     for image in (
         "quay.io/prometheuscommunity/postgres-exporter:v0.20.1",
@@ -28,12 +28,12 @@ def test_rise2_observability_overlay_keeps_exporters_internal_and_pinned() -> No
 
 
 def test_rise2_smart_metrics_use_node_exporter_textfile_without_privileged_container() -> None:
-    overlay = (
-        _repository() / "deploy" / "compose.rise2.observability.v2.yaml"
-    ).read_text(encoding="utf-8")
-    apply_script = (
-        _repository() / "scripts" / "rise2_v2_observability_apply.sh"
-    ).read_text(encoding="utf-8")
+    overlay = (_repository() / "deploy" / "compose.rise2.observability.v2.yaml").read_text(
+        encoding="utf-8"
+    )
+    apply_script = (_repository() / "scripts" / "rise2_v2_observability_apply.sh").read_text(
+        encoding="utf-8"
+    )
 
     assert "--collector.textfile.directory=/var/lib/node-exporter/textfile" in overlay
     assert "WOS_V2_NODE_EXPORTER_TEXTFILE_PATH" in overlay
@@ -43,9 +43,9 @@ def test_rise2_smart_metrics_use_node_exporter_textfile_without_privileged_conta
 
 
 def test_prometheus_scrapes_datastores_and_internal_http_probes() -> None:
-    prometheus = (
-        _repository() / "monitoring" / "prometheus" / "prometheus.yml"
-    ).read_text(encoding="utf-8")
+    prometheus = (_repository() / "monitoring" / "prometheus" / "prometheus.yml").read_text(
+        encoding="utf-8"
+    )
 
     for job in ("postgres-exporter", "redis-exporter", "blackbox-http"):
         assert f"job_name: {job}" in prometheus
