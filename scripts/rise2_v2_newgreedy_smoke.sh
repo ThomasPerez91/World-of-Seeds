@@ -72,6 +72,10 @@ sudo tee "$config_file" >/dev/null <<'EOF'
 [proxy]
 listen_port = 3456
 
+[stats]
+persist_stats = true
+auto_purge_stopped = false
+
 [web]
 web_enabled = true
 web_host = 0.0.0.0
