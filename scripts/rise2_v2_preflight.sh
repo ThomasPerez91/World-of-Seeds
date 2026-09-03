@@ -65,6 +65,28 @@ printf '%s\n' "$newgreedy_image" | grep -Eq '^.+@sha256:[0-9a-f]{64}$' \
 [ "$(stat -c '%g' "$newgreedy_config")" = "$newgreedy_gid" ] \
   || fail "NewGreedy config group must match the container GID"
 
+# qBittorrent emits event=stopped during ordinary shutdown/recreate. NewGreedy
+# 1.7.5 deletes the torrent's persisted stats when auto_purge_stopped is enabled,
+# which destroys continuity for torrents that remain READY in WOS. Rise2 therefore
+# requires durable stats and leaves lifecycle cleanup to WOS/age-based cleanup.
+python3 - "$newgreedy_config" <<'PY' \
+  || fail "NewGreedy stats policy requires persist_stats=true and auto_purge_stopped=false"
+import configparser
+import sys
+
+config = configparser.ConfigParser(inline_comment_prefixes=(";", "#"))
+try:
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        config.read_file(stream)
+    persist_stats = config.getboolean("stats", "persist_stats")
+    auto_purge_stopped = config.getboolean("stats", "auto_purge_stopped")
+except (OSError, configparser.Error, ValueError):
+    raise SystemExit(1)
+
+if not persist_stats or auto_purge_stopped:
+    raise SystemExit(1)
+PY
+
 case "$newgreedy_state" in
   /srv/world-of-seeds-v2/*) ;;
   *) fail "NewGreedy state must be inside /srv/world-of-seeds-v2" ;;
