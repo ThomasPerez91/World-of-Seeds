@@ -114,19 +114,19 @@ groups:
         annotations:
           summary: Des processus restent bloqués en attente d'entrées-sorties
       - alert: WOSRaidMd10Missing
-        expr: absent(node_md_disks_required{device="md10"})
+        expr: count(node_uname_info{nodename="rise2-01"}) > 0 and on() absent(node_md_disks_required{device="md10"})
         for: 2m
         labels: {severity: critical}
         annotations:
-          summary: Le RAID0 md10 n'est plus visible par node-exporter
+          summary: Le RAID0 md10 n'est plus visible par node-exporter sur Rise2
       - alert: WOSRaidMd10Degraded
-        expr: node_md_disks{device="md10",state="active"} < node_md_disks_required{device="md10"}
+        expr: (node_md_disks{device="md10",state="active"} < node_md_disks_required{device="md10"}) and on(instance) node_uname_info{nodename="rise2-01"}
         for: 1m
         labels: {severity: critical}
         annotations:
           summary: Le nombre de disques actifs de md10 est inférieur au nombre requis
       - alert: WOSRaidMd10FailedDisk
-        expr: node_md_disks{device="md10",state="failed"} > 0
+        expr: (node_md_disks{device="md10",state="failed"} > 0) and on(instance) node_uname_info{nodename="rise2-01"}
         for: 1m
         labels: {severity: critical}
         annotations:
