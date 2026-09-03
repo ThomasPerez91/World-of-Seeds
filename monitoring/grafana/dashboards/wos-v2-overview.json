@@ -9,105 +9,118 @@
     {
       "id": 1,
       "type": "stat",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "Cibles Prometheus UP",
       "gridPos": {"x": 0, "y": 0, "w": 4, "h": 4},
-      "targets": [{"expr": "sum(up)", "refId": "A"}],
+      "targets": [{"expr": "sum(up)", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}}],
       "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
     },
     {
       "id": 2,
       "type": "stat",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "qBittorrent",
       "gridPos": {"x": 4, "y": 0, "w": 4, "h": 4},
-      "targets": [{"expr": "wos_qbittorrent_up", "refId": "A"}],
+      "targets": [{"expr": "wos_qbittorrent_up", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}}],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
     },
     {
       "id": 3,
       "type": "stat",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "Redis",
       "gridPos": {"x": 8, "y": 0, "w": 4, "h": 4},
-      "targets": [{"expr": "wos_redis_up", "refId": "A"}],
+      "targets": [{"expr": "wos_redis_up", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}}],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
     },
     {
       "id": 4,
       "type": "stat",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "Tâches en attente",
       "gridPos": {"x": 12, "y": 0, "w": 4, "h": 4},
-      "targets": [{"expr": "wos_jobs{state=\"queued\"}", "refId": "A"}],
+      "targets": [{"expr": "wos_jobs{state=\"queued\"}", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}}],
       "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
     },
     {
       "id": 5,
       "type": "stat",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "Âge file",
       "gridPos": {"x": 16, "y": 0, "w": 4, "h": 4},
-      "targets": [{"expr": "wos_job_queue_oldest_age_seconds", "refId": "A"}],
+      "targets": [{"expr": "wos_job_queue_oldest_age_seconds", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}}],
       "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
     },
     {
       "id": 6,
       "type": "stat",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "Stockage libre",
       "gridPos": {"x": 20, "y": 0, "w": 4, "h": 4},
-      "targets": [{"expr": "wos_storage_bytes{kind=\"disk_free\"}", "refId": "A"}],
+      "targets": [{"expr": "wos_storage_bytes{kind=\"disk_free\"}", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}}],
       "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}
     },
     {
       "id": 7,
       "type": "timeseries",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "Requêtes API",
       "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
-      "targets": [{"expr": "sum by (route,status_class) (rate(wos_api_requests_total[5m]))", "refId": "A", "legendFormat": "{{route}} {{status_class}}"}],
+      "targets": [{"expr": "sum by (route,status_class) (rate(wos_api_requests_total[5m]))", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}, "legendFormat": "{{route}} {{status_class}}"}],
       "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
     },
     {
       "id": 8,
       "type": "timeseries",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "Latence API p95",
       "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
-      "targets": [{"expr": "histogram_quantile(0.95, sum by (le,route) (rate(wos_api_request_duration_seconds_bucket[5m])))", "refId": "A", "legendFormat": "{{route}}"}],
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le,route) (rate(wos_api_request_duration_seconds_bucket[5m])))", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}, "legendFormat": "{{route}}"}],
       "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
     },
     {
       "id": 9,
       "type": "timeseries",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "Jobs durables",
       "gridPos": {"x": 0, "y": 12, "w": 8, "h": 8},
-      "targets": [{"expr": "wos_jobs", "refId": "A", "legendFormat": "{{state}}"}],
+      "targets": [{"expr": "wos_jobs", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}, "legendFormat": "{{state}}"}],
       "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
     },
     {
       "id": 10,
       "type": "timeseries",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "Scheduler génération",
       "gridPos": {"x": 8, "y": 12, "w": 8, "h": 8},
-      "targets": [{"expr": "wos_scheduler_generation", "refId": "A", "legendFormat": "{{state}}"}],
+      "targets": [{"expr": "wos_scheduler_generation", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}, "legendFormat": "{{state}}"}],
       "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
     },
     {
       "id": 11,
       "type": "timeseries",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "Latence dépendances",
       "gridPos": {"x": 16, "y": 12, "w": 8, "h": 8},
-      "targets": [{"expr": "wos_qbittorrent_latency_seconds", "refId": "A", "legendFormat": "qBittorrent"}, {"expr": "wos_database_query_latency_seconds", "refId": "B", "legendFormat": "DB metrics query"}],
+      "targets": [{"expr": "wos_qbittorrent_latency_seconds", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}, "legendFormat": "qBittorrent"}, {"expr": "wos_database_query_latency_seconds", "refId": "B","datasource":{"type":"prometheus","uid":"prometheus"}, "legendFormat": "DB metrics query"}],
       "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
     },
     {
       "id": 12,
       "type": "timeseries",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "Stockage WOS",
       "gridPos": {"x": 0, "y": 20, "w": 12, "h": 8},
-      "targets": [{"expr": "wos_storage_bytes{kind=\"managed\"}", "refId": "A", "legendFormat": "managed"}, {"expr": "wos_storage_bytes{kind=\"disk_free\"}", "refId": "B", "legendFormat": "free"}, {"expr": "wos_storage_bytes{kind=\"disk_total\"}", "refId": "C", "legendFormat": "total"}],
+      "targets": [{"expr": "wos_storage_bytes{kind=\"managed\"}", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}, "legendFormat": "managed"}, {"expr": "wos_storage_bytes{kind=\"disk_free\"}", "refId": "B","datasource":{"type":"prometheus","uid":"prometheus"}, "legendFormat": "free"}, {"expr": "wos_storage_bytes{kind=\"disk_total\"}", "refId": "C","datasource":{"type":"prometheus","uid":"prometheus"}, "legendFormat": "total"}],
       "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}
     },
     {
       "id": 13,
       "type": "timeseries",
+      "datasource":{"type":"prometheus","uid":"prometheus"},
       "title": "CPU / RAM hôte",
       "gridPos": {"x": 12, "y": 20, "w": 12, "h": 8},
-      "targets": [{"expr": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))", "refId": "A", "legendFormat": "CPU"}, {"expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)", "refId": "B", "legendFormat": "RAM"}],
+      "targets": [{"expr": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))", "refId": "A","datasource":{"type":"prometheus","uid":"prometheus"}, "legendFormat": "CPU"}, {"expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)", "refId": "B","datasource":{"type":"prometheus","uid":"prometheus"}, "legendFormat": "RAM"}],
       "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []}
     }
   ],
@@ -119,5 +132,5 @@
   "timezone": "browser",
   "title": "World of Seeds V2 — Vue opérationnelle",
   "uid": "world-of-seeds-v2",
-  "version": 1
+  "version": 2
 }
