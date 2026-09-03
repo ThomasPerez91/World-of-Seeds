@@ -66,12 +66,24 @@ ALERTS = {
     "WOSHostNetworkErrors",
     "WOSContainerRestarting",
     "WOSNewGreedyContainerMissing",
+    "WOSPostgresExporterUnavailable",
+    "WOSPostgresDeadlocks",
+    "WOSRedisExporterUnavailable",
+    "WOSRedisEvictions",
+    "WOSInternalHttpProbeFailed",
+    "WOSSmartMetricsMissing",
+    "WOSSmartDeviceFailed",
+    "WOSSmartPendingSectors",
+    "WOSSmartUncorrectableSectors",
+    "WOSSmartNvmeMediaErrors",
+    "WOSSmartTemperatureHigh",
 }
 DASHBOARDS = {
     "world-of-seeds-v2",
     "rise2-host",
     "rise2-docker",
     "wos-v2-operations",
+    "rise2-datastores",
 }
 
 
