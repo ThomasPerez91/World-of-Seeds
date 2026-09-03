@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -194,7 +195,7 @@ def main() -> int:
             encoding="utf-8",
         )
         os.chmod(args.output, 0o644)
-        print(f"SMART metrics collection failed: {type(exc).__name__}", file=os.sys.stderr)
+        print(f"SMART metrics collection failed: {type(exc).__name__}", file=sys.stderr)
         return 1
     return 0
 
