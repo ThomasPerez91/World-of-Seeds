@@ -41,7 +41,11 @@ REQUIRED = {
     ("Network", r"Proxy\Profiles\RSS"): "false",
     ("Network", r"Proxy\Profiles\Misc"): "false",
     ("BitTorrent", r"Session\ProxyPeerConnections"): "false",
-    ("BitTorrent", r"Session\QueueingSystemEnabled"): "false",
+    ("BitTorrent", r"Session\QueueingSystemEnabled"): "true",
+    ("BitTorrent", r"Session\MaxActiveDownloads"): "-1",
+    ("BitTorrent", r"Session\MaxActiveUploads"): "1000",
+    ("BitTorrent", r"Session\MaxActiveTorrents"): "-1",
+    ("BitTorrent", r"Session\IgnoreSlowTorrentsForQueueing"): "false",
     ("BitTorrent", r"Session\DefaultSavePath"): "/data",
 }
 USERNAME = ("Preferences", r"WebUI\Username")
@@ -95,7 +99,6 @@ def credentials(registry: str) -> tuple[str, str]:
             if route["qbittorrent_url"] != "http://qbittorrent:8080":
                 raise ValueError
             username, password = route["qbittorrent_username"], route["qbittorrent_password"]
-            # Bounded QSettings-safe usernames. Passwords are UTF-8, never INI text.
             if not isinstance(username, str) or not re.fullmatch(
                 r"[A-Za-z0-9_.@-]{1,128}", username
             ):
@@ -140,7 +143,6 @@ def settings(text: str) -> dict[tuple[str, str], str]:
 
 def password_matches(value: str, password: str) -> bool:
     try:
-        # Qt serializes QByteArray as this quoted INI value.
         match = re.fullmatch(r'"?@ByteArray\(([A-Za-z0-9+/=]+):([A-Za-z0-9+/=]+)\)"?', value)
         if match is None:
             return False
@@ -179,15 +181,9 @@ def render(existing: str, username: str, password: str) -> str:
     desired[PASSWORD] = (
         current_hash if password_matches(current_hash, password) else password_value(password)
     )
-    # Only the generated host bootstrap is rendered here. Runtime reconciliation
-    # preserves all unrelated volume settings. Never preserve legacy plaintext auth.
     old.pop(("Preferences", r"WebUI\Password"), None)
     old.pop(("Preferences", r"WebUI\Password_ha1"), None)
     old.update(desired)
-    # Only the fresh-profile seed carries this marker. qB 5.2.3 upgrade.cpp
-    # otherwise treats an explicit modern config as pre-v4 and overwrites its
-    # proxy profiles. The runtime reconciler leaves an existing profile's Meta
-    # section untouched, so genuine upstream migrations are never suppressed.
     old[("Meta", "MigrationVersion")] = "8"
     lines = []
     for section in sorted({section for section, _ in old}):
@@ -263,8 +259,6 @@ def prepare(environment: Path, *, check: bool = False) -> None:
         ) != (app_uid, app_gid):
             raise BootstrapError("derived integration secret is absent or stale")
         return
-    # Mount these stable directories, never individual replaceable file inodes.
-    # Atomic updates are then visible when existing containers restart.
     for directory, owner, group, mode in (
         (runtime, os.getuid(), os.getgid(), 0o700),
         (runtime / "qb", uid, gid, 0o700),
