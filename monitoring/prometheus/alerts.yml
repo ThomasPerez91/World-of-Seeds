@@ -148,3 +148,67 @@ groups:
         labels: {severity: critical}
         annotations:
           summary: Le conteneur NewGreedy n'est plus visible par cAdvisor
+      - alert: WOSPostgresExporterUnavailable
+        expr: up{job="postgres-exporter"} == 0 or pg_up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: L'exporter PostgreSQL ou PostgreSQL ne répond plus
+      - alert: WOSPostgresDeadlocks
+        expr: increase(pg_stat_database_deadlocks[10m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: PostgreSQL a détecté de nouveaux deadlocks
+      - alert: WOSRedisExporterUnavailable
+        expr: up{job="redis-exporter"} == 0 or redis_up == 0
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: L'exporter Redis ou Redis ne répond plus
+      - alert: WOSRedisEvictions
+        expr: increase(redis_evicted_keys_total[10m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: Redis a évincé des clés pendant les dix dernières minutes
+      - alert: WOSInternalHttpProbeFailed
+        expr: probe_success{job="blackbox-http"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Une sonde HTTP interne WOS ne reçoit plus de réponse 2xx
+      - alert: WOSSmartMetricsMissing
+        expr: absent(wos_smart_collect_success) or wos_smart_collect_success == 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: La collecte SMART Rise2 est absente ou en échec
+      - alert: WOSSmartDeviceFailed
+        expr: wos_smart_device_healthy == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: Un disque Rise2 échoue au test global SMART
+      - alert: WOSSmartPendingSectors
+        expr: wos_smart_current_pending_sectors > 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: Un disque Rise2 contient des secteurs en attente
+      - alert: WOSSmartUncorrectableSectors
+        expr: wos_smart_offline_uncorrectable_sectors > 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: Un disque Rise2 contient des secteurs non corrigeables
+      - alert: WOSSmartNvmeMediaErrors
+        expr: wos_smart_nvme_media_errors_total > 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: Un NVMe Rise2 signale des erreurs média ou d'intégrité
+      - alert: WOSSmartTemperatureHigh
+        expr: wos_smart_temperature_celsius > 65
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Un disque Rise2 dépasse 65 degrés pendant dix minutes
