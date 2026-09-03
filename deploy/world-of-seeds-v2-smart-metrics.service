@@ -1,0 +1,17 @@
+[Unit]
+Description=World of Seeds V2 SMART metrics collector
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /opt/world-of-seeds-v2/scripts/rise2_v2_smart_metrics.py --output /var/lib/world-of-seeds-v2/node-exporter-textfile/wos_smart.prom
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/world-of-seeds-v2/node-exporter-textfile
