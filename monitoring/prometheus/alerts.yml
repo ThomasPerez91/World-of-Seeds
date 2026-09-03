@@ -18,6 +18,17 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: De nouvelles tâches durables V2 ont échoué
+      - alert: WOSJobRetriesIncreasing
+        expr: delta(wos_job_retries_total[15m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: Des tâches V2 ont nécessité de nouvelles tentatives
+      - alert: WOSSchedulerDrift
+        expr: wos_scheduler_generation{state="desired"} - wos_scheduler_generation{state="applied"} > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Le scheduler V2 n'a pas appliqué la génération désirée
       - alert: WOSStorageCritical
         expr: wos_storage_pressure{state="critical"} == 1
         for: 2m
@@ -30,6 +41,12 @@ groups:
         labels: {severity: critical}
         annotations:
           summary: qBittorrent ne répond plus à World of Seeds V2
+      - alert: WOSQbittorrentSlow
+        expr: wos_qbittorrent_latency_seconds > 2
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: La latence de la sonde qBittorrent dépasse 2 secondes
       - alert: WOSRedisUnavailable
         expr: wos_redis_up == 0
         for: 5m
@@ -48,6 +65,12 @@ groups:
         labels: {severity: critical}
         annotations:
           summary: L'API ou sa base PostgreSQL autoritaire ne répond plus
+      - alert: WOSDatabaseMetricsSlow
+        expr: wos_database_query_latency_seconds > 1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: La collecte des métriques SQL prend plus d'une seconde
       - alert: WOSHostCpuSaturated
         expr: 100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 90
         for: 10m
@@ -60,20 +83,68 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: La mémoire de l'hôte Docker est saturée
+      - alert: WOSHostSwapSaturated
+        expr: node_memory_SwapTotal_bytes > 0 and 100 * (1 - node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes) > 80
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Plus de 80 pour cent du swap de l'hôte est utilisé
       - alert: WOSHostDiskFilling
-        expr: 100 * (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) > 90
+        expr: 100 * (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}) > 90
         for: 10m
         labels: {severity: critical}
         annotations:
           summary: Un système de fichiers de l'hôte Docker dépasse 90 pour cent
+      - alert: WOSHostInodesFilling
+        expr: 100 * (1 - node_filesystem_files_free{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_files{fstype!~"tmpfs|overlay|squashfs"}) > 90
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Un système de fichiers dépasse 90 pour cent de ses inodes
       - alert: WOSHostIoSaturated
         expr: max(rate(node_disk_io_time_seconds_total[5m])) > 0.9
         for: 10m
         labels: {severity: warning}
         annotations:
           summary: Les entrées-sorties disque de l'hôte Docker sont saturées
+      - alert: WOSHostBlockedProcesses
+        expr: node_procs_blocked > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Des processus restent bloqués en attente d'entrées-sorties
+      - alert: WOSRaidMd10Missing
+        expr: count(node_uname_info{nodename="rise2-01"}) > 0 and on() absent(node_md_disks_required{device="md10"})
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Le RAID0 md10 n'est plus visible par node-exporter sur Rise2
+      - alert: WOSRaidMd10Degraded
+        expr: (node_md_disks{device="md10",state="active"} < node_md_disks_required{device="md10"}) and on(instance) node_uname_info{nodename="rise2-01"}
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: Le nombre de disques actifs de md10 est inférieur au nombre requis
+      - alert: WOSRaidMd10FailedDisk
+        expr: (node_md_disks{device="md10",state="failed"} > 0) and on(instance) node_uname_info{nodename="rise2-01"}
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: md10 signale au moins un disque en échec
+      - alert: WOSHostNetworkErrors
+        expr: sum(rate(node_network_receive_errs_total{device!~"lo|veth.*|br-.*|docker.*"}[5m]) + rate(node_network_transmit_errs_total{device!~"lo|veth.*|br-.*|docker.*"}[5m])) > 1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Le serveur produit plus d'une erreur réseau par seconde
       - alert: WOSContainerRestarting
         expr: changes(container_start_time_seconds{name!=""}[15m]) > 2
         labels: {severity: warning}
         annotations:
           summary: Un conteneur redémarre de manière répétée
+      - alert: WOSNewGreedyContainerMissing
+        expr: absent(container_last_seen{name=~".*newgreedy.*"})
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Le conteneur NewGreedy n'est plus visible par cAdvisor
