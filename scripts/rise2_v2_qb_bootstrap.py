@@ -41,6 +41,7 @@ REQUIRED = {
     ("Network", r"Proxy\Profiles\RSS"): "false",
     ("Network", r"Proxy\Profiles\Misc"): "false",
     ("BitTorrent", r"Session\ProxyPeerConnections"): "false",
+    ("BitTorrent", r"Session\QueueingSystemEnabled"): "false",
     ("BitTorrent", r"Session\DefaultSavePath"): "/data",
 }
 USERNAME = ("Preferences", r"WebUI\Username")
