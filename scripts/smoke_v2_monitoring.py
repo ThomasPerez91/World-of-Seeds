@@ -172,7 +172,7 @@ def main() -> int:
         print(logs.stdout, file=sys.stderr)
         raise RuntimeError(f"Grafana database is not healthy: {health}; last error: {health_error}")
     dashboards = _request(
-        f"http://127.0.0.1:{port}/api/search?query=World%20of%20Seeds",
+        f"http://127.0.0.1:{port}/api/search?type=dash-db",
         authorization=authorization,
     )
     dashboard_uids = {item.get("uid") for item in dashboards}
