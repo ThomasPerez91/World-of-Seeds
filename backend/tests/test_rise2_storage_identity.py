@@ -74,3 +74,14 @@ def test_rise2_storage_smoke_exercises_both_immutable_runtime_identities() -> No
     assert "manager.remove_empty(username)" in script
     assert "docker compose" in script
     assert "--no-deps" in script
+
+
+def test_rise2_storage_smoke_does_not_reuse_live_api_static_ip() -> None:
+    script = (_repository() / "scripts" / "rise2_v2_storage_smoke.sh").read_text(encoding="utf-8")
+
+    assert "wos_image=$(env_value WOS_V2_IMAGE)" in script
+    assert 'docker pull "$wos_image"' in script
+    assert "docker run --rm --pull=never" in script
+    assert "--network none" in script
+    assert '--mount "type=bind,src=$storage,dst=/data"' in script
+    assert '"$wos_image" -c "$1"' in script
