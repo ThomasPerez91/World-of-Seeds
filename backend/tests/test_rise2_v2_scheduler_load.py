@@ -3,11 +3,12 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
 
-def _load_module():
+def _load_module() -> ModuleType:
     path = Path(__file__).resolve().parents[2] / "scripts" / "rise2_v2_scheduler_load.py"
     spec = importlib.util.spec_from_file_location("rise2_v2_scheduler_load", path)
     assert spec is not None
