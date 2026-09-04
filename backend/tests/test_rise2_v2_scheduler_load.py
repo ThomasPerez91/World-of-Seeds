@@ -61,11 +61,7 @@ def test_percentile_uses_bounded_observed_sample() -> None:
 
 
 def test_production_runtime_wrapper_forces_real_redis() -> None:
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "scripts"
-        / "rise2_v2_scheduler_load_runtime.py"
-    )
+    path = Path(__file__).resolve().parents[2] / "scripts" / "rise2_v2_scheduler_load_runtime.py"
     source = path.read_text(encoding="utf-8")
     assert "RedisCoordinator.from_settings(get_settings())" in source
     assert 'kwargs["redis"] = redis' in source
