@@ -19,6 +19,29 @@ de l'image. Il accepte uniquement des métriques numériques ou booléennes et c
 chaque artefact de preuve, jamais son chemin ni son contenu. Les fichiers de preuve restent dans le
 répertoire privé de l'hôte et ne sont pas ajoutés à Git.
 
+La checkout de déploiement Rise2 reste sur le SHA `develop_V2` réellement testé ; ne pas basculer
+le checkout opérationnel sur la draft `feat/v2-rise2-pilot`. Tant que #103 n'est pas fusionnée,
+l'outil de registre peut être extrait en lecture seule depuis le commit exact de la draft, sans
+modifier le checkout runtime :
+
+```bash
+runtime_revision="$(git rev-parse HEAD)"
+git fetch origin feat/v2-rise2-pilot
+tool_revision="$(git rev-parse FETCH_HEAD)"
+tool_root="/var/lib/world-of-seeds-v2/pilot-tools/$tool_revision"
+install -d -m 0700 -- "$tool_root"
+git show "$tool_revision:scripts/rise2_v2_pilot.py" > "$tool_root/rise2_v2_pilot.py"
+chmod 0755 "$tool_root/rise2_v2_pilot.py"
+test "$(git hash-object "$tool_root/rise2_v2_pilot.py")" = \
+  "$(git rev-parse "$tool_revision:scripts/rise2_v2_pilot.py")"
+test "$(git rev-parse HEAD)" = "$runtime_revision"
+pilot_tool="$tool_root/rise2_v2_pilot.py"
+```
+
+Cette vérification de blob fait partie du `policy_failures=0` du préflight : un outil différent du
+blob Git attendu interdit d'enregistrer le gate comme réussi. Le champ `revision` du ledger reste
+le SHA `develop_V2` qui correspond au runtime/image testé, pas le SHA de la draft de tooling.
+
 Préparer un répertoire par révision :
 
 ```bash
@@ -27,7 +50,7 @@ image_digest='sha256:REMPLACER_PAR_LE_DIGEST_VERIFIE'
 pilot_root="/var/lib/world-of-seeds-v2/pilot/$revision"
 install -d -m 0700 -- "$pilot_root"
 
-scripts/rise2_v2_pilot.py init "$pilot_root/ledger.json" \
+"$pilot_tool" init "$pilot_root/ledger.json" \
   --revision "$revision" \
   --image-digest "$image_digest"
 ```
@@ -41,7 +64,7 @@ tracker ou les listes de fichiers.
 Une étape s'enregistre ainsi :
 
 ```bash
-scripts/rise2_v2_pilot.py record "$pilot_root/ledger.json" preflight \
+"$pilot_tool" record "$pilot_root/ledger.json" preflight \
   --status passed \
   --duration-seconds 42 \
   --evidence "$pilot_root/preflight.aggregate.json" \
@@ -164,11 +187,11 @@ et les preuves que V1 est disponible, l'admission V2 suspendue et les volumes V2
 Après revue des douze étapes, finaliser avec une référence d'approbation non secrète :
 
 ```bash
-scripts/rise2_v2_pilot.py finalize "$pilot_root/ledger.json" \
+"$pilot_tool" finalize "$pilot_root/ledger.json" \
   --decision go \
   --approval-ref ops-approval-YYYYMMDD
 
-scripts/rise2_v2_pilot.py validate "$pilot_root/ledger.json" --require-final
+"$pilot_tool" validate "$pilot_root/ledger.json" --require-final
 ```
 
 `go` et `go_limited` exigent douze étapes réussies. `no_go` exige les douze étapes enregistrées et
