@@ -60,6 +60,18 @@ def test_percentile_uses_bounded_observed_sample() -> None:
     assert load._percentile([4.0, 1.0, 3.0, 2.0], 0.95) == 3.0
 
 
+def test_production_runtime_wrapper_forces_real_redis() -> None:
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "rise2_v2_scheduler_load_runtime.py"
+    )
+    source = path.read_text(encoding="utf-8")
+    assert "RedisCoordinator.from_settings(get_settings())" in source
+    assert 'kwargs["redis"] = redis' in source
+    assert "await redis.aclose()" in source
+
+
 @pytest.mark.asyncio
 async def test_load_gate_refuses_short_measurements_before_touching_runtime() -> None:
     with pytest.raises(ValueError, match="at least 300s warmup and 1800s measurement"):
