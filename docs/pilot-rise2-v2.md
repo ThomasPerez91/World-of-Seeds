@@ -107,6 +107,22 @@ vérification, staging, restauration PostgreSQL dans un volume jetable puis reco
 cible V2 vierge. Vérifier au moins un canari de contenu par taille et SHA-256 sans écrire son nom
 dans la preuve.
 
+Sur un hôte où le filesystem de contenu ne fournit pas de snapshot bloc/filesystem natif, V2-33
+accepte une **copie complète off-host cohérente** comme point de restauration de contenu, mais
+uniquement sous les contraintes suivantes : `worker`, `scheduler`, qBittorrent et NewGreedy sont
+arrêtés pendant toute la copie ; la destination est un stockage hors hôte indépendant ; le
+répertoire cible n'existe pas avant l'exercice et n'est jamais réutilisé ; la copie conserve
+modes, UID/GID, timestamps et arborescence ; un manifeste SHA-256 complet est calculé après copie
+et son digest est intégré dans l'identifiant du point de restauration ; ce répertoire n'est plus
+modifié ensuite. La restauration doit recopier ce point vers une nouvelle cible absente avant le
+contrôle des canaris. Une copie locale sur le RAID0, une copie effectuée pendant que des writers
+sont actifs ou un répertoire off-host réutilisé ne satisfait pas le gate.
+
+Cette variante ne prétend pas fournir la sémantique instantanée d'un snapshot filesystem : elle
+valide explicitement le plan de reprise réel de Rise2 lorsque le stockage de contenu est un ext4
+sur RAID0 sans couche de snapshots. Le même `content_snapshot_id` lie la copie off-host figée et
+l'archive chiffrée de configuration/état.
+
 Enregistrer `backup_restore` avec `postgres_restored`, `content_canary_verified`,
 `restore_failures`, `secret_findings`, `existing_target_writes` et `rto_seconds`. La durée réelle
 doit rester sous le RTO enregistré. Une cible déjà existante est un no-go, jamais une restauration
