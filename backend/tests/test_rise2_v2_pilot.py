@@ -225,5 +225,7 @@ def test_pilot_tool_is_executable_and_runbook_covers_every_check() -> None:
     runbook = (repository / "docs" / "pilot-rise2-v2.md").read_text(encoding="utf-8")
 
     assert script.stat().st_mode & stat.S_IXUSR
+    assert 'git show "$tool_revision:scripts/rise2_v2_pilot.py"' in runbook
+    assert "Le champ `revision` du ledger reste" in runbook
     for name in pilot.CHECKS:
         assert f"`{name}`" in runbook
