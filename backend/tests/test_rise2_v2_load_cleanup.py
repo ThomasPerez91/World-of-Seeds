@@ -11,8 +11,8 @@ def test_cleanup_tool_compiles_and_is_campaign_scoped() -> None:
     assert 'parser.add_argument("--campaign", required=True)' in source
     assert "helper._campaign(campaign)" in source
     assert "helper._prefix(campaign)" in source
-    assert "ManagedTorrent.name.like(f\"{prefix}%\")" in source
-    assert "User.username.like(f\"{prefix}%\")" in source
+    assert 'ManagedTorrent.name.like(f"{prefix}%")' in source
+    assert 'User.username.like(f"{prefix}%")' in source
 
 
 def test_cleanup_tool_uses_owned_qb_removal_and_verifies_zero_remainder() -> None:
