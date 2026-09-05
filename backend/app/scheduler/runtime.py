@@ -120,12 +120,13 @@ class SchedulerRuntime:
             requests = await self._load_active_requests(session, torrents)
             cooldown_released = _release_elapsed_cooldowns(torrents, requests, now=now)
             ledger = await load_scheduler_ledger(session, state)
-            fairness_user_order, fairness_user_order_complete = (
-                await self._load_fairness_user_order(
-                    session,
-                    ledger.cursor_user_id,
-                    now=now,
-                )
+            (
+                fairness_user_order,
+                fairness_user_order_complete,
+            ) = await self._load_fairness_user_order(
+                session,
+                ledger.cursor_user_id,
+                now=now,
             )
             candidates = _scheduler_candidates(torrents, requests, now=now)
             selection = select_torrents(
@@ -375,11 +376,7 @@ class SchedulerRuntime:
         )
         probe_limit = MAX_SCHEDULER_CONTROL_SET + 1
         ring = list(
-            (
-                await session.scalars(
-                    base.where(User.id > cursor_user_id).limit(probe_limit)
-                )
-            ).all()
+            (await session.scalars(base.where(User.id > cursor_user_id).limit(probe_limit))).all()
         )
         if len(ring) < probe_limit:
             ring.extend(
