@@ -20,7 +20,7 @@ def test_gate4_resume_requires_gate3_and_refuses_recorded_gate4() -> None:
     source = RUNNER_PATH.read_text(encoding="utf-8")
     assert '("preflight", "backup_restore", "load_1_slot")' in source
     assert 'if "load_2_slots" in checks:' in source
-    assert 'load_1_slot=RECORDED' in source
+    assert "load_1_slot=RECORDED" in source
 
 
 def test_gate4_resume_preserves_failed_report_before_validation() -> None:
@@ -32,7 +32,7 @@ def test_gate4_resume_preserves_failed_report_before_validation() -> None:
     validate = source.index("base.validate_load(report, slots)")
     assert report_write < aggregate_write < validate
     assert "completed.returncode not in (0, 2)" in source
-    assert '(completed.returncode == 2) != failed' in source
+    assert "(completed.returncode == 2) != failed" in source
 
 
 def test_gate4_resume_keeps_control_plane_stopped_during_prepare_and_load() -> None:
