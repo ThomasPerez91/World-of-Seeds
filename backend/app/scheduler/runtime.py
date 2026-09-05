@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.coordination import RedisCoordinator, TorrentEventType, TorrentRealtimeEvent
@@ -120,6 +120,13 @@ class SchedulerRuntime:
             requests = await self._load_active_requests(session, torrents)
             cooldown_released = _release_elapsed_cooldowns(torrents, requests, now=now)
             ledger = await load_scheduler_ledger(session, state)
+            fairness_user_order, fairness_user_order_complete = (
+                await self._load_fairness_user_order(
+                    session,
+                    ledger.cursor_user_id,
+                    now=now,
+                )
+            )
             candidates = _scheduler_candidates(torrents, requests, now=now)
             selection = select_torrents(
                 candidates,
@@ -128,6 +135,8 @@ class SchedulerRuntime:
                 active_global=0,
                 active_by_user={},
                 ledger=ledger,
+                fairness_user_order=fairness_user_order,
+                fairness_user_order_complete=fairness_user_order_complete,
             )
             identities = tuple(
                 ManagedTorrentControlIdentity(
@@ -324,6 +333,64 @@ class SchedulerRuntime:
             state.scan_cursor_created_at = None
             state.scan_cursor_id = None
         return (*active, *window)
+
+    @staticmethod
+    async def _load_fairness_user_order(
+        session: AsyncSession,
+        cursor_user_id: uuid.UUID | None,
+        *,
+        now: datetime,
+    ) -> tuple[tuple[uuid.UUID, ...], bool]:
+        """Load a bounded global successor ring so torrent windows cannot skip a user forever."""
+        if cursor_user_id is None:
+            return (), False
+
+        eligible_request = exists(
+            select(TorrentRequest.id)
+            .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
+            .where(
+                TorrentRequest.user_id == User.id,
+                TorrentRequest.state.in_(
+                    (TorrentRequestState.REQUESTED, TorrentRequestState.ACTIVE)
+                ),
+                ManagedTorrent.state.in_(
+                    (ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED)
+                ),
+                ManagedTorrent.total_size > 0,
+                ManagedTorrent.progress < 1,
+                or_(
+                    ManagedTorrent.scheduler_retry_at.is_(None),
+                    ManagedTorrent.scheduler_retry_at <= now,
+                ),
+            )
+        )
+        base = (
+            select(User.id)
+            .where(
+                User.is_active.is_(True),
+                User.deleted_at.is_(None),
+                eligible_request,
+            )
+            .order_by(User.id)
+        )
+        probe_limit = MAX_SCHEDULER_CONTROL_SET + 1
+        ring = list(
+            (
+                await session.scalars(
+                    base.where(User.id > cursor_user_id).limit(probe_limit)
+                )
+            ).all()
+        )
+        if len(ring) < probe_limit:
+            ring.extend(
+                (
+                    await session.scalars(
+                        base.where(User.id <= cursor_user_id).limit(probe_limit - len(ring))
+                    )
+                ).all()
+            )
+        complete = len(ring) <= MAX_SCHEDULER_CONTROL_SET
+        return tuple(ring[:MAX_SCHEDULER_CONTROL_SET]), complete
 
     @staticmethod
     async def _load_active_requests(
