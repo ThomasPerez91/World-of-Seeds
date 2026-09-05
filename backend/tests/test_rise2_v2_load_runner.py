@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import importlib.util
-import sys
 from pathlib import Path
-from types import ModuleType
 
 
 RUNNER_PATH = Path(__file__).resolve().parents[2] / "scripts" / "rise2_v2_run_load_gates.py"
 
 
-def _load_runner() -> ModuleType:
+def _load_runner():
     spec = importlib.util.spec_from_file_location("rise2_v2_run_load_gates", RUNNER_PATH)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
