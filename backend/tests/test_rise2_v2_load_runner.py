@@ -1,28 +1,18 @@
 from __future__ import annotations
 
-import importlib.util
+import runpy
 from pathlib import Path
 
 RUNNER_PATH = Path(__file__).resolve().parents[2] / "scripts" / "rise2_v2_run_load_gates.py"
-
-
-def _load_runner():
-    spec = importlib.util.spec_from_file_location("rise2_v2_run_load_gates", RUNNER_PATH)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-runner = _load_runner()
+RUNNER = runpy.run_path(str(RUNNER_PATH))
 
 
 def test_load_runner_compiles_and_has_bounded_campaign_pattern() -> None:
     source = RUNNER_PATH.read_text(encoding="utf-8")
     compile(source, str(RUNNER_PATH), "exec")
-    assert runner.CAMPAIGN_RE.fullmatch("g34-09050311")
-    assert runner.CAMPAIGN_RE.fullmatch("bad_name") is None
+    campaign_re = RUNNER["CAMPAIGN_RE"]
+    assert campaign_re.fullmatch("g34-09050311")
+    assert campaign_re.fullmatch("bad_name") is None
 
 
 def test_load_runner_keeps_worker_and_scheduler_off_for_prepare_and_both_gates() -> None:
