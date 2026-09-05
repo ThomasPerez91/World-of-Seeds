@@ -20,7 +20,7 @@ from app.integrations.http import (
 WOS_V2_CATEGORY = "wos-v2"
 WOS_V2_TAG = "wos-v2"
 MAX_ADD_RESPONSE_BYTES = 16 * 1024
-MAX_LOOKUP_RESPONSE_BYTES = 256 * 1024
+MAX_LOOKUP_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_CONTROL_TORRENTS = 200
 _SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 
