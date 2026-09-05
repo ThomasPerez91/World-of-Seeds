@@ -168,6 +168,28 @@ def _candidate_order(candidate: SchedulerCandidate) -> tuple[datetime, str]:
     return (_utc(candidate.queued_at), str(candidate.torrent_id))
 
 
+def _next_eligible_user(
+    eligible_users: Sequence[uuid.UUID],
+    queues: Mapping[uuid.UUID, Sequence[SchedulerCandidate]],
+    cursor_user_id: uuid.UUID | None,
+) -> uuid.UUID:
+    """Choose locally when the caller has the complete candidate user set."""
+    if not eligible_users:
+        raise ValueError("eligible user set must not be empty")
+    if cursor_user_id is None:
+        return min(
+            eligible_users,
+            key=lambda user_id: (_candidate_order(queues[user_id][0]), str(user_id)),
+        )
+
+    ordered_users = sorted(eligible_users, key=str)
+    cursor_key = str(cursor_user_id)
+    for user_id in ordered_users:
+        if str(user_id) > cursor_key:
+            return user_id
+    return ordered_users[0]
+
+
 def select_torrents(
     candidates: Sequence[SchedulerCandidate],
     *,
@@ -176,14 +198,19 @@ def select_torrents(
     active_global: int,
     active_by_user: Mapping[uuid.UUID, int],
     ledger: SchedulerLedger | None = None,
+    fairness_user_order: Sequence[uuid.UUID] | None = None,
+    fairness_user_order_complete: bool = False,
 ) -> SchedulerResult:
     """Select physical torrents without external effects and return the next durable ledger.
 
     Callers provide every active beneficiary for one physical torrent. A shared torrent is present
     in each beneficiary queue, but is selected and charged exactly once. The durable user cursor
-    rotates that charge fairly across cycles and process restarts. Stalled torrents never consume
-    scarce admission slots; they must be reconsidered after a later health snapshot reports
-    sources again.
+    rotates that charge fairly across cycles and process restarts. A caller using a bounded torrent
+    window may additionally provide the globally ordered successor users after the durable cursor.
+    If the next global user is temporarily outside the bounded window, useful fallback work may run
+    but the durable cursor does not advance past that missing user. Stalled torrents never consume
+    scarce admission slots; they must be reconsidered after a later health snapshot reports sources
+    again.
     """
 
     _utc(now)
@@ -195,6 +222,12 @@ def select_torrents(
     torrent_ids = [candidate.torrent_id for candidate in candidates]
     if len(torrent_ids) != len(set(torrent_ids)):
         raise ValueError("each physical torrent must have exactly one scheduler candidate")
+
+    fair_order = tuple(fairness_user_order or ())
+    if len(fair_order) != len(set(fair_order)):
+        raise ValueError("fairness user order must not contain duplicates")
+    if fairness_user_order_complete and not fair_order and candidates:
+        raise ValueError("complete fairness user order cannot be empty with candidates")
 
     weights: dict[uuid.UUID, int] = {}
     queues: dict[uuid.UUID, list[SchedulerCandidate]] = defaultdict(list)
@@ -218,6 +251,9 @@ def select_torrents(
     for queue in queues.values():
         queue.sort(key=_candidate_order)
 
+    if fairness_user_order_complete and not active_users.issubset(fair_order):
+        raise ValueError("complete fairness user order must contain every active candidate user")
+
     slots = max(0, policy.max_active_global - active_global)
     counts = dict(active_by_user)
     previous = ledger or SchedulerLedger()
@@ -227,24 +263,51 @@ def select_torrents(
     deficit_cap = max(_LARGE_COST, policy.deficit_quantum * _MAX_USER_WEIGHT) * 8
 
     cursor_user_id = previous.cursor_user_id
+    fair_index = 0
     while slots > 0 and queues:
-        eligible_users = sorted(
-            [
-                user_id
-                for user_id, queue in queues.items()
-                if queue and counts.get(user_id, 0) < policy.max_active_per_user
-            ],
-            key=lambda user_id: (_candidate_order(queues[user_id][0]), str(user_id)),
-        )
+        eligible_users = [
+            user_id
+            for user_id, queue in queues.items()
+            if queue and counts.get(user_id, 0) < policy.max_active_per_user
+        ]
         if not eligible_users:
             break
 
-        if cursor_user_id in eligible_users:
-            cursor_index = eligible_users.index(cursor_user_id)
-            chosen_user = eligible_users[(cursor_index + 1) % len(eligible_users)]
+        chosen_user: uuid.UUID
+        advance_fair_cursor = False
+        if cursor_user_id is not None and fair_order:
+            scanned = 0
+            while scanned < len(fair_order):
+                if fair_index >= len(fair_order):
+                    if not fairness_user_order_complete:
+                        break
+                    fair_index = 0
+                fair_user = fair_order[fair_index]
+                if counts.get(fair_user, 0) >= policy.max_active_per_user:
+                    cursor_user_id = fair_user
+                    fair_index += 1
+                    scanned += 1
+                    continue
+                break
+
+            if fair_index < len(fair_order):
+                fair_user = fair_order[fair_index]
+                if fair_user in eligible_users:
+                    chosen_user = fair_user
+                    advance_fair_cursor = True
+                else:
+                    chosen_user = _next_eligible_user(eligible_users, queues, cursor_user_id)
+            else:
+                chosen_user = _next_eligible_user(eligible_users, queues, cursor_user_id)
         else:
-            chosen_user = eligible_users[0]
-        cursor_user_id = chosen_user
+            chosen_user = _next_eligible_user(eligible_users, queues, cursor_user_id)
+            advance_fair_cursor = True
+
+        if advance_fair_cursor:
+            cursor_user_id = chosen_user
+            if fair_order:
+                fair_index += 1
+
         rounds += 1
         deficits[chosen_user] = min(
             deficit_cap,
