@@ -168,6 +168,28 @@ def _candidate_order(candidate: SchedulerCandidate) -> tuple[datetime, str]:
     return (_utc(candidate.queued_at), str(candidate.torrent_id))
 
 
+def _next_eligible_user(
+    eligible_users: Sequence[uuid.UUID],
+    queues: Mapping[uuid.UUID, Sequence[SchedulerCandidate]],
+    cursor_user_id: uuid.UUID | None,
+) -> uuid.UUID:
+    """Advance a stable user ring even when the bounded candidate window changes."""
+    if not eligible_users:
+        raise ValueError("eligible user set must not be empty")
+    if cursor_user_id is None:
+        return min(
+            eligible_users,
+            key=lambda user_id: (_candidate_order(queues[user_id][0]), str(user_id)),
+        )
+
+    ordered_users = sorted(eligible_users, key=str)
+    cursor_key = str(cursor_user_id)
+    for user_id in ordered_users:
+        if str(user_id) > cursor_key:
+            return user_id
+    return ordered_users[0]
+
+
 def select_torrents(
     candidates: Sequence[SchedulerCandidate],
     *,
@@ -228,22 +250,15 @@ def select_torrents(
 
     cursor_user_id = previous.cursor_user_id
     while slots > 0 and queues:
-        eligible_users = sorted(
-            [
-                user_id
-                for user_id, queue in queues.items()
-                if queue and counts.get(user_id, 0) < policy.max_active_per_user
-            ],
-            key=lambda user_id: (_candidate_order(queues[user_id][0]), str(user_id)),
-        )
+        eligible_users = [
+            user_id
+            for user_id, queue in queues.items()
+            if queue and counts.get(user_id, 0) < policy.max_active_per_user
+        ]
         if not eligible_users:
             break
 
-        if cursor_user_id in eligible_users:
-            cursor_index = eligible_users.index(cursor_user_id)
-            chosen_user = eligible_users[(cursor_index + 1) % len(eligible_users)]
-        else:
-            chosen_user = eligible_users[0]
+        chosen_user = _next_eligible_user(eligible_users, queues, cursor_user_id)
         cursor_user_id = chosen_user
         rounds += 1
         deficits[chosen_user] = min(
