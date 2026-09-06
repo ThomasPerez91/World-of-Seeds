@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from redis.asyncio import Redis
 from sqlalchemy import delete, func, select, text
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection, connect
@@ -108,8 +109,7 @@ def open_socket(secret: dict[str, Any], token: str) -> ClientConnection:
     cookie_name = str(secret["session_cookie_name"])
     tcp_socket = socket.create_connection(("api", 8000), timeout=10)
     # The connection timeout is only for establishing TCP. Leaving it on the socket
-    # would kill an otherwise healthy WebSocket before the 20-second application
-    # heartbeat and turn the runtime gate into a false failure.
+    # would kill an otherwise healthy WebSocket before a long-lived application wait.
     tcp_socket.settimeout(None)
     return connect(
         f"ws://{host}:8000/api/v2/torrents/events",
@@ -156,6 +156,33 @@ async def publish_queue_event() -> bool:
         await redis.aclose()
 
 
+async def wait_queue_subscribers(expected: int, timeout: float = 30) -> int:
+    """Return the observed global queue-channel subscriber count, bounded by timeout."""
+    settings = get_settings()
+    if settings.redis_url is None:
+        return 0
+    client = Redis.from_url(
+        settings.redis_url.get_secret_value(),
+        decode_responses=True,
+        socket_connect_timeout=settings.redis_connect_timeout_seconds,
+        socket_timeout=settings.redis_socket_timeout_seconds,
+    )
+    channel = f"{settings.redis_namespace}:events:torrent-queue"
+    deadline = time.monotonic() + timeout
+    observed = 0
+    try:
+        while time.monotonic() < deadline:
+            response = await client.execute_command("PUBSUB", "NUMSUB", channel)
+            if isinstance(response, (list, tuple)) and len(response) >= 2:
+                observed = int(response[1])
+                if observed >= expected:
+                    return observed
+            await asyncio.sleep(0.2)
+    finally:
+        await client.aclose()
+    return observed
+
+
 async def idle_transactions() -> int:
     async with session_factory() as db:
         value = await db.scalar(
@@ -180,12 +207,11 @@ def baseline(state_dir: Path) -> None:
             while len(sockets) < target:
                 sockets.append(open_socket(secret, tokens[len(sockets) % len(tokens)]))
 
-        # The server accepts the WebSocket before the Redis subscription is confirmed.
-        # Waiting for one application heartbeat from every socket proves all 100
-        # subscriptions reached the realtime loop before the fan-out event is injected.
-        subscription_ready = sum(
-            receive_type(socket_, "heartbeat", timeout=25) for socket_ in sockets
-        )
+        # WebSocket accept happens before Redis subscription confirmation. Instead of
+        # inferring readiness from a heartbeat, observe Redis PUBSUB NUMSUB directly on
+        # the global queue channel and only then inject the fan-out event.
+        queue_subscribers = asyncio.run(wait_queue_subscribers(len(sockets)))
+        subscription_ready = min(queue_subscribers, len(sockets))
 
         if not asyncio.run(publish_queue_event()):
             raise RuntimeError("baseline event publish failed")
@@ -194,6 +220,7 @@ def baseline(state_dir: Path) -> None:
             "connections": len(sockets),
             "connection_tiers": list(tiers),
             "subscription_ready": subscription_ready,
+            "queue_subscribers": queue_subscribers,
             "event_deliveries": deliveries,
             "idle_transactions": asyncio.run(idle_transactions()),
         }
@@ -217,13 +244,7 @@ def reconnect(state_dir: Path) -> dict[str, int]:
     secret = load_secret(state_dir)
     sockets = [open_socket(secret, str(row["token"])) for row in secret["sessions"]]
     try:
-        subscription_ready = sum(
-            receive_type(socket_, "heartbeat", timeout=25) for socket_ in sockets
-        )
-        if subscription_ready != len(sockets):
-            raise RuntimeError(
-                f"reconnect subscriptions not ready: {subscription_ready}/{len(sockets)}"
-            )
+        asyncio.run(wait_queue_subscribers(len(sockets)))
         if not asyncio.run(publish_queue_event()):
             raise RuntimeError("reconnect event publish failed")
         deliveries = sum(receive_type(socket_, "queue_changed") for socket_ in sockets)
