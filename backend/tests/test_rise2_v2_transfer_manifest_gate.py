@@ -24,13 +24,9 @@ def test_transfer_manifest_gate_enforces_required_operational_proof() -> None:
     assert '"pause_resume_cancel_verified"' in runner
     assert "MANIFEST_FILE_COUNT = 50_000" in probe
     assert "MANIFEST_PAGE_SIZE = 500" in probe
-    assert (
-        "for offset in range(0, MANIFEST_FILE_COUNT, MANIFEST_PAGE_SIZE)" in probe
-    )
-    assert (
-        'headers={"Range": f"bytes=0-{midpoint - 1}", "If-Range": etag}' in probe
-    )
-    assert 'response.iter_raw(chunk_size=64 * 1024)' in probe
+    assert "for offset in range(0, MANIFEST_FILE_COUNT, MANIFEST_PAGE_SIZE)" in probe
+    assert 'headers={"Range": f"bytes=0-{midpoint - 1}", "If-Range": etag}' in probe
+    assert "response.iter_raw(chunk_size=64 * 1024)" in probe
     assert "await _wait_for_no_leases" in probe
 
 
@@ -47,4 +43,4 @@ def test_transfer_manifest_gate_is_pinned_secret_safe_and_cleanup_bounded() -> N
     assert "--remove-orphans" not in runner
     assert "ThreadPoolExecutor" not in probe
     assert "store.purge(storage_key)" in probe
-    assert 'print(json.dumps(result, sort_keys=True))' in probe
+    assert "print(json.dumps(result, sort_keys=True))" in probe
