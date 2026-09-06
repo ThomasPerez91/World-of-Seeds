@@ -7,8 +7,8 @@ import argparse
 import asyncio
 import json
 import os
+import socket
 import time
-import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -106,10 +106,10 @@ async def cleanup(campaign: str) -> None:
 def open_socket(secret: dict[str, Any], token: str) -> ClientConnection:
     host = str(secret["allowed_host"])
     cookie_name = str(secret["session_cookie_name"])
+    tcp_socket = socket.create_connection(("api", 8000), timeout=10)
     return connect(
         f"ws://{host}:8000/api/v2/torrents/events",
-        host="api",
-        port=8000,
+        sock=tcp_socket,
         additional_headers={"Cookie": f"{cookie_name}={token}"},
         proxy=None,
         compression=None,
@@ -119,12 +119,12 @@ def open_socket(secret: dict[str, Any], token: str) -> ClientConnection:
     )
 
 
-def receive_type(socket: ClientConnection, expected: str, timeout: float = 10) -> bool:
+def receive_type(socket_: ClientConnection, expected: str, timeout: float = 10) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         remaining = deadline - time.monotonic()
         try:
-            payload = json.loads(socket.recv(timeout=remaining))
+            payload = json.loads(socket_.recv(timeout=remaining))
         except (ConnectionClosed, TimeoutError, json.JSONDecodeError):
             return False
         if payload.get("type") == expected:
@@ -132,11 +132,11 @@ def receive_type(socket: ClientConnection, expected: str, timeout: float = 10) -
     return False
 
 
-def wait_disconnected(socket: ClientConnection, timeout: float = 90) -> bool:
+def wait_disconnected(socket_: ClientConnection, timeout: float = 90) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            socket.recv(timeout=deadline - time.monotonic())
+            socket_.recv(timeout=deadline - time.monotonic())
         except ConnectionClosed:
             return True
         except TimeoutError:
@@ -178,7 +178,7 @@ def baseline(state_dir: Path) -> None:
         time.sleep(2)
         if not asyncio.run(publish_queue_event()):
             raise RuntimeError("baseline event publish failed")
-        deliveries = sum(receive_type(socket, "queue_changed") for socket in sockets)
+        deliveries = sum(receive_type(socket_, "queue_changed") for socket_ in sockets)
         result = {
             "connections": len(sockets),
             "connection_tiers": list(tiers),
@@ -187,16 +187,16 @@ def baseline(state_dir: Path) -> None:
         }
         (state_dir / "baseline.ready").write_text("ready\n", encoding="utf-8")
         result["api_restart_disconnects"] = sum(
-            wait_disconnected(socket) for socket in sockets
+            wait_disconnected(socket_) for socket_ in sockets
         )
         (state_dir / "baseline.json").write_text(
             json.dumps(result, sort_keys=True) + "\n",
             encoding="utf-8",
         )
     finally:
-        for socket in sockets:
+        for socket_ in sockets:
             try:
-                socket.close()
+                socket_.close()
             except (ConnectionClosed, OSError):
                 pass
 
@@ -208,23 +208,23 @@ def reconnect(state_dir: Path) -> dict[str, int]:
         time.sleep(1)
         if not asyncio.run(publish_queue_event()):
             raise RuntimeError("reconnect event publish failed")
-        deliveries = sum(receive_type(socket, "queue_changed") for socket in sockets)
+        deliveries = sum(receive_type(socket_, "queue_changed") for socket_ in sockets)
         return {"reconnections": len(sockets), "event_deliveries": deliveries}
     finally:
-        for socket in sockets:
-            socket.close()
+        for socket_ in sockets:
+            socket_.close()
 
 
 def redis_down(state_dir: Path) -> dict[str, int | bool]:
     secret = load_secret(state_dir)
     successes = 0
     for row in secret["sessions"]:
-        socket = open_socket(secret, str(row["token"]))
+        socket_ = open_socket(secret, str(row["token"]))
         try:
-            successes += receive_type(socket, "resync_required")
+            successes += receive_type(socket_, "resync_required")
         finally:
             try:
-                socket.close()
+                socket_.close()
             except (ConnectionClosed, OSError):
                 pass
     lost_event = not asyncio.run(publish_queue_event())
