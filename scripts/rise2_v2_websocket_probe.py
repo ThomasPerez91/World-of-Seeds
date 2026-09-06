@@ -21,7 +21,7 @@ from websockets.sync.client import ClientConnection, connect
 
 from app.auth.security import DUMMY_PASSWORD_HASH
 from app.auth.service import issue_session
-from app.coordination import RedisCoordinator
+from app.coordination import RedisCoordinator, TorrentEventType
 from app.core.config import get_settings
 from app.core.database import session_factory
 from app.models import User, UserSession
@@ -156,9 +156,7 @@ def receive_type_many(
             if remaining <= 0:
                 break
             try:
-                payload = json.loads(
-                    sockets[index].recv(timeout=min(0.05, remaining))
-                )
+                payload = json.loads(sockets[index].recv(timeout=min(0.05, remaining)))
             except TimeoutError:
                 continue
             except (ConnectionClosed, json.JSONDecodeError):
@@ -286,7 +284,11 @@ def baseline(state_dir: Path) -> None:
         if subscription_ready == len(sockets):
             event_publish_succeeded = asyncio.run(publish_queue_event())
             if event_publish_succeeded:
-                deliveries = receive_type_many(sockets, "queue_changed", timeout=10)
+                deliveries = receive_type_many(
+                    sockets,
+                    TorrentEventType.QUEUE_CHANGED.value,
+                    timeout=10,
+                )
 
         result = {
             "connections": len(sockets),
@@ -322,7 +324,11 @@ def reconnect(state_dir: Path) -> dict[str, int]:
             )
         if not asyncio.run(publish_queue_event()):
             raise RuntimeError("reconnect event publish failed")
-        deliveries = receive_type_many(sockets, "queue_changed", timeout=10)
+        deliveries = receive_type_many(
+            sockets,
+            TorrentEventType.QUEUE_CHANGED.value,
+            timeout=10,
+        )
         return {"reconnections": len(sockets), "event_deliveries": deliveries}
     finally:
         for socket_ in sockets:
