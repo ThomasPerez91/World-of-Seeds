@@ -175,13 +175,22 @@ def baseline(state_dir: Path) -> None:
         for target in tiers:
             while len(sockets) < target:
                 sockets.append(open_socket(secret, tokens[len(sockets) % len(tokens)]))
-        time.sleep(2)
+
+        # The server accepts the WebSocket before the Redis subscription is confirmed.
+        # A fixed sleep can therefore race the last subscriptions under real load. Waiting
+        # for one heartbeat from every socket proves all 100 subscriptions reached the
+        # realtime loop before the fan-out event is injected.
+        subscription_ready = sum(
+            receive_type(socket_, "heartbeat", timeout=25) for socket_ in sockets
+        )
+
         if not asyncio.run(publish_queue_event()):
             raise RuntimeError("baseline event publish failed")
         deliveries = sum(receive_type(socket_, "queue_changed") for socket_ in sockets)
         result = {
             "connections": len(sockets),
             "connection_tiers": list(tiers),
+            "subscription_ready": subscription_ready,
             "event_deliveries": deliveries,
             "idle_transactions": asyncio.run(idle_transactions()),
         }
