@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pathlib import Path
 
 
@@ -44,10 +42,7 @@ def test_websocket_gate_recovers_dependencies_and_runtime_exactly() -> None:
 def test_websocket_gate_requires_first_four_gates_and_keeps_evidence_secret_free() -> None:
     runner = RUNNER_PATH.read_text(encoding="utf-8")
 
-    assert (
-        '("preflight", "backup_restore", "load_1_slot", "load_2_slots")'
-        in runner
-    )
+    assert '("preflight", "backup_restore", "load_1_slot", "load_2_slots")' in runner
     assert 'if "websocket_recovery" in checks:' in runner
     assert '"secrets_or_business_identifiers_in_report": False' in runner
     assert "sessions.json" in runner
