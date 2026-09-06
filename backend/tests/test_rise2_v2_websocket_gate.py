@@ -16,16 +16,27 @@ def test_websocket_gate_enforces_required_operational_proof() -> None:
     probe = PROBE_PATH.read_text(encoding="utf-8")
 
     assert '"connections": 100' in runner
+    assert '"subscription_ready": 100' in runner
     assert '"reconnections": 25' in runner
     assert '"idle_transactions": 0' in runner
     assert '"resync_failures": 0' in runner
     assert '"lost_events_after_resync": 0' in runner
     assert '"memory_returned_to_plateau": True' in runner
     assert "tiers = (10, 25, 50, 100)" in probe
+    assert 'receive_type(socket_, "heartbeat", timeout=25)' in probe
     assert "pg_stat_activity" in probe
     assert "resync_required" in probe
     assert '"/api/v2/torrents"' in probe
     assert '"authoritative_resync_successes"' in probe
+
+
+def test_websocket_gate_preserves_secret_free_baseline_diagnostics() -> None:
+    runner = RUNNER_PATH.read_text(encoding="utf-8")
+
+    assert '"websocket_recovery.baseline.json"' in runner
+    assert 'print(f"baseline_metrics={json.dumps(baseline_metrics, sort_keys=True)}")' in runner
+    assert 'baseline.get("subscription_ready") != 100' in runner
+    assert "baseline WebSocket invariants failed:" in runner
 
 
 def test_websocket_gate_recovers_dependencies_and_runtime_exactly() -> None:
