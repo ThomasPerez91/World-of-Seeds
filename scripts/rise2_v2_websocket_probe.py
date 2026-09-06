@@ -107,6 +107,10 @@ def open_socket(secret: dict[str, Any], token: str) -> ClientConnection:
     host = str(secret["allowed_host"])
     cookie_name = str(secret["session_cookie_name"])
     tcp_socket = socket.create_connection(("api", 8000), timeout=10)
+    # The connection timeout is only for establishing TCP. Leaving it on the socket
+    # would kill an otherwise healthy WebSocket before the 20-second application
+    # heartbeat and turn the runtime gate into a false failure.
+    tcp_socket.settimeout(None)
     return connect(
         f"ws://{host}:8000/api/v2/torrents/events",
         sock=tcp_socket,
@@ -177,9 +181,8 @@ def baseline(state_dir: Path) -> None:
                 sockets.append(open_socket(secret, tokens[len(sockets) % len(tokens)]))
 
         # The server accepts the WebSocket before the Redis subscription is confirmed.
-        # A fixed sleep can therefore race the last subscriptions under real load. Waiting
-        # for one heartbeat from every socket proves all 100 subscriptions reached the
-        # realtime loop before the fan-out event is injected.
+        # Waiting for one application heartbeat from every socket proves all 100
+        # subscriptions reached the realtime loop before the fan-out event is injected.
         subscription_ready = sum(
             receive_type(socket_, "heartbeat", timeout=25) for socket_ in sockets
         )
@@ -214,7 +217,13 @@ def reconnect(state_dir: Path) -> dict[str, int]:
     secret = load_secret(state_dir)
     sockets = [open_socket(secret, str(row["token"])) for row in secret["sessions"]]
     try:
-        time.sleep(1)
+        subscription_ready = sum(
+            receive_type(socket_, "heartbeat", timeout=25) for socket_ in sockets
+        )
+        if subscription_ready != len(sockets):
+            raise RuntimeError(
+                f"reconnect subscriptions not ready: {subscription_ready}/{len(sockets)}"
+            )
         if not asyncio.run(publish_queue_event()):
             raise RuntimeError("reconnect event publish failed")
         deliveries = sum(receive_type(socket_, "queue_changed") for socket_ in sockets)
