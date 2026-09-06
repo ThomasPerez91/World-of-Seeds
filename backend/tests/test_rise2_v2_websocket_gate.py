@@ -43,7 +43,7 @@ def test_websocket_gate_bounds_failed_fanout_without_serial_socket_timeouts() ->
     assert 'sum(receive_type(socket_, "queue_changed") for socket_ in sockets)' not in probe
     assert "sum(wait_disconnected(socket_) for socket_ in sockets)" not in probe
     assert 'receive_type_many(sockets, "resync_required", timeout=10)' in probe
-    assert 'if subscription_ready == len(sockets):' in probe
+    assert "if subscription_ready == len(sockets):" in probe
     assert '(state_dir / "baseline.ready").write_text' in probe
 
 
