@@ -43,3 +43,18 @@ def test_gate4_resume_keeps_control_plane_stopped_during_prepare_and_load() -> N
     restore = source.index("self.restore_control_plane()", run_gate)
     assert stop < prepare < run_gate < restore
     assert "--remove-orphans" not in source
+
+
+def test_gate4_resume_recreates_and_verifies_runtime_during_recovery() -> None:
+    source = RUNNER_PATH.read_text(encoding="utf-8")
+    restore = source.index("def restore_control_plane")
+    recovery = source[restore : source.index("def run_tool", restore)]
+    assert '"--force-recreate"' in recovery
+    assert '"--no-deps"' in recovery
+    assert '"worker"' in recovery
+    assert '"scheduler"' in recovery
+    assert 'self.dc("start", "worker", "scheduler")' not in recovery
+    assert "_verify_recovered_control_plane" in recovery
+    assert "recovered control plane OCI revision mismatch" in source
+    assert "recovered control plane image digest mismatch" in source
+    assert "--remove-orphans" not in source
