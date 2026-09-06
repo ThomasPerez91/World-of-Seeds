@@ -24,6 +24,8 @@ def test_websocket_gate_enforces_required_operational_proof() -> None:
     assert '"memory_returned_to_plateau": True' in runner
     assert "tiers = (10, 25, 50, 100)" in probe
     assert 'receive_type(socket_, "heartbeat", timeout=25)' in probe
+    assert "tcp_socket.settimeout(None)" in probe
+    assert "reconnect subscriptions not ready" in probe
     assert "pg_stat_activity" in probe
     assert "resync_required" in probe
     assert '"/api/v2/torrents"' in probe
