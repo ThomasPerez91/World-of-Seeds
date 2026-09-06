@@ -24,7 +24,8 @@ def test_websocket_gate_enforces_required_operational_proof() -> None:
     assert "tiers = (10, 25, 50, 100)" in probe
     assert "pg_stat_activity" in probe
     assert "resync_required" in probe
-    assert 'client.get("/api/v2/torrents"' in probe
+    assert '"/api/v2/torrents"' in probe
+    assert '"authoritative_resync_successes"' in probe
 
 
 def test_websocket_gate_recovers_dependencies_and_runtime_exactly() -> None:
