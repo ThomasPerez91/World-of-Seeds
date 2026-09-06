@@ -272,24 +272,19 @@ def baseline(state_dir: Path) -> None:
                 pass
 
 
-def reconnect(state_dir: Path) -> dict[str, int | bool]:
+def reconnect(state_dir: Path) -> dict[str, int]:
     secret = load_secret(state_dir)
     sockets = [open_socket(secret, str(row["token"])) for row in secret["sessions"]]
     try:
         queue_subscribers = asyncio.run(wait_queue_subscribers(len(sockets)))
-        subscription_ready = min(queue_subscribers, len(sockets))
-        event_publish_succeeded = False
-        deliveries = 0
-        if subscription_ready == len(sockets):
-            event_publish_succeeded = asyncio.run(publish_queue_event())
-            if event_publish_succeeded:
-                deliveries = receive_type_many(sockets, "queue_changed", timeout=10)
-        return {
-            "reconnections": len(sockets),
-            "subscription_ready": subscription_ready,
-            "event_publish_succeeded": event_publish_succeeded,
-            "event_deliveries": deliveries,
-        }
+        if queue_subscribers < len(sockets):
+            raise RuntimeError(
+                f"reconnect subscriptions not ready: {queue_subscribers}/{len(sockets)}"
+            )
+        if not asyncio.run(publish_queue_event()):
+            raise RuntimeError("reconnect event publish failed")
+        deliveries = receive_type_many(sockets, "queue_changed", timeout=10)
+        return {"reconnections": len(sockets), "event_deliveries": deliveries}
     finally:
         for socket_ in sockets:
             socket_.close()
