@@ -284,15 +284,32 @@ class Runner:
         baseline = json.loads(
             (self.state_dir / "baseline.json").read_text(encoding="utf-8")
         )
+        baseline_metrics = {
+            "connections": baseline.get("connections"),
+            "connection_tiers": baseline.get("connection_tiers"),
+            "subscription_ready": baseline.get("subscription_ready"),
+            "event_deliveries": baseline.get("event_deliveries"),
+            "api_restart_disconnects": baseline.get("api_restart_disconnects"),
+            "idle_transactions": baseline.get("idle_transactions"),
+        }
+        write_private_json(
+            self.evidence_root / "websocket_recovery.baseline.json",
+            baseline_metrics,
+        )
+        print(f"baseline_metrics={json.dumps(baseline_metrics, sort_keys=True)}")
         if (
             baseline.get("connections") != 100
             or baseline.get("connection_tiers") != [10, 25, 50, 100]
+            or baseline.get("subscription_ready") != 100
             or baseline.get("event_deliveries") != 100
             or baseline.get("api_restart_disconnects") != 100
             or baseline.get("idle_transactions") != 0
         ):
-            raise RuntimeError("baseline WebSocket invariants failed")
-        print("api_restart_disconnects=100 idle_transactions=0")
+            raise RuntimeError(
+                "baseline WebSocket invariants failed: "
+                f"{json.dumps(baseline_metrics, sort_keys=True)}"
+            )
+        print("subscription_ready=100 api_restart_disconnects=100 idle_transactions=0")
 
         reconnect = json.loads(self.run_probe("reconnect", capture=True).stdout)
         if reconnect != {"event_deliveries": 25, "reconnections": 25}:
@@ -327,6 +344,7 @@ class Runner:
         evidence = {
             "schema": EVIDENCE_SCHEMA,
             "connections": 100,
+            "subscription_ready": 100,
             "reconnections": 25,
             "idle_transactions": 0,
             "resync_failures": 0,
