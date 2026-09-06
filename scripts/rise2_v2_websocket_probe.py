@@ -9,7 +9,6 @@ import json
 import os
 import socket
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -143,13 +142,35 @@ def receive_type_many(
     *,
     timeout: float = 10,
 ) -> int:
+    """Poll many sync WebSockets within one global deadline without extra threads."""
     if not sockets:
         return 0
-    with ThreadPoolExecutor(max_workers=len(sockets)) as executor:
-        futures = [
-            executor.submit(receive_type, socket_, expected, timeout) for socket_ in sockets
-        ]
-        return sum(future.result() for future in futures)
+
+    deadline = time.monotonic() + timeout
+    pending = set(range(len(sockets)))
+    successes = 0
+    while pending and time.monotonic() < deadline:
+        progressed = False
+        for index in tuple(pending):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                payload = json.loads(
+                    sockets[index].recv(timeout=min(0.05, remaining))
+                )
+            except TimeoutError:
+                continue
+            except (ConnectionClosed, json.JSONDecodeError):
+                pending.remove(index)
+                continue
+            progressed = True
+            if payload.get("type") == expected:
+                pending.remove(index)
+                successes += 1
+        if not progressed and pending:
+            time.sleep(0.01)
+    return successes
 
 
 def wait_disconnected(socket_: ClientConnection, timeout: float = 90) -> bool:
@@ -169,13 +190,30 @@ def wait_disconnected_many(
     *,
     timeout: float = 90,
 ) -> int:
+    """Poll disconnects across all sockets within one global deadline."""
     if not sockets:
         return 0
-    with ThreadPoolExecutor(max_workers=len(sockets)) as executor:
-        futures = [
-            executor.submit(wait_disconnected, socket_, timeout) for socket_ in sockets
-        ]
-        return sum(future.result() for future in futures)
+
+    deadline = time.monotonic() + timeout
+    pending = set(range(len(sockets)))
+    disconnected = 0
+    while pending and time.monotonic() < deadline:
+        progressed = False
+        for index in tuple(pending):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                sockets[index].recv(timeout=min(0.05, remaining))
+            except ConnectionClosed:
+                pending.remove(index)
+                disconnected += 1
+                progressed = True
+            except TimeoutError:
+                continue
+        if not progressed and pending:
+            time.sleep(0.01)
+    return disconnected
 
 
 async def publish_queue_event() -> bool:
@@ -238,8 +276,9 @@ def baseline(state_dir: Path) -> None:
                 sockets.append(open_socket(secret, tokens[len(sockets) % len(tokens)]))
 
         # WebSocket accept happens before Redis subscription confirmation. Observe the
-        # global queue channel directly, then bound all socket receives concurrently so
-        # one failed subscriber cannot turn the gate into a many-minute serial timeout.
+        # global queue channel directly, then poll all socket receives under one global
+        # deadline without allocating another thread per WebSocket. The scheduler probe
+        # container has a 128-PID limit and the sync client already owns receiver threads.
         queue_subscribers = asyncio.run(wait_queue_subscribers(len(sockets)))
         subscription_ready = min(queue_subscribers, len(sockets))
         event_publish_succeeded = False
