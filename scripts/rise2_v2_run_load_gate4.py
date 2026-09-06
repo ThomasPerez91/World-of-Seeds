@@ -37,6 +37,7 @@ class Gate4Runner(base.Runner):
     def __init__(self, args: argparse.Namespace) -> None:
         super().__init__(args)
         self.resume_runner_path = Path(__file__).resolve()
+        self.expected_image_digest: str | None = None
 
     def verify_resume_tool(self) -> None:
         if not self.resume_runner_path.is_file() or self.resume_runner_path.is_symlink():
@@ -75,6 +76,13 @@ class Gate4Runner(base.Runner):
         ledger = base.read_json(self.ledger)
         if ledger.get("revision") != self.runtime_revision or ledger.get("decision") is not None:
             raise RuntimeError("pilot ledger runtime/decision mismatch")
+        image_digest = ledger.get("image_digest")
+        if (
+            not isinstance(image_digest, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest) is None
+        ):
+            raise RuntimeError("pilot ledger image digest is invalid")
+        self.expected_image_digest = image_digest
         checks = ledger.get("checks", {})
         for name in ("preflight", "backup_restore", "load_1_slot"):
             if checks.get(name, {}).get("status") != "passed":
@@ -97,6 +105,54 @@ class Gate4Runner(base.Runner):
         )
         if api_revision != self.runtime_revision:
             raise RuntimeError("runtime OCI revision mismatch")
+
+    def _verify_recovered_control_plane(self) -> None:
+        if self.expected_image_digest is None:
+            raise RuntimeError("expected runtime image digest is unavailable")
+        worker_ids = self.dc("ps", "-q", "worker", capture=True).stdout.splitlines()
+        scheduler_ids = self.dc("ps", "-q", "scheduler", capture=True).stdout.splitlines()
+        if not worker_ids or len(scheduler_ids) != 1:
+            raise RuntimeError("recovered control plane container count is invalid")
+
+        for container_id in (*worker_ids, *scheduler_ids):
+            running = base.run_stdout(
+                ["docker", "inspect", "-f", "{{.State.Running}}", container_id],
+                cwd=self.repo,
+            )
+            image = base.run_stdout(
+                ["docker", "inspect", "-f", "{{.Config.Image}}", container_id],
+                cwd=self.repo,
+            )
+            revision = base.run_stdout(
+                [
+                    "docker",
+                    "inspect",
+                    "-f",
+                    '{{ index .Config.Labels "org.opencontainers.image.revision" }}',
+                    container_id,
+                ],
+                cwd=self.repo,
+            )
+            if running != "true":
+                raise RuntimeError("recovered control plane container is not running")
+            if revision != self.runtime_revision:
+                raise RuntimeError("recovered control plane OCI revision mismatch")
+            if not image.endswith(f"@{self.expected_image_digest}"):
+                raise RuntimeError("recovered control plane image digest mismatch")
+
+    def restore_control_plane(self) -> None:
+        if self.stack_stopped:
+            print("\n========== RECOVERY STACK ==========")
+            self.dc(
+                "up",
+                "-d",
+                "--no-deps",
+                "--force-recreate",
+                "worker",
+                "scheduler",
+            )
+            self._verify_recovered_control_plane()
+            self.stack_stopped = False
 
     def run_tool(self, *args: str) -> dict[str, Any]:
         command = [
