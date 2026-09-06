@@ -27,10 +27,24 @@ def test_websocket_gate_enforces_required_operational_proof() -> None:
     assert 'execute_command("PUBSUB", "NUMSUB", channel)' in probe
     assert "wait_queue_subscribers(len(sockets))" in probe
     assert '"queue_subscribers": queue_subscribers' in probe
+    assert "ThreadPoolExecutor" in probe
+    assert 'receive_type_many(sockets, "queue_changed", timeout=10)' in probe
+    assert "wait_disconnected_many(sockets, timeout=90)" in probe
+    assert '"event_publish_succeeded": event_publish_succeeded' in probe
     assert "pg_stat_activity" in probe
     assert "resync_required" in probe
     assert '"/api/v2/torrents"' in probe
     assert '"authoritative_resync_successes"' in probe
+
+
+def test_websocket_gate_bounds_failed_fanout_without_serial_socket_timeouts() -> None:
+    probe = PROBE_PATH.read_text(encoding="utf-8")
+
+    assert 'sum(receive_type(socket_, "queue_changed") for socket_ in sockets)' not in probe
+    assert "sum(wait_disconnected(socket_) for socket_ in sockets)" not in probe
+    assert 'receive_type_many(sockets, "resync_required", timeout=10)' in probe
+    assert 'if subscription_ready == len(sockets):' in probe
+    assert '(state_dir / "baseline.ready").write_text' in probe
 
 
 def test_websocket_gate_preserves_secret_free_baseline_diagnostics() -> None:
