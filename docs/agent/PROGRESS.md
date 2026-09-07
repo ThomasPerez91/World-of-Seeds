@@ -1670,12 +1670,44 @@
 - The base V2 Compose remains a foundation stack. The separate runnable local profile uses
   only disposable local data and must not reuse Rise2 or V1 secrets/data.
 
+## V2-33 — Limited Rise2 pilot completed
+
+- PR `#103` completed the limited Rise2 pilot and was merged into `develop_V2` after a distinct
+  merge authorization. The pilot result remains immutable: 12/12 gates PASS, decision `GO`,
+  approval ref `v2-33-go-20260907`, tested runtime revision
+  `adcf67d5ea92b72c2a2210f8cdafb29669a940d8`, and final ledger SHA-256
+  `38c94b41aed849a754053470e4a1eba8834157c64c57c6fb2e7d79dcca19d70b`.
+- The approved pilot WOS rollback image remains
+  `ghcr.io/thomasperez91/world-of-seeds-v2@sha256:d0e817283ad95ba1792b4e16e7241bddabbce2190272382e2c339b4c291a947e`.
+- The post-pilot NewGreedy log-safety correction was merged through PR `#135`. Rise2 now enforces
+  `proxy.flow_detail = 0` through the shared preflight and `newgreedy-init` policy while preserving
+  `persist_stats = true`, `auto_purge_stopped = false`, and the mode-0640 configuration boundary.
+- Post-merge `develop_V2` validation for PR `#135`: CI `#408` and Rise2 qB bootstrap `#115` PASS.
+
+## V2-34 — Release candidate
+
+- Branch `feat/v2-34-release-candidate` and PR `#136` start from `develop_V2`
+  `58244c51555f901863049c280de5302939db1196`.
+- The V2 version is synchronized to `2.0.0-rc.1` through the repository versioning tool, including
+  backend/frontend lockfiles. The V1 stable release workflow remains master-only and unchanged.
+- Added a closed RC manifest and validator that freeze functionality, preserve V1 rollback, forbid
+  automatic deployment/DNS/V1 import/stable release, bind the immutable V2-33 evidence, and require
+  the candidate schema to remain Alembic revision `20260831_22`.
+- Added `docs/release-candidate-v2.md` covering immutable candidate resolution, schema compatibility,
+  Rise2 validation, backup/restore, application rollback, and the separate V2-35 stable boundary.
+- Added the dedicated `V2 release candidate` workflow. Run `#2` (`34119794992`) PASS: the RC policy
+  is valid and the exact previous WOS digest starts successfully against the candidate schema and
+  passes live/readiness checks without a database downgrade.
+- Main CI and the independent qB fresh-volume smoke remain mandatory on the final PR head. No V2-34
+  merge, Rise2 deployment, DNS switch, real V1 import, or stable `2.0.0` release is automatic.
+
 ## Next task
 
-- The post-freeze qB authentication/bootstrap correction is the only active task. After review, green CI,
-  and merge, rerun the Rise2 preflight with the already published immutable WOS/NewGreedy digests;
-  do not deploy or start V2-33 automatically.
-- V2-32D remains blocked by NewGreedy v1.7.5 and is not a pilot prerequisite unless explicitly
-  decided otherwise.
-- Do not continue, rebase, close, or merge the existing V2-33 draft PR `#103` automatically; its
-  host phase requires a separate explicit decision and Rise2 authority.
+- Finish V2-34 PR `#136`: require final-head CI, V2 release-candidate compatibility, qB bootstrap,
+  and automated review to be green; fix and resolve every release-blocking finding.
+- Merge PR `#136` only after a separate explicit authorization.
+- After merge, resolve and validate the immutable `2.0.0-rc.1` image on Rise2 using the V2-34
+  runbook. Do not start V2-35, publish stable `2.0.0`, switch DNS, or import real V1 data
+  automatically.
+- V2-32D remains blocked by NewGreedy v1.7.5 and non-blocking unless a separate decision changes
+  that status.
