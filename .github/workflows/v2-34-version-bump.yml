@@ -1,0 +1,44 @@
+name: V2-34 version bump
+
+on:
+  push:
+    branches:
+      - feat/v2-34-release-candidate
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set V2 RC version through repository tooling
+        run: |
+          python scripts/versioning.py set --channel v2 2.0.0-rc.1
+          python scripts/versioning.py check --channel v2
+          git diff --check
+
+      - name: Commit synchronized version mirrors
+        run: |
+          if git diff --quiet; then
+            echo "Version mirrors already synchronized."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            VERSION \
+            backend/pyproject.toml \
+            backend/app/__init__.py \
+            backend/uv.lock \
+            frontend/package.json \
+            frontend/package-lock.json \
+            frontend/src/version.ts
+          git commit -m "chore(v2): bump release candidate to 2.0.0-rc.1"
+          git push origin HEAD:feat/v2-34-release-candidate
