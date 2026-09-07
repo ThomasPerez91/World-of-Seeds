@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: World of Seeds V2
+    orgId: 1
+    folder: World of Seeds V2
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

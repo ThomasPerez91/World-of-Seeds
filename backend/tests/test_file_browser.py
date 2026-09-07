@@ -192,7 +192,11 @@ async def test_navigation_rejects_unsafe_paths(
     response = await client.get("/api/v1/files", params={"path": unsafe_path})
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Invalid relative path"
+    assert response.json()["detail"] == {
+        "code": "file_path_invalid",
+        "message": "Invalid relative path",
+        "field": None,
+    }
 
 
 @pytest.mark.asyncio

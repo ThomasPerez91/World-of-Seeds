@@ -12,6 +12,7 @@ import {
   LockKeyhole,
   Info,
   LoaderCircle,
+  ListOrdered,
   Pencil,
   Gauge,
   RefreshCw,
@@ -127,4 +128,8 @@ export function InfoIcon(props: AppIconProps) {
 
 export function LoadingIcon(props: AppIconProps) {
   return <LoaderCircle {...decorative} {...props} />;
+}
+
+export function QueueIcon(props: AppIconProps) {
+  return <ListOrdered {...decorative} {...props} />;
 }

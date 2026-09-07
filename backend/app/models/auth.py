@@ -21,6 +21,7 @@ from app.models.base import Base, utc_now
 
 if TYPE_CHECKING:
     from app.models.torrent import UserTorrent
+    from app.models.torrent_v2 import TorrentRequest, UserStorageUsage
     from app.models.trash import TrashEntry
 
 
@@ -33,12 +34,14 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     must_change_credentials: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    preferred_locale: Mapped[str] = mapped_column(String(2), default="fr", nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
 
     __table_args__ = (
         CheckConstraint("length(username) BETWEEN 3 AND 32", name="ck_users_username_length"),
+        CheckConstraint("preferred_locale IN ('fr', 'en')", name="ck_users_preferred_locale"),
         Index("uq_users_username_lower", func.lower(username), unique=True),
     )
 
@@ -56,6 +59,17 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+    torrent_requests: Mapped[list[TorrentRequest]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    storage_usage: Mapped[UserStorageUsage | None] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
     )
 
 

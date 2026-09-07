@@ -1,6 +1,64 @@
 from app.models.auth import LoginThrottle, User, UserSession
 from app.models.base import Base
+from app.models.options_v2 import DatabaseOption, DatabaseOptionAudit
 from app.models.torrent import UserTorrent
+from app.models.torrent_v2 import (
+    DownloadLease,
+    IntegrationServiceHealth,
+    IntegrationServiceState,
+    ManagedTorrent,
+    ManagedTorrentState,
+    QBittorrentInventoryItem,
+    QBittorrentInventorySnapshot,
+    SchedulerDeficit,
+    SchedulerState,
+    StorageLedger,
+    StoragePressureState,
+    TorrentFile,
+    TorrentJob,
+    TorrentJobState,
+    TorrentRequest,
+    TorrentRequestState,
+    TrackerActivity,
+    TrackerActivityOutcome,
+    TrackerActivityType,
+    TrackerDiagnosticCode,
+    UserStorageUsage,
+)
 from app.models.trash import TrashEntry
+from app.models.v1_import import V1ImportItem, V1ImportRun, V1ImportRunStatus
 
-__all__ = ["Base", "LoginThrottle", "TrashEntry", "User", "UserSession", "UserTorrent"]
+__all__ = [
+    "Base",
+    "DatabaseOption",
+    "DatabaseOptionAudit",
+    "DownloadLease",
+    "IntegrationServiceHealth",
+    "IntegrationServiceState",
+    "LoginThrottle",
+    "ManagedTorrent",
+    "ManagedTorrentState",
+    "QBittorrentInventoryItem",
+    "QBittorrentInventorySnapshot",
+    "SchedulerDeficit",
+    "SchedulerState",
+    "StorageLedger",
+    "StoragePressureState",
+    "TrackerActivity",
+    "TrackerActivityOutcome",
+    "TrackerActivityType",
+    "TrackerDiagnosticCode",
+    "UserStorageUsage",
+    "TorrentFile",
+    "TorrentJob",
+    "TorrentJobState",
+    "TorrentRequest",
+    "TorrentRequestState",
+    "TrashEntry",
+    "User",
+    "UserSession",
+    "UserTorrent",
+    "V1ImportItem",
+    "V1ImportRun",
+    "V1ImportRunStatus",
+]

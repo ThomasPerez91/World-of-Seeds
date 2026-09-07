@@ -6,25 +6,29 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
-from app.api.router import api_router
-from app.core.config import get_settings
+from app.api.router import api_v2_router, build_api_router
+from app.coordination import RedisCoordinator
+from app.core.config import Settings, get_settings
 from app.core.database import engine
 from app.core.http_security import SecurityHeadersMiddleware
 from app.integrations import ExternalServicesMonitor
 from app.integrations.newgreedy_config import NewGreedyConfigStore
 from app.integrations.newgreedy_restart import NewGreedyRestartStore
 from app.integrations.wos_restart import WosRestartStore
+from app.observability import MetricsRegistry, OperationalMetricsCache, RequestMetricsMiddleware
 from app.options import OptionsStore
+from app.torrents.downloads import DownloadRateLimiter
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     yield
+    await application.state.redis_coordinator.aclose()
     await engine.dispose()
 
 
-def create_app() -> FastAPI:
-    settings = get_settings()
+def create_app(settings_override: Settings | None = None) -> FastAPI:
+    settings = settings_override if settings_override is not None else get_settings()
     docs_url = "/api/docs" if settings.expose_api_docs else None
     openapi_url = "/api/openapi.json" if settings.expose_api_docs else None
 
@@ -37,6 +41,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.state.external_services_monitor = ExternalServicesMonitor(settings)
+    application.state.redis_coordinator = RedisCoordinator.from_settings(settings)
     application.state.newgreedy_config_store = NewGreedyConfigStore(
         settings.data_root,
         max_bytes=settings.newgreedy_config_max_bytes,
@@ -44,12 +49,23 @@ def create_app() -> FastAPI:
     application.state.newgreedy_restart_store = NewGreedyRestartStore(settings.data_root)
     application.state.wos_restart_store = WosRestartStore(settings.data_root)
     application.state.options_store = OptionsStore(settings.data_root)
+    application.state.download_rate_limiter = DownloadRateLimiter()
+    application.state.metrics_registry = MetricsRegistry()
+    application.state.operational_metrics_cache = OperationalMetricsCache()
     application.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     application.add_middleware(
         SecurityHeadersMiddleware,
         enable_hsts=settings.cookie_secure,
     )
-    application.include_router(api_router, prefix="/api/v1")
+    application.add_middleware(
+        RequestMetricsMiddleware,
+        registry=application.state.metrics_registry,
+    )
+    application.include_router(
+        build_api_router(runtime_profile=settings.runtime_profile),
+        prefix="/api/v1",
+    )
+    application.include_router(api_v2_router, prefix="/api/v2")
 
     if settings.static_root.is_dir():
         application.mount(

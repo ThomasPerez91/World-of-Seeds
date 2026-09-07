@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import (
     AnyHttpUrl,
@@ -12,9 +13,25 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 CSRF_COOKIE_NAME = "wos_csrf"
 AllowedHost = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=253)]
+_SAFE_POSTGRES_IDENTIFIER = r"^[A-Za-z_][A-Za-z0-9_.-]{0,62}$"
+_DEMO_SECRET_MARKERS = (
+    "changeme",
+    "local-only",
+    "local-test",
+    "not-a-production-secret",
+    "replace-with",
+    "world_of_seeds",
+)
+
+
+def production_secret_is_unsafe(value: str) -> bool:
+    normalized = value.strip().lower()
+    return len(value) < 20 or any(marker in normalized for marker in _DEMO_SECRET_MARKERS)
 
 
 class Settings(BaseSettings):
@@ -27,11 +44,13 @@ class Settings(BaseSettings):
 
     app_name: str = "World of Seeds"
     environment: Literal["development", "test", "production"] = "development"
+    runtime_profile: Literal["v1", "v2"] = "v1"
     allowed_hosts: list[AllowedHost] = Field(
         default_factory=lambda: ["127.0.0.1", "localhost", "test"],
         min_length=1,
     )
     cookie_secure: bool = False
+    api_process_count: int = Field(default=1, ge=1, le=1)
     session_cookie_name: str = Field(
         default="wos_session",
         min_length=1,
@@ -45,9 +64,21 @@ class Settings(BaseSettings):
     database_url: str | None = Field(default=None, repr=False)
     postgres_host: str = Field(default="localhost", min_length=1)
     postgres_port: int = Field(default=5432, ge=1, le=65535)
-    postgres_db: str = Field(default="world_of_seeds", min_length=1)
-    postgres_user: str = Field(default="world_of_seeds", min_length=1)
+    postgres_db: str = Field(default="world_of_seeds", pattern=_SAFE_POSTGRES_IDENTIFIER)
+    postgres_user: str = Field(default="world_of_seeds", pattern=_SAFE_POSTGRES_IDENTIFIER)
     postgres_password: SecretStr = Field(default=SecretStr("world_of_seeds"), repr=False)
+    redis_url: SecretStr | None = Field(default=None, repr=False)
+    redis_namespace: str = Field(
+        default="wos:v2",
+        min_length=3,
+        max_length=64,
+        pattern=r"^[a-z0-9][a-z0-9:_-]+$",
+    )
+    redis_connect_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
+    redis_socket_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
+    redis_cache_ttl_seconds: int = Field(default=60, ge=1, le=86_400)
+    redis_cache_stale_seconds: int = Field(default=300, ge=0, le=86_400)
+    redis_signal_queue_max_length: int = Field(default=1_000, ge=1, le=100_000)
     data_root: Path = Path("/data")
     static_root: Path = Path("/app/static")
     newgreedy_url: AnyHttpUrl | None = None
@@ -56,6 +87,7 @@ class Settings(BaseSettings):
     qbittorrent_password: SecretStr | None = Field(default=None, repr=False)
     qbittorrent_data_root: Path = Path("/data")
     c411_passkey: SecretStr | None = Field(default=None, repr=False)
+    integration_accounts_json: SecretStr | None = Field(default=None, repr=False)
     c411_tracker_hosts: list[AllowedHost] = Field(
         default_factory=lambda: ["c411.org", "tk.c411.tw"],
         min_length=1,
@@ -78,6 +110,31 @@ class Settings(BaseSettings):
     def reject_empty_qbittorrent_password(cls, value: SecretStr | None) -> SecretStr | None:
         if value is not None and value.get_secret_value() == "":
             raise ValueError("qBittorrent password must not be empty")
+        return value
+
+    @field_validator("integration_accounts_json", mode="before")
+    @classmethod
+    def normalize_empty_integration_registry(cls, value: object) -> object:
+        return None if value == "" else value
+
+    @field_validator("redis_url")
+    @classmethod
+    def validate_redis_url(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None:
+            return value
+        parsed = urlsplit(value.get_secret_value())
+        if (
+            parsed.scheme not in {"redis", "rediss"}
+            or parsed.hostname is None
+            or parsed.query
+            or parsed.fragment
+            or (parsed.path not in {"", "/"} and not parsed.path.removeprefix("/").isdigit())
+        ):
+            raise ValueError("Redis URL must be a redis/rediss origin with an optional DB number")
+        try:
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("Redis URL port is invalid") from exc
         return value
 
     @field_validator("c411_passkey")
@@ -107,8 +164,40 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def require_production_data_mount(self) -> Self:
-        if self.environment == "production" and self.data_root != Path("/data"):
-            raise ValueError("Production data root must be /data")
+        if self.environment != "production":
+            return self
+        if self.data_root != Path("/data") or self.qbittorrent_data_root != Path("/data"):
+            raise ValueError("Production container paths are invalid")
+        if self.runtime_profile != "v2":
+            return self
+        if self.static_root != Path("/app/static"):
+            raise ValueError("Production container paths are invalid")
+        if not self.cookie_secure:
+            raise ValueError("Production session cookies must be secure")
+        if any(
+            host == "*" or host.startswith("*.") or "://" in host or "/" in host
+            for host in self.allowed_hosts
+        ) or not any(host not in {"127.0.0.1", "localhost", "test"} for host in self.allowed_hosts):
+            raise ValueError("Production allowed hosts are invalid")
+        try:
+            database = make_url(self.sqlalchemy_database_url)
+        except (ArgumentError, TypeError, ValueError) as exc:
+            raise ValueError("Production database configuration is invalid") from exc
+        if (
+            database.drivername != "postgresql+asyncpg"
+            or not database.username
+            or not database.password
+            or not database.host
+            or not database.database
+            or database.host in {"127.0.0.1", "localhost", "test"}
+            or production_secret_is_unsafe(database.password)
+        ):
+            raise ValueError("Production database configuration is invalid")
+        if self.redis_url is None:
+            raise ValueError("Production Redis configuration is required")
+        redis_host = urlsplit(self.redis_url.get_secret_value()).hostname
+        if redis_host in {None, "127.0.0.1", "localhost", "test"}:
+            raise ValueError("Production Redis configuration is invalid")
         return self
 
     @property
