@@ -1,4 +1,4 @@
-name: V2 release candidate
+name: V2 release qualification
 
 on:
   pull_request:
@@ -19,14 +19,34 @@ jobs:
   policy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Validate synchronized V2 RC version
-        run: python scripts/versioning.py check --channel v2 --print-version
-      - name: Validate closed V2 RC policy
-        run: python scripts/validate_v2_release_candidate.py
+      - name: Validate synchronized V2 version
+        id: version
+        run: |
+          set -Eeuo pipefail
+          version="$(python scripts/versioning.py check --channel v2 --print-version)"
+          printf 'version=%s\n' "$version" >>"$GITHUB_OUTPUT"
+      - name: Validate closed V2 release policy
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          case "$VERSION" in
+            2.0.0-rc.*)
+              python scripts/validate_v2_release_candidate.py
+              ;;
+            2.0.0)
+              python scripts/validate_v2_stable_release.py
+              ;;
+            *)
+              echo "No V2-34/V2-35 closed release policy applies to $VERSION."
+              ;;
+          esac
 
   previous-image-compatibility:
     runs-on: ubuntu-latest
@@ -54,7 +74,7 @@ jobs:
           --health-timeout 3s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -74,10 +94,10 @@ jobs:
           docker image inspect "$PREVIOUS_WOS_IMAGE" >/dev/null
       - name: Start previous digest against candidate schema
         run: |
-          data="$RUNNER_TEMP/v2-rc-previous-data"
+          data="$RUNNER_TEMP/v2-release-previous-data"
           mkdir -p "$data"
           sudo chown 10001:10001 "$data"
-          docker run --detach --name wos-v2-rc-previous \
+          docker run --detach --name wos-v2-release-previous \
             --network host \
             --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
@@ -105,7 +125,7 @@ jobs:
               break
             fi
             if [ "$attempt" -eq 60 ]; then
-              docker logs wos-v2-rc-previous
+              docker logs wos-v2-release-previous
               exit 1
             fi
             sleep 1
@@ -114,8 +134,8 @@ jobs:
             http://127.0.0.1:28082/api/v1/health/ready >/dev/null
       - name: Verify immutable previous image identity
         run: |
-          test "$(docker inspect --format '{{.Config.Image}}' wos-v2-rc-previous)" = \
+          test "$(docker inspect --format '{{.Config.Image}}' wos-v2-release-previous)" = \
             "$PREVIOUS_WOS_IMAGE"
       - name: Stop previous digest smoke
         if: always()
-        run: docker rm --force wos-v2-rc-previous >/dev/null 2>&1 || true
+        run: docker rm --force wos-v2-release-previous >/dev/null 2>&1 || true
