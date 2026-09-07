@@ -39,7 +39,7 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Validate the V2 prerelease version
+      - name: Validate the synchronized V2 version
         id: version
         run: |
           set -Eeuo pipefail
