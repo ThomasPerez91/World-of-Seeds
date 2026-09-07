@@ -1,10 +1,11 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 Username = Annotated[str, StringConstraints(min_length=3, max_length=32)]
 Password = Annotated[str, StringConstraints(min_length=12, max_length=256)]
+Locale = Literal["fr", "en"]
 
 
 class LoginRequest(BaseModel):
@@ -20,6 +21,7 @@ class UserResponse(BaseModel):
     is_admin: bool
     is_active: bool
     must_change_credentials: bool
+    preferred_locale: Locale
 
 
 class AuthResponse(BaseModel):
@@ -39,6 +41,10 @@ class ChangeUsernameRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=256)
     new_password: Password
+
+
+class ChangeLocaleRequest(BaseModel):
+    preferred_locale: Locale
 
 
 class UserStatusRequest(BaseModel):

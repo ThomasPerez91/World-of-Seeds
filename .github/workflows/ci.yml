@@ -5,9 +5,14 @@ on:
   push:
     branches:
       - master
+      - develop
+      - develop_V2
 
 permissions:
   contents: read
+
+env:
+  WOS_VERSION_CHANNEL: v2
 
 jobs:
   backend:
@@ -26,8 +31,18 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      redis:
+        image: redis:8.2.9-alpine3.22
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 3s
+          --health-retries 5
     env:
       WOS_DATABASE_URL: postgresql+asyncpg://world_of_seeds:world_of_seeds_test@127.0.0.1:5432/world_of_seeds_test
+      WOS_REDIS_URL: redis://127.0.0.1:6379/15
     defaults:
       run:
         working-directory: backend
@@ -46,7 +61,13 @@ jobs:
           uv export --frozen --no-dev --no-emit-project --no-header \
             --format requirements.txt --output-file /tmp/requirements.lock
           diff --unified requirements.lock /tmp/requirements.lock
-      - run: uv run alembic -c alembic.ini upgrade head
+      - name: Validate migrations and V2 rollback
+        run: |
+          uv run alembic -c alembic.ini upgrade head
+          if [ "$WOS_VERSION_CHANNEL" = "v2" ]; then
+            uv run alembic -c alembic.ini downgrade 20260820_05
+            uv run alembic -c alembic.ini upgrade head
+          fi
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy app tests
@@ -68,6 +89,77 @@ jobs:
       - run: npm run check
       - run: npm run test
       - run: npm run build
+
+  security:
+    name: Dependency and image security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Prepare bounded security reports
+        run: mkdir -p "$RUNNER_TEMP/security-reports"
+      - name: Audit locked Python dependencies
+        run: >-
+          uvx --from pip-audit==2.10.1 pip-audit
+          --requirement backend/requirements.lock
+          --no-deps --disable-pip --format json
+          --output "$RUNNER_TEMP/security-reports/python.json"
+      - name: Audit frontend production dependencies
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm ci
+          npm audit --omit=dev --audit-level=high --json \
+            | tee "$RUNNER_TEMP/security-reports/frontend.json"
+      - name: Install pinned Trivy scanner
+        env:
+          TRIVY_VERSION: "0.74.0"
+          TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+        run: |
+          archive="$RUNNER_TEMP/trivy.tar.gz"
+          curl --fail --silent --show-error --location \
+            --output "$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "$TRIVY_SHA256  $archive" | sha256sum --check --strict
+          tar --extract --gzip --no-same-owner --file "$archive" \
+            --directory "$RUNNER_TEMP" trivy
+          "$RUNNER_TEMP/trivy" --version
+      - name: Scan Dockerfile configuration
+        run: >-
+          "$RUNNER_TEMP/trivy" config
+          --severity HIGH,CRITICAL --exit-code 1
+          --format json --output "$RUNNER_TEMP/security-reports/config.json" Dockerfile
+      - name: Build application image for scanning
+        run: |
+          version="$(python3 scripts/versioning.py check \
+            --channel "$WOS_VERSION_CHANNEL" --print-version)"
+          docker build --build-arg "WOS_APP_VERSION=$version" \
+            --tag world-of-seeds:security .
+      - name: Scan application image
+        run: |
+          "$RUNNER_TEMP/trivy" image \
+            --severity HIGH,CRITICAL --exit-code 0 \
+            --format json --output "$RUNNER_TEMP/security-reports/image.json" \
+            world-of-seeds:security
+          "$RUNNER_TEMP/trivy" image \
+            --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 \
+            world-of-seeds:security
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: security-reports
+          path: ${{ runner.temp }}/security-reports
+          if-no-files-found: error
+          retention-days: 14
 
   container:
     name: Container image
@@ -113,12 +205,48 @@ jobs:
             exit 1
           fi
       - name: Validate application version consistency
-        run: python3 scripts/versioning.py check --print-version
+        run: >-
+          python3 scripts/versioning.py check
+          --channel "$WOS_VERSION_CHANNEL" --print-version
+      - name: Validate V2 foundation configuration
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: |
+          mkdir -p "$RUNNER_TEMP/seedbox-v2"
+          WOS_V2_STORAGE_HOST_PATH="$RUNNER_TEMP/seedbox-v2" \
+            docker compose --env-file .env.v2.example \
+              -f compose.v2.yaml config --format json \
+            | python3 scripts/validate_compose_v2.py
+          docker compose --project-name world-of-seeds-v2-local \
+            --env-file .env.v2.local.example \
+            -f compose.v2.yaml -f compose.v2.local.yaml \
+            config --format json \
+            | python3 scripts/validate_compose_v2_local.py
+          docker compose --project-name world-of-seeds-v2-local \
+            --env-file .env.v2.local.example \
+            -f compose.v2.yaml -f compose.v2.local.yaml \
+            -f compose.v2.monitoring.yaml --profile monitoring \
+            config --format json \
+            | python3 scripts/validate_compose_v2_monitoring.py --platform linux
+          docker compose --project-name world-of-seeds-v2-local \
+            --env-file .env.v2.local.example \
+            -f compose.v2.yaml -f compose.v2.local.yaml \
+            -f compose.v2.monitoring.yaml \
+            -f compose.v2.monitoring.docker-desktop.yaml --profile monitoring \
+            config --format json \
+            | python3 scripts/validate_compose_v2_monitoring.py \
+                --platform docker-desktop
+          docker compose --env-file deploy/.env.rise2.v2.example \
+            -f deploy/compose.rise2.v2.yaml config --format json \
+            | python3 scripts/validate_compose_v2_rise2.py
+      - name: Smoke immutable NewGreedy Rise2 runtime
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: scripts/rise2_v2_newgreedy_smoke.sh
       - name: Build and start production stack
         run: |
           cp .env.example .env
           mkdir -p "$RUNNER_TEMP/seedbox"
-          version="$(python3 scripts/versioning.py check --print-version)"
+          version="$(python3 scripts/versioning.py check \
+            --channel "$WOS_VERSION_CHANNEL" --print-version)"
           docker compose build --build-arg "WOS_APP_VERSION=$version"
           SEEDBOX_HOST_PATH="$RUNNER_TEMP/seedbox" docker compose up \
             --detach --no-build --wait --wait-timeout 120
@@ -146,3 +274,59 @@ jobs:
       - name: Stop production stack
         if: always()
         run: docker compose down --volumes
+      - name: Build and start V2 foundation
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: |
+          mkdir -p "$RUNNER_TEMP/seedbox-v2"
+          version="$(python3 scripts/versioning.py check \
+            --channel v2 --print-version)"
+          WOS_V2_STORAGE_HOST_PATH="$RUNNER_TEMP/seedbox-v2" \
+            docker compose --env-file .env.v2.example \
+              -f compose.v2.yaml build \
+              --build-arg "WOS_APP_VERSION=$version"
+          WOS_V2_STORAGE_HOST_PATH="$RUNNER_TEMP/seedbox-v2" \
+            docker compose --env-file .env.v2.example \
+              -f compose.v2.yaml up \
+              --detach --no-build --wait --wait-timeout 120
+      - name: Verify V2 service isolation
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: |
+          compose=(docker compose --env-file .env.v2.example -f compose.v2.yaml)
+          curl --fail --silent --show-error \
+            http://127.0.0.1:28081/api/v1/health/live
+          test "$("${compose[@]}" port api 8000)" = "127.0.0.1:28081"
+          if "${compose[@]}" port postgres 5432 >/tmp/v2-postgres-port 2>/dev/null; then
+            echo "V2 PostgreSQL must not publish a host port."
+            cat /tmp/v2-postgres-port
+            exit 1
+          fi
+          if "${compose[@]}" port redis 6379 >/tmp/v2-redis-port 2>/dev/null; then
+            echo "V2 Redis must not publish a host port."
+            cat /tmp/v2-redis-port
+            exit 1
+          fi
+          test "$("${compose[@]}" exec -T redis redis-cli ping)" = "PONG"
+          test -n "$("${compose[@]}" ps --quiet --status running worker)"
+      - name: Stop V2 foundation
+        if: always() && env.WOS_VERSION_CHANNEL == 'v2'
+        run: >-
+          docker compose --env-file .env.v2.example
+          -f compose.v2.yaml down --volumes
+      - name: Build and start complete local V2 profile
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: scripts/local_v2.sh up
+      - name: Run complete local V2 smoke
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: scripts/local_v2.sh smoke
+      - name: Run bounded V2 load smoke
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: scripts/local_v2.sh load
+      - name: Start isolated V2 monitoring
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: scripts/local_v2.sh monitoring-up
+      - name: Run V2 monitoring smoke
+        if: env.WOS_VERSION_CHANNEL == 'v2'
+        run: scripts/local_v2.sh monitoring-smoke
+      - name: Stop complete local V2 profile
+        if: always() && env.WOS_VERSION_CHANNEL == 'v2'
+        run: scripts/local_v2.sh down

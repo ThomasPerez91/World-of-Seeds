@@ -27,6 +27,19 @@ CATEGORY_LABELS: dict[OptionCategory, str] = {
     "interface": "Interface",
 }
 
+_SENSITIVE_KEY_FRAGMENTS = (
+    "PASSWORD",
+    "TOKEN",
+    "PASSKEY",
+    "SECRET",
+    "PRIVATE_KEY",
+    "CREDENTIAL",
+)
+
+
+def is_sensitive_option_key(key: str) -> bool:
+    return any(fragment in key.upper() for fragment in _SENSITIVE_KEY_FRAGMENTS)
+
 
 @dataclass(frozen=True, slots=True)
 class OptionSpec:
@@ -133,6 +146,86 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         minimum=1,
         maximum=100,
         unit="count",
+    ),
+    _integer(
+        "WOS_QB_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL",
+        "Débit qBittorrent maximal global",
+        "Plafond réparti entre les torrents V2 admis ; 0 désactive la limite.",
+        0,
+        "torrents",
+        minimum=0,
+        maximum=10_000_000_000,
+        unit="bytes_per_second",
+    ),
+    _integer(
+        "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL",
+        "Torrents actifs globaux",
+        "Nombre maximal de torrents physiques admis simultanément par le scheduler V2.",
+        2,
+        "torrents",
+        minimum=1,
+        maximum=200,
+        unit="count",
+    ),
+    _integer(
+        "WOS_SCHEDULER_MAX_ACTIVE_PER_USER",
+        "Torrents actifs par utilisateur dans le scheduler",
+        "Nombre maximal de torrents physiques attribués simultanément à un même compte.",
+        2,
+        "torrents",
+        minimum=1,
+        maximum=50,
+        unit="count",
+    ),
+    _integer(
+        "WOS_SCHEDULER_SMALL_TORRENT_BYTES",
+        "Seuil petit torrent",
+        "Taille restante maximale de la classe favorisée des petits torrents.",
+        10_737_418_240,
+        "torrents",
+        minimum=1_048_576,
+        maximum=1_099_511_627_776,
+        unit="bytes",
+    ),
+    _integer(
+        "WOS_SCHEDULER_MEDIUM_TORRENT_BYTES",
+        "Seuil torrent moyen",
+        "Taille restante maximale de la classe intermédiaire du scheduler.",
+        53_687_091_200,
+        "torrents",
+        minimum=2_097_152,
+        maximum=5_497_558_138_880,
+        unit="bytes",
+    ),
+    _integer(
+        "WOS_SCHEDULER_DEFICIT_QUANTUM",
+        "Quantum d’équité",
+        "Crédit ajouté à chaque tour, multiplié par le poids du compte.",
+        1,
+        "torrents",
+        minimum=1,
+        maximum=16,
+        unit="credit",
+    ),
+    _integer(
+        "WOS_SCHEDULER_AGING_INTERVAL_SECONDS",
+        "Intervalle de vieillissement",
+        "Temps d’attente nécessaire pour obtenir un crédit anti-famine supplémentaire.",
+        3600,
+        "torrents",
+        minimum=60,
+        maximum=86_400,
+        unit="seconds",
+    ),
+    _integer(
+        "WOS_SCHEDULER_AGING_MAX_BONUS",
+        "Bonus maximal de vieillissement",
+        "Réduction maximale et bornée du coût d’un torrent qui attend.",
+        3,
+        "torrents",
+        minimum=0,
+        maximum=3,
+        unit="credit",
     ),
     _integer(
         "WOS_TORRENT_MAX_SIZE_BYTES",

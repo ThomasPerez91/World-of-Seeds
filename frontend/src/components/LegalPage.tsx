@@ -1,4 +1,5 @@
 import { BackIcon } from "./icons";
+import { useI18n } from "../i18n";
 
 export type LegalDocument = "legal" | "terms";
 
@@ -7,13 +8,14 @@ export function LegalLinks({
 }: {
   onOpen: (document: LegalDocument) => void;
 }) {
+  const { t } = useI18n();
   return (
-    <nav className="legal-links" aria-label="Informations légales">
+    <nav className="legal-links" aria-label={t("legal.links")}>
       <button type="button" onClick={() => onOpen("legal")}>
-        Mentions légales
+        {t("legal.notices")}
       </button>
       <button type="button" onClick={() => onOpen("terms")}>
-        Conditions d’utilisation
+        {t("legal.terms")}
       </button>
     </nav>
   );
@@ -165,11 +167,12 @@ export function LegalPage({
   onBack: () => void;
   onOpen: (document: LegalDocument) => void;
 }) {
+  const { t } = useI18n();
   return (
     <main className="legal-page">
       <header className="legal-page-header">
         <button type="button" className="back-button" onClick={onBack}>
-          <BackIcon /> Retour
+          <BackIcon /> {t("legal.back")}
         </button>
         <LegalLinks onOpen={onOpen} />
       </header>

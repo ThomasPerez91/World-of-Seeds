@@ -1,0 +1,148 @@
+name: V2 release qualification
+
+on:
+  pull_request:
+    branches:
+      - develop_V2
+      - develop
+  push:
+    branches:
+      - develop_V2
+      - develop
+
+permissions:
+  contents: read
+
+env:
+  PREVIOUS_WOS_IMAGE: ghcr.io/thomasperez91/world-of-seeds-v2@sha256:d0e817283ad95ba1792b4e16e7241bddabbce2190272382e2c339b4c291a947e
+  WOS_DATABASE_URL: postgresql+asyncpg://world_of_seeds:world_of_seeds_test@127.0.0.1:5432/world_of_seeds_test
+  V2_STABLE_RELEASE_SHA: 4814d4636e4a14edfa711c2c78da4dd5a8df2300
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Validate synchronized V2 version
+        id: version
+        run: |
+          set -Eeuo pipefail
+          version="$(python scripts/versioning.py check --channel v2 --print-version)"
+          printf 'version=%s\n' "$version" >>"$GITHUB_OUTPUT"
+      - name: Validate closed V2 release policy when applicable
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          case "$VERSION" in
+            2.0.0-rc.*)
+              python scripts/validate_v2_release_candidate.py
+              ;;
+            2.0.0)
+              if [ "$GITHUB_SHA" = "$V2_STABLE_RELEASE_SHA" ]; then
+                python scripts/validate_v2_stable_release.py
+              else
+                echo "V2 2.0.0 is already released; closed V2-35 provenance applies only to $V2_STABLE_RELEASE_SHA."
+              fi
+              ;;
+            *)
+              echo "No V2-34/V2-35 closed release policy applies to $VERSION."
+              ;;
+          esac
+
+  previous-image-compatibility:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: world_of_seeds_test
+          POSTGRES_USER: world_of_seeds
+          POSTGRES_PASSWORD: world_of_seeds_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U world_of_seeds -d world_of_seeds_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:8.2.9-alpine3.22
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          working-directory: backend
+      - name: Materialize candidate schema from frozen dependencies
+        working-directory: backend
+        run: |
+          uv sync --frozen --dev
+          uv run alembic -c alembic.ini upgrade head
+          test "$(uv run alembic -c alembic.ini heads | awk '{print $1}')" = "20260831_22"
+      - name: Pull exact previous WOS digest
+        run: |
+          docker pull "$PREVIOUS_WOS_IMAGE"
+          docker image inspect "$PREVIOUS_WOS_IMAGE" >/dev/null
+      - name: Start previous digest against candidate schema
+        run: |
+          data="$RUNNER_TEMP/v2-release-previous-data"
+          mkdir -p "$data"
+          sudo chown 10001:10001 "$data"
+          docker run --detach --name wos-v2-release-previous \
+            --network host \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --mount "type=bind,src=$data,dst=/data" \
+            --env WOS_ENVIRONMENT=development \
+            --env WOS_RUNTIME_PROFILE=v2 \
+            --env WOS_COOKIE_SECURE=false \
+            --env 'WOS_ALLOWED_HOSTS=["127.0.0.1","localhost"]' \
+            --env WOS_DATA_ROOT=/data \
+            --env WOS_DATABASE_URL="$WOS_DATABASE_URL" \
+            --env WOS_POSTGRES_HOST=127.0.0.1 \
+            --env WOS_POSTGRES_PORT=5432 \
+            --env WOS_POSTGRES_DB=world_of_seeds_test \
+            --env WOS_POSTGRES_USER=world_of_seeds \
+            --env WOS_POSTGRES_PASSWORD=world_of_seeds_test \
+            --env WOS_REDIS_URL=redis://127.0.0.1:6379/14 \
+            "$PREVIOUS_WOS_IMAGE" \
+            uvicorn app.main:app --host 127.0.0.1 --port 28082 \
+              --no-access-log --no-server-header
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:28082/api/v1/health/live >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker logs wos-v2-release-previous
+              exit 1
+            fi
+            sleep 1
+          done
+          curl --fail --silent --show-error \
+            http://127.0.0.1:28082/api/v1/health/ready >/dev/null
+      - name: Verify immutable previous image identity
+        run: |
+          test "$(docker inspect --format '{{.Config.Image}}' wos-v2-release-previous)" = \
+            "$PREVIOUS_WOS_IMAGE"
+      - name: Stop previous digest smoke
+        if: always()
+        run: docker rm --force wos-v2-release-previous >/dev/null 2>&1 || true

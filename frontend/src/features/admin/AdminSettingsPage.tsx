@@ -3,14 +3,18 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from "react"
 import {
   api,
   ApiError,
+  type CentralAdminOverview,
   type OptionField,
   type OptionValue,
   type OptionsResponse,
 } from "../../api/client";
+import { useFeedback } from "../../components/Feedback";
 import { Notice, type NoticeTone } from "../../components/Notice";
 import { RestartIcon, SaveIcon } from "../../components/icons";
+import { type MessageKey, useI18n } from "../../i18n";
 import { FileDialog } from "../files/FileDialog";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
+import { optionFieldCopy, optionSectionLabel } from "./optionTranslations";
 
 type DraftValue = boolean | string;
 
@@ -20,14 +24,13 @@ interface PageNotice {
   tone: NoticeTone;
 }
 
-const unitLabels: Record<string, string> = {
-  bytes: "octets",
-  bytes_per_second: "octets/s",
-  count: "éléments",
-  count_per_minute: "requêtes/min",
-  hours: "heures",
-  percent: "%",
-  seconds: "secondes",
+const unitLabels: Record<string, MessageKey> = {
+  bytes: "admin.unit.bytes",
+  bytes_per_second: "admin.unit.bytes_per_second",
+  count: "admin.unit.count",
+  count_per_minute: "admin.unit.count_per_minute",
+  hours: "admin.unit.hours",
+  seconds: "admin.unit.seconds",
 };
 
 function wait(milliseconds: number): Promise<void> {
@@ -45,18 +48,22 @@ function createDraft(options: OptionsResponse): Record<string, DraftValue> {
   );
 }
 
-function validateField(field: OptionField, draft: DraftValue): string | null {
+function validateField(
+  field: OptionField,
+  draft: DraftValue,
+  t: (key: MessageKey, params?: Record<string, string | number>) => string,
+): string | null {
   if (field.input_type !== "integer") return null;
   if (typeof draft !== "string" || !/^-?\d+$/.test(draft)) {
-    return "Saisis un nombre entier.";
+    return t("admin.integerRequired");
   }
   const value = Number(draft);
-  if (!Number.isSafeInteger(value)) return "Cette valeur est trop grande.";
+  if (!Number.isSafeInteger(value)) return t("admin.valueTooLarge");
   if (field.minimum !== null && value < field.minimum) {
-    return `La valeur minimale est ${field.minimum}.`;
+    return t("admin.minimumValue", { value: field.minimum });
   }
   if (field.maximum !== null && value > field.maximum) {
-    return `La valeur maximale est ${field.maximum}.`;
+    return t("admin.maximumValue", { value: field.maximum });
   }
   return null;
 }
@@ -75,7 +82,9 @@ export function AdminSettingsPage({
   onNavigate: (view: AdminView) => void;
   onSessionExpired: () => void;
 }) {
-  const [options, setOptions] = useState<OptionsResponse | null>(null);
+  const feedback = useFeedback();
+  const { formatBytes, formatDate, formatNumber, locale, t } = useI18n();
+  const [options, setOptions] = useState<CentralAdminOverview | null>(null);
   const [draft, setDraft] = useState<Record<string, DraftValue>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -89,7 +98,7 @@ export function AdminSettingsPage({
     setLoading(true);
     setNotice(null);
     try {
-      const result = await api.getOptions();
+      const result = await api.getCentralAdminOverview();
       if (!mounted.current) return;
       setOptions(result);
       setDraft(createDraft(result));
@@ -102,13 +111,13 @@ export function AdminSettingsPage({
       }
       setNotice({
         tone: "error",
-        title: "Paramètres indisponibles",
-        message: "Impossible de charger la configuration fonctionnelle.",
+        title: t("admin.settingsUnavailable"),
+        message: t("admin.settingsLoadFailed"),
       });
     } finally {
       if (mounted.current) setLoading(false);
     }
-  }, [onSessionExpired]);
+  }, [onSessionExpired, t]);
 
   useEffect(() => {
     mounted.current = true;
@@ -134,15 +143,12 @@ export function AdminSettingsPage({
     const fields = options.sections.flatMap((section) => section.fields);
     const errors = Object.fromEntries(
       fields
-        .map((field) => [field.key, validateField(field, draft[field.key])] as const)
+        .map((field) => [field.key, validateField(field, draft[field.key], t)] as const)
         .filter((entry): entry is readonly [string, string] => entry[1] !== null),
     );
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
-      setNotice({
-        tone: "error",
-        message: "Corrige les champs signalés avant d’enregistrer.",
-      });
+      feedback.toast({ tone: "error", message: t("admin.correctFields") });
       return;
     }
 
@@ -152,24 +158,24 @@ export function AdminSettingsPage({
         .map((field) => [field.key, parsedValue(field, draft[field.key])]),
     );
     if (Object.keys(changes).length === 0) {
-      setNotice({ tone: "info", message: "Aucune modification à enregistrer." });
+      feedback.toast({ tone: "info", message: t("admin.noChanges") });
       return;
     }
 
     setSaving(true);
     setNotice(null);
     try {
-      const result = await api.updateOptions(changes);
+      const result = await api.updateCentralAdminOptions(changes);
       if (!mounted.current) return;
       setOptions(result);
       setDraft(createDraft(result));
       setFieldErrors({});
-      setNotice({
+      feedback.toast({
         tone: result.restart_required ? "warning" : "success",
-        title: result.restart_required ? "Redémarrage nécessaire" : undefined,
+        title: result.restart_required ? t("admin.restartNeeded") : undefined,
         message: result.restart_required
-          ? "Configuration enregistrée. Un redémarrage est nécessaire."
-          : "Configuration appliquée.",
+          ? t("admin.configurationRestart")
+          : t("admin.configurationApplied"),
       });
     } catch (caught) {
       if (!mounted.current) return;
@@ -178,14 +184,16 @@ export function AdminSettingsPage({
         return;
       }
       if (caught instanceof ApiError && caught.field !== null) {
-        setFieldErrors({ [caught.field]: caught.message });
+        setFieldErrors({
+          [caught.field]: locale === "fr" ? caught.message : t("admin.configurationSaveFailed"),
+        });
       }
-      setNotice({
+      feedback.toast({
         tone: "error",
         message:
-          caught instanceof ApiError
+          caught instanceof ApiError && locale === "fr"
             ? caught.message
-            : "La configuration n’a pas pu être enregistrée.",
+            : t("admin.configurationSaveFailed"),
       });
     } finally {
       if (mounted.current) setSaving(false);
@@ -204,19 +212,20 @@ export function AdminSettingsPage({
           statusObserved = true;
           setNotice({
             tone: "progress",
-            title: "Redémarrage en cours",
-            message: "Le service se relance. Cette page se reconnectera automatiquement.",
+            title: t("admin.restartInProgress"),
+            message: t("admin.restartReconnect"),
           });
         }
         if (status.state === "failed" || status.state === "rejected") {
           setRestarting(false);
-          setNotice({
+          setNotice(null);
+          feedback.toast({
             tone: "error",
-            title: "Redémarrage refusé",
+            title: t("admin.restartRejected"),
             message:
               status.message_code === "cooldown"
-                ? "Un redémarrage vient déjà d’être effectué. Réessaie dans une minute."
-                : "Le serveur n’a pas pu redémarrer World of Seeds.",
+                ? t("admin.restartCooldown")
+                : t("admin.restartServerFailed"),
           });
           return;
         }
@@ -224,10 +233,11 @@ export function AdminSettingsPage({
           await api.liveHealth();
           if (!mounted.current) return;
           setRestarting(false);
-          setNotice({
+          setNotice(null);
+          feedback.toast({
             tone: "success",
-            title: "Service opérationnel",
-            message: "World of Seeds a redémarré avec succès.",
+            title: t("admin.serviceOperational"),
+            message: t("admin.restartSucceeded"),
           });
           return;
         }
@@ -236,8 +246,8 @@ export function AdminSettingsPage({
         if (mounted.current) {
           setNotice({
             tone: "progress",
-            title: "Reconnexion en cours",
-            message: "Le service redémarre. Nouvelle vérification automatique…",
+            title: t("admin.reconnecting"),
+            message: t("admin.restartChecking"),
           });
         }
       }
@@ -252,10 +262,11 @@ export function AdminSettingsPage({
     }
     if (!mounted.current) return;
     setRestarting(false);
-    setNotice({
+    setNotice(null);
+    feedback.toast({
       tone: "error",
-      title: "Redémarrage prolongé",
-      message: "Le redémarrage prend plus de temps que prévu.",
+      title: t("admin.restartLong"),
+      message: t("admin.restartLongMessage"),
     });
   }
 
@@ -264,8 +275,8 @@ export function AdminSettingsPage({
     setRestarting(true);
     setNotice({
       tone: "progress",
-      title: "Demande transmise",
-      message: "Le serveur prépare le redémarrage de World of Seeds.",
+      title: t("admin.requestSent"),
+      message: t("admin.restartPreparing"),
     });
     try {
       const requested = await api.restartWos();
@@ -277,13 +288,8 @@ export function AdminSettingsPage({
         return;
       }
       setRestarting(false);
-      setNotice({
-        tone: "error",
-        message:
-          caught instanceof ApiError
-            ? caught.message
-            : "La demande de redémarrage n’a pas pu être envoyée.",
-      });
+      setNotice(null);
+      feedback.toast({ tone: "error", message: t("admin.restartRequestFailed") });
     }
   }
 
@@ -292,21 +298,23 @@ export function AdminSettingsPage({
       <section className="admin-section options-section" aria-labelledby="admin-options-title">
         <div className="section-heading options-heading">
           <div>
-            <p className="eyebrow">Configuration</p>
-            <h2 id="admin-options-title">Paramètres fonctionnels</h2>
+            <p className="eyebrow">{t("admin.configuration")}</p>
+            <h2 id="admin-options-title">{t("admin.functionalSettings")}</h2>
             <p className="section-intro">
-              Ajuste les limites et performances sans exposer de secret dans ce fichier.
+              {t("admin.settingsIntro")}
             </p>
           </div>
-          <button
-            type="button"
-            className="danger-outline-button restart-wos-button"
-            disabled={restarting}
-            onClick={() => setRestartDialogOpen(true)}
-          >
-            <RestartIcon className={restarting ? "rotating" : undefined} />
-            {restarting ? "Redémarrage…" : "Redémarrer WOS"}
-          </button>
+          {options?.service_controls_available === true && (
+            <button
+              type="button"
+              className="danger-outline-button restart-wos-button"
+              disabled={restarting}
+              onClick={() => setRestartDialogOpen(true)}
+            >
+              <RestartIcon className={restarting ? "rotating" : undefined} />
+              {restarting ? t("admin.restarting") : t("admin.restartWos")}
+            </button>
+          )}
         </div>
 
         {notice !== null && (
@@ -321,16 +329,52 @@ export function AdminSettingsPage({
 
         {loading && options === null ? (
           <p className="admin-loading" role="status">
-            Lecture de la configuration…
+            {t("admin.readingConfiguration")}
           </p>
         ) : options !== null ? (
-          <form className="options-form" noValidate onSubmit={(event) => void save(event)}>
+          <>
+            <div className="central-admin-status" aria-label={t("admin.operationalState")}>
+              <article>
+                <span>Scheduler</span>
+                <strong>{options.scheduler.synchronized ? t("admin.synchronized") : t("admin.reconcileRequired")}</strong>
+                <small>
+                  {t("admin.schedulerGeneration", {
+                    desired: formatNumber(options.scheduler.desired_generation),
+                    applied: formatNumber(options.scheduler.applied_generation),
+                  })}
+                </small>
+              </article>
+              <article>
+                <span>{t("admin.sharedStorage")}</span>
+                <strong>{formatBytes(options.storage.managed_bytes)}</strong>
+                <small>
+                  {t("admin.storagePressure", {
+                    logical: formatBytes(options.storage.logical_bytes),
+                    pressure: options.storage.pressure,
+                  })}
+                </small>
+              </article>
+              <article>
+                <span>{t("admin.userQuota")}</span>
+                <strong>
+                  {options.storage.user_quota_bytes === 0
+                    ? t("admin.unlimited")
+                    : formatBytes(options.storage.user_quota_bytes)}
+                </strong>
+                <small>{t("admin.schedulerRounds", { count: formatNumber(options.scheduler.rounds) })}</small>
+              </article>
+            </div>
+            <form className="options-form" noValidate onSubmit={(event) => void save(event)}>
             <div className="options-sections">
               {options.sections.map((section, sectionIndex) => (
                 <details key={section.id} open={sectionIndex === 0}>
-                  <summary>{section.label}</summary>
+                  <summary>{optionSectionLabel(section.id, locale, section.label)}</summary>
                   <div className="options-fields">
                     {section.fields.map((field) => {
+                      const copy = optionFieldCopy(field.key, locale, {
+                        label: field.label,
+                        description: field.description,
+                      });
                       const error = fieldErrors[field.key];
                       const inputId = `option-${field.key.toLowerCase()}`;
                       const hintId = `${inputId}-hint`;
@@ -338,11 +382,13 @@ export function AdminSettingsPage({
                       return (
                         <div className={`option-field${error === undefined ? "" : " invalid"}`} key={field.key}>
                           <div>
-                            <label htmlFor={inputId}>{field.label}</label>
+                            <label htmlFor={inputId}>
+                              {copy.label}
+                            </label>
                             <p id={hintId}>
-                              {field.description}
+                              {copy.description}
                               {field.restart_required && (
-                                <span className="restart-required"> Redémarrage requis.</span>
+                                <span className="restart-required"> {t("admin.restartRequired")}</span>
                               )}
                             </p>
                           </div>
@@ -386,7 +432,7 @@ export function AdminSettingsPage({
                                   onChange={(event) => updateDraft(field.key, event.target.value)}
                                 />
                                 {field.unit !== null && (
-                                  <span>{unitLabels[field.unit] ?? field.unit}</span>
+                                  <span>{unitLabels[field.unit] === undefined ? field.unit : t(unitLabels[field.unit])}</span>
                                 )}
                               </div>
                             )}
@@ -404,29 +450,50 @@ export function AdminSettingsPage({
               ))}
             </div>
             <div className="options-actions">
-              <span>Les identifiants et jetons restent exclusivement dans les variables secrètes.</span>
+              <span>{t("admin.secretsNote")}</span>
               <button type="submit" disabled={saving || restarting}>
                 <SaveIcon />
-                {saving ? "Enregistrement…" : "Enregistrer"}
+                {saving ? t("admin.saving") : t("admin.save")}
               </button>
             </div>
-          </form>
+            </form>
+            <section className="options-audit" aria-labelledby="options-audit-title">
+              <h3 id="options-audit-title">{t("admin.audit")}</h3>
+              <ol>
+                {options.audit.slice(0, 10).map((event) => (
+                  <li key={`${event.key}-${event.version}`}>
+                    <strong>{event.key}</strong>
+                    <span>
+                      {t("admin.versionBy", {
+                        version: formatNumber(event.version),
+                        actor: event.actor ?? t("admin.system"),
+                        date: formatDate(event.changed_at, {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        }),
+                      })}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          </>
         ) : null}
       </section>
 
       {restartDialogOpen && (
         <FileDialog
-          eyebrow="Maintenance"
-          title="Redémarrer World of Seeds ?"
-          description="L’interface sera indisponible quelques secondes puis vérifiera automatiquement son retour."
+          eyebrow={t("admin.maintenance")}
+          title={t("admin.restartTitle")}
+          description={t("admin.restartDescription")}
           onClose={() => setRestartDialogOpen(false)}
         >
           <div className="dialog-actions">
             <button type="button" className="secondary-button" onClick={() => setRestartDialogOpen(false)}>
-              Annuler
+              {t("common.cancel")}
             </button>
             <button type="button" className="danger-button" onClick={() => void requestRestart()}>
-              Confirmer le redémarrage
+              {t("admin.confirmRestart")}
             </button>
           </div>
         </FileDialog>

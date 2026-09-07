@@ -15,22 +15,23 @@ import {
   SaveIcon,
   SettingsIcon,
 } from "../../components/icons";
-import { Notice } from "../../components/Notice";
-import { formatBytes } from "../../utils/format";
+import { useFeedback } from "../../components/Feedback";
+import { type MessageKey, useI18n } from "../../i18n";
 import { FileDialog } from "../files/FileDialog";
+import { newGreedyFieldCopy, newGreedySectionLabel } from "./newGreedyTranslations";
 
 type DraftValue = boolean | string;
 
-function restartStatusMessage(status: NewGreedyRestartStatus): string {
-  if (status.state === "pending") return "Demande en attente du serveur hôte.";
-  if (status.state === "restarting") return "Redémarrage de NewGreedy en cours…";
-  if (status.state === "healthy") return "Dernier redémarrage terminé avec succès.";
+function restartStatusMessage(status: NewGreedyRestartStatus): MessageKey {
+  if (status.state === "pending") return "admin.ngPending";
+  if (status.state === "restarting") return "admin.ngRestarting";
+  if (status.state === "healthy") return "admin.ngHealthy";
   if (status.message_code === "cooldown") {
-    return "Redémarrage refusé : patiente une minute avant de réessayer.";
+    return "admin.ngCooldown";
   }
-  if (status.state === "failed") return "Le dernier redémarrage a échoué.";
-  if (status.state === "rejected") return "La demande de redémarrage a été refusée.";
-  return "NewGreedy peut être redémarré depuis cette interface.";
+  if (status.state === "failed") return "admin.ngRestartFailed";
+  if (status.state === "rejected") return "admin.ngRestartRejected";
+  return "admin.ngRestartReady";
 }
 
 function initialDraft(config: NewGreedyConfig): Record<string, DraftValue> {
@@ -75,6 +76,7 @@ function ConfigControl({
   field: NewGreedyConfigField;
   onChange: (value: DraftValue) => void;
 }) {
+  const { t } = useI18n();
   const inputId = `newgreedy-${field.id.replace(".", "-")}`;
   if (field.input_type === "boolean") {
     return (
@@ -87,7 +89,7 @@ function ConfigControl({
           onChange={(event) => onChange(event.currentTarget.checked)}
         />
         <span aria-hidden="true" />
-        {draft === true ? "Activé" : "Désactivé"}
+        {draft === true ? t("admin.enabled") : t("admin.disabled")}
       </label>
     );
   }
@@ -129,20 +131,19 @@ export function NewGreedyControlPanel({
 }: {
   onSessionExpired: () => void;
 }) {
+  const feedback = useFeedback();
+  const { formatBytes, formatNumber, locale, t } = useI18n();
   const [config, setConfig] = useState<NewGreedyConfig | null>(null);
   const [draft, setDraft] = useState<Record<string, DraftValue>>({});
   const [overview, setOverview] = useState<NewGreedyOverview | null>(null);
   const [configError, setConfigError] = useState("");
   const [overviewError, setOverviewError] = useState("");
-  const [notice, setNotice] = useState("");
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [saving, setSaving] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [resetError, setResetError] = useState("");
   const [restartStatus, setRestartStatus] = useState<NewGreedyRestartStatus | null>(null);
   const [restartControlError, setRestartControlError] = useState("");
-  const [restartActionError, setRestartActionError] = useState("");
   const [restartOpen, setRestartOpen] = useState(false);
   const [requestingRestart, setRequestingRestart] = useState(false);
   const mounted = useRef(true);
@@ -167,9 +168,9 @@ export function NewGreedyControlPanel({
       }
     } catch (caught) {
       if (!mounted.current || handleUnauthorized(caught)) return;
-      setOverviewError("Les statistiques NewGreedy sont indisponibles.");
+      setOverviewError(t("admin.ngOverviewUnavailable"));
     }
-  }, [handleUnauthorized]);
+  }, [handleUnauthorized, t]);
 
   const loadRestartStatus = useCallback(async () => {
     try {
@@ -180,9 +181,9 @@ export function NewGreedyControlPanel({
       }
     } catch (caught) {
       if (!mounted.current || handleUnauthorized(caught)) return;
-      setRestartControlError("Le contrôle de redémarrage n’est pas disponible.");
+      setRestartControlError(t("admin.ngRestartControlUnavailable"));
     }
-  }, [handleUnauthorized]);
+  }, [handleUnauthorized, t]);
 
   useEffect(() => {
     mounted.current = true;
@@ -196,9 +197,7 @@ export function NewGreedyControlPanel({
         }
       } catch (caught) {
         if (!mounted.current || handleUnauthorized(caught)) return;
-        setConfigError(
-          "Le fichier de configuration sécurisé n’est pas encore disponible.",
-        );
+        setConfigError(t("admin.ngConfigUnavailable"));
       } finally {
         if (mounted.current) setLoadingConfig(false);
       }
@@ -212,7 +211,7 @@ export function NewGreedyControlPanel({
       window.clearInterval(interval);
       window.clearInterval(restartInterval);
     };
-  }, [handleUnauthorized, loadOverview, loadRestartStatus]);
+  }, [handleUnauthorized, loadOverview, loadRestartStatus, t]);
 
   const changes = useMemo(
     () => (config === null ? {} : changedValues(config, draft)),
@@ -224,23 +223,22 @@ export function NewGreedyControlPanel({
     if (!hasChanges) return;
     setSaving(true);
     setConfigError("");
-    setNotice("");
     try {
       const result = await api.updateNewGreedyConfig(changes);
       setConfig(result);
       setDraft(initialDraft(result));
-      setNotice(
-        result.restart_required
-          ? "Configuration enregistrée. Redémarre NewGreedy pour l’appliquer."
-          : "Configuration enregistrée.",
-      );
+      feedback.toast({
+        tone: result.restart_required ? "warning" : "success",
+        message: result.restart_required ? t("admin.ngConfigRestart") : t("admin.ngConfigSaved"),
+      });
     } catch (caught) {
       if (handleUnauthorized(caught)) return;
-      setConfigError(
-        caught instanceof ApiError && caught.status === 422
-          ? "Une valeur est invalide. Vérifie les champs modifiés."
-          : "La configuration n’a pas pu être enregistrée.",
-      );
+      feedback.toast({
+        tone: "error",
+        message: caught instanceof ApiError && caught.status === 422
+          ? t("admin.ngValueInvalid")
+          : t("admin.configurationSaveFailed"),
+      });
     } finally {
       setSaving(false);
     }
@@ -248,19 +246,21 @@ export function NewGreedyControlPanel({
 
   async function resetStats() {
     setResetting(true);
-    setResetError("");
     try {
       const result = await api.resetNewGreedyStats();
       setResetOpen(false);
-      setNotice(
-        result.purged === 0
-          ? "Les statistiques étaient déjà vides."
-          : `${result.purged} statistique${result.purged > 1 ? "s" : ""} supprimée${result.purged > 1 ? "s" : ""}.`,
-      );
+      feedback.toast({
+        tone: "success",
+        message: result.purged === 0
+          ? t("admin.ngStatsEmpty")
+          : t(result.purged === 1 ? "admin.ngStatsPurgedOne" : "admin.ngStatsPurgedMany", {
+              count: formatNumber(result.purged),
+            }),
+      });
       await loadOverview();
     } catch (caught) {
       if (handleUnauthorized(caught)) return;
-      setResetError("La remise à zéro n’a pas pu être effectuée.");
+      feedback.toast({ tone: "error", message: t("admin.ngResetFailed") });
     } finally {
       setResetting(false);
     }
@@ -268,20 +268,19 @@ export function NewGreedyControlPanel({
 
   async function requestRestart() {
     setRequestingRestart(true);
-    setRestartActionError("");
     try {
       const result = await api.restartNewGreedy();
       setRestartStatus(result);
       setRestartOpen(false);
-      setNotice("Demande de redémarrage envoyée au serveur.");
+      feedback.toast({ tone: "info", message: t("admin.ngRestartSent") });
     } catch (caught) {
       if (handleUnauthorized(caught)) return;
       if (caught instanceof ApiError && caught.status === 409) {
         setRestartOpen(false);
         await loadRestartStatus();
-        setNotice("Un redémarrage NewGreedy est déjà en cours.");
+        feedback.toast({ tone: "info", message: t("admin.ngRestartAlready") });
       } else {
-        setRestartActionError("La demande de redémarrage n’a pas pu être envoyée.");
+        feedback.toast({ tone: "error", message: t("admin.restartRequestFailed") });
       }
     } finally {
       setRequestingRestart(false);
@@ -292,9 +291,9 @@ export function NewGreedyControlPanel({
     <div className="newgreedy-control">
       <div className="service-control-heading">
         <div>
-          <p className="eyebrow">Pilotage</p>
+          <p className="eyebrow">{t("admin.control")}</p>
           <h3>NewGreedy</h3>
-          <p>Statistiques agrégées et paramètres autorisés.</p>
+          <p>{t("admin.ngIntro")}</p>
         </div>
         <div className="service-control-actions">
           <button
@@ -307,29 +306,39 @@ export function NewGreedyControlPanel({
               restartStatus.state === "restarting"
             }
             onClick={() => {
-              setRestartActionError("");
               setRestartOpen(true);
             }}
           >
             <RestartIcon />
-            Redémarrer NewGreedy
+            {t("admin.restartNewgreedy")}
           </button>
           <button
             type="button"
             className="danger-outline-button compact-button"
             disabled={overview === null}
-            onClick={() => {
-              setResetError("");
-              setResetOpen(true);
-            }}
+            onClick={() => setResetOpen(true)}
           >
             <DeleteIcon />
-            Remettre les stats à zéro
+            {t("admin.resetStats")}
           </button>
         </div>
       </div>
 
-      <Notice message={notice} onDismiss={() => setNotice("")} />
+      {resetOpen && (
+        <div className="inline-danger-confirmation service-inline-confirmation" role="group" aria-labelledby="reset-stats-title">
+          <div>
+            <strong id="reset-stats-title">{t("admin.resetStatsTitle")}</strong>
+            <span>{t("admin.resetStatsDescription")}</span>
+            <small>{t("admin.resetStatsWarning")}</small>
+          </div>
+          <button type="button" className="secondary-button" onClick={() => setResetOpen(false)} disabled={resetting}>
+            {t("common.cancel")}
+          </button>
+          <button type="button" className="danger-button" onClick={() => void resetStats()} disabled={resetting} autoFocus>
+            {resetting ? t("admin.resetting") : t("admin.confirmReset")}
+          </button>
+        </div>
+      )}
       <div
         className={`restart-live-status ${restartStatus?.state ?? "unavailable"}`}
         role="status"
@@ -339,8 +348,8 @@ export function NewGreedyControlPanel({
         <p>
           {restartControlError ||
             (restartStatus === null
-              ? "Lecture du contrôle de redémarrage…"
-              : restartStatusMessage(restartStatus))}
+              ? t("admin.ngRestartReading")
+              : t(restartStatusMessage(restartStatus)))}
         </p>
       </div>
       <p className="form-message error-message" role="alert">
@@ -348,34 +357,39 @@ export function NewGreedyControlPanel({
       </p>
       {overview === null ? (
         <div className="newgreedy-metrics loading" role="status">
-          Chargement des statistiques…
+          {t("admin.statsLoading")}
         </div>
       ) : (
         <dl className="newgreedy-metrics">
           <div>
-            <dt>Torrents suivis</dt>
-            <dd>{overview.torrents}</dd>
+            <dt>{t("admin.trackedTorrents")}</dt>
+            <dd>{formatNumber(overview.torrents)}</dd>
             <dd className="metric-detail">
-              {overview.downloading} en cours · {overview.seeding} en seed
+              {t("admin.downloadingSeeding", {
+                downloading: formatNumber(overview.downloading),
+                seeding: formatNumber(overview.seeding),
+              })}
             </dd>
           </div>
           <div>
-            <dt>Download cumulé</dt>
+            <dt>{t("admin.totalDownload")}</dt>
             <dd>{formatBytes(overview.total_downloaded_bytes)}</dd>
-            <dd className="metric-detail">{overview.target_reached} objectif(s) atteint(s)</dd>
+            <dd className="metric-detail">{t("admin.targetsReached", { count: formatNumber(overview.target_reached) })}</dd>
           </div>
           <div>
-            <dt>Upload simulé</dt>
+            <dt>{t("admin.simulatedUpload")}</dt>
             <dd>{formatBytes(overview.total_fake_uploaded_bytes)}</dd>
             <dd className="metric-detail">
-              {formatBytes(overview.total_reported_uploaded_bytes)} annoncés
+              {t("admin.reportedBytes", { value: formatBytes(overview.total_reported_uploaded_bytes) })}
             </dd>
           </div>
           <div className={overview.stalled > 0 ? "warning" : undefined}>
-            <dt>Signalements</dt>
-            <dd>{overview.stalled}</dd>
+            <dt>{t("admin.alerts")}</dt>
+            <dd>{formatNumber(overview.stalled)}</dd>
             <dd className="metric-detail">
-              {overview.stalled > 0 ? "torrent(s) bloqué(s)" : "Aucun blocage"}
+              {overview.stalled > 0
+                ? t("admin.stalledTorrents", { count: formatNumber(overview.stalled) })
+                : t("admin.noStall")}
             </dd>
           </div>
         </dl>
@@ -384,8 +398,8 @@ export function NewGreedyControlPanel({
       <div className="newgreedy-config-heading">
         <SettingsIcon />
         <div>
-          <h4>Configuration</h4>
-          <p>Les paramètres réseau sensibles restent verrouillés.</p>
+          <h4>{t("admin.configuration")}</h4>
+          <p>{t("admin.ngConfigIntro")}</p>
         </div>
       </div>
       <p className="form-message error-message" role="alert">
@@ -393,7 +407,7 @@ export function NewGreedyControlPanel({
       </p>
       {loadingConfig ? (
         <div className="newgreedy-config-loading" role="status">
-          Lecture de la configuration…
+          {t("admin.readingConfiguration")}
         </div>
       ) : config === null ? null : (
         <form
@@ -406,95 +420,59 @@ export function NewGreedyControlPanel({
           <div className="newgreedy-config-sections">
             {config.sections.map((section) => (
               <details key={section.id}>
-                <summary>{section.label}</summary>
+                <summary>{newGreedySectionLabel(section.id, locale, section.label)}</summary>
                 <div className="newgreedy-fields">
-                  {section.fields.map((field) => (
-                    <div
-                      key={field.id}
-                      className={`newgreedy-field${field.editable ? "" : " locked"}`}
-                    >
-                      <div>
-                        <label htmlFor={`newgreedy-${field.id.replace(".", "-")}`}>
-                          {field.label}
-                        </label>
-                        <p>{field.description}</p>
+                  {section.fields.map((field) => {
+                    const copy = newGreedyFieldCopy(field.id, locale, {
+                      label: field.label,
+                      description: field.description,
+                    });
+                    return (
+                      <div
+                        key={field.id}
+                        className={`newgreedy-field${field.editable ? "" : " locked"}`}
+                      >
+                        <div>
+                          <label htmlFor={`newgreedy-${field.id.replace(".", "-")}`}>
+                            {copy.label}
+                          </label>
+                          <p>{copy.description}</p>
+                        </div>
+                        <ConfigControl
+                          field={field}
+                          draft={draft[field.id] ?? originalDraftValue(field)}
+                          onChange={(value) =>
+                            setDraft((current) => ({ ...current, [field.id]: value }))
+                          }
+                        />
                       </div>
-                      <ConfigControl
-                        field={field}
-                        draft={draft[field.id] ?? originalDraftValue(field)}
-                        onChange={(value) =>
-                          setDraft((current) => ({ ...current, [field.id]: value }))
-                        }
-                      />
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </details>
             ))}
           </div>
           <div className="newgreedy-config-actions">
-            <span>Une modification nécessite un redémarrage de NewGreedy.</span>
+            <span>{t("admin.ngRestartNote")}</span>
             <button type="submit" disabled={!hasChanges || saving}>
               <SaveIcon />
-              {saving ? "Enregistrement…" : "Enregistrer les modifications"}
+              {saving ? t("admin.saving") : t("admin.saveChanges")}
             </button>
           </div>
         </form>
       )}
 
-      {resetOpen && (
-        <FileDialog
-          eyebrow="Administration"
-          title="Remettre les statistiques à zéro ?"
-          description="Toutes les statistiques NewGreedy actuellement enregistrées seront supprimées."
-          onClose={() => setResetOpen(false)}
-          closeDisabled={resetting}
-        >
-          <div className="confirmation-content">
-            <p className="permanent-delete-warning">
-              Cette action n’arrête et ne supprime aucun torrent dans qBittorrent.
-            </p>
-            <p className="form-message error-message" role="alert">
-              {resetError}
-            </p>
-            <div className="dialog-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => setResetOpen(false)}
-                disabled={resetting}
-                data-initial-focus
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                className="danger-button"
-                onClick={() => void resetStats()}
-                disabled={resetting}
-              >
-                {resetting ? "Remise à zéro…" : "Confirmer"}
-              </button>
-            </div>
-          </div>
-        </FileDialog>
-      )}
-
       {restartOpen && (
         <FileDialog
-          eyebrow="Administration"
-          title="Redémarrer NewGreedy ?"
-          description="Le proxy sera recréé avec la configuration enregistrée."
+          eyebrow={t("admin.adminEyebrow")}
+          title={t("admin.restartNewgreedyTitle")}
+          description={t("admin.restartNewgreedyDescription")}
           onClose={() => setRestartOpen(false)}
           closeDisabled={requestingRestart}
         >
           <div className="confirmation-content">
             <p className="permanent-delete-warning">
-              Les annonces torrent seront interrompues quelques secondes. qBittorrent ne sera pas
-              redémarré.
-            </p>
-            <p className="form-message error-message" role="alert">
-              {restartActionError}
+              {t("admin.restartNewgreedyWarning")}
             </p>
             <div className="dialog-actions">
               <button
@@ -504,14 +482,14 @@ export function NewGreedyControlPanel({
                 disabled={requestingRestart}
                 data-initial-focus
               >
-                Annuler
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
                 onClick={() => void requestRestart()}
                 disabled={requestingRestart}
               >
-                {requestingRestart ? "Demande en cours…" : "Confirmer le redémarrage"}
+                {requestingRestart ? t("admin.requesting") : t("admin.confirmRestart")}
               </button>
             </div>
           </div>

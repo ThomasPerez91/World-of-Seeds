@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.coordination import RedisCoordinator
 from app.core.config import Settings, get_settings
 from app.core.database import get_db_session
 from app.integrations import ExternalServicesMonitor
@@ -16,7 +17,9 @@ from app.integrations.newgreedy_restart import NewGreedyRestartStore
 from app.integrations.wos_restart import WosRestartStore
 from app.main import app
 from app.models import Base
+from app.observability import OperationalMetricsCache
 from app.options import OptionsStore
+from app.torrents.downloads import DownloadRateLimiter
 
 
 @pytest.fixture
@@ -56,6 +59,7 @@ async def client(db_session: AsyncSession, data_root: Path) -> AsyncIterator[Asy
     app.dependency_overrides[get_db_session] = override_db_session
     app.dependency_overrides[get_settings] = override_settings
     app.state.external_services_monitor = ExternalServicesMonitor(test_settings)
+    app.state.redis_coordinator = RedisCoordinator.unconfigured()
     app.state.newgreedy_config_store = NewGreedyConfigStore(
         test_settings.data_root,
         max_bytes=test_settings.newgreedy_config_max_bytes,
@@ -69,6 +73,8 @@ async def client(db_session: AsyncSession, data_root: Path) -> AsyncIterator[Asy
         status_owner_uid=os.geteuid(),
     )
     app.state.options_store = OptionsStore(test_settings.data_root)
+    app.state.download_rate_limiter = DownloadRateLimiter()
+    app.state.operational_metrics_cache = OperationalMetricsCache()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as test_client:
         yield test_client

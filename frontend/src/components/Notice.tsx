@@ -6,6 +6,7 @@ import {
   SuccessIcon,
   WarningIcon,
 } from "./icons";
+import { useI18n } from "../i18n";
 
 export type NoticeTone = "success" | "error" | "warning" | "info" | "progress";
 
@@ -15,14 +16,6 @@ const icons = {
   warning: WarningIcon,
   info: InfoIcon,
   progress: LoadingIcon,
-};
-
-const defaultTitles = {
-  success: "Opération réussie",
-  error: "Action impossible",
-  warning: "Attention",
-  info: "Information",
-  progress: "Opération en cours",
 };
 
 export function Notice({
@@ -38,6 +31,7 @@ export function Notice({
   title?: string;
   tone?: NoticeTone;
 }) {
+  const { t } = useI18n();
   if (message === "") return null;
   const Icon = icons[tone];
 
@@ -49,19 +43,19 @@ export function Notice({
     >
       <Icon className={tone === "progress" ? "rotating" : undefined} />
       <div className="notice-copy">
-        <strong>{title ?? defaultTitles[tone]}</strong>
+        <strong>{title ?? t(`notice.${tone}`)}</strong>
         <span>{message}</span>
       </div>
       {onRetry !== undefined && (
         <button type="button" className="notice-retry" onClick={onRetry}>
-          Réessayer
+          {t("common.retry")}
         </button>
       )}
       <button
         type="button"
         className="notice-dismiss"
         onClick={onDismiss}
-        aria-label="Fermer le message"
+        aria-label={t("notice.close")}
       >
         <CloseIcon />
       </button>

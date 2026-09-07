@@ -1,0 +1,12 @@
+[Unit]
+Description=Collect World of Seeds V2 SMART metrics every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+AccuracySec=15s
+Unit=world-of-seeds-v2-smart-metrics.service
+
+[Install]
+WantedBy=timers.target

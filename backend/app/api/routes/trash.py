@@ -42,21 +42,25 @@ from app.trash.dependencies import TrashServiceDependency
 router = APIRouter()
 
 
+def _detail(code: str, message: str) -> dict[str, str | None]:
+    return {"code": code, "message": message, "field": None}
+
+
 def _raise_trash_error(exc: Exception) -> Never:
     if isinstance(exc, InvalidRelativePathError):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid relative path",
+            detail=_detail("file_path_invalid", "Invalid relative path"),
         ) from exc
     if isinstance(exc, (TrashEntryNotFoundError, TrashStorageMissingError)):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Trash entry not found",
+            detail=_detail("trash_entry_not_found", "Trash entry not found"),
         ) from exc
     if isinstance(exc, BrowserPathNotFoundError):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="File not found",
+            detail=_detail("file_not_found", "File not found"),
         ) from exc
     if isinstance(
         exc,
@@ -64,32 +68,38 @@ def _raise_trash_error(exc: Exception) -> Never:
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid trash operation",
+            detail=_detail("trash_operation_invalid", "Invalid trash operation"),
         ) from exc
     if isinstance(exc, (BrowserPathBlockedError, MutationProtectedPathError)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Path is blocked",
+            detail=_detail("file_path_blocked", "Path is blocked"),
         ) from exc
     if isinstance(exc, (MutationCollisionError, TrashRestoreTargetMissingError)):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="The original location is unavailable or already occupied",
+            detail=_detail(
+                "trash_restore_target_unavailable",
+                "The original location is unavailable or already occupied",
+            ),
         ) from exc
     if isinstance(exc, TrashStorageUnsafeError):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Trash entry failed its integrity check",
+            detail=_detail("trash_integrity_failed", "Trash entry failed its integrity check"),
         ) from exc
     if isinstance(exc, (MutationCompensationError, TrashCompensationError)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Trash operation could not be rolled back safely",
+            detail=_detail(
+                "trash_operation_unverified",
+                "Trash operation could not be rolled back safely",
+            ),
         ) from exc
     if isinstance(exc, TrashPurgeError):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Permanent deletion did not complete",
+            detail=_detail("trash_purge_incomplete", "Permanent deletion did not complete"),
         ) from exc
     if isinstance(
         exc,
@@ -97,7 +107,7 @@ def _raise_trash_error(exc: Exception) -> Never:
     ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Trash storage is unavailable",
+            detail=_detail("trash_storage_unavailable", "Trash storage is unavailable"),
         ) from exc
     raise exc
 
