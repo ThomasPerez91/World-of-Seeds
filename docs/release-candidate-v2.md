@@ -14,6 +14,8 @@ This runbook is the V2-34 boundary. It validates a release candidate on the isol
 
 The approved V2-33 baseline is `v2-33-go-20260907`. Its final ledger SHA-256 is `38c94b41aed849a754053470e4a1eba8834157c64c57c6fb2e7d79dcca19d70b` and its tested runtime revision is `adcf67d5ea92b72c2a2210f8cdafb29669a940d8`.
 
+The exact `backend/migrations/versions` Git tree from that runtime is `12c3a629ecf105797afd787d06f6c1e9d2b24d5b`. V2-34 validates the current migration tree against this value so an existing migration cannot be edited in place while retaining the same Alembic revision.
+
 The previous WOS image retained for application rollback is:
 
 `ghcr.io/thomasperez91/world-of-seeds-v2@sha256:d0e817283ad95ba1792b4e16e7241bddabbce2190272382e2c339b4c291a947e`
@@ -30,16 +32,17 @@ This digest is a rollback input, never a mutable tag.
 
 ## Database compatibility
 
-The V2-33 pilot schema and the V2-34 candidate schema are both Alembic revision `20260831_22`. V2-34 is therefore deliberately schema-neutral: no expand/contract migration is required inside the RC itself, and adding any later migration requires reopening this compatibility decision and updating the manifest, tests, and runbook.
+The V2-33 pilot schema and the V2-34 candidate schema are both Alembic revision `20260831_22`. In addition to the revision identifier, the complete pilot `backend/migrations/versions` tree is pinned to `12c3a629ecf105797afd787d06f6c1e9d2b24d5b`. V2-34 is therefore deliberately schema-neutral: no expand/contract migration is required inside the RC itself, and changing any existing migration or adding a later migration requires reopening this compatibility decision and updating the manifest, tests, and runbook.
 
 Before candidate validation:
 
 1. verify Alembic reports a single head at `20260831_22`;
-2. execute the normal CI migration round-trip and require it to pass;
-3. take the encrypted V2 backup and complete the isolated restore drill before a host mutation;
-4. preserve the V2 PostgreSQL volume during an application-image rollback.
+2. verify `git rev-parse HEAD:backend/migrations/versions` equals `12c3a629ecf105797afd787d06f6c1e9d2b24d5b`;
+3. execute the normal CI migration round-trip and require it to pass;
+4. take the encrypted V2 backup and complete the isolated restore drill before a host mutation;
+5. preserve the V2 PostgreSQL volume during an application-image rollback.
 
-Because the schema is unchanged from the pilot, rollback to the previous WOS digest must not require a database downgrade. Any future RC migration must be expand/contract compatible with the previous approved application digest or supply and prove a bounded rollback migration before it is accepted.
+Because both the revision and the migration contents are unchanged from the pilot, rollback to the previous WOS digest must not require a database downgrade. Any future RC migration must be expand/contract compatible with the previous approved application digest or supply and prove a bounded rollback migration before it is accepted.
 
 ## Rise2 validation
 

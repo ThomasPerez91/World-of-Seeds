@@ -10,7 +10,8 @@
   },
   "database": {
     "pilot_revision": "20260831_22",
-    "candidate_revision": "20260831_22"
+    "candidate_revision": "20260831_22",
+    "pilot_versions_tree_sha": "12c3a629ecf105797afd787d06f6c1e9d2b24d5b"
   },
   "release_policy": {
     "automatic_deploy": false,
