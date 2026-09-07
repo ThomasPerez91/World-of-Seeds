@@ -5,15 +5,14 @@ on:
   push:
     branches:
       - master
+      - develop
       - develop_V2
 
 permissions:
   contents: read
 
 env:
-  WOS_VERSION_CHANNEL: >-
-    ${{ ((github.event_name == 'pull_request' && github.base_ref == 'develop_V2') ||
-    github.ref == 'refs/heads/develop_V2') && 'v2' || 'stable' }}
+  WOS_VERSION_CHANNEL: v2
 
 jobs:
   backend:
