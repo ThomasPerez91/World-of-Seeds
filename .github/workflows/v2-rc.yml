@@ -4,9 +4,11 @@ on:
   pull_request:
     branches:
       - develop_V2
+      - develop
   push:
     branches:
       - develop_V2
+      - develop
 
 permissions:
   contents: read
@@ -14,6 +16,7 @@ permissions:
 env:
   PREVIOUS_WOS_IMAGE: ghcr.io/thomasperez91/world-of-seeds-v2@sha256:d0e817283ad95ba1792b4e16e7241bddabbce2190272382e2c339b4c291a947e
   WOS_DATABASE_URL: postgresql+asyncpg://world_of_seeds:world_of_seeds_test@127.0.0.1:5432/world_of_seeds_test
+  V2_STABLE_RELEASE_SHA: 4814d4636e4a14edfa711c2c78da4dd5a8df2300
 
 jobs:
   policy:
@@ -31,7 +34,7 @@ jobs:
           set -Eeuo pipefail
           version="$(python scripts/versioning.py check --channel v2 --print-version)"
           printf 'version=%s\n' "$version" >>"$GITHUB_OUTPUT"
-      - name: Validate closed V2 release policy
+      - name: Validate closed V2 release policy when applicable
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -41,7 +44,11 @@ jobs:
               python scripts/validate_v2_release_candidate.py
               ;;
             2.0.0)
-              python scripts/validate_v2_stable_release.py
+              if [ "$GITHUB_SHA" = "$V2_STABLE_RELEASE_SHA" ]; then
+                python scripts/validate_v2_stable_release.py
+              else
+                echo "V2 2.0.0 is already released; closed V2-35 provenance applies only to $V2_STABLE_RELEASE_SHA."
+              fi
               ;;
             *)
               echo "No V2-34/V2-35 closed release policy applies to $VERSION."
