@@ -7,12 +7,8 @@ def _repository() -> Path:
 
 def test_rise2_preflight_preserves_newgreedy_policy_across_qb_restarts() -> None:
     repository = _repository()
-    preflight = (repository / "scripts" / "rise2_v2_preflight.sh").read_text(
-        encoding="utf-8"
-    )
-    policy = (repository / "scripts" / "rise2_v2_newgreedy_policy.py").read_text(
-        encoding="utf-8"
-    )
+    preflight = (repository / "scripts" / "rise2_v2_preflight.sh").read_text(encoding="utf-8")
+    policy = (repository / "scripts" / "rise2_v2_newgreedy_policy.py").read_text(encoding="utf-8")
 
     policy_call = "rise2_v2_newgreedy_policy.py"
     bootstrap = "rise2_v2_qb_bootstrap.py"
