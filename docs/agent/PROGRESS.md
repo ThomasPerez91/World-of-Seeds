@@ -1711,3 +1711,11 @@
   automatically.
 - V2-32D remains blocked by NewGreedy v1.7.5 and non-blocking unless a separate decision changes
   that status.
+
+## 2026-09-07 — V2-34 validée sur Rise2 / V2-35 stable en préparation
+
+- V2-34 est validée sur Rise2 avec l'image RC exacte `2.0.0-rc.1`, revision `896323ac1858a804ce5a6d33185f3b30b7db3847`, digest `sha256:47f0e7ba7ca2f5700e94def18bac91748cefcaac6b61ed4225573b4aa6d1afcd`.
+- Le backup pré-RC et le restore drill isolé ont réussi ; le rollback applicatif réel RC vers le digest précédent puis retour RC a réussi en 15 secondes sans recréer les volumes PostgreSQL, Redis, qBittorrent ou NewGreedy, et V1 est restée disponible.
+- V2-35 part exactement de ce HEAD sur `feat/v2-35-stable-release` et prépare `2.0.0` sans changement fonctionnel : versioning V2 stable, manifeste de provenance, validation fermée du delta RC→stable, qualification CI et runbook de cutover progressif.
+- Le merge V2-35 ne déploie pas automatiquement, ne publie pas `latest`/`2.0.0`, ne change pas le DNS et n'importe pas V1. Le digest stable exact doit d'abord être publié sous son SHA, validé puis promu sans rebuild après approbation explicite.
+- V1 reste disponible pendant la fenêtre de rollback ; V2-32D reste bloquée et non bloquante.

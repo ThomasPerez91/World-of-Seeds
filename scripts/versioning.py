@@ -15,6 +15,11 @@ import tomllib
 STABLE_SEMVER_PATTERN = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
 )
+V2_STABLE_PATTERN = re.compile(
+    r"^(?P<major>[2-9]|[1-9][0-9]+)\."
+    r"(0|[1-9][0-9]*)\."
+    r"(0|[1-9][0-9]*)$"
+)
 V2_PRERELEASE_PATTERN = re.compile(
     r"^(?P<major>[2-9]|[1-9][0-9]+)\."
     r"(0|[1-9][0-9]*)\."
@@ -49,12 +54,16 @@ def _match_one(path: Path, pattern: str) -> str:
 
 
 def validate_version_format(version: str, channel: VersionChannel) -> None:
-    pattern = STABLE_SEMVER_PATTERN if channel == "stable" else V2_PRERELEASE_PATTERN
-    if pattern.fullmatch(version) is None:
-        if channel == "stable":
-            requirement = "a stable semantic version"
-        else:
-            requirement = "a V2 prerelease such as 2.0.0-alpha.0"
+    if channel == "stable":
+        accepted = STABLE_SEMVER_PATTERN.fullmatch(version) is not None
+        requirement = "a stable semantic version"
+    else:
+        accepted = (
+            V2_PRERELEASE_PATTERN.fullmatch(version) is not None
+            or V2_STABLE_PATTERN.fullmatch(version) is not None
+        )
+        requirement = "a V2 prerelease or stable semantic version with major >= 2"
+    if not accepted:
         raise VersioningError(f"Version {version!r} is not {requirement}")
 
 
