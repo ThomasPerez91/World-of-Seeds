@@ -273,6 +273,8 @@ services:
     image: ${WOS_V2_NEWGREEDY_IMAGE:?set immutable WOS_V2_NEWGREEDY_IMAGE digest}
     pull_policy: always
     restart: "no"
+    group_add:
+      - "${WOS_V2_NEWGREEDY_GID:?set WOS_V2_NEWGREEDY_GID}"
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
