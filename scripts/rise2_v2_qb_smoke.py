@@ -95,7 +95,7 @@ def smoke() -> None:
         state.mkdir(mode=0o700)
         ng_config = root / "newgreedy.ini"
         ng_config.write_text(
-            "[proxy]\nlisten_port = 3456\n[stats]\npersist_stats = true\n"
+            "[proxy]\nlisten_port = 3456\nflow_detail = 0\n[stats]\npersist_stats = true\n"
             "auto_purge_stopped = false\n[web]\nweb_enabled = true\n"
             "web_host = 0.0.0.0\nweb_port = 8080\n"
         )
