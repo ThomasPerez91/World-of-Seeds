@@ -52,6 +52,15 @@ def test_consolidated_runner_covers_every_remaining_gate() -> None:
     assert "finalize" not in runner
 
 
+def test_dependency_failure_recovery_canary_restarts_workers_deterministically() -> None:
+    runner = _read("rise2_v2_run_dependency_failure_gate.sh")
+
+    assert 'stop_service worker\nsetup="$(probe_mode setup)"' in runner
+    assert "SETUP_DONE=1\nstart_service worker\nwait_canary" in runner
+    assert 'echo "last_canary_snapshot=$snap" >&2' in runner
+    assert "--remove-orphans" not in runner
+
+
 def test_resource_pressure_gate_is_bounded_and_fail_closed() -> None:
     runner = _read("rise2_v2_run_resource_pressure_gate.sh")
     probe = _read("rise2_v2_resource_pressure_probe.py")
