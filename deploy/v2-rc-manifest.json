@@ -1,0 +1,22 @@
+{
+  "schema": "world-of-seeds-v2-release-candidate/v1",
+  "version": "2.0.0-rc.1",
+  "functional_freeze": true,
+  "pilot": {
+    "approval_ref": "v2-33-go-20260907",
+    "ledger_sha256": "38c94b41aed849a754053470e4a1eba8834157c64c57c6fb2e7d79dcca19d70b",
+    "runtime_revision": "adcf67d5ea92b72c2a2210f8cdafb29669a940d8",
+    "previous_wos_image": "ghcr.io/thomasperez91/world-of-seeds-v2@sha256:d0e817283ad95ba1792b4e16e7241bddabbce2190272382e2c339b4c291a947e"
+  },
+  "database": {
+    "pilot_revision": "20260831_22",
+    "candidate_revision": "20260831_22"
+  },
+  "release_policy": {
+    "automatic_deploy": false,
+    "dns_switch": false,
+    "v1_import": false,
+    "stable_release": false,
+    "v1_rollback_preserved": true
+  }
+}
