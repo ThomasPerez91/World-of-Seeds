@@ -2,9 +2,9 @@ name: Rise2 qB bootstrap
 
 on:
   push:
-    branches: [fix/v2-rise2-qbittorrent-bootstrap, develop_V2]
+    branches: [fix/v2-rise2-qbittorrent-bootstrap, develop_V2, develop]
   pull_request:
-    branches: [develop_V2]
+    branches: [develop_V2, develop]
 
 permissions:
   contents: read
