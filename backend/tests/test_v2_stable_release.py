@@ -1,6 +1,5 @@
 import json
-import subprocess
-import sys
+import runpy
 from pathlib import Path
 
 
@@ -8,18 +7,22 @@ def _repository() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def test_v2_stable_release_policy_passes() -> None:
+def test_v2_stable_release_policy_components_pass_without_git_history() -> None:
     repository = _repository()
-    result = subprocess.run(
-        [sys.executable, str(repository / "scripts/validate_v2_stable_release.py")],
-        cwd=repository,
-        check=False,
-        capture_output=True,
-        text=True,
+    namespace = runpy.run_path(str(repository / "scripts/validate_v2_stable_release.py"))
+    manifest = json.loads(
+        (repository / "deploy/v2-stable-manifest.json").read_text(encoding="utf-8")
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "V2 stable release policy: PASS (2.0.0)" in result.stdout
+    namespace["_validate_manifest"](manifest)
+    namespace["_validate_version"](repository, manifest)
+    namespace["_validate_database"](repository)
+    namespace["_validate_workflows"](repository)
+    namespace["_validate_runbook"](repository)
+
+    assert namespace["EXPECTED_VERSION"] == "2.0.0"
+    assert "backend/app/main.py" not in namespace["ALLOWED_RC_DELTA"]
+    assert "backend/migrations/versions" not in namespace["ALLOWED_RC_DELTA"]
 
 
 def test_v2_stable_manifest_is_anchored_to_the_validated_rc() -> None:
