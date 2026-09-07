@@ -89,11 +89,11 @@ def test_cleanup_and_pilot_account_gates_keep_credentials_private() -> None:
     assert '"remaining_test_users"] == 0' in cleanup
     assert '"remaining_test_torrents"] == 0' in cleanup
     assert '"remaining_test_files"] == 0' in cleanup
-    assert 'os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600' in probe
+    assert "os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600" in probe
     assert "install -o root -g root -m 0600" in pilot
-    assert "rm -f -- \"$TEMP_CREDENTIALS\"" in pilot
+    assert 'rm -f -- "$TEMP_CREDENTIALS"' in pilot
     assert '"credentials_in_output"] == 0' in pilot
-    assert "cat \"$CREDENTIALS\"" not in pilot
+    assert 'cat "$CREDENTIALS"' not in pilot
 
 
 def test_rollback_gate_is_reversible_and_preserves_v2_volumes() -> None:
