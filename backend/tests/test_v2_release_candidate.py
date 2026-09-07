@@ -1,24 +1,25 @@
 from __future__ import annotations
 
-import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/validate_v2_release_candidate.py"
 
 
-def _module():
-    spec = importlib.util.spec_from_file_location("validate_v2_release_candidate", SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def test_v2_release_candidate_policy_is_valid() -> None:
-    module = _module()
-    assert module.validate_release_candidate(ROOT) == "2.0.0-rc.1"
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    assert result.returncode == 0, result.stdout
+    assert "V2 release candidate policy: PASS (2.0.0-rc.1)" in result.stdout
 
 
 def test_v2_release_candidate_locks_previous_digest_and_schema() -> None:
