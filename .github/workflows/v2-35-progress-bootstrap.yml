@@ -1,0 +1,42 @@
+name: V2-35 progress bootstrap
+
+on:
+  push:
+    branches:
+      - feat/v2-35-stable-release
+
+permissions:
+  contents: write
+
+jobs:
+  progress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: feat/v2-35-stable-release
+          fetch-depth: 0
+      - name: Append V2-35 progress once
+        run: |
+          set -Eeuo pipefail
+          marker='## 2026-09-07 — V2-34 validée sur Rise2 / V2-35 stable en préparation'
+          if grep -Fqx "$marker" docs/agent/PROGRESS.md; then
+            echo 'Progress already recorded.'
+            exit 0
+          fi
+          cat >> docs/agent/PROGRESS.md <<'EOF'
+
+## 2026-09-07 — V2-34 validée sur Rise2 / V2-35 stable en préparation
+
+- V2-34 est validée sur Rise2 avec l'image RC exacte `2.0.0-rc.1`, revision `896323ac1858a804ce5a6d33185f3b30b7db3847`, digest `sha256:47f0e7ba7ca2f5700e94def18bac91748cefcaac6b61ed4225573b4aa6d1afcd`.
+- Le backup pré-RC et le restore drill isolé ont réussi ; le rollback applicatif réel RC vers le digest précédent puis retour RC a réussi en 15 secondes sans recréer les volumes PostgreSQL, Redis, qBittorrent ou NewGreedy, et V1 est restée disponible.
+- V2-35 part exactement de ce HEAD sur `feat/v2-35-stable-release` et prépare `2.0.0` sans changement fonctionnel : versioning V2 stable, manifeste de provenance, validation fermée du delta RC→stable, qualification CI et runbook de cutover progressif.
+- Le merge V2-35 ne déploie pas automatiquement, ne publie pas `latest`/`2.0.0`, ne change pas le DNS et n'importe pas V1. Le digest stable exact doit d'abord être publié sous son SHA, validé puis promu sans rebuild après approbation explicite.
+- V1 reste disponible pendant la fenêtre de rollback ; V2-32D reste bloquée et non bloquante.
+EOF
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/agent/PROGRESS.md
+          git commit -m 'docs(v2-35): record stable release preparation'
+          git push origin HEAD:feat/v2-35-stable-release
