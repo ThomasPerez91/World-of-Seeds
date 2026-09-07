@@ -17,62 +17,10 @@ jobs:
         with:
           fetch-depth: 0
       - name: Replace obsolete progress tail
+        env:
+          TAIL_B64: IyMgVjItMzMg4oCUIExpbWl0ZWQgUmlzZTIgcGlsb3QgY29tcGxldGVkCgotIFBSIGAjMTAzYCBjb21wbGV0ZWQgdGhlIGxpbWl0ZWQgUmlzZTIgcGlsb3QgYW5kIHdhcyBtZXJnZWQgaW50byBgZGV2ZWxvcF9WMmAgYWZ0ZXIgYSBkaXN0aW5jdAogIG1lcmdlIGF1dGhvcml6YXRpb24uIFRoZSBwaWxvdCByZXN1bHQgcmVtYWlucyBpbW11dGFibGU6IDEyLzEyIGdhdGVzIFBBU1MsIGRlY2lzaW9uIGBHT2AsCiAgYXBwcm92YWwgcmVmIGB2Mi0zMy1nby0yMDI2MDkwN2AsIHRlc3RlZCBydW50aW1lIHJldmlzaW9uCiAgYGFkY2Y2N2Q1ZWE5MmI3MmMyYTIyMTBmOGNkYWZiMjk2NjlhOTQwZDhgLCBhbmQgZmluYWwgbGVkZ2VyIFNIQS0yNTYKICBgMzhjOTRiNDFhZWQ4NDlhNzU0MDUzNDcwZTRhMWViYTg4MzQxNTdjNjRjNTdjNmZiMmU3ZDc5ZGNjYTE5ZDcwYmAuCi0gVGhlIGFwcHJvdmVkIHBpbG90IFdPUyByb2xsYmFjayBpbWFnZSByZW1haW5zCiAgYGdoY3IuaW8vdGhvbWFzcGVyZXo5MS93b3JsZC1vZi1zZWVkcy12MkBzaGEyNTY6ZDBlODE3MjgzYWQ5NWJhMTc5MmI0ZTE2ZTcyNDFiZGRhYmJjZTIxOTAyNzIzODJlMmMzMzliNGMyOTFhOTQ3ZWAuCi0gVGhlIHBvc3QtcGlsb3QgTmV3R3JlZWR5IGxvZy1zYWZldHkgY29ycmVjdGlvbiB3YXMgbWVyZ2VkIHRocm91Z2ggUFIgYCMxMzVgLiBSaXNlMiBub3cgZW5mb3JjZXMKICBgcHJveHkuZmxvd19kZXRhaWwgPSAwYCB0aHJvdWdoIHRoZSBzaGFyZWQgcHJlZmxpZ2h0IGFuZCBgbmV3Z3JlZWR5LWluaXRgIHBvbGljeSB3aGlsZSBwcmVzZXJ2aW5nCiAgYHBlcnNpc3Rfc3RhdHMgPSB0cnVlYCwgYGF1dG9fcHVyZ2Vfc3RvcHBlZCA9IGZhbHNlYCwgYW5kIHRoZSBtb2RlLTA2NDAgY29uZmlndXJhdGlvbiBib3VuZGFyeS4KLSBQb3N0LW1lcmdlIGBkZXZlbG9wX1YyYCB2YWxpZGF0aW9uIGZvciBQUiBgIzEzNWA6IENJIGAjNDA4YCBhbmQgUmlzZTIgcUIgYm9vdHN0cmFwIGAjMTE1YCBQQVNTLgoKIyMgVjItMzQg4oCUIFJlbGVhc2UgY2FuZGlkYXRlCgotIEJyYW5jaCBgZmVhdC92Mi0zNC1yZWxlYXNlLWNhbmRpZGF0ZWAgYW5kIFBSIGAjMTM2YCBzdGFydCBmcm9tIGBkZXZlbG9wX1YyYAogIGA1ODI0NGM1MTU1NWY5MDE4NjMwNDljMjgwZGU1MzAyOTM5ZGIxMTk2YC4KLSBUaGUgVjIgdmVyc2lvbiBpcyBzeW5jaHJvbml6ZWQgdG8gYDIuMC4wLXJjLjFgIHRocm91Z2ggdGhlIHJlcG9zaXRvcnkgdmVyc2lvbmluZyB0b29sLCBpbmNsdWRpbmcKICBiYWNrZW5kL2Zyb250ZW5kIGxvY2tmaWxlcy4gVGhlIFYxIHN0YWJsZSByZWxlYXNlIHdvcmtmbG93IHJlbWFpbnMgbWFzdGVyLW9ubHkgYW5kIHVuY2hhbmdlZC4KLSBBZGRlZCBhIGNsb3NlZCBSQyBtYW5pZmVzdCBhbmQgdmFsaWRhdG9yIHRoYXQgZnJlZXplIGZ1bmN0aW9uYWxpdHksIHByZXNlcnZlIFYxIHJvbGxiYWNrLCBmb3JiaWQKICBhdXRvbWF0aWMgZGVwbG95bWVudC9ETlMvVjEgaW1wb3J0L3N0YWJsZSByZWxlYXNlLCBiaW5kIHRoZSBpbW11dGFibGUgVjItMzMgZXZpZGVuY2UsIGFuZCByZXF1aXJlCiAgdGhlIGNhbmRpZGF0ZSBzY2hlbWEgdG8gcmVtYWluIEFsZW1iaWMgcmV2aXNpb24gYDIwMjYwODMxXzIyYC4KLSBBZGRlZCBgZG9jcy9yZWxlYXNlLWNhbmRpZGF0ZS12Mi5tZGAgY292ZXJpbmcgaW1tdXRhYmxlIGNhbmRpZGF0ZSByZXNvbHV0aW9uLCBzY2hlbWEgY29tcGF0aWJpbGl0eSwKICBSaXNlMiB2YWxpZGF0aW9uLCBiYWNrdXAvcmVzdG9yZSwgYXBwbGljYXRpb24gcm9sbGJhY2ssIGFuZCB0aGUgc2VwYXJhdGUgVjItMzUgc3RhYmxlIGJvdW5kYXJ5LgotIEFkZGVkIHRoZSBkZWRpY2F0ZWQgYFYyIHJlbGVhc2UgY2FuZGlkYXRlYCB3b3JrZmxvdy4gUnVuIGAjMmAgKGAzNDExOTc5NDk5MmApIFBBU1M6IHRoZSBSQyBwb2xpY3kKICBpcyB2YWxpZCBhbmQgdGhlIGV4YWN0IHByZXZpb3VzIFdPUyBkaWdlc3Qgc3RhcnRzIHN1Y2Nlc3NmdWxseSBhZ2FpbnN0IHRoZSBjYW5kaWRhdGUgc2NoZW1hIGFuZAogIHBhc3NlcyBsaXZlL3JlYWRpbmVzcyBjaGVja3Mgd2l0aG91dCBhIGRhdGFiYXNlIGRvd25ncmFkZS4KLSBNYWluIENJIGFuZCB0aGUgaW5kZXBlbmRlbnQgcUIgZnJlc2gtdm9sdW1lIHNtb2tlIHJlbWFpbiBtYW5kYXRvcnkgb24gdGhlIGZpbmFsIFBSIGhlYWQuIE5vIFYyLTM0CiAgbWVyZ2UsIFJpc2UyIGRlcGxveW1lbnQsIEROUyBzd2l0Y2gsIHJlYWwgVjEgaW1wb3J0LCBvciBzdGFibGUgYDIuMC4wYCByZWxlYXNlIGlzIGF1dG9tYXRpYy4KCiMjIE5leHQgdGFzawoKLSBGaW5pc2ggVjItMzQgUFIgYCMxMzZgOiByZXF1aXJlIGZpbmFsLWhlYWQgQ0ksIFYyIHJlbGVhc2UtY2FuZGlkYXRlIGNvbXBhdGliaWxpdHksIHFCIGJvb3RzdHJhcCwKICBhbmQgYXV0b21hdGVkIHJldmlldyB0byBiZSBncmVlbjsgZml4IGFuZCByZXNvbHZlIGV2ZXJ5IHJlbGVhc2UtYmxvY2tpbmcgZmluZGluZy4KLSBNZXJnZSBQUiBgIzEzNmAgb25seSBhZnRlciBhIHNlcGFyYXRlIGV4cGxpY2l0IGF1dGhvcml6YXRpb24uCi0gQWZ0ZXIgbWVyZ2UsIHJlc29sdmUgYW5kIHZhbGlkYXRlIHRoZSBpbW11dGFibGUgYDIuMC4wLXJjLjFgIGltYWdlIG9uIFJpc2UyIHVzaW5nIHRoZSBWMi0zNAogIHJ1bmJvb2suIERvIG5vdCBzdGFydCBWMi0zNSwgcHVibGlzaCBzdGFibGUgYDIuMC4wYCwgc3dpdGNoIEROUywgb3IgaW1wb3J0IHJlYWwgVjEgZGF0YQogIGF1dG9tYXRpY2FsbHkuCi0gVjItMzJEIHJlbWFpbnMgYmxvY2tlZCBieSBOZXdHcmVlZHkgdjEuNy41IGFuZCBub24tYmxvY2tpbmcgdW5sZXNzIGEgc2VwYXJhdGUgZGVjaXNpb24gY2hhbmdlcwogIHRoYXQgc3RhdHVzLgo=
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("docs/agent/PROGRESS.md")
-          text = path.read_text(encoding="utf-8")
-          marker = "\n## Next task\n"
-          if marker not in text:
-              raise SystemExit("PROGRESS.md: Next task marker not found")
-          prefix, _, _ = text.partition(marker)
-          replacement = r'''
-
-## V2-33 — Limited Rise2 pilot completed
-
-- PR `#103` completed the limited Rise2 pilot and was merged into `develop_V2` after a distinct
-  merge authorization. The pilot result remains immutable: 12/12 gates PASS, decision `GO`,
-  approval ref `v2-33-go-20260907`, tested runtime revision
-  `adcf67d5ea92b72c2a2210f8cdafb29669a940d8`, and final ledger SHA-256
-  `38c94b41aed849a754053470e4a1eba8834157c64c57c6fb2e7d79dcca19d70b`.
-- The approved pilot WOS rollback image remains
-  `ghcr.io/thomasperez91/world-of-seeds-v2@sha256:d0e817283ad95ba1792b4e16e7241bddabbce2190272382e2c339b4c291a947e`.
-- The post-pilot NewGreedy log-safety correction was merged through PR `#135`. Rise2 now enforces
-  `proxy.flow_detail = 0` through the shared preflight and `newgreedy-init` policy while preserving
-  `persist_stats = true`, `auto_purge_stopped = false`, and the mode-0640 configuration boundary.
-- Post-merge `develop_V2` validation for PR `#135`: CI `#408` and Rise2 qB bootstrap `#115` PASS.
-
-## V2-34 — Release candidate
-
-- Branch `feat/v2-34-release-candidate` and PR `#136` start from `develop_V2`
-  `58244c51555f901863049c280de5302939db1196`.
-- The V2 version is synchronized to `2.0.0-rc.1` through the repository versioning tool, including
-  backend/frontend lockfiles. The V1 stable release workflow remains master-only and unchanged.
-- Added a closed RC manifest and validator that freeze functionality, preserve V1 rollback, forbid
-  automatic deployment/DNS/V1 import/stable release, bind the immutable V2-33 evidence, and require
-  the candidate schema to remain Alembic revision `20260831_22`.
-- Added `docs/release-candidate-v2.md` covering immutable candidate resolution, schema compatibility,
-  Rise2 validation, backup/restore, application rollback, and the separate V2-35 stable boundary.
-- Added the dedicated `V2 release candidate` workflow. Run `#2` (`34119794992`) PASS: the RC policy
-  is valid and the exact previous WOS digest starts successfully against the candidate schema and
-  passes live/readiness checks without a database downgrade.
-- Main CI and the independent qB fresh-volume smoke remain mandatory on the final PR head. No V2-34
-  merge, Rise2 deployment, DNS switch, real V1 import, or stable `2.0.0` release is automatic.
-
-## Next task
-
-- Finish V2-34 PR `#136`: require final-head CI, V2 release-candidate compatibility, qB bootstrap,
-  and automated review to be green; fix and resolve every release-blocking finding.
-- Merge PR `#136` only after a separate explicit authorization.
-- After merge, resolve and validate the immutable `2.0.0-rc.1` image on Rise2 using the V2-34
-  runbook. Do not start V2-35, publish stable `2.0.0`, switch DNS, or import real V1 data
-  automatically.
-- V2-32D remains blocked by NewGreedy v1.7.5 and non-blocking unless a separate decision changes
-  that status.
-'''
-          path.write_text(prefix + replacement, encoding="utf-8")
-          PY
+          python3 -c 'import base64, os; from pathlib import Path; p=Path("docs/agent/PROGRESS.md"); t=p.read_text(encoding="utf-8"); m="\n## Next task\n"; assert m in t; p.write_text(t.partition(m)[0]+"\n"+base64.b64decode(os.environ["TAIL_B64"]).decode(), encoding="utf-8")'
           git diff --check
       - name: Commit progress update
         run: |
