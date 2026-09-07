@@ -43,6 +43,7 @@ ALLOWED_RC_DELTA = {
     "VERSION",
     "backend/app/__init__.py",
     "backend/pyproject.toml",
+    "backend/tests/test_v2_release_candidate.py",
     "backend/tests/test_v2_stable_release.py",
     "backend/tests/test_versioning.py",
     "backend/uv.lock",
