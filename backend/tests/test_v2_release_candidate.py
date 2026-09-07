@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/validate_v2_release_candidate.py"
 
 
-def test_v2_release_candidate_policy_is_valid() -> None:
+def test_v2_release_candidate_validator_rejects_the_stable_checkout() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],
         cwd=ROOT,
@@ -18,12 +18,13 @@ def test_v2_release_candidate_policy_is_valid() -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
-    assert result.returncode == 0, result.stdout
-    assert "V2 release candidate policy: PASS (2.0.0-rc.1)" in result.stdout
+    assert result.returncode == 1
+    assert "VERSION must be a 2.0.0 release candidate" in result.stdout
 
 
 def test_v2_release_candidate_pins_approved_pilot_evidence() -> None:
     manifest = json.loads((ROOT / "deploy/v2-rc-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["version"] == "2.0.0-rc.1"
     assert manifest["pilot"] == {
         "approval_ref": "v2-33-go-20260907",
         "ledger_sha256": "38c94b41aed849a754053470e4a1eba8834157c64c57c6fb2e7d79dcca19d70b",
@@ -44,7 +45,7 @@ def test_v2_release_candidate_locks_pilot_migration_tree() -> None:
     }
 
 
-def test_v2_release_candidate_cannot_cross_stable_boundary() -> None:
+def test_v2_release_candidate_evidence_remains_closed_after_stable_promotion() -> None:
     manifest = json.loads((ROOT / "deploy/v2-rc-manifest.json").read_text(encoding="utf-8"))
     assert manifest["functional_freeze"] is True
     assert manifest["release_policy"] == {
