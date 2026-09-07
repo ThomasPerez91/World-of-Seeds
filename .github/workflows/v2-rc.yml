@@ -1,0 +1,121 @@
+name: V2 release candidate
+
+on:
+  pull_request:
+    branches:
+      - develop_V2
+  push:
+    branches:
+      - develop_V2
+
+permissions:
+  contents: read
+
+env:
+  PREVIOUS_WOS_IMAGE: ghcr.io/thomasperez91/world-of-seeds-v2@sha256:d0e817283ad95ba1792b4e16e7241bddabbce2190272382e2c339b4c291a947e
+  WOS_DATABASE_URL: postgresql+asyncpg://world_of_seeds:world_of_seeds_test@127.0.0.1:5432/world_of_seeds_test
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Validate synchronized V2 RC version
+        run: python scripts/versioning.py check --channel v2 --print-version
+      - name: Validate closed V2 RC policy
+        run: python scripts/validate_v2_release_candidate.py
+
+  previous-image-compatibility:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: world_of_seeds_test
+          POSTGRES_USER: world_of_seeds
+          POSTGRES_PASSWORD: world_of_seeds_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U world_of_seeds -d world_of_seeds_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:8.2.9-alpine3.22
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          working-directory: backend
+      - name: Materialize candidate schema from frozen dependencies
+        working-directory: backend
+        run: |
+          uv sync --frozen --dev
+          uv run alembic -c alembic.ini upgrade head
+          test "$(uv run alembic -c alembic.ini heads | awk '{print $1}')" = "20260831_22"
+      - name: Pull exact previous WOS digest
+        run: |
+          docker pull "$PREVIOUS_WOS_IMAGE"
+          docker image inspect "$PREVIOUS_WOS_IMAGE" >/dev/null
+      - name: Start previous digest against candidate schema
+        run: |
+          data="$RUNNER_TEMP/v2-rc-previous-data"
+          mkdir -p "$data"
+          sudo chown 10001:10001 "$data"
+          docker run --detach --name wos-v2-rc-previous \
+            --network host \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --mount "type=bind,src=$data,dst=/data" \
+            --env WOS_ENVIRONMENT=development \
+            --env WOS_RUNTIME_PROFILE=v2 \
+            --env WOS_COOKIE_SECURE=false \
+            --env 'WOS_ALLOWED_HOSTS=["127.0.0.1","localhost"]' \
+            --env WOS_DATA_ROOT=/data \
+            --env WOS_DATABASE_URL="$WOS_DATABASE_URL" \
+            --env WOS_POSTGRES_HOST=127.0.0.1 \
+            --env WOS_POSTGRES_PORT=5432 \
+            --env WOS_POSTGRES_DB=world_of_seeds_test \
+            --env WOS_POSTGRES_USER=world_of_seeds \
+            --env WOS_POSTGRES_PASSWORD=world_of_seeds_test \
+            --env WOS_REDIS_URL=redis://127.0.0.1:6379/14 \
+            "$PREVIOUS_WOS_IMAGE" \
+            uvicorn app.main:app --host 127.0.0.1 --port 28082 \
+              --no-access-log --no-server-header
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:28082/api/v1/health/live >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker logs wos-v2-rc-previous
+              exit 1
+            fi
+            sleep 1
+          done
+          curl --fail --silent --show-error \
+            http://127.0.0.1:28082/api/v1/health/ready >/dev/null
+      - name: Verify immutable previous image identity
+        run: |
+          test "$(docker inspect --format '{{.Config.Image}}' wos-v2-rc-previous)" = \
+            "$PREVIOUS_WOS_IMAGE"
+      - name: Stop previous digest smoke
+        if: always()
+        run: docker rm --force wos-v2-rc-previous >/dev/null 2>&1 || true
