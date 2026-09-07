@@ -375,7 +375,7 @@ def test_ledger_rejects_symlinked_evidence(tmp_path: Path, host_ok: None) -> Non
 
 def _concurrent_record_worker(report: str, evidence: str, queue: Any) -> None:
     module = _pilot_module()
-    setattr(module, "_verify_host_provenance", lambda *args, **kwargs: None)
+    module.__dict__["_verify_host_provenance"] = lambda *args, **kwargs: None
     metrics = _metrics("preflight")
     try:
         module.record(
