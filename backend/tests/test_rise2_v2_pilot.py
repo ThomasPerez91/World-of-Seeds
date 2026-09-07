@@ -198,7 +198,7 @@ def test_complete_go_ledger_is_private_and_valid(tmp_path: Path, host_ok: None) 
 def test_record_rejects_empty_or_unrelated_evidence(tmp_path: Path, host_ok: None) -> None:
     report = tmp_path / "pilot.json"
     evidence = tmp_path / "unrelated.json"
-    evidence.write_text('{}\n', encoding="utf-8")
+    evidence.write_text("{}\n", encoding="utf-8")
     evidence.chmod(0o600)
     pilot.initialize(report, REVISION, DIGEST)
 
@@ -285,9 +285,7 @@ def test_record_enforces_mandatory_check_order(tmp_path: Path, host_ok: None) ->
         )
 
 
-def test_record_rejects_unknown_or_duplicate_metric_names(
-    tmp_path: Path, host_ok: None
-) -> None:
+def test_record_rejects_unknown_or_duplicate_metric_names(tmp_path: Path, host_ok: None) -> None:
     report = tmp_path / "pilot.json"
     metrics = _metrics("preflight")
     evidence = _write_evidence(tmp_path / "preflight.json", "preflight", metrics)
@@ -349,9 +347,7 @@ def test_validate_rejects_out_of_order_timestamps(tmp_path: Path, host_ok: None)
     _record_one(report, tmp_path, "preflight")
     _record_one(report, tmp_path, "backup_restore")
     value = json.loads(report.read_text())
-    value["checks"]["backup_restore"]["recorded_at"] = value["checks"]["preflight"][
-        "recorded_at"
-    ]
+    value["checks"]["backup_restore"]["recorded_at"] = value["checks"]["preflight"]["recorded_at"]
 
     with pytest.raises(pilot.PilotLedgerError, match="strictly increasing"):
         pilot.validate(value)
@@ -359,9 +355,7 @@ def test_validate_rejects_out_of_order_timestamps(tmp_path: Path, host_ok: None)
 
 def test_ledger_rejects_symlinked_evidence(tmp_path: Path, host_ok: None) -> None:
     report = tmp_path / "pilot.json"
-    target = _write_evidence(
-        tmp_path / "preflight.json", "preflight", _metrics("preflight")
-    )
+    target = _write_evidence(tmp_path / "preflight.json", "preflight", _metrics("preflight"))
     link = tmp_path / "evidence-link.json"
     link.symlink_to(target)
     pilot.initialize(report, REVISION, DIGEST)
@@ -396,13 +390,9 @@ def _concurrent_record_worker(report: str, evidence: str, queue: multiprocessing
         queue.put("recorded")
 
 
-def test_concurrent_record_is_serialized_without_lost_update(
-    tmp_path: Path, host_ok: None
-) -> None:
+def test_concurrent_record_is_serialized_without_lost_update(tmp_path: Path, host_ok: None) -> None:
     report = tmp_path / "pilot.json"
-    evidence = _write_evidence(
-        tmp_path / "preflight.json", "preflight", _metrics("preflight")
-    )
+    evidence = _write_evidence(tmp_path / "preflight.json", "preflight", _metrics("preflight"))
     pilot.initialize(report, REVISION, DIGEST)
     context = multiprocessing.get_context("fork")
     queue = context.Queue()
@@ -447,8 +437,7 @@ def test_host_provenance_verifies_hostname_checkout_compose_and_running_image(
             return json.dumps(
                 {
                     "services": {
-                        name: {"image": expected_image}
-                        for name in ("api", "worker", "scheduler")
+                        name: {"image": expected_image} for name in ("api", "worker", "scheduler")
                     }
                 }
             )
@@ -471,9 +460,9 @@ def test_host_provenance_verifies_hostname_checkout_compose_and_running_image(
 
 
 def test_pilot_tool_is_executable_and_runbook_covers_every_check() -> None:
-    source = (
-        Path(__file__).resolve().parents[2] / "scripts" / "rise2_v2_pilot.py"
-    ).read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[2] / "scripts" / "rise2_v2_pilot.py").read_text(
+        encoding="utf-8"
+    )
     compile(source, "rise2_v2_pilot.py", "exec")
     assert "fcntl.flock" in source
     assert "APPROVED_RTO_SECONDS = 14_400" in source
