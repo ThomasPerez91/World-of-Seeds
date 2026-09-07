@@ -71,6 +71,7 @@ mountpoint -q -- "$smoke_root/data" || fail "CI storage tmpfs mount failed"
 sudo tee "$config_file" >/dev/null <<'EOF'
 [proxy]
 listen_port = 3456
+flow_detail = 0
 
 [stats]
 persist_stats = true
@@ -122,6 +123,8 @@ sudo "$repository/scripts/rise2_v2_preflight.sh" "$environment"
 compose up --detach --wait --wait-timeout 120 newgreedy
 wait_healthy
 compose exec -T newgreedy curl -fsS http://127.0.0.1:8080/api/health >/dev/null
+compose exec -T newgreedy python3 -c \
+    'import configparser; c=configparser.ConfigParser(); c.read("/app/config.ini"); assert c.getint("proxy", "flow_detail") == 0'
 newgreedy_container="$(compose ps --quiet newgreedy)"
 sudo docker inspect "$newgreedy_container" \
     | jq -e '.[0].NetworkSettings.Ports["8080/tcp"] == null' >/dev/null \
@@ -158,11 +161,35 @@ compose exec -T newgreedy python3 -c \
 ca_recreate="$(compose exec -T newgreedy sha256sum /root/.mitmproxy/mitmproxy-ca-cert.pem | awk '{print $1}')"
 [[ "$ca_recreate" == "$ca_initial" ]] || fail "CA changed after container recreation"
 
+# Prove the declarative init gate fails closed even when preflight is bypassed.
+sudo python3 - "$config_file" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+content = path.read_text(encoding="utf-8")
+assert "flow_detail = 0" in content
+path.write_text(content.replace("flow_detail = 0", "flow_detail = 1", 1), encoding="utf-8")
+PY
+if compose run --rm --no-deps newgreedy-init >/dev/null 2>&1; then
+    fail "verbose flow_detail unexpectedly passed newgreedy-init"
+fi
+sudo python3 - "$config_file" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+content = path.read_text(encoding="utf-8")
+assert "flow_detail = 1" in content
+path.write_text(content.replace("flow_detail = 1", "flow_detail = 0", 1), encoding="utf-8")
+PY
+
 echo "NewGreedy image: $newgreedy_image"
 echo "CA fingerprint initial: $ca_initial"
 echo "CA fingerprint after restart: $ca_restart"
 echo "CA fingerprint after recreate: $ca_recreate"
 echo "Persistent state sentinel: preserved"
+echo "NewGreedy flow_detail policy: enforced"
 
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     cat >>"$GITHUB_STEP_SUMMARY" <<EOF
@@ -174,6 +201,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 - CA after restart: \`$ca_restart\`
 - CA after recreate: \`$ca_recreate\`
 - Persistent state sentinel after recreate: **preserved**
+- NewGreedy \`flow_detail=0\` startup policy: **enforced**
 - Published host ports: **none**
 EOF
 fi
