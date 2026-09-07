@@ -61,6 +61,13 @@ def test_dependency_failure_recovery_canary_restarts_workers_deterministically()
     assert "--remove-orphans" not in runner
 
 
+def test_dependency_failure_probe_keeps_utc_timestamps_timezone_aware() -> None:
+    probe = _read("rise2_v2_dependency_failure_probe.py")
+
+    assert "datetime.now(UTC).replace(tzinfo=None)" not in probe
+    assert probe.count("datetime.now(UTC)") >= 2
+
+
 def test_resource_pressure_gate_is_bounded_and_fail_closed() -> None:
     runner = _read("rise2_v2_run_resource_pressure_gate.sh")
     probe = _read("rise2_v2_resource_pressure_probe.py")
