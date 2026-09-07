@@ -37,7 +37,7 @@ jobs:
           - Le merge V2-35 ne déploie pas automatiquement, ne publie pas `latest`/`2.0.0`, ne change pas le DNS et n'importe pas V1. Le digest stable exact doit d'abord être publié sous son SHA, validé puis promu sans rebuild après approbation explicite.
           - V1 reste disponible pendant la fenêtre de rollback ; V2-32D reste bloquée et non bloquante.
           """
-          path.write_text(source.rstrip() + section + "\n", encoding="utf-8")
+          path.write_text(source.rstrip() + section.rstrip() + "\n", encoding="utf-8")
           PY
           if git diff --quiet -- docs/agent/PROGRESS.md; then
             echo 'Progress already recorded.'
