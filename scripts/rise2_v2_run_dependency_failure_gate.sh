@@ -198,6 +198,7 @@ wait_canary() {
         sleep 2
     done
     echo "expired job recovery/backoff was not observed" >&2
+    echo "last_canary_snapshot=$snap" >&2
     return 1
 }
 
@@ -287,12 +288,14 @@ wait_integration newgreedy HEALTHY 30
 echo "provenance=PASSED prior_gates=6/12"
 
 mkdir -m 0700 "$EVIDENCE_ROOT"
+stop_service worker
 setup="$(probe_mode setup)"
 python3 - "$setup" <<'PY'
 import json,sys
 s=json.loads(sys.argv[1]); assert s.get("sentinel_jobs") == 9 and s.get("sentinel_torrents") == 9
 PY
 SETUP_DONE=1
+start_service worker
 wait_canary
 echo "expired_job_recovery=PASSED backoff=PASSED"
 
