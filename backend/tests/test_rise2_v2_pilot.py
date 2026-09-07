@@ -4,6 +4,7 @@ import multiprocessing
 import stat
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -133,6 +134,7 @@ def _write_evidence(
     name: str,
     metrics: dict[str, bool | int | float],
 ) -> Path:
+    payload: dict[str, Any]
     if name in {"load_1_slot", "load_2_slots"}:
         payload = {
             "load": {
@@ -371,9 +373,9 @@ def test_ledger_rejects_symlinked_evidence(tmp_path: Path, host_ok: None) -> Non
         )
 
 
-def _concurrent_record_worker(report: str, evidence: str, queue: multiprocessing.Queue) -> None:
+def _concurrent_record_worker(report: str, evidence: str, queue: Any) -> None:
     module = _pilot_module()
-    module._verify_host_provenance = lambda *args, **kwargs: None
+    setattr(module, "_verify_host_provenance", lambda *args, **kwargs: None)
     metrics = _metrics("preflight")
     try:
         module.record(
