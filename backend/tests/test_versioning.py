@@ -61,7 +61,7 @@ def test_application_version_rejects_a_mismatched_release_tag() -> None:
     assert "does not match VERSION" in result.stderr
 
 
-def test_stable_channel_rejects_the_v2_prerelease() -> None:
+def test_stable_channel_accepts_the_v2_stable_release() -> None:
     repository = _repository()
 
     result = subprocess.run(
@@ -71,21 +71,24 @@ def test_stable_channel_rejects_the_v2_prerelease() -> None:
             "--root",
             str(repository),
             "check",
+            "--expected-version",
+            "2.0.0",
+            "--expected-tag",
+            "v2.0.0",
+            "--print-version",
         ],
-        check=False,
+        check=True,
         capture_output=True,
         text=True,
     )
 
-    assert result.returncode == 1
-    assert "is not a stable semantic version" in result.stderr
+    assert result.stdout.strip() == "2.0.0"
 
 
 @pytest.mark.parametrize(
     ("version", "channel"),
     [
         ("1.3.3", "v2"),
-        ("2.0.0", "v2"),
         ("2.0.0-preview.1", "v2"),
         ("2.0.0-alpha.01", "v2"),
         ("2.0.0-alpha.0", "stable"),
@@ -100,9 +103,17 @@ def test_version_channels_reject_incompatible_formats(version: str, channel: str
 
 @pytest.mark.parametrize(
     "version",
-    ["2.0.0-alpha.0", "2.0.0-beta.12", "2.0.0-rc.1", "2.4.1-alpha.3"],
+    [
+        "2.0.0-alpha.0",
+        "2.0.0-beta.12",
+        "2.0.0-rc.1",
+        "2.4.1-alpha.3",
+        "2.0.0",
+        "2.4.1",
+        "10.3.7",
+    ],
 )
-def test_v2_channel_accepts_the_documented_prerelease_formats(version: str) -> None:
+def test_v2_channel_accepts_documented_v2_formats(version: str) -> None:
     namespace = runpy.run_path(str(_repository() / "scripts/versioning.py"))
 
     namespace["validate_version_format"](version, "v2")
