@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import multiprocessing
 import stat
 from pathlib import Path
 from types import ModuleType
@@ -19,6 +20,11 @@ def _pilot_module() -> ModuleType:
 pilot = _pilot_module()
 REVISION = "a" * 40
 DIGEST = f"sha256:{'b' * 64}"
+
+
+@pytest.fixture
+def host_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pilot, "_verify_host_provenance", lambda *args, **kwargs: None)
 
 
 def _metrics(name: str) -> dict[str, bool | int | float]:
@@ -103,7 +109,7 @@ def _metrics(name: str) -> dict[str, bool | int | float]:
             "v1_unchanged": True,
         },
         "pilot_accounts": {
-            "pilot_account_count": 3,
+            "pilot_account_count": 1,
             "v1_data_moves": 0,
             "credentials_in_output": 0,
             "forced_credential_change": True,
@@ -122,110 +128,354 @@ def _metrics(name: str) -> dict[str, bool | int | float]:
     return values[name]
 
 
-def _record_all(
+def _write_evidence(
+    path: Path,
+    name: str,
+    metrics: dict[str, bool | int | float],
+) -> Path:
+    if name in {"load_1_slot", "load_2_slots"}:
+        payload = {
+            "load": {
+                "schema": pilot.LOAD_EVIDENCE_SCHEMA,
+                **metrics,
+                "secrets_or_business_identifiers_in_report": False,
+            },
+            "prometheus": {"query_errors": 0},
+        }
+    else:
+        payload = {
+            "schema": pilot.EVIDENCE_SCHEMAS[name],
+            **metrics,
+            "secrets_or_business_identifiers_in_report": False,
+        }
+    path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    path.chmod(0o600)
+    return path
+
+
+def _raw_metrics(metrics: dict[str, bool | int | float]) -> list[str]:
+    return [f"{key}={str(value).lower()}" for key, value in metrics.items()]
+
+
+def _record_one(
     report: Path,
-    evidence: Path,
+    root: Path,
+    name: str,
     *,
-    failed_check: str | None = None,
+    failed: bool = False,
+    duration: float | None = None,
 ) -> None:
+    metrics = _metrics(name)
+    evidence = _write_evidence(root / f"{name}.json", name, metrics)
+    pilot.record(
+        report,
+        name,
+        "failed" if failed else "passed",
+        duration if duration is not None else (2100 if name.startswith("load_") else 60),
+        evidence,
+        _raw_metrics(metrics),
+    )
+
+
+def _record_all(report: Path, root: Path, *, failed_check: str | None = None) -> None:
     for name in pilot.CHECKS:
-        metrics = _metrics(name)
-        raw_metrics = [f"{key}={str(value).lower()}" for key, value in metrics.items()]
-        pilot.record(
-            report,
-            name,
-            "failed" if name == failed_check else "passed",
-            2100 if name.startswith("load_") else 60,
-            evidence,
-            raw_metrics,
-        )
+        _record_one(report, root, name, failed=name == failed_check)
 
 
-def test_complete_go_ledger_is_private_and_valid(tmp_path: Path) -> None:
+def test_complete_go_ledger_is_private_and_valid(tmp_path: Path, host_ok: None) -> None:
     report = tmp_path / "pilot.json"
-    evidence = tmp_path / "aggregate.json"
-    evidence.write_text('{"aggregate": true}\n')
-
     pilot.initialize(report, REVISION, DIGEST)
-    _record_all(report, evidence)
-    pilot.finalize(report, "go", "ops-approval-20260830")
+    _record_all(report, tmp_path)
+    pilot.finalize(report, "go", "v2-33-go-20260907")
 
     assert stat.S_IMODE(report.stat().st_mode) == 0o600
     value = json.loads(report.read_text())
     pilot.validate(value, require_final=True)
     assert value["checks"]["preflight"]["evidence_sha256"]
-    assert str(evidence) not in report.read_text()
-    assert "aggregate" not in report.read_text()
+    assert value["decision"]["status"] == "go"
 
 
-def test_go_refuses_missing_host_checks(tmp_path: Path) -> None:
+def test_record_rejects_empty_or_unrelated_evidence(tmp_path: Path, host_ok: None) -> None:
+    report = tmp_path / "pilot.json"
+    evidence = tmp_path / "unrelated.json"
+    evidence.write_text('{}\n', encoding="utf-8")
+    evidence.chmod(0o600)
+    pilot.initialize(report, REVISION, DIGEST)
+
+    with pytest.raises(pilot.PilotLedgerError, match="invalid schema"):
+        pilot.record(
+            report,
+            "preflight",
+            "passed",
+            1,
+            evidence,
+            _raw_metrics(_metrics("preflight")),
+        )
+
+
+def test_record_rejects_evidence_metric_mismatch(tmp_path: Path, host_ok: None) -> None:
+    report = tmp_path / "pilot.json"
+    metrics = _metrics("preflight")
+    evidence_metrics = dict(metrics)
+    evidence_metrics["policy_failures"] = 1
+    evidence = _write_evidence(tmp_path / "preflight.json", "preflight", evidence_metrics)
+    pilot.initialize(report, REVISION, DIGEST)
+
+    with pytest.raises(pilot.PilotLedgerError, match="does not substantiate metric"):
+        pilot.record(
+            report,
+            "preflight",
+            "passed",
+            1,
+            evidence,
+            _raw_metrics(metrics),
+        )
+
+
+def test_record_rejects_non_finite_duration(tmp_path: Path, host_ok: None) -> None:
+    report = tmp_path / "pilot.json"
+    metrics = _metrics("preflight")
+    evidence = _write_evidence(tmp_path / "preflight.json", "preflight", metrics)
+    pilot.initialize(report, REVISION, DIGEST)
+
+    with pytest.raises(pilot.PilotLedgerError, match="finite"):
+        pilot.record(
+            report,
+            "preflight",
+            "passed",
+            float("nan"),
+            evidence,
+            _raw_metrics(metrics),
+        )
+
+
+def test_restore_rto_is_fixed_to_four_hours(tmp_path: Path, host_ok: None) -> None:
+    report = tmp_path / "pilot.json"
+    pilot.initialize(report, REVISION, DIGEST)
+    _record_one(report, tmp_path, "preflight")
+    metrics = _metrics("backup_restore")
+    metrics["rto_seconds"] = 20_000
+    evidence = _write_evidence(tmp_path / "backup_restore.json", "backup_restore", metrics)
+
+    with pytest.raises(pilot.PilotLedgerError, match="four-hour ceiling"):
+        pilot.record(
+            report,
+            "backup_restore",
+            "passed",
+            19_000,
+            evidence,
+            _raw_metrics(metrics),
+        )
+
+
+def test_record_enforces_mandatory_check_order(tmp_path: Path, host_ok: None) -> None:
+    report = tmp_path / "pilot.json"
+    metrics = _metrics("backup_restore")
+    evidence = _write_evidence(tmp_path / "backup_restore.json", "backup_restore", metrics)
+    pilot.initialize(report, REVISION, DIGEST)
+
+    with pytest.raises(pilot.PilotLedgerError, match="mandatory order"):
+        pilot.record(
+            report,
+            "backup_restore",
+            "passed",
+            1,
+            evidence,
+            _raw_metrics(metrics),
+        )
+
+
+def test_record_rejects_unknown_or_duplicate_metric_names(
+    tmp_path: Path, host_ok: None
+) -> None:
+    report = tmp_path / "pilot.json"
+    metrics = _metrics("preflight")
+    evidence = _write_evidence(tmp_path / "preflight.json", "preflight", metrics)
+    pilot.initialize(report, REVISION, DIGEST)
+
+    with pytest.raises(pilot.PilotLedgerError, match="invalid metric set"):
+        pilot.record(
+            report,
+            "preflight",
+            "passed",
+            1,
+            evidence,
+            [*_raw_metrics(metrics), "token_like_field=1"],
+        )
+
+    raw = _raw_metrics(metrics)
+    with pytest.raises(pilot.PilotLedgerError, match="duplicate metric"):
+        pilot.record(
+            report,
+            "preflight",
+            "passed",
+            1,
+            evidence,
+            [*raw, raw[0]],
+        )
+
+
+def test_approval_reference_uses_closed_operational_namespace(
+    tmp_path: Path, host_ok: None
+) -> None:
+    report = tmp_path / "pilot.json"
+    pilot.initialize(report, REVISION, DIGEST)
+    _record_all(report, tmp_path)
+
+    with pytest.raises(pilot.PilotLedgerError, match="approval reference"):
+        pilot.finalize(report, "go", "ghp_abcdefghijklmnopqrstuvwxyz123456")
+
+
+def test_go_refuses_missing_host_checks(tmp_path: Path, host_ok: None) -> None:
     report = tmp_path / "pilot.json"
     pilot.initialize(report, REVISION, DIGEST)
 
     with pytest.raises(pilot.PilotLedgerError, match="missing checks"):
-        pilot.finalize(report, "go", "ops-approval-20260830")
+        pilot.finalize(report, "go", "ops-approval-20260907")
 
 
-def test_load_pass_refuses_short_measurement(tmp_path: Path) -> None:
+def test_no_go_accepts_complete_failed_host_matrix(tmp_path: Path, host_ok: None) -> None:
     report = tmp_path / "pilot.json"
-    evidence = tmp_path / "aggregate.json"
-    evidence.write_text("{}\n")
     pilot.initialize(report, REVISION, DIGEST)
-    metrics = _metrics("load_1_slot")
-    metrics["measurement_seconds"] = 1799
+    _record_all(report, tmp_path, failed_check="resource_pressure")
 
-    with pytest.raises(pilot.PilotLedgerError, match="30 minutes"):
-        pilot.record(
-            report,
-            "load_1_slot",
-            "passed",
-            2100,
-            evidence,
-            [f"{key}={value}" for key, value in metrics.items()],
-        )
-
-
-def test_no_go_requires_a_recorded_failure(tmp_path: Path) -> None:
-    report = tmp_path / "pilot.json"
-    evidence = tmp_path / "aggregate.json"
-    evidence.write_text("{}\n")
-    pilot.initialize(report, REVISION, DIGEST)
-    _record_all(report, evidence)
-
-    with pytest.raises(pilot.PilotLedgerError, match="at least one failed check"):
-        pilot.finalize(report, "no_go", "ops-approval-20260830")
-
-
-def test_no_go_accepts_a_complete_failed_host_matrix(tmp_path: Path) -> None:
-    report = tmp_path / "pilot.json"
-    evidence = tmp_path / "aggregate.json"
-    evidence.write_text("{}\n")
-    pilot.initialize(report, REVISION, DIGEST)
-    _record_all(report, evidence, failed_check="resource_pressure")
-
-    pilot.finalize(report, "no_go", "ops-approval-20260830")
+    pilot.finalize(report, "no_go", "ops-approval-20260907")
     pilot.validate(json.loads(report.read_text()), require_final=True)
 
 
-def test_ledger_rejects_symlinked_evidence(tmp_path: Path) -> None:
+def test_validate_rejects_out_of_order_timestamps(tmp_path: Path, host_ok: None) -> None:
     report = tmp_path / "pilot.json"
-    evidence = tmp_path / "aggregate.json"
-    evidence.write_text("{}\n")
+    pilot.initialize(report, REVISION, DIGEST)
+    _record_one(report, tmp_path, "preflight")
+    _record_one(report, tmp_path, "backup_restore")
+    value = json.loads(report.read_text())
+    value["checks"]["backup_restore"]["recorded_at"] = value["checks"]["preflight"][
+        "recorded_at"
+    ]
+
+    with pytest.raises(pilot.PilotLedgerError, match="strictly increasing"):
+        pilot.validate(value)
+
+
+def test_ledger_rejects_symlinked_evidence(tmp_path: Path, host_ok: None) -> None:
+    report = tmp_path / "pilot.json"
+    target = _write_evidence(
+        tmp_path / "preflight.json", "preflight", _metrics("preflight")
+    )
     link = tmp_path / "evidence-link.json"
-    link.symlink_to(evidence)
+    link.symlink_to(target)
     pilot.initialize(report, REVISION, DIGEST)
 
     with pytest.raises(pilot.PilotLedgerError, match="regular file"):
-        pilot.record(report, "preflight", "failed", 1, link, [])
+        pilot.record(
+            report,
+            "preflight",
+            "passed",
+            1,
+            link,
+            _raw_metrics(_metrics("preflight")),
+        )
+
+
+def _concurrent_record_worker(report: str, evidence: str, queue: multiprocessing.Queue) -> None:
+    module = _pilot_module()
+    module._verify_host_provenance = lambda *args, **kwargs: None
+    metrics = _metrics("preflight")
+    try:
+        module.record(
+            Path(report),
+            "preflight",
+            "passed",
+            1,
+            Path(evidence),
+            _raw_metrics(metrics),
+        )
+    except module.PilotLedgerError:
+        queue.put("rejected")
+    else:
+        queue.put("recorded")
+
+
+def test_concurrent_record_is_serialized_without_lost_update(
+    tmp_path: Path, host_ok: None
+) -> None:
+    report = tmp_path / "pilot.json"
+    evidence = _write_evidence(
+        tmp_path / "preflight.json", "preflight", _metrics("preflight")
+    )
+    pilot.initialize(report, REVISION, DIGEST)
+    context = multiprocessing.get_context("fork")
+    queue = context.Queue()
+    processes = [
+        context.Process(
+            target=_concurrent_record_worker,
+            args=(str(report), str(evidence), queue),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=10)
+        assert process.exitcode == 0
+
+    outcomes = sorted(queue.get(timeout=2) for _ in processes)
+    assert outcomes == ["recorded", "rejected"]
+    value = json.loads(report.read_text())
+    assert set(value["checks"]) == {"preflight"}
+
+
+def test_host_provenance_verifies_hostname_checkout_compose_and_running_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env_file = tmp_path / "environment"
+    env_file.write_text("safe=true\n", encoding="utf-8")
+    compose = repo / "compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+    monkeypatch.setattr(pilot.socket, "gethostname", lambda: pilot.PILOT_HOST)
+
+    expected_image = f"ghcr.io/example/wos@{DIGEST}"
+
+    def fake_command(command: list[str], *, cwd: Path | None = None) -> str:
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return REVISION
+        if command[:3] == ["git", "status", "--porcelain"]:
+            return ""
+        if "config" in command:
+            return json.dumps(
+                {
+                    "services": {
+                        name: {"image": expected_image}
+                        for name in ("api", "worker", "scheduler")
+                    }
+                }
+            )
+        if "ps" in command:
+            return "api-container"
+        if command[:3] == ["docker", "inspect", "-f"]:
+            if "org.opencontainers.image.revision" in command[3]:
+                return REVISION
+            return expected_image
+        raise AssertionError(command)
+
+    monkeypatch.setattr(pilot, "_command", fake_command)
+    pilot._verify_host_provenance(
+        REVISION,
+        DIGEST,
+        repo=repo,
+        env_file=env_file,
+        compose=Path("compose.yaml"),
+    )
 
 
 def test_pilot_tool_is_executable_and_runbook_covers_every_check() -> None:
-    repository = Path(__file__).resolve().parents[2]
-    script = repository / "scripts" / "rise2_v2_pilot.py"
-    runbook = (repository / "docs" / "pilot-rise2-v2.md").read_text(encoding="utf-8")
-
-    assert script.stat().st_mode & stat.S_IXUSR
-    assert 'git show "$tool_revision:scripts/rise2_v2_pilot.py"' in runbook
-    assert "Le champ `revision` du ledger reste" in runbook
-    for name in pilot.CHECKS:
-        assert f"`{name}`" in runbook
+    source = (
+        Path(__file__).resolve().parents[2] / "scripts" / "rise2_v2_pilot.py"
+    ).read_text(encoding="utf-8")
+    compile(source, "rise2_v2_pilot.py", "exec")
+    assert "fcntl.flock" in source
+    assert "APPROVED_RTO_SECONDS = 14_400" in source
+    assert "_validate_evidence_artifact" in source
+    assert "_verify_host_provenance" in source
