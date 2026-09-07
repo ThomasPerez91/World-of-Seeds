@@ -140,7 +140,19 @@ def _validate_v1_release_isolation(root: Path) -> None:
         workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
     except OSError as exc:
         raise ReleaseCandidateError("stable release workflow is unavailable") from exc
-    if "branches: [master]" not in workflow:
+
+    trigger = re.search(
+        r"(?ms)^on:\s*\n\s+push:\s*\n\s+branches:\s*\n"
+        r"(?P<branches>(?:\s+-\s+[^\n]+\n)+)",
+        workflow,
+    )
+    if trigger is None:
+        raise ReleaseCandidateError("stable release push policy is unreadable")
+    branches = re.findall(
+        r"(?m)^\s+-\s+([A-Za-z0-9._/-]+)\s*$",
+        trigger.group("branches"),
+    )
+    if branches != ["master"]:
         raise ReleaseCandidateError("stable release workflow is no longer master-only")
     if "develop_V2" in workflow or "--channel v2" in workflow:
         raise ReleaseCandidateError("stable release workflow must remain isolated from V2")
