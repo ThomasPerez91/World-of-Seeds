@@ -20,11 +20,23 @@ def validate_config(path: Path) -> None:
     try:
         with path.open(encoding="utf-8") as stream:
             parser.read_file(stream)
+    except OSError as exc:
+        raise NewGreedyPolicyError("configuration file is unreadable") from exc
+    except configparser.Error as exc:
+        raise NewGreedyPolicyError("configuration file has invalid INI syntax") from exc
+
+    try:
         flow_detail = parser.getint("proxy", "flow_detail")
         persist_stats = parser.getboolean("stats", "persist_stats")
         auto_purge_stopped = parser.getboolean("stats", "auto_purge_stopped")
-    except (OSError, configparser.Error, ValueError) as exc:
-        raise NewGreedyPolicyError("required NewGreedy policy keys are missing or invalid") from exc
+    except configparser.NoSectionError as exc:
+        raise NewGreedyPolicyError(f"required section is missing: {exc.section}") from exc
+    except configparser.NoOptionError as exc:
+        raise NewGreedyPolicyError(
+            f"required option is missing: {exc.section}.{exc.option}"
+        ) from exc
+    except ValueError as exc:
+        raise NewGreedyPolicyError("required policy value has an invalid type") from exc
 
     if flow_detail != 0:
         raise NewGreedyPolicyError("proxy.flow_detail must be 0")
