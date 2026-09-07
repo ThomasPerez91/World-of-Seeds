@@ -39,7 +39,7 @@ def info_hash(campaign: str, index: int) -> str:
 
 async def setup(campaign: str) -> dict[str, int | bool]:
     name_prefix = prefix(campaign)
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(UTC)
     future = now + timedelta(hours=6)
     async with session_factory() as session, session.begin():
         existing = int(
@@ -105,7 +105,7 @@ async def setup(campaign: str) -> dict[str, int | bool]:
 
 async def snapshot(campaign: str) -> dict[str, int | bool]:
     name_prefix = prefix(campaign)
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(UTC)
     async with session_factory() as session:
         torrent_ids = select(ManagedTorrent.id).where(
             ManagedTorrent.name.like(f"{name_prefix}%")
