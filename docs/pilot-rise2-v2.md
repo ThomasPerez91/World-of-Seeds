@@ -4,215 +4,194 @@
 
 Ce runbook valide la V2 sur la pile Rise2 isolée avant toute release candidate. Il ne modifie ni
 la V1, ni `master`, ni `develop`, ne déplace aucune donnée V1 et n'autorise aucune bascule DNS,
-aucun import V1 réel et aucune release `2.0.0`. Ces trois actions nécessitent une approbation
-explicite distincte.
+aucun import V1 réel et aucune release stable `2.0.0`. Ces actions nécessitent des approbations
+séparées.
 
-Le pilote porte d'abord sur des données de test jetables, puis sur un petit nombre de comptes
-pilotes créés sans déplacer leurs données V1. La V1 reste disponible pendant toute la fenêtre de
-retour arrière. Un test incomplet n'est jamais transformé en succès documentaire : la décision
-finale est `go`, `go_limited` ou `no_go` et toutes les étapes doivent être enregistrées.
+Le pilote utilise d'abord des données de test jetables, puis un nombre limité de comptes pilotes.
+La V1 reste disponible pendant toute la fenêtre de retour arrière. La décision finale est
+`go`, `go_limited` ou `no_go`; aucune étape manquante n'est transformée en succès documentaire.
 
-## Preuve expurgée
+## Registre de preuve et provenance
 
-Le registre `scripts/rise2_v2_pilot.py` lie les résultats au SHA Git complet et au digest immuable
-de l'image. Il accepte uniquement des métriques numériques ou booléennes et conserve le SHA-256 de
-chaque artefact de preuve, jamais son chemin ni son contenu. Les fichiers de preuve restent dans le
-répertoire privé de l'hôte et ne sont pas ajoutés à Git.
+`scripts/rise2_v2_pilot.py` conserve un registre mode `0600` lié au SHA runtime complet et au
+digest immuable de l'image. Chaque écriture du registre est sérialisée par un verrou exclusif,
+les douze gates doivent être enregistrées dans l'ordre, leurs timestamps doivent être strictement
+croissants et une gate déjà enregistrée ne peut pas être remplacée silencieusement.
 
-La checkout de déploiement Rise2 reste sur le SHA `develop_V2` réellement testé ; ne pas basculer
-le checkout opérationnel sur la draft `feat/v2-rise2-pilot`. Tant que #103 n'est pas fusionnée,
-l'outil de registre peut être extrait en lecture seule depuis le commit exact de la draft, sans
-modifier le checkout runtime :
+Pour `init` et chaque `record`, l'outil vérifie directement sur `rise2-01` :
 
-```bash
-runtime_revision="$(git rev-parse HEAD)"
-git fetch origin feat/v2-rise2-pilot
-tool_revision="$(git rev-parse FETCH_HEAD)"
-tool_root="/var/lib/world-of-seeds-v2/pilot-tools/$tool_revision"
-install -d -m 0700 -- "$tool_root"
-git show "$tool_revision:scripts/rise2_v2_pilot.py" > "$tool_root/rise2_v2_pilot.py"
-chmod 0755 "$tool_root/rise2_v2_pilot.py"
-test "$(git hash-object "$tool_root/rise2_v2_pilot.py")" = \
-  "$(git rev-parse "$tool_revision:scripts/rise2_v2_pilot.py")"
-test "$(git rev-parse HEAD)" = "$runtime_revision"
-pilot_tool="$tool_root/rise2_v2_pilot.py"
-```
+- le hostname approuvé ;
+- la checkout Git propre et exactement égale au SHA du ledger ;
+- l'image normalisée des services `api`, `worker` et `scheduler` ;
+- l'unique conteneur API en cours d'exécution ;
+- son image réellement configurée et son label OCI de révision.
 
-Cette vérification de blob fait partie du `policy_failures=0` du préflight : un outil différent du
-blob Git attendu interdit d'enregistrer le gate comme réussi. Le champ `revision` du ledger reste
-le SHA `develop_V2` qui correspond au runtime/image testé, pas le SHA de la draft de tooling.
+Une preuve `passed` ne peut donc pas être enregistrée depuis un autre hôte, une autre checkout ou
+une autre image. Le tooling de la draft peut rester extrait séparément par blob Git vérifié : la
+checkout opérationnelle ne bascule jamais sur la branche de tooling.
 
-Préparer un répertoire par révision :
+L'artefact de chaque gate doit être un JSON régulier mode `0600`, borné à 2 MiB, secret-free, avec
+le schéma attendu pour la gate. Les métriques du ledger sont whitelisted par gate et doivent être
+présentes avec exactement les mêmes valeurs dans la preuve. Pour les deux gates de charge,
+le sous-objet `load` doit porter le schéma
+`world-of-seeds-v2-rise2-scheduler-load/v1`; les autres gates utilisent leur schéma dédié
+`world-of-seeds-v2-rise2-<gate>/v1`. Une preuve vide, sans schéma, sans métriques correspondantes,
+symlinkée ou portant une métrique arbitraire est refusée.
 
-```bash
-revision="$(git rev-parse HEAD)"
-image_digest='sha256:REMPLACER_PAR_LE_DIGEST_VERIFIE'
-pilot_root="/var/lib/world-of-seeds-v2/pilot/$revision"
-install -d -m 0700 -- "$pilot_root"
+Le RTO de lancement est une constante de politique : **4 heures / 14 400 secondes**. Les preuves
+`backup_restore` et `rollback` doivent enregistrer exactement ce plafond et leur durée réelle doit
+y rester inférieure ou égale. L'opérateur ne peut pas relever le RTO en modifiant une métrique.
 
-"$pilot_tool" init "$pilot_root/ledger.json" \
-  --revision "$revision" \
-  --image-digest "$image_digest"
-```
-
-Le clone doit être propre, positionné sur le SHA testé de `develop_V2`, et l'image déclarée dans
-`/etc/world-of-seeds-v2/environment` doit correspondre exactement au digest enregistré. Les
-artefacts bruts peuvent contenir uniquement les sorties expurgées prévues par les outils ; ne pas
-y rediriger l'environnement, les configurations, les commandes avec credentials, les réponses
-tracker ou les listes de fichiers.
-
-Une étape s'enregistre ainsi :
-
-```bash
-"$pilot_tool" record "$pilot_root/ledger.json" preflight \
-  --status passed \
-  --duration-seconds 42 \
-  --evidence "$pilot_root/preflight.aggregate.json" \
-  --metric newgreedy_readable=true \
-  --metric isolated_v2_storage=true \
-  --metric policy_failures=0 \
-  --metric v1_mounts=0 \
-  --metric public_internal_ports=0
-```
-
-Le registre refuse un `passed` qui ne respecte pas les invariants et seuils de la matrice. Une
-étape réellement en échec doit être enregistrée `failed`; ses métriques restent agrégées.
+Les références d'approbation sont limitées aux namespaces opérationnels datés
+`ops-approval-YYYYMMDD` ou `v2-33-{go|go-limited|no-go}-YYYYMMDD`; une valeur ressemblant à un
+token générique n'est pas acceptée.
 
 ## Séquence obligatoire
 
+L'ordre est immuable :
+
+1. `preflight`
+2. `backup_restore`
+3. `load_1_slot`
+4. `load_2_slots`
+5. `websocket_recovery`
+6. `transfer_manifest`
+7. `dependency_failures`
+8. `resource_pressure`
+9. `security_observability`
+10. `test_data_cleanup`
+11. `pilot_accounts`
+12. `rollback`
+
+Un `no_go` peut continuer à enregistrer les gates suivantes pour produire une matrice complète,
+mais il ne peut pas réordonner les exercices. `rollback` est donc toujours postérieur à la création
+des comptes pilotes qu'il doit réellement couvrir.
+
 ### 1. Préflight et isolation
 
-1. Inventorier sans secret OS, noyau, Docker/Compose, CPU, RAM, swap, disques, filesystem, marge
-   de restauration, ports occupés et pare-feu.
-2. Vérifier que le stockage, les volumes, réseaux, profils qB/NewGreedy, secrets et domaines V2
-   sont distincts de la V1.
-3. Exécuter :
+Inventorier OS, noyau, Docker/Compose, CPU, RAM, swap, disques, filesystem, ports et pare-feu sans
+imprimer de secret. Vérifier que stockage, volumes, réseaux, profils qB/NewGreedy et secrets V2
+sont distincts de la V1. Exécuter `scripts/rise2_v2_preflight.sh` avec l'environnement Rise2 et
+confirmer que seuls 80/443 sont publiés, que les métriques applicatives sont refusées par l'ingress
+public et restent disponibles pour Prometheus sur le réseau privé.
 
-   ```bash
-   scripts/rise2_v2_preflight.sh /etc/world-of-seeds-v2/environment
-   ```
-
-4. Confirmer que seuls 80/443 sont publiés, que `/api/v2/metrics` est refusé par l'ingress public
-   et reste lisible par Prometheus sur le réseau privé.
-5. Enregistrer `preflight` avec `newgreedy_readable`, `isolated_v2_storage`, `policy_failures`,
-   `v1_mounts` et `public_internal_ports`.
-
-Tout montage, secret, réseau ou profil partagé avec la V1 est un **no-go immédiat**.
+`preflight` exige `newgreedy_readable=true`, `isolated_v2_storage=true` et zéro
+`policy_failures`, `v1_mounts`, `public_internal_ports`.
 
 ### 2. Sauvegarde et restauration vierge
 
-Exécuter la procédure complète de
-[`backup-restore-rise2-v2.md`](backup-restore-rise2-v2.md) : archive chiffrée, snapshot externe,
-vérification, staging, restauration PostgreSQL dans un volume jetable puis reconstruction sur une
-cible V2 vierge. Vérifier au moins un canari de contenu par taille et SHA-256 sans écrire son nom
-dans la preuve.
+Exécuter `docs/backup-restore-rise2-v2.md` : archive chiffrée, copie/snapshot de contenu hors hôte,
+staging, restauration PostgreSQL et reconstruction sur une cible V2 absente avant l'exercice.
+Vérifier les canaris par taille et SHA-256 sans inscrire de nom métier dans la preuve.
 
-Sur un hôte où le filesystem de contenu ne fournit pas de snapshot bloc/filesystem natif, V2-33
-accepte une **copie complète off-host cohérente** comme point de restauration de contenu, mais
-uniquement sous les contraintes suivantes : `worker`, `scheduler`, qBittorrent et NewGreedy sont
-arrêtés pendant toute la copie ; la destination est un stockage hors hôte indépendant ; le
-répertoire cible n'existe pas avant l'exercice et n'est jamais réutilisé ; la copie conserve
-modes, UID/GID, timestamps et arborescence ; un manifeste SHA-256 complet est calculé après copie
-et son digest est intégré dans l'identifiant du point de restauration ; ce répertoire n'est plus
-modifié ensuite. La restauration doit recopier ce point vers une nouvelle cible absente avant le
-contrôle des canaris. Une copie locale sur le RAID0, une copie effectuée pendant que des writers
-sont actifs ou un répertoire off-host réutilisé ne satisfait pas le gate.
+Sur l'ext4/RAID0 Rise2 sans snapshot filesystem natif, une copie complète off-host cohérente est
+acceptée uniquement si `worker`, `scheduler`, qBittorrent et NewGreedy sont arrêtés pendant toute
+la copie, si la cible externe est indépendante et neuve, et si un manifeste SHA-256 complet lie
+le point de restauration à l'archive d'état. Une copie locale sur le RAID0 ou une restauration en
+place est interdite.
 
-Cette variante ne prétend pas fournir la sémantique instantanée d'un snapshot filesystem : elle
-valide explicitement le plan de reprise réel de Rise2 lorsque le stockage de contenu est un ext4
-sur RAID0 sans couche de snapshots. Le même `content_snapshot_id` lie la copie off-host figée et
-l'archive chiffrée de configuration/état.
+`backup_restore` exige restauration PostgreSQL et canari valides, zéro échec/secret/écriture sur
+cible préexistante et un RTO exactement égal à 14 400 secondes.
 
-Enregistrer `backup_restore` avec `postgres_restored`, `content_canary_verified`,
-`restore_failures`, `secret_findings`, `existing_target_writes` et `rto_seconds`. La durée réelle
-doit rester sous le RTO enregistré. Une cible déjà existante est un no-go, jamais une restauration
-en place.
+### 3. Charge à un puis deux slots
 
-### 3. Charge soutenue à un puis deux slots
-
-Avec 100 comptes de test jetables, un backlog supérieur à 200 et les tailles/états définis dans
-[`security-load-v2.md`](security-load-v2.md), exécuter séparément :
-
-- 5 minutes de chauffe puis 30 minutes mesurées avec un slot ;
-- 5 minutes de chauffe puis 30 minutes mesurées avec deux slots.
-
-Conserver les résultats agrégés du générateur de charge et de Prometheus. Enregistrer
-`load_1_slot` puis `load_2_slots` avec : `slots`, `warmup_seconds`, `measurement_seconds`,
-`famine_count`, `duplicate_count`, `corruption_count`, `unexpected_transition_count`,
-`scheduler_cycle_p95_seconds` et `scheduler_interval_seconds`.
-
-Les quatre compteurs d'erreur doivent rester à zéro et le p95 du cycle scheduler doit rester
-strictement inférieur à son intervalle configuré. Une mesure plus courte est refusée.
+Pour chaque gate : 5 minutes de chauffe puis 30 minutes mesurées. `load_1_slot` exige exactement
+un slot, `load_2_slots` exactement deux. Les compteurs famine, doublon, corruption et transition
+inattendue doivent rester à zéro. Le p95 du cycle scheduler doit rester strictement inférieur à
+son intervalle configuré. Une durée totale inférieure à 2 100 secondes est refusée.
 
 ### 4. WebSocket, transferts et manifestes
 
-Exécuter les paliers 10/25/50/100 WebSockets, puis 25 comptes avec quatre onglets et 25
-reconnexions. Redémarrer l'API, interrompre/rétablir Redis et perdre volontairement un événement ;
-la reconnexion doit effectuer une resynchronisation GET sans transaction PostgreSQL inactive.
-Enregistrer `websocket_recovery`.
+Couvrir au moins 100 WebSockets et 25 reconnexions, avec redémarrage API, perte/rétablissement Redis
+et resynchronisation GET. Zéro transaction SQL inactive, zéro resync en échec et zéro événement
+perdu après resync; la mémoire doit revenir à son plateau.
 
-Tester ensuite Range/reprise, client lent, annulation, déconnexion et limites sur petits/gros
-fichiers, puis manifestes petits, paginés, plusieurs milliers et 50 000 entrées. Enregistrer
-`transfer_manifest`; il exige démarrage progressif, pause/reprise/annulation, intégrité, zéro lease
-résiduelle et zéro dépassement de limite.
+Tester ensuite Range/reprise, client lent, annulation, déconnexion et limites, puis un manifeste de
+50 000 fichiers. Le transfert doit démarrer progressivement, pause/reprise/annulation doivent être
+validées, sans erreur d'intégrité, lease résiduelle ni dépassement de limite.
 
 ### 5. Pannes et pression de ressources
 
-Après snapshot et une panne à la fois, couvrir au minimum les huit familles suivantes : Redis,
-PostgreSQL lent, qBittorrent lent/indisponible, NewGreedy lent/indisponible, worker, scheduler,
-reset qB et ingress/API. Utiliser `docker compose stop/start/restart` uniquement sur le projet
-`world-of-seeds-v2-rise2`; ne jamais cibler un nom de conteneur V1. Vérifier backoff, état sûr,
-absence de faux succès, aucun job perdu et reprise idempotente. Enregistrer
-`dependency_failures` avec `scenarios` supérieur ou égal à 8.
+Couvrir au minimum huit familles : Redis, PostgreSQL lent, qBittorrent indisponible, NewGreedy
+indisponible, worker, scheduler, reset qB et ingress/API. Vérifier backoff, absence de faux succès,
+aucun job perdu et reprise idempotente.
 
-Appliquer ensuite une pression bornée CPU/RAM/I/O/disque à la seule pile V2, avec seuil de fin et
-espace de restauration réservé. Vérifier que la pression disque ferme l'admission de façon sûre et
-qu'aucun seuil dépassé ne reste inexpliqué. Enregistrer `resource_pressure`. Ne jamais remplir un
-filesystem, appliquer une charge non bornée ou supprimer des fichiers pour simuler la pression.
+Appliquer ensuite une pression bornée CPU/RAM/I/O/disque uniquement à la pile V2. L'admission doit
+fermer de façon sûre sous pression disque critique et aucun seuil dépassé ne doit rester inexpliqué.
+Ne jamais remplir un filesystem ni utiliser `--remove-orphans`.
 
 ### 6. Sécurité et observabilité
 
-Rejouer audits de dépendances, configuration et image. Rechercher dans les sorties observables les
-secrets, trackers complets et identifiants métier, sans copier les occurrences dans le rapport.
-Enregistrer uniquement les compteurs dans `security_observability`, avec la preuve que les métriques
-sont privées et disponibles pour Prometheus.
+Rejouer audits de dépendances, configuration et image. Scanner logs et métriques pour secrets,
+URL trackers complètes et identifiants métier sans recopier les occurrences. Exiger zéro
+HIGH/CRITICAL corrigeable, zéro secret, zéro identifiant métier, métriques publiques bloquées et
+métriques privées disponibles.
 
 ### 7. Nettoyage et comptes pilotes
 
-Supprimer les seuls comptes, torrents et fichiers marqués par l'identifiant de campagne de test,
-via les actions métier prévues. Vérifier par compteurs qu'il ne reste aucune donnée de test et que
-la V1 est inchangée, puis enregistrer `test_data_cleanup`.
-
-Créer ensuite un nombre limité de comptes pilotes via l'administration V2. Conserver les
-credentials hors logs et rapports, imposer leur changement à la première connexion et ne déplacer
-aucune donnée V1. Enregistrer `pilot_accounts` avec uniquement le nombre de comptes et les
-invariants booléens attendus.
+Supprimer uniquement les données portant l'identifiant de campagne de test. Vérifier zéro compte,
+torrent ou fichier de test résiduel et aucune modification V1. Créer ensuite un nombre limité de
+comptes pilotes avec credentials hors logs, changement forcé à la première connexion et zéro
+déplacement de données V1.
 
 ### 8. Rollback chronométré
 
-Sans supprimer les volumes V2 : suspendre l'admission, laisser finir ou remettre les jobs à un
-point idempotent, capturer les compteurs agrégés, retirer l'ingress pilote V2, confirmer que la V1
-reste disponible, puis vérifier health, authentification et absence d'écriture V2. Redémarrer le
-digest V2 précédent uniquement si sa compatibilité avec le schéma courant a déjà été prouvée.
+Le rollback V2-33 **suspend la nouvelle admission publique V2** en retirant l'ingress pilote, mais
+il ne force pas à zéro toute écriture interne V2 : worker et scheduler peuvent terminer ou
+réconcilier un effet durable déjà engagé pour atteindre un point idempotent sûr. Mesurer un
+compteur global de writes PostgreSQL V2 serait donc contraire à la stratégie de drain et pourrait
+transformer une reprise sûre en faux échec.
 
-Enregistrer `rollback` avec la durée, le RTO, les échecs health/authentification, les écritures V1
-et les preuves que V1 est disponible, l'admission V2 suspendue et les volumes V2 préservés.
+Le contrat vérifié est précisément :
+
+- aucune écriture V1 (`v1_writes=0`) ;
+- V1 reste disponible ;
+- l'admission publique V2 est suspendue ;
+- health et authentification pilote restent valides depuis le réseau interne de contrôle ;
+- aucun volume V2 n'est supprimé ou remplacé ;
+- la durée reste sous le RTO immuable de 14 400 secondes ;
+- le runtime V2 est restauré après l'exercice.
+
+Ne jamais exécuter `down --volumes` ni `--remove-orphans` dans cet exercice.
 
 ## Décision
 
-Après revue des douze étapes, finaliser avec une référence d'approbation non secrète :
+Après les douze gates, finaliser avec une référence non secrète :
 
 ```bash
-"$pilot_tool" finalize "$pilot_root/ledger.json" \
-  --decision go \
-  --approval-ref ops-approval-YYYYMMDD
+pilot_root="/var/lib/world-of-seeds-v2/pilot/$(git rev-parse HEAD)"
+pilot_tool="/var/lib/world-of-seeds-v2/pilot-gates-7-12-tools/$(git rev-parse feat/v2-rise2-pilot)/rise2_v2_pilot.py"
 
-"$pilot_tool" validate "$pilot_root/ledger.json" --require-final
+sudo python3 "$pilot_tool" finalize "$pilot_root/ledger.json" \
+  --decision go \
+  --approval-ref v2-33-go-20260907
+
+sudo python3 "$pilot_tool" validate "$pilot_root/ledger.json" --require-final
 ```
 
-`go` et `go_limited` exigent douze étapes réussies. `no_go` exige les douze étapes enregistrées et
-au moins un échec explicite. Le registre final, son SHA-256 et une synthèse sans secret sont relus
-avant d'être mentionnés dans `PROGRESS.md`; les artefacts bruts restent privés sur Rise2.
+`go` et `go_limited` exigent 12/12 gates réussies. `no_go` exige 12/12 gates enregistrées et au
+moins un échec explicite. Une décision V2-33 n'autorise jamais à elle seule une bascule DNS, un
+import V1 réel ou la release stable.
 
-La décision V2-33 n'autorise pas V2-34 si elle est `no_go`. Elle n'autorise jamais à elle seule un
-DNS public, un import V1 réel ou la release stable.
+## Résultat opérationnel du 7 septembre 2026
+
+Le pilote réel Rise2 est terminé :
+
+- runtime testé : `adcf67d5ea92b72c2a2210f8cdafb29669a940d8` ;
+- tooling utilisé pour les gates 7→12 et la finalisation :
+  `087c5fa54d7793258113a0e3e51ac7c969e9e928` ;
+- image WOS :
+  `ghcr.io/thomasperez91/world-of-seeds-v2@sha256:d0e817283ad95ba1792b4e16e7241bddabbce2190272382e2c339b4c291a947e` ;
+- gates : **12/12 PASSED** ;
+- décision : **GO** ;
+- référence : `v2-33-go-20260907` ;
+- décision enregistrée : `2026-09-07T09:29:13.249423Z` ;
+- SHA-256 du ledger final :
+  `38c94b41aed849a754053470e4a1eba8834157c64c57c6fb2e7d79dcca19d70b` ;
+- validation finale `--require-final` : PASS.
+
+Gate 9 a initialement détecté des passkeys dans les URL d'annonce affichées par `mitmdump` dans
+les logs NewGreedy. Rise2 a été durci avec `flow_detail: 0`; un flux synthétique a ensuite donné
+`synthetic_marker_log_occurrences=0`, puis Gate 9 a passé avec `runtime_log_secret_findings=0`.
+Ce réglage doit être rendu déclaratif/reproductible pour un volume NewGreedy neuf avant V2-34;
+le runtime historique testé n'est pas réécrit rétroactivement.
