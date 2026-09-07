@@ -66,11 +66,14 @@ def test_newgreedy_policy_rejects_unsafe_stats_policy(tmp_path: Path) -> None:
 def test_rise2_compose_enforces_policy_before_newgreedy_start() -> None:
     repository = Path(__file__).resolve().parents[2]
     compose = (repository / "deploy/compose.rise2.v2.yaml").read_text(encoding="utf-8")
+    init_block = compose.split("\n  newgreedy-init:\n", 1)[1].split("\n  newgreedy:\n", 1)[0]
 
-    assert "source: ../scripts/rise2_v2_newgreedy_policy.py" in compose
-    assert "target: /bootstrap/newgreedy-policy.py" in compose
-    assert "target: /bootstrap/config.ini" in compose
-    assert "python3 /bootstrap/newgreedy-policy.py /bootstrap/config.ini" in compose
+    assert "source: ../scripts/rise2_v2_newgreedy_policy.py" in init_block
+    assert "target: /bootstrap/newgreedy-policy.py" in init_block
+    assert "target: /bootstrap/config.ini" in init_block
+    assert "python3 /bootstrap/newgreedy-policy.py /bootstrap/config.ini" in init_block
+    assert "group_add:" in init_block
+    assert "WOS_V2_NEWGREEDY_GID" in init_block
     assert "newgreedy-init:\n        condition: service_completed_successfully" in compose
 
 
