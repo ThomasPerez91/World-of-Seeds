@@ -1,8 +1,9 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { TrashEntry, TrashListing } from "../../api/client";
+import { FeedbackProvider } from "../../components/Feedback";
 import { auditAccessibility } from "../../test/accessibility";
 import { TrashBrowser } from "./TrashBrowser";
 
@@ -23,7 +24,7 @@ function response(body: unknown, status = 200): Response {
 }
 
 describe("TrashBrowser", () => {
-  it("sécurise la suppression définitive et restaure sans perdre le focus", async () => {
+  it("confirme la purge dans la page et restaure directement sans perdre le focus", async () => {
     const user = userEvent.setup();
     const onFilesChanged = vi.fn();
     let restored = false;
@@ -44,11 +45,13 @@ describe("TrashBrowser", () => {
     );
 
     const view = render(
-      <TrashBrowser
-        onFilesChanged={onFilesChanged}
-        onSessionExpired={vi.fn()}
-        revision={0}
-      />,
+      <FeedbackProvider>
+        <TrashBrowser
+          onFilesChanged={onFilesChanged}
+          onSessionExpired={vi.fn()}
+          revision={0}
+        />
+      </FeedbackProvider>,
     );
     await screen.findByRole("heading", { name: "movie.mkv" });
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
@@ -57,21 +60,18 @@ describe("TrashBrowser", () => {
       name: "Supprimer définitivement movie.mkv",
     });
     await user.click(purgeButton);
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Annuler" }));
-    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
-    await user.keyboard("{Escape}");
+    const cancelButton = screen.getByRole("button", { name: "Annuler" });
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(document.activeElement).toBe(purgeButton);
+    expect(screen.getByText("« movie.mkv » et tout son contenu seront irrécupérables.")).toBeTruthy();
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+    await user.click(cancelButton);
+    expect(document.activeElement).toBe(screen.getByRole("button", {
+      name: "Supprimer définitivement movie.mkv",
+    }));
 
     await user.click(screen.getByRole("button", { name: "Restaurer" }));
-    const restoreConfirmation = within(screen.getByRole("dialog")).getByRole("button", {
-      name: "Restaurer",
-    });
-    expect(document.activeElement).toBe(restoreConfirmation);
-    await user.click(restoreConfirmation);
-
     await screen.findByText("« movie.mkv » a été restauré.");
-    await user.click(screen.getByRole("button", { name: "Fermer" }));
+    await user.click(screen.getByRole("button", { name: "Fermer le message" }));
     await waitFor(() => expect(onFilesChanged).toHaveBeenCalledOnce());
   });
 });

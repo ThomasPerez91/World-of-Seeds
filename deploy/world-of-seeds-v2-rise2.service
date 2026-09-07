@@ -1,0 +1,20 @@
+[Unit]
+Description=World of Seeds V2 Rise2 stack
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+RequiresMountsFor=/srv/world-of-seeds-v2/data
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/world-of-seeds-v2
+ExecStartPre=/usr/bin/mountpoint -q /srv/world-of-seeds-v2/data
+ExecStartPre=/opt/world-of-seeds-v2/scripts/rise2_v2_preflight.sh /etc/world-of-seeds-v2/environment
+ExecStart=/usr/bin/docker compose --env-file /etc/world-of-seeds-v2/environment -f /opt/world-of-seeds-v2/deploy/compose.rise2.v2.yaml up --detach --wait --wait-timeout 180
+ExecStop=/usr/bin/docker compose --env-file /etc/world-of-seeds-v2/environment -f /opt/world-of-seeds-v2/deploy/compose.rise2.v2.yaml stop
+TimeoutStartSec=10min
+TimeoutStopSec=35min
+
+[Install]
+WantedBy=multi-user.target

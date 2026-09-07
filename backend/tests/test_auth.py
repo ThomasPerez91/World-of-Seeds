@@ -93,13 +93,49 @@ async def test_failed_logins_are_generic_and_throttled(
             json={"username": "thomas", "password": "incorrect-password"},
         )
         assert response.status_code == 401
-        assert response.json()["detail"] == "Invalid username or password"
+        assert response.json()["detail"] == {
+            "code": "authentication_failed",
+            "message": "Invalid username or password",
+            "field": None,
+        }
 
     locked = await client.post(
         "/api/v1/auth/login",
         json={"username": "thomas", "password": "correct-horse-battery"},
     )
     assert locked.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_user_persists_supported_interface_locale(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await create_user(
+        db_session,
+        username="thomas",
+        password="correct-horse-battery",
+        must_change_credentials=True,
+    )
+    await login(client, "thomas", "correct-horse-battery")
+
+    changed = await client.patch(
+        "/api/v1/auth/locale",
+        json={"preferred_locale": "en"},
+        headers=csrf_header(client),
+    )
+
+    assert changed.status_code == 200
+    assert changed.json()["user"]["preferred_locale"] == "en"
+    await db_session.refresh(user)
+    assert user.preferred_locale == "en"
+
+    rejected = await client.patch(
+        "/api/v1/auth/locale",
+        json={"preferred_locale": "de"},
+        headers=csrf_header(client),
+    )
+    assert rejected.status_code == 422
 
 
 @pytest.mark.asyncio

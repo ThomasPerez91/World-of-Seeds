@@ -294,6 +294,8 @@ class SandboxedFolderArchiver:
                     copied_bytes += len(chunk)
                     remaining -= len(chunk)
                     yield from writer.drain()
+                if remaining != 0:
+                    raise BrowserPathBlockedError("An archive file changed during streaming")
             yield from writer.drain()
             return copied_bytes
         finally:

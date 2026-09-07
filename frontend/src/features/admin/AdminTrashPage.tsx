@@ -1,19 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api, ApiError, type AdminTrashEntry, type AdminTrashListing } from "../../api/client";
-import { formatBytes } from "../../utils/format";
-import { Notice } from "../../components/Notice";
-import { FileDialog } from "../files/FileDialog";
+import { useFeedback } from "../../components/Feedback";
+import { useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
-
-const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
 
 type PurgeTarget = { kind: "all" } | { kind: "entry"; entry: AdminTrashEntry };
 
-function PurgeDialog({
+function InlinePurgeConfirmation({
   onClose,
   onCompleted,
   onSessionExpired,
@@ -24,80 +18,71 @@ function PurgeDialog({
   onSessionExpired: () => void;
   target: PurgeTarget;
 }) {
-  const [error, setError] = useState("");
+  const feedback = useFeedback();
+  const { t } = useI18n();
   const [submitting, setSubmitting] = useState(false);
   const all = target.kind === "all";
 
   async function purge() {
     setSubmitting(true);
-    setError("");
     try {
       if (target.kind === "entry") {
         await api.purgeAdminTrash(target.entry.id);
-        onCompleted(`« ${target.entry.name} » a été supprimé définitivement.`);
+        onCompleted(t("admin.trashPurged", { name: target.entry.name }));
       } else {
         const result = await api.purgeAllAdminTrash();
         const suffix =
           result.remaining === 0
-            ? "Toutes les corbeilles sont vides."
-            : `${result.remaining} éléments restent à traiter. Relance le nettoyage.`;
-        onCompleted(`${result.purged} éléments supprimés. ${suffix}`);
+            ? t("admin.purgeAllComplete")
+            : t("admin.purgeAllRemaining", { count: result.remaining });
+        onCompleted(t("admin.purgeAllResult", { count: result.purged, suffix }));
       }
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      setError(
-        caught instanceof ApiError && caught.status === 409
-          ? "L’intégrité d’un élément n’a pas pu être confirmée."
-          : "Le nettoyage n’a pas pu être terminé. Actualise la page avant de réessayer.",
-      );
+      feedback.toast({
+        tone: "error",
+        message: caught instanceof ApiError && caught.status === 409
+          ? t("admin.purgeIntegrityFailed")
+          : t("admin.purgeFailed"),
+      });
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <FileDialog
-      eyebrow="Administration"
-      title={all ? "Vider toutes les corbeilles" : "Supprimer définitivement"}
-      description={
-        all
-          ? "Tous les éléments de toutes les corbeilles seront supprimés par lots sécurisés."
-          : `« ${target.entry.name} » sera supprimé de la corbeille de ${target.entry.username}.`
-      }
-      onClose={onClose}
-      closeDisabled={submitting}
+    <div
+      className="inline-danger-confirmation admin-inline-confirmation"
+      role="group"
+      aria-labelledby="admin-purge-confirmation-title"
     >
-      <div className="confirmation-content">
-        <p className="permanent-delete-warning">
-          Cette action détruit les fichiers et ne peut pas être annulée.
-        </p>
-        <p className="form-message error-message" role="alert">
-          {error}
-        </p>
-        <div className="dialog-actions">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onClose}
-            disabled={submitting}
-            data-initial-focus
-          >
-            Annuler
-          </button>
-          <button
-            type="button"
-            className="danger-button"
-            onClick={() => void purge()}
-            disabled={submitting}
-          >
-            {submitting ? "Suppression…" : all ? "Tout supprimer" : "Supprimer"}
-          </button>
-        </div>
+      <div>
+        <strong id="admin-purge-confirmation-title">
+          {all ? t("admin.emptyAllTrash") : t("admin.deletePermanently")}
+        </strong>
+        <span>
+          {all
+            ? t("admin.emptyTrashDescription")
+            : t("admin.deleteTrashDescription", { name: target.entry.name, username: target.entry.username })}
+        </span>
+        <small>{t("admin.permanentWarning")}</small>
       </div>
-    </FileDialog>
+      <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>
+        {t("common.cancel")}
+      </button>
+      <button
+        type="button"
+        className="danger-button"
+        onClick={() => void purge()}
+        disabled={submitting}
+        autoFocus
+      >
+        {submitting ? t("admin.deletingTrash") : all ? t("admin.deleteAll") : t("admin.confirmPurge")}
+      </button>
+    </div>
   );
 }
 
@@ -110,12 +95,21 @@ export function AdminTrashPage({
   onNavigate: (view: AdminView) => void;
   onSessionExpired: () => void;
 }) {
+  const feedback = useFeedback();
+  const { formatBytes, formatDate, t } = useI18n();
   const [listing, setListing] = useState<AdminTrashListing | null>(null);
   const [target, setTarget] = useState<PurgeTarget | null>(null);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
+  const purgeOpenerRef = useRef<HTMLButtonElement | null>(null);
+  const restorePurgeFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (target !== null || !restorePurgeFocusRef.current) return;
+    restorePurgeFocusRef.current = false;
+    purgeOpenerRef.current?.focus();
+  }, [target]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -130,18 +124,24 @@ export function AdminTrashPage({
           onSessionExpired();
           return;
         }
-        setError("Impossible de charger les corbeilles.");
+        setError(t("admin.trashLoadFailed"));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [onSessionExpired, revision]);
+  }, [onSessionExpired, revision, t]);
 
   function completed(message: string) {
+    purgeOpenerRef.current = null;
     setTarget(null);
-    setNotice(message);
+    feedback.toast({ tone: "success", message });
     setRevision((current) => current + 1);
+  }
+
+  function closePurgeConfirmation() {
+    restorePurgeFocusRef.current = true;
+    setTarget(null);
   }
 
   return (
@@ -149,8 +149,8 @@ export function AdminTrashPage({
       <section className="admin-section" aria-labelledby="admin-trash-title" aria-busy={loading}>
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Nettoyage global</p>
-            <h2 id="admin-trash-title">Corbeilles utilisateurs</h2>
+            <p className="eyebrow">{t("admin.globalCleanup")}</p>
+            <h2 id="admin-trash-title">{t("admin.userTrash")}</h2>
           </div>
           <div className="admin-trash-actions">
             <button
@@ -159,32 +159,42 @@ export function AdminTrashPage({
               disabled={loading}
               onClick={() => setRevision((current) => current + 1)}
             >
-              Actualiser
+              {t("common.refresh")}
             </button>
             <button
               type="button"
               className="danger-outline-button"
-              disabled={loading || (listing?.entries.length ?? 0) === 0}
-              onClick={() => setTarget({ kind: "all" })}
+              disabled={loading || target !== null || (listing?.entries.length ?? 0) === 0}
+              onClick={(event) => {
+                purgeOpenerRef.current = event.currentTarget;
+                setTarget({ kind: "all" });
+              }}
             >
-              Vider toutes les corbeilles
+              {t("admin.emptyAllTrash")}
             </button>
           </div>
         </div>
 
-        <Notice message={notice} onDismiss={() => setNotice("")} />
+        {target !== null && (
+          <InlinePurgeConfirmation
+            target={target}
+            onClose={closePurgeConfirmation}
+            onCompleted={completed}
+            onSessionExpired={onSessionExpired}
+          />
+        )}
         <p className="form-message error-message" role="alert">
           {error}
         </p>
         {listing?.truncated && (
           <p className="truncation-notice" role="status">
-            La liste est limitée aux 5 000 éléments les plus récents.
+            {t("admin.trashTruncated")}
           </p>
         )}
         {!loading && listing?.entries.length === 0 && (
           <div className="admin-empty-state">
-            <strong>Toutes les corbeilles sont vides</strong>
-            <span>Aucun élément ne nécessite de nettoyage.</span>
+            <strong>{t("admin.allTrashEmpty")}</strong>
+            <span>{t("admin.noTrashCleanup")}</span>
           </div>
         )}
         {listing !== null && listing.entries.length > 0 && (
@@ -201,33 +211,29 @@ export function AdminTrashPage({
                   </div>
                   <span className="admin-trash-path">{entry.original_path}</span>
                   <span>
-                    {formatBytes(entry.size, "Taille du dossier non calculée")} · supprimé le{" "}
-                    <time dateTime={entry.deleted_at}>
-                      {dateFormatter.format(new Date(entry.deleted_at))}
-                    </time>
+                    {t("admin.deletedOn", {
+                      size: formatBytes(entry.size, t("trash.folderSizeUnknown")),
+                      date: formatDate(entry.deleted_at, { dateStyle: "medium", timeStyle: "short" }),
+                    })}
                   </span>
                 </div>
                 <button
                   type="button"
                   className="danger-outline-button compact-button"
-                  aria-label={`Supprimer définitivement ${entry.name} de la corbeille de ${entry.username}`}
-                  onClick={() => setTarget({ kind: "entry", entry })}
+                  aria-label={t("admin.deleteTrashNamed", { name: entry.name, username: entry.username })}
+                  disabled={target !== null}
+                  onClick={(event) => {
+                    purgeOpenerRef.current = event.currentTarget;
+                    setTarget({ kind: "entry", entry });
+                  }}
                 >
-                  Supprimer
+                  {t("common.delete")}
                 </button>
               </li>
             ))}
           </ul>
         )}
       </section>
-      {target !== null && (
-        <PurgeDialog
-          target={target}
-          onClose={() => setTarget(null)}
-          onCompleted={completed}
-          onSessionExpired={onSessionExpired}
-        />
-      )}
     </AdminPageShell>
   );
 }

@@ -1,0 +1,60 @@
+services:
+  node-exporter:
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+      - --collector.textfile.directory=/var/lib/node-exporter/textfile
+    volumes:
+      - type: bind
+        source: ${WOS_V2_NODE_EXPORTER_TEXTFILE_PATH:-/var/lib/world-of-seeds-v2/node-exporter-textfile}
+        target: /var/lib/node-exporter/textfile
+        read_only: true
+        bind: {create_host_path: false}
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATA_SOURCE_URI: postgres:5432/${WOS_V2_POSTGRES_DB:?set WOS_V2_POSTGRES_DB}?sslmode=disable
+      DATA_SOURCE_USER: ${WOS_V2_POSTGRES_USER:?set WOS_V2_POSTGRES_USER}
+      DATA_SOURCE_PASS: ${WOS_V2_POSTGRES_PASSWORD:?set WOS_V2_POSTGRES_PASSWORD}
+    networks: [backend, monitoring]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.89.0
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    networks: [backend, monitoring]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+
+  blackbox-exporter:
+    image: quay.io/prometheus/blackbox-exporter:v0.28.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/blackbox_exporter/config.yml
+    volumes:
+      - type: bind
+        source: ../monitoring/blackbox/blackbox.yml
+        target: /etc/blackbox_exporter/config.yml
+        read_only: true
+    networks: [backend, torrent, monitoring]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64

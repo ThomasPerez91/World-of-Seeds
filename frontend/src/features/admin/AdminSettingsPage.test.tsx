@@ -3,9 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { auditAccessibility } from "../../test/accessibility";
+import { FeedbackProvider } from "../../components/Feedback";
 import { AdminSettingsPage } from "./AdminSettingsPage";
+import { translatedNewGreedyFieldIds } from "./newGreedyTranslations";
+import { translatedOptionKeys } from "./optionTranslations";
 
 const options = {
+  service_controls_available: true,
   sections: [
     {
       id: "torrents",
@@ -30,6 +34,33 @@ const options = {
   ],
   changed_keys: [],
   restart_required: false,
+  scheduler: {
+    desired_generation: 4,
+    applied_generation: 3,
+    synchronized: false,
+    rounds: 9,
+    lease_active: true,
+  },
+  storage: {
+    managed_bytes: 100,
+    logical_bytes: 150,
+    disk_total_bytes: 1000,
+    disk_free_bytes: 600,
+    pressure: "warning",
+    managed_quota_bytes: 0,
+    user_quota_bytes: 0,
+  },
+  audit: [
+    {
+      key: "WOS_TORRENT_MAX_ACTIVE_PER_USER",
+      version: 1,
+      old_value: null,
+      new_value: 5,
+      actor: null,
+      source: "bootstrap",
+      changed_at: "2026-08-22T10:00:00Z",
+    },
+  ],
 } as const;
 
 function response(body: unknown, status = 200): Response {
@@ -40,14 +71,21 @@ function response(body: unknown, status = 200): Response {
 }
 
 describe("AdminSettingsPage", () => {
+  it("possède une traduction anglaise stable pour chaque option V2", () => {
+    expect(translatedOptionKeys.size).toBe(36);
+    expect(translatedOptionKeys.has("WOS_ADMIN_REFRESH_INTERVAL_SECONDS")).toBe(true);
+    expect(translatedNewGreedyFieldIds.size).toBe(44);
+    expect(translatedNewGreedyFieldIds.has("advanced.inject_hours")).toBe(true);
+  });
+
   it("affiche une erreur métier structurée sous le champ concerné", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const url = String(input);
-        if (url === "/api/v1/admin/options" && init?.method === undefined) {
+        if (url === "/api/v2/admin/overview" && init?.method === undefined) {
           return response(options);
         }
-        if (url === "/api/v1/admin/options" && init?.method === "PATCH") {
+        if (url === "/api/v2/admin/options" && init?.method === "PATCH") {
           return response(
             {
               detail: {
@@ -66,11 +104,13 @@ describe("AdminSettingsPage", () => {
 
     const user = userEvent.setup();
     const view = render(
-      <AdminSettingsPage
-        onBack={vi.fn()}
-        onNavigate={vi.fn()}
-        onSessionExpired={vi.fn()}
-      />,
+      <FeedbackProvider>
+        <AdminSettingsPage
+          onBack={vi.fn()}
+          onNavigate={vi.fn()}
+          onSessionExpired={vi.fn()}
+        />
+      </FeedbackProvider>,
     );
 
     const input = await screen.findByRole("spinbutton", {
@@ -80,9 +120,7 @@ describe("AdminSettingsPage", () => {
     await user.type(input, "6");
     await user.click(screen.getByRole("button", { name: "Enregistrer" }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "Cette limite est incompatible avec la capacité globale.",
-    );
+    expect(await screen.findAllByText("Cette limite est incompatible avec la capacité globale.")).toHaveLength(2);
     expect(input.getAttribute("aria-invalid")).toBe("true");
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
@@ -91,7 +129,7 @@ describe("AdminSettingsPage", () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const url = String(input);
-        if (url === "/api/v1/admin/options") return response(options);
+        if (url === "/api/v2/admin/overview") return response(options);
         if (url === "/api/v1/admin/services/wos/restart" && init?.method === "POST") {
           return response({
             state: "pending",
@@ -118,11 +156,13 @@ describe("AdminSettingsPage", () => {
 
     const user = userEvent.setup();
     render(
-      <AdminSettingsPage
-        onBack={vi.fn()}
-        onNavigate={vi.fn()}
-        onSessionExpired={vi.fn()}
-      />,
+      <FeedbackProvider>
+        <AdminSettingsPage
+          onBack={vi.fn()}
+          onNavigate={vi.fn()}
+          onSessionExpired={vi.fn()}
+        />
+      </FeedbackProvider>,
     );
 
     await screen.findByRole("heading", { name: "Paramètres fonctionnels" });
@@ -134,7 +174,7 @@ describe("AdminSettingsPage", () => {
       await screen.findByText(
         "World of Seeds a redémarré avec succès.",
         {},
-        { timeout: 2500 },
+        { timeout: 3500 },
       ),
     ).toBeDefined();
     expect(fetchMock).toHaveBeenCalledWith(

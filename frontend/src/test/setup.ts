@@ -18,5 +18,6 @@ Object.defineProperty(window, "matchMedia", {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
   window.history.replaceState({}, "", "/");
 });

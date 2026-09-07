@@ -1,3 +1,8 @@
+from app.options.postgres import (
+    DatabaseOptionsDriftError,
+    DatabaseOptionsUpdate,
+    PostgresOptionsRegistry,
+)
 from app.options.registry import (
     CATEGORY_LABELS,
     OPTION_SPECS,
@@ -16,6 +21,8 @@ from app.options.store import (
 
 __all__ = [
     "CATEGORY_LABELS",
+    "DatabaseOptionsDriftError",
+    "DatabaseOptionsUpdate",
     "OPTION_SPECS",
     "OptionFieldValue",
     "OptionSpec",
@@ -26,4 +33,5 @@ __all__ = [
     "OptionsUnsafeError",
     "OptionsUpdate",
     "OptionsValidationError",
+    "PostgresOptionsRegistry",
 ]

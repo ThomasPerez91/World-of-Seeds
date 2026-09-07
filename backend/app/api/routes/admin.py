@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated, Literal, Never, cast
 from uuid import UUID
 
@@ -6,7 +7,13 @@ from sqlalchemy import func, select
 from starlette.concurrency import run_in_threadpool
 
 from app.admin import AdminStorageError, AdminStorageInspector
-from app.auth.dependencies import AuthContext, DbSession, require_admin_csrf, require_current_admin
+from app.auth.dependencies import (
+    AppSettings,
+    AuthContext,
+    DbSession,
+    require_admin_csrf,
+    require_current_admin,
+)
 from app.auth.service import (
     ManagedUserNotFoundError,
     ProtectedUserError,
@@ -14,6 +21,7 @@ from app.auth.service import (
     delete_managed_user,
     set_managed_user_active,
 )
+from app.coordination.dependencies import RedisCoordinatorDependency
 from app.core.config import Settings, get_settings
 from app.files import WorkspaceError
 from app.files.dependencies import WorkspaceManagerDependency
@@ -34,6 +42,7 @@ from app.integrations.newgreedy_restart import (
     NewGreedyRestartPendingError,
     NewGreedyRestartStatus,
 )
+from app.integrations.observability_v2 import load_v2_external_services_snapshot
 from app.integrations.wos_restart import (
     WosRestartError,
     WosRestartPendingError,
@@ -182,12 +191,26 @@ async def update_options(
     )
 
 
+def require_legacy_service_controls(settings: AppSettings) -> None:
+    if settings.runtime_profile != "v1":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "legacy_service_controls_disabled"},
+        )
+
+
 @router.get("/services/health", response_model=AdminSystemHealthResponse)
 async def get_services_health(
+    db: DbSession,
+    settings: AppSettings,
     monitor: ExternalServicesMonitorDependency,
     _: Annotated[AuthContext, Depends(require_current_admin)],
 ) -> AdminSystemHealthResponse:
-    snapshot = await monitor.snapshot()
+    snapshot = (
+        await load_v2_external_services_snapshot(db)
+        if settings.runtime_profile == "v2"
+        else await monitor.snapshot()
+    )
     return AdminSystemHealthResponse(
         status="ok" if snapshot.healthy else "degraded",
         checked_at=snapshot.checked_at,
@@ -203,6 +226,7 @@ async def get_services_health(
             version=snapshot.qbittorrent.version,
             error_code=snapshot.qbittorrent.error_code,
         ),
+        service_controls_available=settings.runtime_profile == "v1",
     )
 
 
@@ -251,7 +275,11 @@ def _raise_newgreedy_config_error(exc: NewGreedyConfigError) -> Never:
     ) from exc
 
 
-@router.get("/services/newgreedy/config", response_model=NewGreedyConfigResponse)
+@router.get(
+    "/services/newgreedy/config",
+    response_model=NewGreedyConfigResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
+)
 async def get_newgreedy_config(
     store: NewGreedyConfigStoreDependency,
     _: Annotated[AuthContext, Depends(require_current_admin)],
@@ -263,7 +291,11 @@ async def get_newgreedy_config(
     return _config_response(fields)
 
 
-@router.patch("/services/newgreedy/config", response_model=NewGreedyConfigResponse)
+@router.patch(
+    "/services/newgreedy/config",
+    response_model=NewGreedyConfigResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
+)
 async def update_newgreedy_config(
     payload: NewGreedyConfigUpdateRequest,
     store: NewGreedyConfigStoreDependency,
@@ -276,7 +308,11 @@ async def update_newgreedy_config(
     return _config_response(fields, restart_required=True)
 
 
-@router.get("/services/newgreedy/overview", response_model=NewGreedyOverviewResponse)
+@router.get(
+    "/services/newgreedy/overview",
+    response_model=NewGreedyOverviewResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
+)
 async def get_newgreedy_overview(
     monitor: ExternalServicesMonitorDependency,
     _: Annotated[AuthContext, Depends(require_current_admin)],
@@ -303,6 +339,7 @@ async def get_newgreedy_overview(
 @router.delete(
     "/services/newgreedy/stats",
     response_model=NewGreedyStatsResetResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def reset_newgreedy_stats(
     monitor: ExternalServicesMonitorDependency,
@@ -321,6 +358,7 @@ async def reset_newgreedy_stats(
 @router.get(
     "/services/newgreedy/torrents",
     response_model=NewGreedyTorrentListingResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def list_newgreedy_torrents(
     monitor: ExternalServicesMonitorDependency,
@@ -341,6 +379,7 @@ async def list_newgreedy_torrents(
 @router.get(
     "/services/qbittorrent/torrents",
     response_model=QBittorrentTorrentListingResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def list_qbittorrent_torrents(
     monitor: ExternalServicesMonitorDependency,
@@ -385,6 +424,7 @@ def _raise_newgreedy_restart_error(exc: NewGreedyRestartError) -> Never:
 @router.get(
     "/services/newgreedy/restart",
     response_model=NewGreedyRestartStatusResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def get_newgreedy_restart_status(
     store: NewGreedyRestartStoreDependency,
@@ -401,6 +441,7 @@ async def get_newgreedy_restart_status(
     "/services/newgreedy/restart",
     response_model=NewGreedyRestartStatusResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def request_newgreedy_restart(
     store: NewGreedyRestartStoreDependency,
@@ -434,6 +475,7 @@ def _raise_wos_restart_error(exc: WosRestartError) -> Never:
 @router.get(
     "/services/wos/restart",
     response_model=NewGreedyRestartStatusResponse,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def get_wos_restart_status(
     store: WosRestartStoreDependency,
@@ -450,6 +492,7 @@ async def get_wos_restart_status(
     "/services/wos/restart",
     response_model=NewGreedyRestartStatusResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_legacy_service_controls)],
 )
 async def request_wos_restart(
     store: WosRestartStoreDependency,
@@ -523,10 +566,11 @@ async def update_user_status(
     user_id: UUID,
     payload: UserStatusRequest,
     db: DbSession,
+    redis: RedisCoordinatorDependency,
     _: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> UserResponse:
     try:
-        user = await set_managed_user_active(db, user_id=user_id, is_active=payload.is_active)
+        result = await set_managed_user_active(db, user_id=user_id, is_active=payload.is_active)
     except ManagedUserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
     except ProtectedUserError as exc:
@@ -534,17 +578,20 @@ async def update_user_status(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrator accounts cannot be suspended",
         ) from exc
-    return UserResponse.model_validate(user)
+    if result.queue_membership_changed:
+        await redis.publish_torrent_queue_changed(datetime.now(UTC))
+    return UserResponse.model_validate(result.user)
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: UUID,
     db: DbSession,
+    redis: RedisCoordinatorDependency,
     _: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> Response:
     try:
-        await delete_managed_user(db, user_id=user_id)
+        queue_membership_changed = await delete_managed_user(db, user_id=user_id)
     except ManagedUserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
     except ProtectedUserError as exc:
@@ -552,6 +599,8 @@ async def delete_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrator accounts cannot be deleted",
         ) from exc
+    if queue_membership_changed:
+        await redis.publish_torrent_queue_changed(datetime.now(UTC))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
