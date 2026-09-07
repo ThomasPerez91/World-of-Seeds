@@ -8,6 +8,7 @@ on:
       - completed
     branches:
       - develop_V2
+      - develop
 
 permissions: {}
 
@@ -21,7 +22,8 @@ jobs:
     if: >-
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'develop_V2'
+      (github.event.workflow_run.head_branch == 'develop_V2' ||
+      github.event.workflow_run.head_branch == 'develop')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -71,7 +73,7 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
-            org.opencontainers.image.ref.name=develop_V2
+            org.opencontainers.image.ref.name=${{ github.event.workflow_run.head_branch }}
           cache-from: type=gha,scope=v2
           cache-to: type=gha,mode=max,scope=v2
           provenance: mode=max

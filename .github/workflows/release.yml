@@ -1,4 +1,4 @@
-name: Publish release
+name: Publish V1 legacy release
 
 on:
   push:
@@ -8,13 +8,15 @@ on:
 permissions: {}
 
 concurrency:
-  group: world-of-seeds-release
+  group: world-of-seeds-v1-release
   cancel-in-progress: false
 
 jobs:
   release:
-    name: Publish stable release
-    if: startsWith(github.event.head_commit.message, 'release:')
+    name: Publish V1 legacy release
+    if: >-
+      startsWith(github.event.head_commit.message, 'release: V1.') ||
+      startsWith(github.event.head_commit.message, 'release: v1.')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -24,22 +26,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve and validate the application version
+      - name: Resolve and validate the V1 application version
         id: version
         run: |
           set -Eeuo pipefail
           version="$(python3 scripts/versioning.py check --print-version)"
+          [[ "$version" =~ ^1\.[0-9]+\.[0-9]+$ ]]
           python3 scripts/versioning.py check --expected-tag "v$version"
           printf 'version=%s\n' "$version" >>"$GITHUB_OUTPUT"
           printf 'tag=v%s\n' "$version" >>"$GITHUB_OUTPUT"
 
-      - name: Prepare or verify the release
+      - name: Prepare or verify the V1 release
         id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -Eeuo pipefail
+          [[ "$RELEASE_TAG" =~ ^v1\.[0-9]+\.[0-9]+$ ]]
           releases_json="$(gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/releases?per_page=100")"
           release_json="$(jq -c --arg tag "$RELEASE_TAG" \
@@ -75,13 +79,15 @@ jobs:
             '.tag_name == $tag and .prerelease == false and (.target_commitish == "master" or .target_commitish == $sha)' \
             <<<"$release_json" >/dev/null
 
-      - name: Dispatch the immutable release build
+      - name: Dispatch the immutable V1 release build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -Eeuo pipefail
+          [[ "$RELEASE_TAG" =~ ^v1\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_VERSION" =~ ^1\.[0-9]+\.[0-9]+$ ]]
           jq -n \
             --arg sha "$GITHUB_SHA" \
             --arg tag "$RELEASE_TAG" \
