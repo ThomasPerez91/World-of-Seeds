@@ -8,7 +8,7 @@ World of Seeds V2 est désormais la ligne de production active.
 - Production : Rise2.
 - Branche de production : `master`.
 - Branche d'intégration : `develop`.
-- `master` et `develop` sont alignées sur `7010fa9f2a86cd74961bfc60eaaab5c2f7aa5f14` au moment de ce handoff.
+- Le dernier `develop` vérifié au démarrage de la planification UX post-2.0 est `3e1f9db9fd8af1e51334266d4747feeb941a3511` (PR #148). Tout nouvel agent doit néanmoins faire un `fetch` et vérifier le HEAD réel avant de créer sa branche.
 - `develop_V2` est une branche historique/legacy de la phase de construction V2 ; ne plus l'utiliser pour les nouveaux développements.
 - La V1 `1.3.3` reste figée par son tag/release et sur l'ancien serveur uniquement comme solution de rollback pendant la fenêtre de conservation ; elle n'est plus la production active et son ancien déploiement GitHub est désactivé.
 
@@ -130,6 +130,35 @@ Pour tout nouveau travail :
 
 Ne jamais pousser directement sur `master` ou `develop`.
 
+## Refonte UX post-2.0
+
+La priorité produit post-2.0 est désormais une refonte de l'expérience utilisateur autour d'un Dashboard **torrent-centric**.
+
+Décisions validées :
+
+- la page d'accueil utilisateur devient un Dashboard de suivi des torrents ;
+- l'ancien espace utilisateur Fichiers/Corbeille n'est plus la cible produit et sera retiré après audit de ses dépendances ;
+- le Dashboard présente des synthèses torrents, récupération locale et stockage en réutilisant d'abord les contrats déjà disponibles ;
+- le gestionnaire de torrents adopte une présentation compacte en accordéons ;
+- l'ajout `.torrent` par clic et glisser/déposer, la progression, les états de queue, le WebSocket, l'annulation/désabonnement, la rétention et le manifeste READY existants sont à réutiliser, pas à réécrire ;
+- la première refonte n'ajoute pas de backend seulement pour seeders, peers, ETA, vitesse qB, ratio ou télémétrie globale de récupération ;
+- la récupération affichée dans cette phase correspond à la file locale du contrôleur navigateur existant : nombre actif / concurrence maximale locale et positions d'attente disponibles ; elle n'est pas une file globale autoritaire multi-appareils ;
+- le thème doit offrir `light`, `dark` et `system` avec préférence utilisateur persistée ; la préférence de langue FR/EN existante reste conservée ;
+- les couleurs doivent être plus claires et douces, les boutons plus modernes et les couleurs sémantiques fortes réservées aux vrais avertissements/actions destructrices ;
+- le login, les paramètres, le shell utilisateur et ensuite l'administration doivent converger vers le même design system.
+
+### Découpage des tâches
+
+- **UX-00 — TERMINE** : planification documentaire de la refonte dans `roadmap-v2.md`, `PROGRESS.md` et `CONTEXT.md`.
+- **UX-01 — A FAIRE** : design system, thèmes, préférence persistée, cartouche Préférences, login/settings/shell.
+- **UX-02 — A FAIRE** : nouveau Dashboard et ses cartouches en composant les données/API existantes.
+- **UX-03 — A FAIRE** : gestionnaire de torrents en accordéons avec les contrats actuels.
+- **UX-04 — A FAIRE** : expérience READY et récupération locale, sans nouvelle télémétrie backend.
+- **UX-05 — A FAIRE** : retrait de l'espace utilisateur Fichiers/Corbeille et nettoyage après audit de dépendances.
+- **UX-06 — A FAIRE** : harmonisation admin, responsive, accessibilité et nettoyage final.
+
+Le détail, les dépendances et la Definition of Done de chaque tâche sont dans `docs/roadmap-v2.md`.
+
 ## Dette / points encore ouverts
 
 ### V2-32D — nettoyage NewGreedy à la purge
@@ -150,6 +179,6 @@ Les PR encore ouvertes contre `develop_V2` sont historiques et ne doivent pas ê
 
 ## Prochaine tâche
 
-La phase de construction/release V2 est terminée.
+**UX-01 — Design system, thèmes et préférences.**
 
-Le prochain développement doit partir du dernier `develop` et suivre le flux protégé actuel. La prochaine fonctionnalité ou correction produit sera définie comme une nouvelle tâche post-2.0, sur une branche dédiée, sans réutiliser la séquence de release V2-00 → V2-35.
+Elle doit partir du dernier `develop` réel après merge de UX-00, sur une branche dédiée, et rester limitée aux fondations visuelles, aux préférences utilisateur et aux écrans nécessaires à leur adoption. Ne pas commencer UX-02 dans la même PR.
