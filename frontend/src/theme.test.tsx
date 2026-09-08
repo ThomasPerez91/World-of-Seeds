@@ -75,7 +75,7 @@ describe("theme", () => {
       expect(light.getAttribute("aria-disabled")).toBe("true");
       expect(light.hasAttribute("disabled")).toBe(false);
       expect(document.activeElement).toBe(light);
-      expect(screen.getByRole("status").textContent).toContain("Enregistrement");
+      expect(screen.getByText("Enregistrement…")).toBeTruthy();
       await act(async () => reject(new Error("offline")));
       expect(screen.getByText("dark/dark")).toBeTruthy();
       expect(screen.getByRole("alert").textContent).toContain("rétabli");
