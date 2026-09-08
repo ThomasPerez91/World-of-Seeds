@@ -6,16 +6,22 @@ Ce canal remplace définitivement l'ancien déploiement V1/OVH. La V1 reste fig�
 release Git, mais aucune clé GitHub destinée à Rise2 ne doit permettre un shell général sur le
 serveur. Le déploiement V2 passe par une clé SSH dédiée et une commande forcée installée par root.
 
-La première étape est volontairement **manuelle uniquement** (`workflow_dispatch`). Une seconde PR
-n'activera le déploiement automatique après CI vert sur `master` qu'après un premier passage manuel
-réussi sur Rise2.
+Le premier passage manuel a été validé le 8 septembre 2026 par le run GitHub Actions
+`34204307209` sur le SHA `2164c4411d84fd4381f7e58370189eef86ecc263`. Le canal automatique peut
+donc s'exécuter après un CI `master` vert. `workflow_dispatch` reste disponible pour les opérations
+manuelles contrôlées.
 
 ## Contrat de sécurité
 
+- le déclenchement automatique dépend de la fin réussie du workflow `CI` sur un événement `push`
+  de la branche `master` ;
+- le runner verrouille la révision sur le `head_sha` du CI qui vient de réussir ;
+- si cette révision n'est plus le HEAD courant de `master`, le run est considéré obsolète et s'arrête
+  avant le build de production ;
 - le runner construit l'image depuis le SHA exact de `master` et publie uniquement
   `ghcr.io/thomasperez91/world-of-seeds-v2:sha-<sha>` ;
 - le déploiement utilise ensuite le digest immuable retourné par GHCR, jamais un tag mutable ;
-- la commande Rise2 vérifie que le SHA demandé est encore le HEAD de `origin/master` ;
+- la commande Rise2 vérifie à nouveau que le SHA demandé est encore le HEAD de `origin/master` ;
 - seuls les historiques fast-forward sont acceptés ;
 - PostgreSQL, Redis, qBittorrent et NewGreedy ne sont jamais recréés par le déploiement applicatif ;
 - une modification des fichiers qB/NewGreedy ou de la topologie Compose Rise2 bloque le canal
@@ -25,7 +31,7 @@ réussi sur Rise2.
 
 ## GitHub Environment `rise2-production`
 
-Créer l'environment GitHub `rise2-production` avec :
+L'environment GitHub `rise2-production` contient :
 
 Variables :
 
@@ -42,8 +48,8 @@ Ne jamais réutiliser une clé SSH personnelle ou la clé de l'utilisateur `sysa
 
 ## Préparation Rise2
 
-Les deux fichiers versionnés suivants doivent être installés par root et non exécutés directement
-à partir d'un checkout modifiable :
+Les deux fichiers versionnés suivants sont installés par root et non exécutés directement à partir
+d'un checkout modifiable :
 
 ```text
 deploy/world-of-seeds-v2-deploy-command
@@ -53,8 +59,8 @@ deploy/deploy-world-of-seeds-v2-rise2
   -> /usr/local/sbin/deploy-world-of-seeds-v2-rise2
 ```
 
-Le compte `wosdeploy` doit avoir un mot de passe verrouillé. Son `authorized_keys` est root-owned et
-force `/usr/local/sbin/world-of-seeds-v2-deploy-command`, sans PTY, forwarding, agent, X11 ou user rc.
+Le compte `wosdeploy` a un mot de passe verrouillé. Son `authorized_keys` est root-owned et force
+`/usr/local/sbin/world-of-seeds-v2-deploy-command`, sans PTY, forwarding, agent, X11 ou user rc.
 Le seul droit sudo NOPASSWD autorisé est `/usr/local/sbin/deploy-world-of-seeds-v2-rise2`.
 
 La commande forcée accepte exactement :
@@ -65,15 +71,17 @@ deploy-world-of-seeds-v2 <40-hex-sha> <sha256:digest> <github-user>
 
 Le token GHCR arrive uniquement sur stdin et n'est jamais passé dans les arguments SSH.
 
-## Premier passage
+## Validation du premier passage
 
-1. garder le workflow en mode `workflow_dispatch` seulement ;
-2. installer la clé/commande restreinte sur Rise2 ;
-3. créer les variables et secrets de `rise2-production` ;
-4. lancer manuellement `Deploy V2 to Rise2` depuis `master` ;
-5. vérifier le digest en cours, la santé API, 2 workers, scheduler, HTTPS et l'identité inchangée de
-   PostgreSQL/Redis/qBittorrent/NewGreedy ;
-6. seulement après ce PASS, activer le déclenchement automatique après CI vert sur `master`.
+Le run `34204307209` a validé :
+
+1. le build et la publication de l'image immuable du SHA exact de `master` ;
+2. la vérification des labels OCI révision/version et de l'architecture `linux/amd64` ;
+3. la connexion Rise2 via l'identité SSH restreinte ;
+4. le déploiement du digest exact ;
+5. les contrôles runtime et les garde-fous du script Rise2.
+
+Le résultat GitHub du build et du déploiement était `success`.
 
 ## Changements d'infrastructure sensibles
 

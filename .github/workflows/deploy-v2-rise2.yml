@@ -2,6 +2,10 @@ name: Deploy V2 to Rise2
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [master]
 
 permissions: {}
 
@@ -12,7 +16,12 @@ concurrency:
 jobs:
   build:
     name: Build immutable V2 production image
-    if: github.ref == 'refs/heads/master'
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'master')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -24,16 +33,30 @@ jobs:
     steps:
       - name: Lock deployment revision
         id: context
+        env:
+          TARGET_REVISION: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -Eeuo pipefail
-          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
-          printf 'revision=%s\n' "$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+          [[ "$TARGET_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          printf 'revision=%s\n' "$TARGET_REVISION" >>"$GITHUB_OUTPUT"
 
       - name: Check out exact master revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           ref: ${{ steps.context.outputs.revision }}
+
+      - name: Require current master head
+        env:
+          TARGET_REVISION: ${{ steps.context.outputs.revision }}
+        run: |
+          set -Eeuo pipefail
+          git fetch --quiet origin master:refs/remotes/origin/master
+          current_master="$(git rev-parse refs/remotes/origin/master)"
+          [[ "$current_master" == "$TARGET_REVISION" ]] || {
+            echo "Deployment superseded: target $TARGET_REVISION is no longer master HEAD ($current_master)." >&2
+            exit 1
+          }
 
       - name: Validate V2 version
         id: version
