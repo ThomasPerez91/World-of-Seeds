@@ -1,0 +1,166 @@
+name: Deploy V2 to Rise2
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: world-of-seeds-v2-rise2-production
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build immutable V2 production image
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      revision: ${{ steps.context.outputs.revision }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Lock deployment revision
+        id: context
+        run: |
+          set -Eeuo pipefail
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          printf 'revision=%s\n' "$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+
+      - name: Check out exact master revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.context.outputs.revision }}
+
+      - name: Validate V2 version
+        id: version
+        run: |
+          set -Eeuo pipefail
+          version="$(python3 scripts/versioning.py check --channel v2 --print-version)"
+          printf 'version=%s\n' "$version" >>"$GITHUB_OUTPUT"
+
+      - name: Validate Rise2 deployment helpers
+        run: |
+          set -Eeuo pipefail
+          bash -n \
+            deploy/deploy-world-of-seeds-v2-rise2 \
+            deploy/world-of-seeds-v2-deploy-command
+          if SSH_ORIGINAL_COMMAND='interactive-shell' \
+            bash deploy/world-of-seeds-v2-deploy-command; then
+            echo 'Restricted V2 deploy command accepted invalid input.' >&2
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish exact master image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/thomasperez91/world-of-seeds-v2:sha-${{ steps.context.outputs.revision }}
+          build-args: |
+            WOS_APP_VERSION=${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.context.outputs.revision }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.ref.name=master
+          cache-from: type=gha,scope=v2-production
+          cache-to: type=gha,mode=max,scope=v2-production
+          provenance: mode=max
+          sbom: true
+
+      - name: Verify immutable artifact identity
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          EXPECTED_REVISION: ${{ steps.context.outputs.revision }}
+          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          image="ghcr.io/thomasperez91/world-of-seeds-v2@$IMAGE_DIGEST"
+          docker pull --platform linux/amd64 "$image"
+          [[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" == "$EXPECTED_REVISION" ]]
+          [[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image")" == "$EXPECTED_VERSION" ]]
+          [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" == 'linux/amd64' ]]
+
+  deploy:
+    name: Deploy exact digest on Rise2
+    needs: build
+    if: needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: rise2-production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Validate Rise2 connection configuration
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          REVISION: ${{ needs.build.outputs.revision }}
+          SSH_HOST: ${{ vars.RISE2_SSH_HOST }}
+          SSH_PORT: ${{ vars.RISE2_SSH_PORT }}
+          SSH_USER: ${{ vars.RISE2_SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.RISE2_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.RISE2_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ -n "$SSH_HOST" ]]
+          [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]]
+          (( SSH_PORT >= 1 && SSH_PORT <= 65535 ))
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [[ -n "$SSH_PRIVATE_KEY" ]]
+          [[ -n "$SSH_KNOWN_HOSTS" ]]
+
+      - name: Configure restricted Rise2 SSH identity
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.RISE2_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.RISE2_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" >"$HOME/.ssh/wos-v2-rise2"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" >"$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/wos-v2-rise2" "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/wos-v2-rise2" >/dev/null
+
+      - name: Deploy on Rise2 through restricted command
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          REVISION: ${{ needs.build.outputs.revision }}
+          REGISTRY_USER: ${{ github.repository_owner }}
+          SSH_HOST: ${{ vars.RISE2_SSH_HOST }}
+          SSH_PORT: ${{ vars.RISE2_SSH_PORT }}
+          SSH_USER: ${{ vars.RISE2_SSH_USER }}
+        run: |
+          set -Eeuo pipefail
+          printf '%s\n' "$GHCR_TOKEN" \
+            | ssh \
+                -i "$HOME/.ssh/wos-v2-rise2" \
+                -o BatchMode=yes \
+                -o IdentitiesOnly=yes \
+                -o StrictHostKeyChecking=yes \
+                -o "UserKnownHostsFile=$HOME/.ssh/known_hosts" \
+                -p "$SSH_PORT" \
+                "$SSH_USER@$SSH_HOST" \
+                "deploy-world-of-seeds-v2 $REVISION $IMAGE_DIGEST $REGISTRY_USER"
