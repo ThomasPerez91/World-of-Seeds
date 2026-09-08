@@ -24,6 +24,40 @@ La ligne de production active est **V2**.
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
 
+## Direction produit post-2.0 — refonte UX planifiée
+
+La prochaine évolution produit validée est une refonte progressive de l'interface utilisateur autour d'un **Dashboard torrent-centric**.
+
+Cette section décrit une direction durable approuvée, pas un état déjà déployé : les PR UX-01 à UX-06 doivent être intégrées séparément et conserver une application fonctionnelle entre chaque étape.
+
+Cible utilisateur :
+
+- après authentification, le Dashboard devient l'accueil principal ;
+- le parcours central est ajout `.torrent` -> file/téléchargement -> READY -> récupération locale -> suppression/désabonnement ;
+- l'ancien navigateur de fichiers utilisateur, la corbeille utilisateur et les actions de création libre de dossiers ne font plus partie de la cible UX et doivent être retirés lors de UX-05 après audit de leurs dépendances techniques ;
+- les écrans admin restent disponibles et sont harmonisés avec le nouveau design lors de UX-06.
+
+Principes de design :
+
+- palettes claire et sombre plus lisibles et moins oppressantes que l'UI 2.0 initiale ;
+- thème `light`, `dark` ou `system` avec préférence persistée par utilisateur ;
+- langue FR/EN conservée comme préférence utilisateur ;
+- surfaces/cartouches compacts, boutons modernes et hiérarchie visuelle plus dense ;
+- éviter les grands titres et espaces vides qui réduisent la densité utile ;
+- réserver les couleurs fortes aux vrais états d'erreur, avertissements et actions destructrices.
+
+Principes de scope :
+
+- réutiliser en priorité les données et contrats déjà exposés par l'API ;
+- UX-02 à UX-04 ne doivent pas ajouter du backend uniquement pour afficher seeders, peers, ETA, vitesse qBittorrent, ratio ou une télémétrie globale de récupération ;
+- le frontend ne doit jamais contacter qBittorrent ou NewGreedy directement ;
+- si une donnée de confort n'est pas déjà disponible, l'omettre de la première refonte et la traiter ultérieurement dans une tâche dédiée ;
+- la file de récupération affichée pendant cette première refonte est la file locale du contrôleur navigateur existant : nombre de transferts actifs, concurrence maximale locale et positions disponibles pour les éléments en attente ; elle n'est pas une file globale autoritaire inter-utilisateurs ou multi-appareils ;
+- l'annulation d'un torrent doit conserver le modèle V2 existant : désabonnement d'un utilisateur lorsqu'il reste d'autres droits actifs, puis lifecycle de purge seulement lorsqu'il ne reste plus de demande active ;
+- V2-32D reste bloquée : ne pas prétendre supprimer précisément les statistiques NewGreedy lors d'une dernière annulation tant que NewGreedy n'offre pas le contrat full-hash requis.
+
+Le découpage de référence est `UX-01` à `UX-06` dans `docs/roadmap-v2.md`. `PROGRESS.md` indique la tâche courante.
+
 ## Repository et branches
 
 Repository : `ThomasPerez91/World-of-Seeds`.
@@ -245,13 +279,15 @@ A l'échéance :
 
 ## Temps réel et transferts navigateur
 
-La page téléchargements charge un état PostgreSQL autoritaire puis reçoit des événements WebSocket non autoritaires.
+L'interface torrent charge un état PostgreSQL autoritaire puis reçoit des événements WebSocket non autoritaires.
 
 - pas de polling complet toutes les dix secondes ;
 - après reconnexion, faire une resynchronisation GET autoritaire ;
 - un WebSocket idle ne doit pas maintenir de session SQL.
 
 Les téléchargements récursifs utilisent un manifeste paginé/progressif et une concurrence bornée. Ne pas attendre un manifeste énorme complet avant de démarrer les premiers fichiers.
+
+Pendant la refonte UX, conserver ces mécanismes et les recomposer dans le Dashboard/les accordéons au lieu de créer un second système de suivi parallèle.
 
 ## Observabilité
 
@@ -279,7 +315,7 @@ L'ancien serveur V1 reste seulement une possibilité de rollback trafic pendant 
 
 - `docs/agent/CONTEXT.md` : invariants durables et architecture courante.
 - `docs/agent/PROGRESS.md` : état opérationnel et dernière étape accomplie.
-- `docs/roadmap-v2.md` : historique de la construction V2 et règles post-2.0.
+- `docs/roadmap-v2.md` : historique de la construction V2, règles post-2.0 et roadmap UX post-2.0.
 - `docs/deployment-rise2-github-actions.md` : CI/CD production.
 
-Toute modification durable d'architecture ou de flux de release doit mettre ces fichiers en cohérence dans la même PR.
+Toute modification durable d'architecture, de direction produit ou de flux de release doit mettre ces fichiers en cohérence dans la même PR.
