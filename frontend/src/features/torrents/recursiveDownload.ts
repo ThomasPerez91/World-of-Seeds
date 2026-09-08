@@ -6,6 +6,7 @@ import type {
 const MAX_MANIFEST_PAGE_SIZE = 500;
 const MAX_BUFFERED_MANIFEST_PAGES = 2;
 const MAX_VISIBLE_QUEUE_ITEMS = 8;
+export const DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY = 2;
 
 export interface WritableFileHandle {
   write(data: Uint8Array): Promise<void>;
@@ -128,7 +129,7 @@ export class RecursiveDownloadController {
   private running: Promise<void> | null = null;
 
   constructor(options: RecursiveDownloadOptions) {
-    const concurrency = options.concurrency ?? 2;
+    const concurrency = options.concurrency ?? DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY;
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) {
       throw new Error("download_concurrency_invalid");
     }

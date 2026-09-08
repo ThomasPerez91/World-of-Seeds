@@ -105,7 +105,7 @@ describe("theme", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup(); const view = render(<App />);
-    await screen.findByRole("heading", { name: "Mes fichiers" });
+    await screen.findByRole("heading", { name: "Dashboard" });
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(screen.queryByRole("combobox", { name: "Langue" })).toBeNull();
     const trigger = screen.getByRole("button", { name: "Ouvrir le menu du compte" });
@@ -133,7 +133,7 @@ describe("theme", () => {
       method: "PATCH", body: JSON.stringify({ preferred_theme: "light" }), credentials: "same-origin",
     }));
     view.unmount(); render(<App />);
-    await screen.findByRole("heading", { name: "My files" });
+    await screen.findByRole("heading", { name: "Dashboard" });
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(localStorage.getItem("wos.preferred-theme")).toBe("system");
   });
@@ -157,7 +157,7 @@ describe("theme", () => {
     await user.type(screen.getByLabelText("Nom d’utilisateur"), "test-account");
     await user.type(screen.getByLabelText("Mot de passe"), "fake-test-password");
     await user.click(screen.getByRole("button", { name: "Se connecter" }));
-    await screen.findByRole("heading", { name: "Mes fichiers" });
+    await screen.findByRole("heading", { name: "Dashboard" });
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
 });
