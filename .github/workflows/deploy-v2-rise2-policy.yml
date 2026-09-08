@@ -76,12 +76,28 @@ jobs:
             SSH_ORIGINAL_COMMAND="deploy-world-of-seeds-v2 $revision $digest actor" \
             bash "$command_script" </dev/null
 
-      - name: Keep deployment manual until the first Rise2 pass
+      - name: Validate automatic deployment gate
         run: |
           set -Eeuo pipefail
           workflow=.github/workflows/deploy-v2-rise2.yml
+
           grep -F 'workflow_dispatch:' "$workflow" >/dev/null
-          if grep -Eq '^[[:space:]]+workflow_run:' "$workflow"; then
-            echo 'Automatic master deployment must not be enabled before the manual Rise2 validation.' >&2
+          grep -F 'workflow_run:' "$workflow" >/dev/null
+          grep -F 'workflows: ["CI"]' "$workflow" >/dev/null
+          grep -F 'types: [completed]' "$workflow" >/dev/null
+          grep -F 'branches: [master]' "$workflow" >/dev/null
+          grep -F "github.event.workflow_run.conclusion == 'success'" "$workflow" >/dev/null
+          grep -F "github.event.workflow_run.event == 'push'" "$workflow" >/dev/null
+          grep -F "github.event.workflow_run.head_branch == 'master'" "$workflow" >/dev/null
+          grep -F 'github.event.workflow_run.head_sha' "$workflow" >/dev/null
+          grep -F 'Require current master head' "$workflow" >/dev/null
+
+          if grep -Eq '^[[:space:]]+push:' "$workflow"; then
+            echo 'Rise2 deployment must not trigger directly from a master push.' >&2
+            exit 1
+          fi
+
+          if grep -Eq '^[[:space:]]+pull_request:' "$workflow"; then
+            echo 'Rise2 deployment must never trigger from pull requests.' >&2
             exit 1
           fi
