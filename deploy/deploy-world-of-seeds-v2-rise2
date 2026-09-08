@@ -18,10 +18,14 @@ TARGET_REVISION=""
 TARGET_IMAGE=""
 MIGRATION_APPLIED=0
 RUNTIME_CHANGED=0
+ROLLBACK_ENABLED=0
 COMPOSE=()
 
 fail() {
   printf 'Erreur déploiement Rise2: %s\n' "$*" >&2
+  if [[ "${ROLLBACK_ENABLED}" == "1" ]]; then
+    rollback 1
+  fi
   exit 1
 }
 
@@ -120,9 +124,13 @@ write_state() {
 }
 
 rollback() {
-  local status=$?
+  local status="${1:-$?}"
   trap - ERR
   set +e
+
+  if [[ "${ROLLBACK_ENABLED}" != "1" ]]; then
+    exit "${status}"
+  fi
 
   printf '\nDéploiement V2 échoué (code %s). Tentative de rollback applicatif.\n' "${status}" >&2
 
@@ -252,6 +260,7 @@ PREVIOUS_DB_HEAD="$(docker run --rm --pull=never --entrypoint alembic \
 ENV_BACKUP="$(mktemp /etc/world-of-seeds-v2/.environment.pre-deploy.XXXXXX)"
 cp --preserve=mode,ownership,timestamps -- "${ENV_FILE}" "${ENV_BACKUP}"
 chmod 600 "${ENV_BACKUP}"
+ROLLBACK_ENABLED=1
 
 repo_git checkout --detach "${TARGET_REVISION}" >/dev/null
 set_env_image "${TARGET_IMAGE}"
@@ -332,6 +341,7 @@ readonly HTTPS_CODE="$(curl --silent --show-error --output /dev/null --write-out
 [[ "${HTTPS_CODE}" == "200" ]] || fail "readiness HTTPS production invalide: ${HTTPS_CODE}."
 
 write_state
+ROLLBACK_ENABLED=0
 trap - ERR
 printf 'World of Seeds V2 déployé avec succès : revision=%s image=%s\n' \
   "${TARGET_REVISION}" "${TARGET_IMAGE}"
