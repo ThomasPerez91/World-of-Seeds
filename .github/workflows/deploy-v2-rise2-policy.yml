@@ -1,0 +1,87 @@
+name: V2 Rise2 deploy policy
+
+on:
+  pull_request:
+    branches: [develop, master]
+  push:
+    branches: [develop, master]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate restricted Rise2 deploy path
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate shell syntax and fail-closed policy
+        run: |
+          set -Eeuo pipefail
+          bash -n \
+            deploy/deploy-world-of-seeds-v2-rise2 \
+            deploy/world-of-seeds-v2-deploy-command
+
+          grep -F "la revision demandée n'est pas le HEAD actuel de master." \
+            deploy/deploy-world-of-seeds-v2-rise2 >/dev/null
+          grep -F 'merge-base --is-ancestor' \
+            deploy/deploy-world-of-seeds-v2-rise2 >/dev/null
+          grep -F "changement d'infrastructure sensible détecté" \
+            deploy/deploy-world-of-seeds-v2-rise2 >/dev/null
+          grep -F 'qBittorrent a été recréé' \
+            deploy/deploy-world-of-seeds-v2-rise2 >/dev/null
+          grep -F 'PostgreSQL a été recréé' \
+            deploy/deploy-world-of-seeds-v2-rise2 >/dev/null
+
+          if grep -F 'down --volumes' deploy/deploy-world-of-seeds-v2-rise2; then
+            echo 'Rise2 deploy helper must never destroy volumes.' >&2
+            exit 1
+          fi
+
+      - name: Validate forced SSH command grammar
+        run: |
+          set -Eeuo pipefail
+          command_script=deploy/world-of-seeds-v2-deploy-command
+          revision="$(printf 'a%.0s' {1..40})"
+          digest="sha256:$(printf 'b%.0s' {1..64})"
+
+          for invalid in \
+            'interactive-shell' \
+            "deploy-world-of-seeds-v2 $revision $digest actor extra" \
+            "deploy-world-of-seeds-v2 not-a-sha $digest actor" \
+            "deploy-world-of-seeds-v2 $revision sha256:bad actor"; do
+            if SSH_ORIGINAL_COMMAND="$invalid" bash "$command_script" </dev/null; then
+              echo "Restricted command accepted invalid input: $invalid" >&2
+              exit 1
+            fi
+          done
+
+          fakebin="$(mktemp -d)"
+          trap 'rm -rf "$fakebin"' EXIT
+          cat >"$fakebin/sudo" <<'SH'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          [[ "$1" == '-n' ]]
+          [[ "$2" == '--' ]]
+          [[ "$3" == '/usr/local/sbin/deploy-world-of-seeds-v2-rise2' ]]
+          [[ "$4" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$5" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$6" == 'actor' ]]
+          [[ $# -eq 6 ]]
+          SH
+          chmod 700 "$fakebin/sudo"
+
+          PATH="$fakebin:$PATH" \
+            SSH_ORIGINAL_COMMAND="deploy-world-of-seeds-v2 $revision $digest actor" \
+            bash "$command_script" </dev/null
+
+      - name: Keep deployment manual until the first Rise2 pass
+        run: |
+          set -Eeuo pipefail
+          workflow=.github/workflows/deploy-v2-rise2.yml
+          grep -F 'workflow_dispatch:' "$workflow" >/dev/null
+          if grep -Eq '^[[:space:]]+workflow_run:' "$workflow"; then
+            echo 'Automatic master deployment must not be enabled before the manual Rise2 validation.' >&2
+            exit 1
+          fi
