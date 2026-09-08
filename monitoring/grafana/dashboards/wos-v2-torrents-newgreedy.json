@@ -1,0 +1,207 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "qB — scrape",
+      "gridPos": {"x": 0, "y": 0, "w": 3, "h": 4},
+      "targets": [{"expr": "wos_torrent_metrics_qb_scrape_success", "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "NewGreedy — scrape",
+      "gridPos": {"x": 3, "y": 0, "w": 3, "h": 4},
+      "targets": [{"expr": "wos_torrent_metrics_newgreedy_scrape_success", "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "Torrents qB",
+      "gridPos": {"x": 6, "y": 0, "w": 3, "h": 4},
+      "targets": [{"expr": "wos_torrent_qb_torrents_total", "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "qB transferts actifs",
+      "gridPos": {"x": 9, "y": 0, "w": 3, "h": 4},
+      "targets": [{"expr": "wos_torrent_qb_active_torrents", "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "Débit DL qB",
+      "gridPos": {"x": 12, "y": 0, "w": 3, "h": 4},
+      "targets": [{"expr": "wos_torrent_qb_global_download_rate_bytes_per_second", "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []}
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "Débit UL qB",
+      "gridPos": {"x": 15, "y": 0, "w": 3, "h": 4},
+      "targets": [{"expr": "wos_torrent_qb_global_upload_rate_bytes_per_second", "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []}
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "Hashes NewGreedy",
+      "gridPos": {"x": 18, "y": 0, "w": 3, "h": 4},
+      "targets": [{"expr": "wos_newgreedy_torrents_total", "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "NG stalled",
+      "gridPos": {"x": 21, "y": 0, "w": 3, "h": 4},
+      "targets": [{"expr": "wos_newgreedy_stalled_torrents", "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "Débits qBittorrent",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "wos_torrent_qb_global_download_rate_bytes_per_second", "refId": "A", "legendFormat": "DL", "datasource": {"type": "prometheus", "uid": "prometheus"}},
+        {"expr": "wos_torrent_qb_global_upload_rate_bytes_per_second", "refId": "B", "legendFormat": "UL", "datasource": {"type": "prometheus", "uid": "prometheus"}}
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []}
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "Cumul reporté au tracker par NewGreedy",
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum(wos_newgreedy_tracker_reported_bytes{direction=\"upload\"})", "refId": "A", "legendFormat": "UL reporté", "datasource": {"type": "prometheus", "uid": "prometheus"}},
+        {"expr": "sum(wos_newgreedy_tracker_reported_bytes{direction=\"download\"})", "refId": "B", "legendFormat": "DL reporté", "datasource": {"type": "prometheus", "uid": "prometheus"}}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "Torrents qB par état",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+      "targets": [{"expr": "wos_torrent_qb_torrents", "refId": "A", "legendFormat": "{{state}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "Annonces NewGreedy",
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+      "targets": [{"expr": "sum by (hash8) (rate(wos_newgreedy_torrent_announces_total[15m]))", "refId": "A", "legendFormat": "{{hash8}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []}
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "qB — état courant par hash",
+      "gridPos": {"x": 0, "y": 20, "w": 12, "h": 9},
+      "targets": [{"expr": "wos_torrent_qb_progress_ratio", "refId": "A", "instant": true, "format": "table", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "transformations": [
+        {"id": "labelsToFields", "options": {"mode": "columns"}},
+        {"id": "organize", "options": {"excludeByName": {"Time": true, "__name__": true}, "renameByName": {"Value": "Progression", "hash8": "Hash", "state": "État"}}}
+      ],
+      "fieldConfig": {"defaults": {}, "overrides": [{"matcher": {"id": "byName", "options": "Progression"}, "properties": [{"id": "unit", "value": "percentunit"}, {"id": "min", "value": 0}, {"id": "max", "value": 1}]}]}
+    },
+    {
+      "id": 14,
+      "type": "table",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "NewGreedy — statut courant par hash",
+      "gridPos": {"x": 12, "y": 20, "w": 12, "h": 9},
+      "targets": [{"expr": "wos_newgreedy_torrent_status", "refId": "A", "instant": true, "format": "table", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "transformations": [
+        {"id": "labelsToFields", "options": {"mode": "columns"}},
+        {"id": "organize", "options": {"excludeByName": {"Time": true, "Value": true, "__name__": true}, "renameByName": {"hash8": "Hash", "mode": "Mode", "stalled": "Stalled", "target_reached": "Target reached"}}}
+      ],
+      "fieldConfig": {"defaults": {}, "overrides": []}
+    },
+    {
+      "id": 15,
+      "type": "bargauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "NewGreedy — UL reporté par hash",
+      "gridPos": {"x": 0, "y": 29, "w": 8, "h": 8},
+      "targets": [{"expr": "wos_newgreedy_torrent_reported_upload_bytes", "refId": "A", "legendFormat": "{{hash8}}", "instant": true, "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 16,
+      "type": "bargauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "NewGreedy — DL reporté par hash",
+      "gridPos": {"x": 8, "y": 29, "w": 8, "h": 8},
+      "targets": [{"expr": "wos_newgreedy_torrent_reported_download_bytes", "refId": "A", "legendFormat": "{{hash8}}", "instant": true, "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 17,
+      "type": "bargauge",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "NewGreedy — UL réel observé par hash",
+      "gridPos": {"x": 16, "y": 29, "w": 8, "h": 8},
+      "targets": [{"expr": "wos_newgreedy_torrent_real_upload_bytes", "refId": "A", "legendFormat": "{{hash8}}", "instant": true, "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "Âge depuis dernière annonce NewGreedy",
+      "gridPos": {"x": 0, "y": 37, "w": 12, "h": 8},
+      "targets": [{"expr": "time() - wos_newgreedy_torrent_last_announce_timestamp_seconds", "refId": "A", "legendFormat": "{{hash8}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}],
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0}, "overrides": []}
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "title": "UL réel vs UL reporté NewGreedy",
+      "gridPos": {"x": 12, "y": 37, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "wos_newgreedy_torrent_real_upload_bytes", "refId": "A", "legendFormat": "réel {{hash8}}", "datasource": {"type": "prometheus", "uid": "prometheus"}},
+        {"expr": "wos_newgreedy_torrent_reported_upload_bytes", "refId": "B", "legendFormat": "reporté {{hash8}}", "datasource": {"type": "prometheus", "uid": "prometheus"}}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "tags": ["world-of-seeds", "v2", "qbittorrent", "newgreedy", "rise2"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "World of Seeds V2 — Torrents & NewGreedy",
+  "uid": "wos-v2-torrents-newgreedy",
+  "version": 1
+}
