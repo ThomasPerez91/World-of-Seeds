@@ -66,20 +66,28 @@ describe("theme", () => {
     systemMedia();
     let reject!: (reason: Error) => void;
     const save = vi.spyOn(api, "changeTheme").mockImplementation(() => new Promise((_, fail) => { reject = fail; }));
-    const view = render(<Harness user={account} />);
-    await userEvent.click(screen.getByRole("button", { name: "Clair" }));
-    expect(screen.getByText("light/light")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Sombre" }).hasAttribute("disabled")).toBe(true);
-    await act(async () => reject(new Error("offline")));
-    expect(screen.getByText("dark/dark")).toBeTruthy();
-    expect(screen.getByRole("alert").textContent).toContain("rétabli");
-    expect(localStorage.getItem("wos.preferred-theme")).toBe("dark");
-    await userEvent.click(screen.getByRole("button", { name: "Clair" }));
-    view.rerender(<Harness user={{ ...account, id: "another", preferred_theme: "system" }} />);
-    await act(async () => reject(new Error("old request")));
-    expect(screen.getByText("system/light")).toBeTruthy();
-    expect(screen.queryByRole("alert")).toBeNull();
-    save.mockRestore();
+    try {
+      const view = render(<Harness user={account} />);
+      const light = screen.getByRole("button", { name: "Clair" });
+      light.focus();
+      await userEvent.keyboard("{Enter}");
+      expect(screen.getByText("light/light")).toBeTruthy();
+      expect(light.getAttribute("aria-disabled")).toBe("true");
+      expect(light.hasAttribute("disabled")).toBe(false);
+      expect(document.activeElement).toBe(light);
+      expect(screen.getByRole("status").textContent).toContain("Enregistrement");
+      await act(async () => reject(new Error("offline")));
+      expect(screen.getByText("dark/dark")).toBeTruthy();
+      expect(screen.getByRole("alert").textContent).toContain("rétabli");
+      expect(localStorage.getItem("wos.preferred-theme")).toBe("dark");
+      await userEvent.click(screen.getByRole("button", { name: "Clair" }));
+      view.rerender(<Harness user={{ ...account, id: "another", preferred_theme: "system" }} />);
+      await act(async () => reject(new Error("old request")));
+      expect(screen.getByText("system/light")).toBeTruthy();
+      expect(screen.queryByRole("alert")).toBeNull();
+    } finally {
+      save.mockRestore();
+    }
   });
 
   it("restores /auth/me and persists through account menu, Preferences and reconnection", async () => {
