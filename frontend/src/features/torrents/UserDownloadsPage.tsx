@@ -16,6 +16,7 @@ import {
   QueueIcon,
   RefreshIcon,
 } from "../../components/icons";
+import { Accordion, Badge, Button, Progress, StateMessage } from "../../components/ui";
 import { useI18n, type MessageKey } from "../../i18n";
 import {
   pickDownloadDirectory,
@@ -149,7 +150,7 @@ function LocalQueueLabel({ item }: { item: LocalTransferQueueItem }) {
   }[item.status] as MessageKey);
 }
 
-function TorrentRow({
+function TorrentItem({
   torrent,
   onRefresh,
   onDownload,
@@ -170,60 +171,75 @@ function TorrentRow({
     ? null
     : t(torrent.error_code === "torrent_failed" ? "downloads.needsAttention" : "downloads.stateError");
   return (
-    <tr>
-      <td className="torrent-name-cell" data-label={t("downloads.name")}>
-        <span title={torrent.name}>{torrent.name}</span>
-        {error !== null && <small role="alert">{error}</small>}
-      </td>
-      <td data-label={t("downloads.status")}>
-        <div className="torrent-status-content">
-          <span className={`torrent-primary-state ${torrent.state}`}>
-            {t(stateLabels[torrent.state])}
-          </span>
-          {torrent.state === "ready" && (
-            <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />
+    <li className="torrent-accordion-item">
+      <article className="torrent-accordion-card" aria-label={torrent.name}>
+        <Accordion
+          className="torrent-accordion"
+          summaryClassName="torrent-accordion-toggle"
+          summaryLabel={t("downloads.detailsNamed", { name: torrent.name })}
+          title={(
+            <span className="torrent-accordion-summary">
+              <span className="torrent-summary-heading">
+                <strong title={torrent.name}>{torrent.name}</strong>
+                <span>{formatBytes(torrent.total_size)}</span>
+              </span>
+              <span className="torrent-summary-status">
+                <Badge
+                  tone={torrent.state === "ready" ? "success" : torrent.state === "error" ? "danger" : "neutral"}
+                  className={`torrent-primary-state ${torrent.state}`}
+                >
+                  {t(stateLabels[torrent.state])}
+                </Badge>
+                <TorrentQueueVisibility torrent={torrent} />
+              </span>
+              <span className="torrent-summary-progress">
+                <Progress
+                  label={t("downloads.progressFor", { name: torrent.name })}
+                  value={percent}
+                />
+                <strong>{percent} %</strong>
+              </span>
+              <span className="torrent-details-cue" aria-hidden="true">{t("downloads.details")}</span>
+            </span>
           )}
-          <TorrentQueueVisibility torrent={torrent} />
-        </div>
-      </td>
-      <td className="torrent-size-cell" data-label={t("files.size")}>{formatBytes(torrent.total_size)}</td>
-      <td className="torrent-progress-cell" data-label={t("downloads.progress")}>
-        <div>
-          <progress value={torrent.progress} max={1} aria-label={t("downloads.progressFor", { name: torrent.name })}>
-            {percent} %
-          </progress>
-          <strong>{percent} %</strong>
-        </div>
-      </td>
-      <td className="torrent-date-cell" data-label={t("downloads.updated")}>{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</td>
-      <td className="torrent-row-actions" data-label={t("files.actions")}>
-        <div className="torrent-row-action-group">
+          contentClassName="torrent-accordion-content"
+        >
+          <dl className="torrent-detail-grid">
+            <div><dt>{t("downloads.created")}</dt><dd>{formatDate(torrent.created_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
+            <div><dt>{t("downloads.updated")}</dt><dd>{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
+          </dl>
+          {error !== null && <p className="torrent-detail-error" role="alert">{error}</p>}
+        </Accordion>
+        {torrent.state === "ready" && (
+          <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />
+        )}
+        <div className="torrent-card-actions">
           {torrent.state === "ready" ? (
-            <button type="button" disabled={downloadBusy} onClick={onDownload}>
+            <Button type="button" disabled={downloadBusy} onClick={onDownload}>
               <DownloadIcon />
               <span>{t("common.download")}</span>
-            </button>
+            </Button>
           ) : (
-            <button type="button" className="secondary-button" onClick={onRefresh}>
+            <Button type="button" variant="secondary" onClick={onRefresh}>
               <RefreshIcon />
               <span>{t("common.refresh")}</span>
-            </button>
+            </Button>
           )}
           {!(["cancelled", "expired"] as TorrentRequestV2State[]).includes(torrent.state) && (
-            <button
+            <Button
               type="button"
-              className="danger-button"
+              variant="danger"
               disabled={cancelBusy}
               onClick={onCancel}
               aria-label={t("downloads.cancelNamed", { name: torrent.name })}
             >
               <DeleteIcon />
               <span>{cancelBusy ? t("downloads.cancelling") : t("common.cancel")}</span>
-            </button>
+            </Button>
           )}
         </div>
-      </td>
-    </tr>
+      </article>
+    </li>
   );
 }
 
@@ -734,13 +750,13 @@ export function UserDownloadsPage({
       )}
 
       {pageError !== "" && (
-        <div className="browser-state torrent-page-error" role="alert">
+        <StateMessage tone="error" className="browser-state torrent-page-error">
           <strong>{t("downloads.trackingUnavailable")}</strong>
           <p>{pageError}</p>
-          <button type="button" className="compact-button" onClick={() => void load(offset)}>
+          <Button type="button" onClick={() => void load(offset)}>
             {t("common.retry")}
-          </button>
-        </div>
+          </Button>
+        </StateMessage>
       )}
 
       {transfer !== null && (
@@ -856,9 +872,9 @@ export function UserDownloadsPage({
       )}
 
       {loading ? (
-        <p className="torrent-list-state" role="status">{t("downloads.reading")}</p>
+        <StateMessage tone="loading" className="torrent-list-state">{t("downloads.reading")}</StateMessage>
       ) : torrents.length === 0 ? (
-        <p className="torrent-list-state">{t("downloads.empty")}</p>
+        <StateMessage tone="empty" className="torrent-list-state">{t("downloads.empty")}</StateMessage>
       ) : (
         <>
           {queueTotal !== null && (
@@ -870,34 +886,19 @@ export function UserDownloadsPage({
               </div>
             </aside>
           )}
-          <div className="torrent-table-wrap" aria-busy={refreshing}>
-            <table className="torrent-table">
-              <caption className="sr-only">{t("downloads.requests")}</caption>
-              <thead>
-                <tr>
-                  <th scope="col">{t("downloads.name")}</th>
-                  <th scope="col">{t("downloads.status")}</th>
-                  <th scope="col">{t("files.size")}</th>
-                  <th scope="col">{t("downloads.progress")}</th>
-                  <th scope="col">{t("downloads.updated")}</th>
-                  <th scope="col">{t("files.actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {torrents.map((torrent) => (
-                  <TorrentRow
-                    key={torrent.id}
-                    torrent={torrent}
-                    onRefresh={() => void load(offset)}
-                    onDownload={() => void startRecursiveDownload(torrent)}
-                    onCancel={() => void cancelTorrentRequest(torrent)}
-                    cancelBusy={cancellingId === torrent.id}
-                    downloadBusy={transfer?.status === "running" || transfer?.status === "paused"}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ul className="torrent-accordion-list" aria-label={t("downloads.requests")} aria-busy={refreshing}>
+            {torrents.map((torrent) => (
+              <TorrentItem
+                key={torrent.id}
+                torrent={torrent}
+                onRefresh={() => void load(offset)}
+                onDownload={() => void startRecursiveDownload(torrent)}
+                onCancel={() => void cancelTorrentRequest(torrent)}
+                cancelBusy={cancellingId === torrent.id}
+                downloadBusy={transfer?.status === "running" || transfer?.status === "paused"}
+              />
+            ))}
+          </ul>
           <nav className="torrent-pagination" aria-label={t("downloads.pagination")}>
             <button
               type="button"

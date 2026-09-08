@@ -152,7 +152,7 @@ Décisions validées :
 - **UX-00 — TERMINE** : planification documentaire de la refonte dans `roadmap-v2.md`, `PROGRESS.md` et `CONTEXT.md`.
 - **UX-01 — TERMINE** : design system, thèmes, préférence persistée, cartouche Préférences, login/settings/shell.
 - **UX-02 — TERMINE** : nouveau Dashboard et ses cartouches en composant les données/API existantes.
-- **UX-03 — A FAIRE** : gestionnaire de torrents en accordéons avec les contrats actuels.
+- **UX-03 — TERMINE** : gestionnaire de torrents en accordéons avec les contrats actuels.
 - **UX-04 — A FAIRE** : expérience READY et récupération locale, sans nouvelle télémétrie backend.
 - **UX-05 — A FAIRE** : retrait de l'espace utilisateur Fichiers/Corbeille et nettoyage après audit de dépendances.
 - **UX-06 — A FAIRE** : harmonisation admin, responsive, accessibilité et nettoyage final.
@@ -211,10 +211,20 @@ UX-02 est terminé sur une branche dédiée : le Dashboard est l’accueil authe
 - Le shell ouvre désormais le Dashboard après authentification et via le wordmark, avec une navigation compacte conservant Fichiers/Corbeille.
 - Le layout est mobile-first : une colonne par défaut, deux à partir de 600 px et trois à partir de 980 px.
 - La tentative unique de validation visuelle locale a été bloquée au démarrage de Vite par l’environnement (`uv_interface_addresses`). La revue responsive est donc structurelle (CSS/tests DOM et axe), sans prétendre à une mesure navigateur réelle.
-- UX-03 n’est pas commencé : la table, le drag/drop, le multi-upload, le WebSocket et les comportements de téléchargement existants sont conservés.
+- UX-03 est terminé : la table a été remplacée par des accordéons, sans modifier le drag/drop, le multi-upload, le WebSocket ni les comportements de téléchargement existants.
+
+## UX-03 — Gestionnaire de torrents en accordéons
+
+- La table principale est remplacée par une liste de cartes utilisant la primitive native `details/summary`, avec résumé compact, progression, état, queue, rétention et actions accessibles hors du toggle.
+- Le panneau ouvert ajoute les dates et l’erreur existantes ; aucune télémétrie backend, donnée qB/NewGreedy ou nouvelle logique READY n’est introduite.
+- Pagination, WebSocket/reconnect/resync, annulation/désabonnement, drag/drop, multi-upload borné, manifeste/fallback, récupération locale et callbacks UX-02 sont conservés.
+- Le layout est mobile-first, sans largeur minimale de table, avec noms longs bornés et contrôles tactiles de 44 px.
+- Validation locale : `npm run check`, `npm run test` (97 tests) et `npm run build` verts ; tests ciblés DOM/axe verts.
+- La tentative unique de validation visuelle locale a de nouveau été bloquée au démarrage de Vite par l’environnement (`uv_interface_addresses`). La revue responsive reste structurelle, sans prétendre à une mesure navigateur réelle.
+- UX-04 n’est pas commencé : l’expérience READY et la récupération locale ne sont pas recomposées au-delà de leur intégration existante.
 
 ## Prochaine tâche
 
-**UX-03 — Gestionnaire de torrents en accordéons.**
+**UX-04 — Expérience READY et récupération locale.**
 
-Tâche distincte, à commencer seulement après validation et intégration de UX-02.
+Tâche distincte, à commencer seulement après validation et intégration de UX-03.
