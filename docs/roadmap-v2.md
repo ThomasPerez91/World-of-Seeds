@@ -94,7 +94,7 @@ La file de récupération présentée pendant cette première refonte est celle 
 | Tâche | Risque | Dépendances | Statut | Scope |
 | --- | --- | --- | --- | --- |
 | UX-00 | RAPIDE | aucune | TERMINE | Formaliser la direction produit, le découpage des PR et les contraintes de scope dans `roadmap-v2.md`, `PROGRESS.md` et `CONTEXT.md`. |
-| UX-01 | MOYEN | UX-00 | A FAIRE | Design system léger, nouvelles palettes claire/sombre, composants UI modernes, préférence `light/dark/system` persistée par utilisateur, cartouche Préférences langue/thème, nouveau shell et login cohérent. |
+| UX-01 | MOYEN | UX-00 | TERMINE | Design system léger, nouvelles palettes claire/sombre, composants UI modernes, préférence `light/dark/system` persistée par utilisateur, cartouche Préférences langue/thème, nouveau shell et login cohérent. |
 | UX-02 | MOYEN | UX-01 | A FAIRE | Nouveau Dashboard utilisateur comme accueil : cartouches torrents, récupération locale et stockage en composant les API/données existantes, sans nouveau backend de télémétrie. |
 | UX-03 | MOYEN | UX-02 | A FAIRE | Remplacer la table actuelle par un gestionnaire de torrents en accordéons ; conserver drag/drop, multi-upload borné, états, progression, queue, WebSocket, annulation/désabonnement et rétention en utilisant le contrat existant. |
 | UX-04 | MOYEN | UX-03 | A FAIRE | Recomposer l'expérience READY : fichier unique, manifeste dossier, téléchargement fichier par fichier ou complet, fallback existant, progression/file locale et affichage actif/max sans nouvelle télémétrie backend. |

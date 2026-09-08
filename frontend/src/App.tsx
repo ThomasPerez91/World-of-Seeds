@@ -23,6 +23,9 @@ import {
   LegalPage,
   type LegalDocument,
 } from "./components/LegalPage";
+import { ThemeProvider } from "./theme";
+import { ThemeSelector } from "./components/ThemeSelector";
+import { Button, Card, Badge, Progress, StateMessage } from "./components/ui";
 import { APP_VERSION } from "./version";
 import { FeedbackProvider } from "./components/Feedback";
 import { useFeedback } from "./components/Feedback";
@@ -77,7 +80,7 @@ function ServiceHealth() {
   }, [check]);
 
   return (
-    <button
+    <Button
       type="button"
       className={`service-health ${health}`}
       onClick={() => void check()}
@@ -92,7 +95,7 @@ function ServiceHealth() {
             ? t("health.healthy")
             : t("health.unavailable")}
       </span>
-    </button>
+    </Button>
   );
 }
 
@@ -143,7 +146,7 @@ function LoginScreen({
 
       <section className="form-panel" aria-labelledby="login-title">
         <LanguageSelector />
-        <div className="form-card">
+        <Card className="form-card">
           <p className="eyebrow">{t("login.title")}</p>
           <h2 id="login-title">{t("login.welcome")}</h2>
           <p className="form-intro">{t("login.instructions")}</p>
@@ -170,14 +173,14 @@ function LoginScreen({
               required
             />
 
-            <button type="submit" disabled={submitting}>
+            <Button type="submit" disabled={submitting}>
               {submitting ? t("login.submitting") : t("login.submit")}
-            </button>
+            </Button>
             <p id="login-error" className="form-message error-message" role="alert">
               {error}
             </p>
           </form>
-        </div>
+        </Card>
         <LegalLinks onOpen={onOpenLegal} />
       </section>
     </main>
@@ -290,9 +293,9 @@ function CredentialChangeScreen({
             aria-invalid={error !== ""}
             required
           />
-          <button type="submit" disabled={submitting}>
+          <Button type="submit" disabled={submitting}>
             {submitting ? t("credentials.submitting") : t("credentials.submit")}
-          </button>
+          </Button>
           <p id="credential-error" className="form-message error-message" role="alert">
             {error}
           </p>
@@ -321,6 +324,7 @@ function AccountMenu({
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -330,7 +334,10 @@ function AccountMenu({
     }
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     }
 
     document.addEventListener("mousedown", closeOnOutsideClick);
@@ -357,9 +364,12 @@ function AccountMenu({
   }
 
   return (
-    <div className="account-menu" ref={containerRef}>
-      <button
+    <div className="account-menu" ref={containerRef} onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+    }}>
+      <Button
         type="button"
+        ref={triggerRef}
         className="account-trigger"
         aria-label={t("dashboard.accountMenu")}
         aria-expanded={open}
@@ -371,11 +381,12 @@ function AccountMenu({
         </span>
         <strong>{user.username}</strong>
         <AccountMenuIcon className="account-trigger-icon" />
-      </button>
+      </Button>
       {open && (
         <div id="account-dropdown" className="account-dropdown">
+          <p className="account-name">{user.username}</p>
           {user.is_admin && (
-            <button
+            <Button
               type="button"
               className="account-dropdown-item"
               onClick={() => {
@@ -384,9 +395,9 @@ function AccountMenu({
               }}
             >
               {t("dashboard.admin")}
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             type="button"
             className="account-dropdown-item"
             onClick={() => {
@@ -395,16 +406,18 @@ function AccountMenu({
             }}
           >
             {t("dashboard.account")}
-          </button>
+          </Button>
           <div className="account-dropdown-separator" />
-          <button
+          <ThemeSelector />
+          <div className="account-dropdown-separator" />
+          <Button
             type="button"
             className="account-dropdown-item logout-item"
             onClick={() => void handleLogout()}
             disabled={loggingOut}
           >
             {loggingOut ? t("dashboard.loggingOut") : t("dashboard.logout")}
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -425,7 +438,20 @@ function AccountSettingsPage({
   onSessionExpired: () => void;
 }) {
   const feedback = useFeedback();
-  const { apiError, t } = useI18n();
+  const { apiError, setLocale, t } = useI18n();
+  const [localeSaving, setLocaleSaving] = useState(false);
+  async function changeLocale(locale: Locale) {
+    setLocaleSaving(true);
+    try {
+      onChanged(await api.changeLocale(locale));
+    } catch {
+      setLocale(user.preferred_locale ?? "fr");
+      feedback.toast({ tone: "error", message: t("language.saveFailed") });
+    } finally {
+      setLocaleSaving(false);
+    }
+  }
+
   const [usernameSubmitting, setUsernameSubmitting] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordSubmitting, setPasswordSubmitting] = useState(false);
@@ -481,9 +507,9 @@ function AccountSettingsPage({
 
   return (
     <section className="settings-page" aria-labelledby="account-settings-title">
-      <button type="button" className="back-button" onClick={onBack}>
+      <Button type="button" className="back-button" onClick={onBack}>
         <BackIcon /> {t("common.backFiles")}
-      </button>
+      </Button>
       <div className="settings-header">
         <p className="eyebrow">{t("account.eyebrow")}</p>
         <h1 id="account-settings-title">{t("account.title")}</h1>
@@ -491,8 +517,16 @@ function AccountSettingsPage({
           {t("account.intro")}
         </p>
       </div>
+      <Card className="preferences-card" aria-labelledby="preferences-title">
+        <h2 id="preferences-title">{t("preferences.title")}</h2>
+        <p className="settings-section-intro">{t("preferences.intro")}</p>
+        <div className="preferences-grid">
+          <LanguageSelector disabled={localeSaving} onChange={changeLocale} />
+          <div><p className="preference-label">{t("theme.label")}</p><ThemeSelector /></div>
+        </div>
+      </Card>
       <div className="settings-grid">
-        <section className="settings-card" aria-labelledby="username-settings-title">
+        <Card className="settings-card" aria-labelledby="username-settings-title">
           <h2 id="username-settings-title">{t("account.username")}</h2>
           <p className="settings-section-intro">
             {t("account.renameHint")}
@@ -511,13 +545,13 @@ function AccountSettingsPage({
             <p className="field-hint">
               {t("account.usernameHint")}
             </p>
-            <button type="submit" disabled={usernameSubmitting || username === user.username}>
+            <Button type="submit" disabled={usernameSubmitting || username === user.username}>
               {usernameSubmitting ? t("credentials.submitting") : t("account.updateName")}
-            </button>
+            </Button>
           </form>
-        </section>
+        </Card>
 
-        <section className="settings-card" aria-labelledby="password-settings-title">
+        <Card className="settings-card" aria-labelledby="password-settings-title">
           <h2 id="password-settings-title">{t("account.passwordTitle")}</h2>
           <p className="settings-section-intro">
             {t("account.passwordHint")}
@@ -552,11 +586,11 @@ function AccountSettingsPage({
             <p className="form-message error-message" role="alert">
               {passwordError}
             </p>
-            <button type="submit" disabled={passwordSubmitting}>
+            <Button type="submit" disabled={passwordSubmitting}>
               {passwordSubmitting ? t("common.processing") : t("account.updatePassword")}
-            </button>
+            </Button>
           </form>
-        </section>
+        </Card>
       </div>
     </section>
   );
@@ -575,14 +609,11 @@ function StorageCard({ storage }: { storage: StorageUsage | null }) {
         <span>{t("storage.used", { value: formatBytes(storage.used) })}</span>
         <strong>{t("storage.available", { value: formatBytes(storage.available) })}</strong>
       </div>
-      <progress
+      <Progress
         className="storage-track"
-        max={100}
         value={percent}
-        aria-label={t("storage.percent", { value: percent.toFixed(0) })}
-      >
-        {percent.toFixed(0)} %
-      </progress>
+        label={t("storage.percent", { value: percent.toFixed(0) })}
+      />
       <span className="storage-total">{t("storage.total", { value: formatBytes(storage.total) })}</span>
     </div>
   );
@@ -611,27 +642,27 @@ function FilesWorkspace({
         <StorageCard storage={storage} />
       </header>
       <div className="file-view-tabs" role="group" aria-label={t("files.views")}>
-        <button
+        <Button
           type="button"
           aria-pressed={activeView === "files"}
           onClick={() => setActiveView("files")}
         >
           {t("dashboard.files")}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           aria-pressed={activeView === "trash"}
           onClick={() => setActiveView("trash")}
         >
           {t("files.trash")}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           aria-pressed={activeView === "downloads"}
           onClick={() => setActiveView("downloads")}
         >
           {t("dashboard.downloads")}
-        </button>
+        </Button>
       </div>
       {activeView === "files" ? (
         <div>
@@ -670,8 +701,7 @@ function Dashboard({
   onOpenLegal: (document: LegalDocument) => void;
   onSessionExpired: () => void;
 }) {
-  const feedback = useFeedback();
-  const { setLocale, t } = useI18n();
+  const { t } = useI18n();
   const [view, setView] = useState<"files" | "settings" | AdminView>("files");
   const [filesRevision, setFilesRevision] = useState(0);
   const [filesHomeKey, setFilesHomeKey] = useState(0);
@@ -685,14 +715,6 @@ function Dashboard({
     setFilesHomeKey((value) => value + 1);
   }
 
-  async function changeLocale(locale: Locale) {
-    try {
-      onUserChanged(await api.changeLocale(locale));
-    } catch {
-      setLocale(user.preferred_locale ?? "fr");
-      feedback.toast({ tone: "error", message: t("language.saveFailed") });
-    }
-  }
 
   return (
     <main className="app-shell">
@@ -700,7 +722,7 @@ function Dashboard({
         {t("dashboard.skip")}
       </a>
       <header className="app-header">
-        <button
+        <Button
           type="button"
           className="wordmark"
           onClick={openFilesHome}
@@ -708,10 +730,9 @@ function Dashboard({
         >
           <BrandMark />
           <span>World of Seeds</span>
-          <span className="version-badge">v{APP_VERSION}</span>
-        </button>
+          <Badge className="version-badge">v{APP_VERSION}</Badge>
+        </Button>
         <div className="header-actions">
-          <LanguageSelector onChange={changeLocale} />
           <AccountMenu
           user={user}
           onOpenAdmin={() => setView("admin-users")}
@@ -790,9 +811,9 @@ function UnavailableScreen({ onRetry }: { onRetry: () => void }) {
         <p className="form-intro">
           {t("unavailable.message")}
         </p>
-        <button type="button" onClick={onRetry}>
+        <Button type="button" onClick={onRetry}>
           {t("common.retry")}
-        </button>
+        </Button>
       </section>
     </main>
   );
@@ -835,52 +856,55 @@ function AppContent() {
     setAuth({ status: "anonymous" });
   }
 
-  if (legalDocument !== null) {
-    return (
-      <LegalPage
-        document={legalDocument}
-        onBack={() => setLegalDocument(null)}
-        onOpen={setLegalDocument}
-      />
-    );
-  }
+  function renderScreen() {
+    if (legalDocument !== null) {
+      return (
+        <LegalPage
+          document={legalDocument}
+          onBack={() => setLegalDocument(null)}
+          onOpen={setLegalDocument}
+        />
+      );
+    }
 
-  if (auth.status === "loading") {
+    if (auth.status === "loading") {
+      return (
+        <main className="loading-page" aria-live="polite" aria-busy="true">
+          <StateMessage tone="loading">{t("app.opening")}</StateMessage>
+        </main>
+      );
+    }
+    if (auth.status === "unavailable") {
+      return <UnavailableScreen onRetry={loadSession} />;
+    }
+    if (auth.status === "anonymous") {
+      return (
+        <LoginScreen
+          onLogin={(user) => setAuth({ status: "authenticated", user })}
+          onOpenLegal={setLegalDocument}
+        />
+      );
+    }
+    if (auth.user.must_change_credentials) {
+      return (
+        <CredentialChangeScreen
+          user={auth.user}
+          onChanged={(user) => setAuth({ status: "authenticated", user })}
+          onOpenLegal={setLegalDocument}
+        />
+      );
+    }
     return (
-      <main className="loading-page" aria-live="polite" aria-busy="true">
-        {t("app.opening")}
-      </main>
-    );
-  }
-  if (auth.status === "unavailable") {
-    return <UnavailableScreen onRetry={loadSession} />;
-  }
-  if (auth.status === "anonymous") {
-    return (
-      <LoginScreen
-        onLogin={(user) => setAuth({ status: "authenticated", user })}
-        onOpenLegal={setLegalDocument}
-      />
-    );
-  }
-  if (auth.user.must_change_credentials) {
-    return (
-      <CredentialChangeScreen
+      <Dashboard
         user={auth.user}
-        onChanged={(user) => setAuth({ status: "authenticated", user })}
+        onUserChanged={(user) => setAuth({ status: "authenticated", user })}
+        onLogout={logout}
         onOpenLegal={setLegalDocument}
+        onSessionExpired={handleSessionExpired}
       />
     );
   }
-  return (
-    <Dashboard
-      user={auth.user}
-      onUserChanged={(user) => setAuth({ status: "authenticated", user })}
-      onLogout={logout}
-      onOpenLegal={setLegalDocument}
-      onSessionExpired={handleSessionExpired}
-    />
-  );
+  return <ThemeProvider user={auth.status === "authenticated" ? auth.user : null}>{renderScreen()}</ThemeProvider>;
 }
 
 export function App() {

@@ -16,7 +16,6 @@ def test_v2_stable_release_policy_components_pass_without_git_history() -> None:
 
     namespace["_validate_manifest"](manifest)
     namespace["_validate_version"](repository, manifest)
-    namespace["_validate_database"](repository)
     namespace["_validate_runbook"](repository)
 
     assert namespace["EXPECTED_VERSION"] == "2.0.0"

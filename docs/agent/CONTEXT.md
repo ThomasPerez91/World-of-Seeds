@@ -198,6 +198,14 @@ Etat du dernier déploiement :
 - Un utilisateur ne peut agir que dans son workspace.
 - Ne jamais révéler chemins hôte, secrets, passkeys ou données d'un autre utilisateur dans une réponse API.
 
+## Préférences d’interface
+
+- `User.preferred_theme` est obligatoire, vaut `light`, `dark` ou `system` et a pour défaut serveur `system` (migration `20260908_23`). Le champ est exposé dans les réponses utilisateur.
+- `PATCH /api/v1/auth/theme` reçoit `{ "preferred_theme": "dark" }` et retourne `AuthResponse`, avec les mêmes exigences authentification/CSRF que la langue. Aucune modification des règles de credentials/session.
+- `data-theme="light|dark"` sur `document.documentElement` représente le thème effectif ; `system` est une préférence, jamais une palette CSS.
+- Le bootstrap externe same-origin `theme-bootstrap.js` applique avant React la dernière préférence locale (`wos.preferred-theme`), ou `system` si absente/invalide/inaccessible. Le compte devient autoritaire lors de la connexion/restauration de session ; le cache ne contient aucun secret.
+- Le provider englobe tous les écrans, suit les changements de `prefers-color-scheme` en mode système et centralise les écritures. Une sauvegarde échouée rétablit le choix précédent sans invalider la session. Les réponses d’une session quittée sont ignorées.
+
 ## Invariants filesystem
 
 - Les chemins clients sont relatifs au workspace authentifié.

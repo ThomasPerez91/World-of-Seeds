@@ -150,7 +150,7 @@ Décisions validées :
 ### Découpage des tâches
 
 - **UX-00 — TERMINE** : planification documentaire de la refonte dans `roadmap-v2.md`, `PROGRESS.md` et `CONTEXT.md`.
-- **UX-01 — A FAIRE** : design system, thèmes, préférence persistée, cartouche Préférences, login/settings/shell.
+- **UX-01 — TERMINE** : design system, thèmes, préférence persistée, cartouche Préférences, login/settings/shell.
 - **UX-02 — A FAIRE** : nouveau Dashboard et ses cartouches en composant les données/API existantes.
 - **UX-03 — A FAIRE** : gestionnaire de torrents en accordéons avec les contrats actuels.
 - **UX-04 — A FAIRE** : expérience READY et récupération locale, sans nouvelle télémétrie backend.
@@ -177,8 +177,34 @@ La V1 ne reçoit plus de développement normal. Elle reste seulement une référ
 
 Les PR encore ouvertes contre `develop_V2` sont historiques et ne doivent pas être fusionnées telles quelles dans le nouveau flux. Toute correction encore pertinente doit être réévaluée puis réimplémentée depuis le `develop` courant.
 
+## UX-01 — Design system, thèmes et préférences
+
+Implémentation terminée sur une branche dédiée issue de `develop` vérifié à
+`2e1b0fff899361839748393d1c7dd24a855bd3c4` (UX-00 / PR #149).
+Intégration soumise aux checks de la PR, sans merge automatique.
+
+- Palettes Light/Dark à tokens partagés ; couleurs fixes des écrans conservés reliées aux tokens sans refonte de leur structure.
+- `preferred_theme` (`light`, `dark`, `system`) persistant ; migration additive `20260908_23`, défaut serveur `system`, CHECK et downgrade.
+- `PATCH /api/v1/auth/theme` authentifié avec CSRF, y compris pendant le changement initial des identifiants, comme la langue.
+- Bootstrap externe same-origin avant React ; cache navigateur avant authentification, préférence du compte à la restauration de session/connexion ; suivi dynamique du système.
+- Provider partagé, changement optimiste, retour au choix précédent et erreur accessible si sauvegarde impossible ; une réponse d’une ancienne session ne change pas le compte suivant.
+- Cartouche Préférences langue/thème ; sélection rapide dans le menu compte ; langue retirée du header authentifié et conservée sur les écrans de connexion.
+- Primitives natives légères Button, IconButton, Card, Badge, Progress, Accordion et StateMessage ; feedback existant conservé.
+- Login, credentials, shell et paramètres compacts, bases CSS mobiles puis enrichissements à 600/900 px ; contrôles tactiles, noms longs et menu borné au viewport.
+
+Validation locale :
+
+- `npm run check`, `npm run test` (90 tests), `npm run build` : verts.
+- Ruff check/format et `mypy app tests` : verts.
+- Auth : 17 tests verts ; test PostgreSQL de migration conditionné à `WOS_DATABASE_URL`, exécuté par la CI et sauté localement faute de service PostgreSQL natif.
+- SQL réel produit par Alembic exécuté avec PostgreSQL embarqué PGlite : upgrade/downgrade/upgrade, comptes existants, défaut, valeurs autorisées, CHECK et NOT NULL validés. Aucune dépendance PGlite ajoutée au projet.
+- Tests axe structurels sur menu/préférences/primitives ; contrastes des tokens de texte sur fond/surface/surface élevée >= 4,5:1 dans les deux palettes.
+- Revue CSS conceptuelle à 320, 375/390, 768, 1024 et desktop large : colonnes mobiles, textes FR/EN, noms longs, erreurs, chargement et menus. **Validation visuelle réelle et mesure d’overflow restantes** : le navigateur de cet environnement bloque la prévisualisation locale. Ne pas présenter cette revue CSS comme une mesure navigateur.
+
+UX-02 n’est pas commencé. Fichiers/Corbeille et le gestionnaire de torrents restent disponibles ; aucun changement qB/NewGreedy/Redis/scheduler/rétention ni refonte structurelle de l’administration.
+
 ## Prochaine tâche
 
-**UX-01 — Design system, thèmes et préférences.**
+**UX-02 — Nouveau Dashboard utilisateur torrent-centric.**
 
-Elle doit partir du dernier `develop` réel après merge de UX-00, sur une branche dédiée, et rester limitée aux fondations visuelles, aux préférences utilisateur et aux écrans nécessaires à leur adoption. Ne pas commencer UX-02 dans la même PR.
+Tâche distincte, à commencer seulement après validation et intégration de UX-01.
