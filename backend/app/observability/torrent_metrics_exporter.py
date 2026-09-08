@@ -165,13 +165,9 @@ def _qb_lines(
             )
         )
         if dl_speed is not None:
-            lines.append(
-                _metric("wos_torrent_qb_download_rate_bytes_per_second", dl_speed, labels)
-            )
+            lines.append(_metric("wos_torrent_qb_download_rate_bytes_per_second", dl_speed, labels))
         if up_speed is not None:
-            lines.append(
-                _metric("wos_torrent_qb_upload_rate_bytes_per_second", up_speed, labels)
-            )
+            lines.append(_metric("wos_torrent_qb_upload_rate_bytes_per_second", up_speed, labels))
         if downloaded is not None:
             lines.append(_metric("wos_torrent_qb_downloaded_bytes", downloaded, labels))
         if uploaded is not None:
