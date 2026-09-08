@@ -7,6 +7,7 @@ import os
 import re
 import threading
 import time
+from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,10 @@ def _metric(name: str, value: float | int, labels: dict[str, str] | None = None)
 def _load_specs(secret_path: Path) -> tuple[DeploymentAccountSpec, ...]:
     raw = secret_path.read_text(encoding="utf-8")
     return parse_deployment_account_specs(SecretStr(raw))
+
+
+def _load_newgreedy_stats(stats_path: Path) -> object:
+    return json.loads(stats_path.read_text(encoding="utf-8"))
 
 
 async def _read_json_response(
@@ -113,10 +118,8 @@ async def _fetch_qb_route(
         return torrents, transfer, truncated
     finally:
         if logged_in:
-            try:
+            with suppress(httpx.HTTPError):
                 await client.post(f"{base_url}/api/v2/auth/logout", headers=headers)
-            except httpx.HTTPError:
-                pass
 
 
 def _qb_lines(
@@ -296,7 +299,7 @@ async def _collect() -> str:
         secret_path = Path(
             os.environ.get("WOS_TORRENT_METRICS_SECRET_PATH", str(DEFAULT_SECRET_PATH))
         )
-        specs = _load_specs(secret_path)
+        specs = await asyncio.to_thread(_load_specs, secret_path)
         unique: dict[tuple[str, str, str], DeploymentAccountSpec] = {}
         for spec in specs:
             unique[
@@ -333,7 +336,7 @@ async def _collect() -> str:
                 str(DEFAULT_NEWGREEDY_STATS_PATH),
             )
         )
-        payload = json.loads(stats_path.read_text(encoding="utf-8"))
+        payload = await asyncio.to_thread(_load_newgreedy_stats, stats_path)
         lines.extend(_newgreedy_lines(payload))
         ng_success = 1
     except (OSError, ValueError, RuntimeError):
