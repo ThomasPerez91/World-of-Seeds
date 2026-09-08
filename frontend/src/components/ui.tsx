@@ -46,7 +46,7 @@ export function Accordion({
 }: AccordionProps) {
   return (
     <details className={`ui-accordion ${className}`} {...props}>
-      <summary className={summaryClassName} aria-label={summaryLabel}>{title}</summary>
+      <summary className={summaryClassName} aria-description={summaryLabel}>{title}</summary>
       <div className={contentClassName}>{children}</div>
     </details>
   );
