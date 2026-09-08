@@ -212,18 +212,16 @@ PREVIOUS_REVISION="$(repo_git rev-parse HEAD)"
 repo_git merge-base --is-ancestor "${PREVIOUS_REVISION}" "${TARGET_REVISION}" \
   || fail "le déploiement refuse un historique non fast-forward."
 
-readonly BLOCKED_CHANGES="$({
-  repo_git diff --name-only "${PREVIOUS_REVISION}..${TARGET_REVISION}" -- \
-    deploy/compose.rise2.v2.yaml \
-    deploy/qbittorrent.rise2.conf \
-    deploy/world-of-seeds-v2-rise2.service \
-    scripts/rise2_v2_qb_bootstrap.py \
-    scripts/rise2_v2_qb_probe.py \
-    scripts/rise2_v2_qb_reconcile.sh \
-    scripts/rise2_v2_qb_reconcile.awk \
-    scripts/rise2_v2_newgreedy_policy.py \
-    scripts/rise2_v2_newgreedy_smoke.sh
-} || true)"
+readonly BLOCKED_CHANGES="$(repo_git diff --name-only "${PREVIOUS_REVISION}..${TARGET_REVISION}" -- \
+  deploy/compose.rise2.v2.yaml \
+  deploy/qbittorrent.rise2.conf \
+  deploy/world-of-seeds-v2-rise2.service \
+  scripts/rise2_v2_qb_bootstrap.py \
+  scripts/rise2_v2_qb_probe.py \
+  scripts/rise2_v2_qb_reconcile.sh \
+  scripts/rise2_v2_qb_reconcile.awk \
+  scripts/rise2_v2_newgreedy_policy.py \
+  scripts/rise2_v2_newgreedy_smoke.sh)"
 [[ -z "${BLOCKED_CHANGES}" ]] || fail "changement d'infrastructure sensible détecté; déploiement manuel requis."
 
 readonly EXPECTED_VERSION="$(repo_git show "${TARGET_REVISION}:VERSION" | tr -d '\r\n')"
@@ -319,7 +317,7 @@ readonly RUNNING_REVISION="$(docker inspect --format '{{index .Config.Labels "or
 [[ "${RUNNING_IMAGE}" == "${TARGET_IMAGE}" ]] || fail "l'API n'exécute pas le digest demandé."
 [[ "${RUNNING_REVISION}" == "${TARGET_REVISION}" ]] || fail "l'API n'exécute pas la revision demandée."
 
-docker exec "${API_CID}" python - <<'PY'
+docker exec -i "${API_CID}" python - <<'PY'
 import urllib.request
 for path in ("/api/v1/health/live", "/api/v1/health/ready"):
     with urllib.request.urlopen("http://127.0.0.1:8000" + path, timeout=5) as response:
