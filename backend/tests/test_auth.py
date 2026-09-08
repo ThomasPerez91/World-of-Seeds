@@ -431,3 +431,51 @@ async def test_security_headers_are_applied_to_rejected_hosts(client: AsyncClien
     assert response.status_code == 400
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-robots-tag"] == "noindex, nofollow, noarchive"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("theme", ["light", "dark", "system"])
+async def test_theme_default_csrf_persistence_and_relogin(
+    client: AsyncClient, db_session: AsyncSession, theme: str
+) -> None:
+    user = await create_user(db_session, username="theme-user", password="correct-horse-battery")
+    assert user.preferred_theme == "system"
+    anonymous = await client.patch("/api/v1/auth/theme", json={"preferred_theme": theme})
+    assert anonymous.status_code == 401
+    await login(client, "theme-user", "correct-horse-battery")
+    me = await client.get("/api/v1/auth/me")
+    assert me.json()["user"]["preferred_theme"] == "system"
+    missing_csrf = await client.patch("/api/v1/auth/theme", json={"preferred_theme": theme})
+    assert missing_csrf.status_code == 403
+    bad_csrf = await client.patch(
+        "/api/v1/auth/theme", json={"preferred_theme": theme}, headers={"X-CSRF-Token": "wrong"}
+    )
+    assert bad_csrf.status_code == 403
+    changed = await client.patch(
+        "/api/v1/auth/theme", json={"preferred_theme": theme}, headers=csrf_header(client)
+    )
+    assert changed.status_code == 200
+    assert changed.json()["user"]["preferred_theme"] == theme
+    await db_session.refresh(user)
+    assert user.preferred_theme == theme
+    assert user.preferred_locale == "fr"
+    assert (await client.get("/api/v1/auth/me")).json()["user"]["preferred_theme"] == theme
+    await client.post("/api/v1/auth/logout", headers=csrf_header(client))
+    await login(client, "theme-user", "correct-horse-battery")
+    assert (await client.get("/api/v1/auth/me")).json()["user"]["preferred_theme"] == theme
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("theme", ["auto", "DARK", "", None, 42])
+async def test_invalid_theme_does_not_mutate_user(
+    client: AsyncClient, db_session: AsyncSession, theme: object
+) -> None:
+    user = await create_user(db_session, username="theme-user", password="correct-horse-battery")
+    await login(client, "theme-user", "correct-horse-battery")
+    response = await client.patch(
+        "/api/v1/auth/theme", json={"preferred_theme": theme}, headers=csrf_header(client)
+    )
+    assert response.status_code == 422
+    await db_session.refresh(user)
+    assert user.preferred_theme == "system"
+    assert (await client.get("/api/v1/auth/me")).status_code == 200
