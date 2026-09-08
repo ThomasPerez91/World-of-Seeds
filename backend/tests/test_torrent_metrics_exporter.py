@@ -64,8 +64,7 @@ def test_newgreedy_lines_export_tracker_and_hash_status() -> None:
         'target_reached="false"} 1'
     ) in payload
     assert (
-        'wos_newgreedy_tracker_reported_bytes{direction="upload",tracker="c411.org"} '
-        "120143052450.0"
+        'wos_newgreedy_tracker_reported_bytes{direction="upload",tracker="c411.org"} 120143052450.0'
     ) in payload
     assert 'wos_newgreedy_torrent_announces_total{hash8="76c0446e"} 6.0' in payload
     assert "wos_newgreedy_stalled_torrents 0" in payload
