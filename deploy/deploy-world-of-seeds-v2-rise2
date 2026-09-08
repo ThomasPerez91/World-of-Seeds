@@ -1,0 +1,337 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly PROJECT_DIR="/opt/world-of-seeds-v2"
+readonly ENV_FILE="/etc/world-of-seeds-v2/environment"
+readonly COMPOSE_FILE="${PROJECT_DIR}/deploy/compose.rise2.v2.yaml"
+readonly IMAGE_REPOSITORY="ghcr.io/thomasperez91/world-of-seeds-v2"
+readonly STATE_DIR="/var/lib/world-of-seeds-v2/deploy"
+readonly STATE_FILE="${STATE_DIR}/current.env"
+readonly DATA_MOUNT="/srv/world-of-seeds-v2/data"
+
+DOCKER_CONFIG_DIR=""
+ENV_BACKUP=""
+PREVIOUS_REVISION=""
+PREVIOUS_IMAGE=""
+PREVIOUS_DB_HEAD=""
+TARGET_REVISION=""
+TARGET_IMAGE=""
+MIGRATION_APPLIED=0
+RUNTIME_CHANGED=0
+COMPOSE=()
+
+fail() {
+  printf 'Erreur déploiement Rise2: %s\n' "$*" >&2
+  exit 1
+}
+
+cleanup() {
+  if [[ -n "${DOCKER_CONFIG_DIR}" && -d "${DOCKER_CONFIG_DIR}" ]]; then
+    rm -rf -- "${DOCKER_CONFIG_DIR}"
+  fi
+  if [[ -n "${ENV_BACKUP}" && -e "${ENV_BACKUP}" ]]; then
+    rm -f -- "${ENV_BACKUP}"
+  fi
+}
+
+repo_git() {
+  git -c safe.directory="${PROJECT_DIR}" -C "${PROJECT_DIR}" "$@"
+}
+
+env_value() {
+  local key="$1"
+  python3 - "${ENV_FILE}" "${key}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+key = sys.argv[2]
+prefix = key + "="
+value = None
+for raw in path.read_text(encoding="utf-8").splitlines():
+    if raw.startswith(prefix):
+        value = raw[len(prefix):].strip()
+if value is None:
+    raise SystemExit(f"missing environment key: {key}")
+if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+    value = value[1:-1]
+print(value)
+PY
+}
+
+set_env_image() {
+  local image="$1"
+  python3 - "${ENV_FILE}" "${image}" <<'PY'
+from pathlib import Path
+import os
+import sys
+import tempfile
+
+path = Path(sys.argv[1])
+image = sys.argv[2]
+st = path.stat()
+lines = path.read_text(encoding="utf-8").splitlines()
+out = []
+found = False
+for line in lines:
+    if line.startswith("WOS_V2_IMAGE="):
+        out.append("WOS_V2_IMAGE=" + image)
+        found = True
+    else:
+        out.append(line)
+if not found:
+    raise SystemExit("WOS_V2_IMAGE missing")
+fd, tmp = tempfile.mkstemp(prefix=".environment.", dir=path.parent)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(out) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(tmp, st.st_mode & 0o777)
+    os.chown(tmp, st.st_uid, st.st_gid)
+    os.replace(tmp, path)
+finally:
+    if os.path.exists(tmp):
+        os.unlink(tmp)
+PY
+}
+
+container_health() {
+  local service="$1"
+  local cid
+  cid="$("${COMPOSE[@]}" ps -q "${service}")"
+  [[ -n "${cid}" ]] || return 1
+  docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${cid}"
+}
+
+write_state() {
+  local tmp
+  install -d -m 700 -o root -g root "${STATE_DIR}"
+  tmp="$(mktemp "${STATE_DIR}/.current.XXXXXX")"
+  chmod 600 "${tmp}"
+  {
+    printf 'revision=%s\n' "${TARGET_REVISION}"
+    printf 'image=%s\n' "${TARGET_IMAGE}"
+    printf 'previous_revision=%s\n' "${PREVIOUS_REVISION}"
+    printf 'previous_image=%s\n' "${PREVIOUS_IMAGE}"
+    printf 'deployed_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >"${tmp}"
+  mv -f -- "${tmp}" "${STATE_FILE}"
+}
+
+rollback() {
+  local status=$?
+  trap - ERR
+  set +e
+
+  printf '\nDéploiement V2 échoué (code %s). Tentative de rollback applicatif.\n' "${status}" >&2
+
+  if [[ -n "${ENV_BACKUP}" && -f "${ENV_BACKUP}" ]]; then
+    cp --preserve=mode,ownership,timestamps -- "${ENV_BACKUP}" "${ENV_FILE}"
+  fi
+
+  if [[ -n "${PREVIOUS_REVISION}" ]]; then
+    repo_git checkout --detach "${PREVIOUS_REVISION}" >/dev/null 2>&1
+  fi
+
+  COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+
+  if [[ "${MIGRATION_APPLIED}" == "1" && -n "${PREVIOUS_DB_HEAD}" ]]; then
+    # The target migration tree is still available in TARGET_IMAGE. Use it to
+    # return the database to the previous application head before restoring the
+    # previous runtime image.
+    set_env_image "${TARGET_IMAGE}"
+    repo_git checkout --detach "${TARGET_REVISION}" >/dev/null 2>&1
+    COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+    "${COMPOSE[@]}" run --rm --no-deps migrate \
+      alembic -c alembic.ini downgrade "${PREVIOUS_DB_HEAD}" >&2
+
+    cp --preserve=mode,ownership,timestamps -- "${ENV_BACKUP}" "${ENV_FILE}"
+    repo_git checkout --detach "${PREVIOUS_REVISION}" >/dev/null 2>&1
+    COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  fi
+
+  if [[ "${RUNTIME_CHANGED}" == "1" ]]; then
+    "${COMPOSE[@]}" up --detach --no-deps --force-recreate \
+      api worker scheduler ingress >&2
+  fi
+
+  printf '\nEtat après rollback :\n' >&2
+  "${COMPOSE[@]}" ps api worker scheduler ingress postgres redis qbittorrent newgreedy >&2
+  exit "${status}"
+}
+
+trap cleanup EXIT
+trap rollback ERR
+
+[[ ${EUID} -eq 0 ]] || fail "ce script doit être exécuté par root via sudo."
+[[ $# -eq 3 ]] || fail "usage: deploy-world-of-seeds-v2-rise2 <revision> <sha256:digest> <github-actor>"
+
+TARGET_REVISION="$1"
+readonly IMAGE_DIGEST="$2"
+readonly REGISTRY_USER="$3"
+TARGET_IMAGE="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
+
+[[ "${TARGET_REVISION}" =~ ^[0-9a-f]{40}$ ]] || fail "revision Git invalide."
+[[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "digest d'image invalide."
+[[ "${REGISTRY_USER}" =~ ^[A-Za-z0-9-]{1,39}$ ]] || fail "identifiant GitHub invalide."
+
+for path in "${PROJECT_DIR}" "${ENV_FILE}" "${COMPOSE_FILE}"; do
+  [[ -e "${path}" ]] || fail "chemin requis absent: ${path}"
+done
+[[ -d "${PROJECT_DIR}/.git" ]] || fail "${PROJECT_DIR} n'est pas un checkout Git."
+[[ -f "${ENV_FILE}" && ! -L "${ENV_FILE}" ]] || fail "fichier d'environnement invalide."
+[[ $(stat -c '%U:%G' "${ENV_FILE}") == "root:root" ]] || fail "l'environnement doit appartenir à root:root."
+ENV_MODE="$(stat -c '%a' "${ENV_FILE}")"
+[[ "${ENV_MODE}" == "600" || "${ENV_MODE}" == "400" ]] || fail "l'environnement doit être en mode 600 ou 400."
+mountpoint -q "${DATA_MOUNT}" || fail "le stockage V2 n'est pas monté sur ${DATA_MOUNT}."
+
+for command in docker curl git mktemp mountpoint python3 stat; do
+  command -v "${command}" >/dev/null || fail "commande requise absente: ${command}"
+done
+docker compose version >/dev/null
+
+[[ -z "$(repo_git status --porcelain --untracked-files=no)" ]] \
+  || fail "le checkout Rise2 contient des modifications suivies."
+
+repo_git fetch --quiet origin master:refs/remotes/origin/master
+readonly REMOTE_MASTER="$(repo_git rev-parse refs/remotes/origin/master)"
+[[ "${REMOTE_MASTER}" == "${TARGET_REVISION}" ]] \
+  || fail "la revision demandée n'est pas le HEAD actuel de master."
+repo_git cat-file -e "${TARGET_REVISION}^{commit}"
+
+PREVIOUS_REVISION="$(repo_git rev-parse HEAD)"
+repo_git merge-base --is-ancestor "${PREVIOUS_REVISION}" "${TARGET_REVISION}" \
+  || fail "le déploiement refuse un historique non fast-forward."
+
+readonly BLOCKED_CHANGES="$({
+  repo_git diff --name-only "${PREVIOUS_REVISION}..${TARGET_REVISION}" -- \
+    deploy/compose.rise2.v2.yaml \
+    deploy/qbittorrent.rise2.conf \
+    deploy/world-of-seeds-v2-rise2.service \
+    scripts/rise2_v2_qb_bootstrap.py \
+    scripts/rise2_v2_qb_probe.py \
+    scripts/rise2_v2_qb_reconcile.sh \
+    scripts/rise2_v2_qb_reconcile.awk \
+    scripts/rise2_v2_newgreedy_policy.py \
+    scripts/rise2_v2_newgreedy_smoke.sh
+} || true)"
+[[ -z "${BLOCKED_CHANGES}" ]] || fail "changement d'infrastructure sensible détecté; déploiement manuel requis."
+
+readonly EXPECTED_VERSION="$(repo_git show "${TARGET_REVISION}:VERSION" | tr -d '\r\n')"
+[[ "${EXPECTED_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] \
+  || fail "VERSION cible invalide."
+
+PREVIOUS_IMAGE="$(env_value WOS_V2_IMAGE)"
+[[ "${PREVIOUS_IMAGE}" =~ ^${IMAGE_REPOSITORY}@sha256:[0-9a-f]{64}$ ]] \
+  || fail "image précédente non immuable ou inattendue."
+
+IFS= read -r REGISTRY_TOKEN || fail "jeton GHCR absent sur l'entrée standard."
+[[ ${#REGISTRY_TOKEN} -ge 20 && ${#REGISTRY_TOKEN} -le 4096 ]] || fail "jeton GHCR invalide."
+
+DOCKER_CONFIG_DIR="$(mktemp -d /tmp/world-of-seeds-v2-docker-config.XXXXXX)"
+chmod 700 "${DOCKER_CONFIG_DIR}"
+export DOCKER_CONFIG="${DOCKER_CONFIG_DIR}"
+printf '%s' "${REGISTRY_TOKEN}" \
+  | docker login ghcr.io --username "${REGISTRY_USER}" --password-stdin >/dev/null
+unset REGISTRY_TOKEN
+
+docker pull "${TARGET_IMAGE}" >/dev/null
+docker pull "${PREVIOUS_IMAGE}" >/dev/null
+
+readonly ACTUAL_REVISION="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${TARGET_IMAGE}")"
+readonly ACTUAL_VERSION="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "${TARGET_IMAGE}")"
+[[ "${ACTUAL_REVISION}" == "${TARGET_REVISION}" ]] || fail "label OCI revision incorrect."
+[[ "${ACTUAL_VERSION}" == "${EXPECTED_VERSION}" ]] || fail "label OCI version incorrect."
+
+PREVIOUS_DB_HEAD="$(docker run --rm --pull=never --entrypoint alembic \
+  --workdir /app/backend "${PREVIOUS_IMAGE}" -c alembic.ini heads 2>/dev/null \
+  | awk 'NR == 1 {print $1}')"
+[[ "${PREVIOUS_DB_HEAD}" =~ ^[0-9A-Za-z_]+$ ]] || fail "impossible de déterminer le head Alembic précédent."
+
+ENV_BACKUP="$(mktemp /etc/world-of-seeds-v2/.environment.pre-deploy.XXXXXX)"
+cp --preserve=mode,ownership,timestamps -- "${ENV_FILE}" "${ENV_BACKUP}"
+chmod 600 "${ENV_BACKUP}"
+
+repo_git checkout --detach "${TARGET_REVISION}" >/dev/null
+set_env_image "${TARGET_IMAGE}"
+
+"${PROJECT_DIR}/scripts/rise2_v2_preflight.sh" "${ENV_FILE}"
+COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+"${COMPOSE[@]}" config --quiet
+
+readonly QB_BEFORE="$("${COMPOSE[@]}" ps -q qbittorrent)"
+readonly NG_BEFORE="$("${COMPOSE[@]}" ps -q newgreedy)"
+readonly PG_BEFORE="$("${COMPOSE[@]}" ps -q postgres)"
+readonly REDIS_BEFORE="$("${COMPOSE[@]}" ps -q redis)"
+for cid in "${QB_BEFORE}" "${NG_BEFORE}" "${PG_BEFORE}" "${REDIS_BEFORE}"; do
+  [[ -n "${cid}" ]] || fail "un service persistant requis est absent."
+done
+
+"${COMPOSE[@]}" stop api worker scheduler
+"${COMPOSE[@]}" run --rm --no-deps migrate
+MIGRATION_APPLIED=1
+
+RUNTIME_CHANGED=1
+"${COMPOSE[@]}" up --detach --no-deps --force-recreate \
+  api worker scheduler
+"${COMPOSE[@]}" up --detach --no-deps --force-recreate ingress
+
+for attempt in $(seq 1 60); do
+  [[ "$(container_health api 2>/dev/null || true)" == "healthy" ]] && break
+  sleep 2
+done
+[[ "$(container_health api)" == "healthy" ]] || fail "API non healthy après déploiement."
+
+readonly EXPECTED_WORKERS="$("${COMPOSE[@]}" config --format json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["services"]["worker"].get("deploy", {}).get("replicas", 1))')"
+RUNNING_WORKERS=0
+RUNNING_SCHEDULERS=0
+for attempt in $(seq 1 60); do
+  RUNNING_WORKERS="$("${COMPOSE[@]}" ps --status running -q worker | wc -l | tr -d ' ')"
+  RUNNING_SCHEDULERS="$("${COMPOSE[@]}" ps --status running -q scheduler | wc -l | tr -d ' ')"
+  [[ "${RUNNING_WORKERS}" == "${EXPECTED_WORKERS}" && "${RUNNING_SCHEDULERS}" == "1" ]] && break
+  sleep 2
+done
+[[ "${RUNNING_WORKERS}" == "${EXPECTED_WORKERS}" ]] || fail "workers incomplets: ${RUNNING_WORKERS}/${EXPECTED_WORKERS}."
+[[ "${RUNNING_SCHEDULERS}" == "1" ]] || fail "scheduler non disponible."
+
+for service in postgres redis qbittorrent newgreedy; do
+  [[ "$(container_health "${service}")" == "healthy" ]] || fail "${service} non healthy après déploiement."
+done
+
+[[ "$("${COMPOSE[@]}" ps -q qbittorrent)" == "${QB_BEFORE}" ]] || fail "qBittorrent a été recréé."
+[[ "$("${COMPOSE[@]}" ps -q newgreedy)" == "${NG_BEFORE}" ]] || fail "NewGreedy a été recréé."
+[[ "$("${COMPOSE[@]}" ps -q postgres)" == "${PG_BEFORE}" ]] || fail "PostgreSQL a été recréé."
+[[ "$("${COMPOSE[@]}" ps -q redis)" == "${REDIS_BEFORE}" ]] || fail "Redis a été recréé."
+
+readonly API_CID="$("${COMPOSE[@]}" ps -q api)"
+readonly RUNNING_IMAGE="$(docker inspect --format '{{.Config.Image}}' "${API_CID}")"
+readonly RUNNING_REVISION="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${API_CID}")"
+[[ "${RUNNING_IMAGE}" == "${TARGET_IMAGE}" ]] || fail "l'API n'exécute pas le digest demandé."
+[[ "${RUNNING_REVISION}" == "${TARGET_REVISION}" ]] || fail "l'API n'exécute pas la revision demandée."
+
+docker exec "${API_CID}" python - <<'PY'
+import urllib.request
+for path in ("/api/v1/health/live", "/api/v1/health/ready"):
+    with urllib.request.urlopen("http://127.0.0.1:8000" + path, timeout=5) as response:
+        assert response.status == 200
+PY
+
+readonly PUBLIC_HOST_RAW="$(env_value WOS_V2_PUBLIC_HOST)"
+readonly PUBLIC_HOST="$(python3 - "${PUBLIC_HOST_RAW}" <<'PYHOST'
+import sys
+hosts = [item.strip() for item in sys.argv[1].split(",") if item.strip()]
+if not hosts:
+    raise SystemExit(1)
+print(hosts[-1])
+PYHOST
+)"
+[[ -n "${PUBLIC_HOST}" ]] || fail "host public V2 absent."
+readonly HTTPS_CODE="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+  --connect-timeout 5 --max-time 15 "https://${PUBLIC_HOST}/api/v1/health/ready")"
+[[ "${HTTPS_CODE}" == "200" ]] || fail "readiness HTTPS production invalide: ${HTTPS_CODE}."
+
+write_state
+trap - ERR
+printf 'World of Seeds V2 déployé avec succès : revision=%s image=%s\n' \
+  "${TARGET_REVISION}" "${TARGET_IMAGE}"
