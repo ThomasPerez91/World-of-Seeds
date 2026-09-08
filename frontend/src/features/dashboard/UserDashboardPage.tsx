@@ -53,19 +53,27 @@ export async function loadTorrentActivity(signal: AbortSignal): Promise<TorrentA
 
 export function LocalDownloadCard({ local }: { local: LocalDownloadSummary }) {
   const { t } = useI18n();
+  let content;
+  if (local.status === "idle" || local.status === "completed" || local.status === "cancelled") {
+    content = <p className="dashboard-summary-empty">{t("dashboard.localIdle")}</p>;
+  } else if (local.status === "paused") {
+    content = <p className="dashboard-summary-value">{t("downloads.localPaused")}</p>;
+  } else if (local.status === "error") {
+    content = <StateMessage tone="error">{t("downloads.localError")}</StateMessage>;
+  } else {
+    content = (
+      <>
+        <p className="dashboard-summary-value">
+          {t("dashboard.localActive", { active: local.active, maximum: local.maximum })}
+        </p>
+        <p>{t("dashboard.localWaiting", { waiting: local.waiting })}</p>
+      </>
+    );
+  }
   return (
     <Card className="dashboard-summary-card" aria-labelledby="local-card-title">
       <h2 id="local-card-title">{t("dashboard.local")}</h2>
-      {local.status === "idle" || local.status === "completed" || local.status === "cancelled" ? (
-        <p className="dashboard-summary-empty">{t("dashboard.localIdle")}</p>
-      ) : (
-        <>
-          <p className="dashboard-summary-value">
-            {t("dashboard.localActive", { active: local.active, maximum: local.maximum })}
-          </p>
-          <p>{t("dashboard.localWaiting", { waiting: local.waiting })}</p>
-        </>
-      )}
+      {content}
       <p className="dashboard-summary-note">{t("dashboard.localNote")}</p>
     </Card>
   );
@@ -155,7 +163,7 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
 
   const usedPercent = storage === null || storage.total === 0
     ? 0
-    : Math.min(100, Math.max(0, ((storage.total - storage.available) / storage.total) * 100));
+    : Math.min(100, Math.max(0, (storage.used / storage.total) * 100));
 
   return (
     <section className="user-dashboard" aria-labelledby="user-dashboard-title">
