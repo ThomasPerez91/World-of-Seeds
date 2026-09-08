@@ -693,7 +693,9 @@ function Dashboard({
   onSessionExpired: () => void;
 }) {
   const { t } = useI18n();
-  const [view, setView] = useState<"dashboard" | "files" | "settings" | AdminView>("dashboard");
+  const [view, setView] = useState<"dashboard" | "files" | "settings" | AdminView>(() =>
+    new URL(window.location.href).searchParams.has("path") ? "files" : "dashboard",
+  );
   const [filesRevision, setFilesRevision] = useState(0);
   const [filesHomeKey, setFilesHomeKey] = useState(0);
   const handleFilesChanged = useCallback(() => {
