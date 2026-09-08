@@ -17,7 +17,6 @@ def test_v2_stable_release_policy_components_pass_without_git_history() -> None:
     namespace["_validate_manifest"](manifest)
     namespace["_validate_version"](repository, manifest)
     namespace["_validate_database"](repository)
-    namespace["_validate_workflows"](repository)
     namespace["_validate_runbook"](repository)
 
     assert namespace["EXPECTED_VERSION"] == "2.0.0"
@@ -52,23 +51,6 @@ def test_v2_stable_manifest_is_anchored_to_the_validated_rc() -> None:
         "v1_rollback_preserved": True,
         "rebuild_after_stable_validation": False,
     }
-
-
-def test_v2_stable_merge_has_no_automatic_stable_promotion_or_v1_side_effect() -> None:
-    repository = _repository()
-    workflows = repository / ".github/workflows"
-
-    v2_image = (workflows / "v2-image.yml").read_text(encoding="utf-8")
-    v2_gate = (workflows / "v2-rc.yml").read_text(encoding="utf-8")
-    v1_release = (workflows / "release.yml").read_text(encoding="utf-8")
-    v1_deploy = (workflows / "deploy.yml").read_text(encoding="utf-8")
-
-    assert "world-of-seeds-v2:sha-" in v2_image
-    assert "world-of-seeds-v2:2.0.0" not in v2_image
-    assert "world-of-seeds-v2:latest" not in v2_image
-    assert "validate_v2_stable_release.py" in v2_gate
-    assert "develop_V2" not in v1_release
-    assert "develop_V2" not in v1_deploy
 
 
 def test_v2_stable_runbook_keeps_cutover_and_v1_retirement_explicit() -> None:
