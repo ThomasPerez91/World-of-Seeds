@@ -59,6 +59,132 @@ Checks requis :
 | V2-34 | TERMINE | Release candidate `2.0.0-rc.1`, validation Rise2 et compatibilité rollback. |
 | V2-35 | TERMINE | Stable `2.0.0`, promotion du digest testé, Git tag/release, cutover Rise2. |
 
+## Refonte UX post-2.0
+
+### Direction produit validée
+
+L'interface utilisateur doit devenir **torrent-centric**.
+
+Le parcours principal visé est :
+
+```text
+Connexion
+  -> Dashboard
+     -> ajout d'un .torrent
+     -> suivi de la file et du téléchargement
+     -> contenu READY
+     -> récupération sur le poste local
+     -> suppression / désabonnement
+```
+
+Le navigateur de fichiers utilisateur, la corbeille utilisateur et les actions de création/gestion libre de dossiers ne doivent plus constituer l'expérience principale. Leur retrait technique doit toutefois être précédé d'un audit de dépendances : l'UI peut être retirée avant certaines briques backend si celles-ci restent nécessaires aux opérations admin, à la création/suppression de comptes ou à des invariants filesystem.
+
+La refonte doit conserver les invariants V2 : PostgreSQL reste autoritaire, Redis reste non autoritaire, le frontend ne pilote jamais qBittorrent ou NewGreedy directement, les droits utilisateur restent portés par `TorrentRequest`, le stockage physique partagé reste dédupliqué, les leases/règles de rétention restent applicables et aucun chemin hôte n'est exposé au client.
+
+### Règles de scope UX
+
+Pour les premiers écrans de la refonte, réutiliser les contrats et données déjà disponibles avant d'ajouter de la télémétrie backend.
+
+En particulier, UX-02 à UX-04 ne doivent pas ajouter de backend uniquement pour exposer des informations décoratives ou de confort telles que seeders, peers, ETA qBittorrent, ratio, débit qBittorrent ou télémétrie globale de récupération. Si une information n'est pas déjà disponible, elle est omise et peut devenir une amélioration ultérieure.
+
+La file de récupération présentée pendant cette première refonte est celle gérée localement par le contrôleur navigateur existant. Elle peut afficher le nombre de récupérations actives, la concurrence maximale locale et la position des éléments en attente disponibles dans ce contrôleur. Elle ne doit pas être présentée comme une file globale autoritaire multi-appareils tant qu'aucun contrat backend dédié n'existe.
+
+### Plan de PR
+
+| Tâche | Risque | Dépendances | Statut | Scope |
+| --- | --- | --- | --- | --- |
+| UX-00 | RAPIDE | aucune | TERMINE | Formaliser la direction produit, le découpage des PR et les contraintes de scope dans `roadmap-v2.md`, `PROGRESS.md` et `CONTEXT.md`. |
+| UX-01 | MOYEN | UX-00 | A FAIRE | Design system léger, nouvelles palettes claire/sombre, composants UI modernes, préférence `light/dark/system` persistée par utilisateur, cartouche Préférences langue/thème, nouveau shell et login cohérent. |
+| UX-02 | MOYEN | UX-01 | A FAIRE | Nouveau Dashboard utilisateur comme accueil : cartouches torrents, récupération locale et stockage en composant les API/données existantes, sans nouveau backend de télémétrie. |
+| UX-03 | MOYEN | UX-02 | A FAIRE | Remplacer la table actuelle par un gestionnaire de torrents en accordéons ; conserver drag/drop, multi-upload borné, états, progression, queue, WebSocket, annulation/désabonnement et rétention en utilisant le contrat existant. |
+| UX-04 | MOYEN | UX-03 | A FAIRE | Recomposer l'expérience READY : fichier unique, manifeste dossier, téléchargement fichier par fichier ou complet, fallback existant, progression/file locale et affichage actif/max sans nouvelle télémétrie backend. |
+| UX-05 | ELEVE | UX-04 | A FAIRE | Retirer l'ancien espace utilisateur Fichiers/Corbeille/création de dossiers et nettoyer le code mort après audit complet des dépendances backend, admin, workspaces, trash et routes `/api/v1/files`. |
+| UX-06 | MOYEN | UX-05 | A FAIRE | Harmoniser l'administration avec le design system, finaliser responsive/accessibilité, supprimer CSS/i18n/tests morts et effectuer le nettoyage final de la refonte. |
+
+### UX-01 — Design system, thèmes et préférences
+
+Objectifs :
+
+- remplacer la palette actuelle trop sombre par deux palettes plus lisibles et plus douces ;
+- ajouter `light`, `dark` et `system` ;
+- persister la préférence de thème avec le compte utilisateur, comme préférence durable ;
+- conserver la préférence de langue FR/EN existante ;
+- fournir les deux réglages dans un cartouche Préférences et le thème dans le menu du compte ;
+- introduire des primitives réutilisables : boutons, icon-buttons, cartes, badges, accordéons, progressions et états loading/empty/error ;
+- réserver les couleurs sémantiques fortes aux vrais avertissements/destructions au lieu de colorer les actions ordinaires ;
+- adapter login, changement initial de credentials, shell et paramètres au même langage visuel.
+
+Une migration additive simple est acceptable pour la préférence de thème. Elle doit être testée avec son downgrade si les pratiques Alembic du projet l'exigent.
+
+### UX-02 — Dashboard utilisateur
+
+Le Dashboard devient la page d'accueil authentifiée.
+
+Cartouches cibles :
+
+1. **Torrents** : actifs, terminés/READY et en attente/file à partir des données torrent déjà exposées ; si nécessaire, agréger côté frontend les pages de l'API existante plutôt que créer un endpoint uniquement pour ces compteurs.
+2. **Récupérations** : état du contrôleur local de récupération déjà existant, avec nombre actif / maximum local et position disponible des éléments en attente. Ne pas prétendre fournir une vue globale inter-utilisateurs ou multi-appareils.
+3. **Stockage** : espace disponible/total à partir d'une donnée déjà exposée par les contrats actuels. Ne pas créer un nouveau backend pour ce cartouche dans cette phase.
+
+Le Dashboard doit être compact, responsive et éviter les grands titres/espacements qui dominent actuellement l'écran.
+
+### UX-03 — Gestionnaire de torrents en accordéons
+
+Réutiliser la mécanique existante de `UserDownloadsPage` plutôt que la réécrire.
+
+Accordéon fermé :
+
+- nom ;
+- taille ;
+- état ;
+- progression lorsque disponible ;
+- position/statut de queue déjà exposé ;
+- actions pertinentes, dont annulation avant READY et téléchargement/suppression lorsque READY.
+
+Accordéon ouvert :
+
+- uniquement les informations déjà disponibles dans le contrat frontend courant ;
+- état détaillé, progression, queue, dates déjà exposées, rétention READY et contenu du manifeste lorsque pertinent ;
+- pas de développement backend pour seeders, peers, ETA, vitesse qB, ratio ou autres diagnostics non exposés.
+
+L'annulation doit conserver la sémantique V2 actuelle : si d'autres demandes actives existent pour le `ManagedTorrent`, l'utilisateur est désabonné ; si la dernière demande active disparaît, le lifecycle de purge existant s'applique. Ne pas contourner V2-32D pour prétendre supprimer précisément l'état NewGreedy.
+
+### UX-04 — READY et récupération locale
+
+Conserver et recomposer les capacités existantes :
+
+- fichier unique téléchargeable directement ;
+- torrent multi-fichiers consultable depuis son accordéon ;
+- téléchargement de chaque fichier ;
+- téléchargement complet via le mécanisme existant adapté au navigateur ;
+- manifeste paginé ;
+- fallback ZIP/compatibilité lorsque nécessaire ;
+- pause/reprise/annulation et progression locale déjà supportées ;
+- concurrence bornée et file locale existante.
+
+Aucune télémétrie backend supplémentaire n'est requise dans cette PR pour mesurer un débit, une file globale ou des téléchargements lancés nativement dans d'autres onglets/appareils.
+
+### UX-05 — Retrait du legacy utilisateur fichiers/corbeille
+
+Avant suppression, auditer au minimum :
+
+- `frontend/src/features/files/*` ;
+- les routes `/api/v1/files` ;
+- `WorkspaceManager` et la structure de workspace ;
+- `.trash`, `TrashEntry` et l'admin trash ;
+- la création, le renommage et la suppression des utilisateurs ;
+- les scripts/imports/tests qui dépendent encore des anciens chemins.
+
+Ne pas supprimer une brique backend uniquement parce que son écran utilisateur disparaît. Retirer ce qui est réellement mort, conserver ou isoler ce qui reste requis par l'administration ou les invariants de sécurité.
+
+### UX-06 — Harmonisation et finition
+
+- appliquer le design system à l'administration ;
+- vérifier mobile/tablette/desktop ;
+- conserver la navigation clavier, les labels accessibles et les tests axe ;
+- nettoyer CSS, traductions, composants et tests devenus morts ;
+- faire un audit final des liens/actions user-facing afin qu'aucune entrée Fichiers/Corbeille supprimée ne subsiste.
+
 ## Jalons de validation désormais acquis
 
 ### Runtime
@@ -109,9 +235,9 @@ Critère de réouverture : NewGreedy expose une suppression exacte par full SHA-
 
 ## Backlog post-2.0
 
-Aucune nouvelle fonctionnalité n'est imposée par cette roadmap au moment du cutover.
+La priorité produit post-2.0 est désormais la refonte UX `UX-01` à `UX-06` définie ci-dessus.
 
-Les prochains sujets doivent être créés explicitement à partir d'un besoin produit ou opérateur, puis classés par risque :
+Les autres sujets doivent être créés explicitement à partir d'un besoin produit ou opérateur, puis classés par risque :
 
 - **RAPIDE** : changement local, pas de migration/topologie ;
 - **MOYEN** : plusieurs couches ou migration additive simple ;
