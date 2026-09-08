@@ -22,3 +22,27 @@ it("provides named native controls, states and keyboard interaction", async () =
   expect(screen.getByRole("progressbar").getAttribute("value")).toBe("100");
   expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 });
+
+it("accepts a rich accordion summary and preserves its content-derived accessible name", async () => {
+  const view = render(
+    <Accordion
+      summaryLabel="Details for Ubuntu.iso"
+      title={<span><strong>Ubuntu.iso</strong><span> · 4 GB</span></span>}
+    >
+      Created today
+    </Accordion>,
+  );
+  const details = view.container.querySelector("details") as HTMLDetailsElement;
+  const summary = view.container.querySelector("summary") as HTMLElement;
+  expect(details.open).toBe(false);
+  expect(summary.getAttribute("aria-label")).toBeNull();
+  expect(summary.getAttribute("aria-description")).toBe("Details for Ubuntu.iso");
+  expect(summary.textContent).toContain("Ubuntu.iso");
+  expect(summary.textContent).toContain("4 GB");
+  await userEvent.tab();
+  expect(document.activeElement).toBe(summary);
+  await userEvent.click(summary);
+  expect(details.open).toBe(true);
+  await userEvent.click(summary);
+  expect(details.open).toBe(false);
+});

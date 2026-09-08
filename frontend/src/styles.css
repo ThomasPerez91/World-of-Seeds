@@ -4978,3 +4978,222 @@ select { min-height: 2.75rem; }
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+/* UX-03 torrent manager: mobile-first cards with native details/summary toggles. */
+.user-downloads-header h2 {
+  font-size: clamp(1.5rem, 6vw, 2rem);
+}
+
+.torrent-accordion-list {
+  display: grid;
+  min-width: 0;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0 clamp(0.75rem, 4vw, 2rem);
+  list-style: none;
+}
+
+.torrent-accordion-item,
+.torrent-accordion-card,
+.torrent-accordion,
+.torrent-accordion-summary,
+.torrent-summary-heading {
+  min-width: 0;
+}
+
+.torrent-accordion-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-elevated);
+  box-shadow: 0 0.2rem 0.75rem color-mix(in srgb, var(--color-shadow) 55%, transparent);
+}
+
+.torrent-accordion.ui-accordion {
+  border: 0;
+  background: transparent;
+}
+
+.torrent-accordion-toggle {
+  position: relative;
+  display: block;
+  min-height: 2.75rem;
+  padding: 0.9rem 2.75rem 0.9rem 0.9rem !important;
+  border-radius: var(--radius-lg);
+  list-style: none;
+}
+
+.torrent-accordion-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.torrent-accordion-toggle::after {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  color: var(--color-text-muted);
+  content: "⌄";
+  font-size: 1.15rem;
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.torrent-accordion[open] > .torrent-accordion-toggle::after {
+  transform: rotate(180deg);
+}
+
+.torrent-accordion-summary {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.torrent-summary-heading {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.torrent-summary-heading > strong {
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.torrent-summary-heading > span,
+.torrent-details-cue {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.torrent-summary-status {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.torrent-summary-progress {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.torrent-summary-progress strong {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.torrent-details-cue {
+  display: none;
+}
+
+.torrent-accordion-content {
+  padding: 0.9rem !important;
+  border-top: 1px solid var(--color-border);
+}
+
+.torrent-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.torrent-detail-grid > div {
+  min-width: 0;
+  padding: 0.65rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-background-secondary);
+}
+
+.torrent-detail-grid dt {
+  color: var(--color-text-subtle);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.torrent-detail-grid dd {
+  margin: 0.3rem 0 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  font-size: 0.78rem;
+}
+
+.torrent-detail-error {
+  margin: 0.75rem 0 0;
+  color: var(--color-danger);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.torrent-accordion-card > .retention-warning {
+  margin: 0 0.9rem 0.75rem;
+}
+
+.torrent-card-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.torrent-card-actions .ui-button {
+  min-height: 2.75rem;
+  flex: 1 1 8rem;
+  margin: 0;
+}
+
+.torrent-card-actions svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .torrent-accordion-toggle::after {
+    transition: none;
+  }
+}
+
+@media (min-width: 600px) {
+  .torrent-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .torrent-card-actions {
+    justify-content: flex-end;
+  }
+
+  .torrent-card-actions .ui-button {
+    flex: 0 0 auto;
+  }
+}
+
+@media (min-width: 820px) {
+  .torrent-accordion-summary {
+    grid-template-columns: minmax(0, 1.5fr) minmax(9rem, auto) minmax(10rem, 0.8fr) auto;
+    align-items: center;
+  }
+
+  .torrent-summary-heading > strong {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .torrent-details-cue {
+    display: inline;
+    white-space: nowrap;
+  }
+
+  .torrent-detail-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

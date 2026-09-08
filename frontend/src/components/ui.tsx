@@ -26,12 +26,39 @@ export function Progress({ label, value, className = "" }: { label: string; valu
     value={value === undefined ? undefined : Math.min(100, Math.max(0, value))} />;
 }
 
+type AccordionProps = Omit<ComponentPropsWithRef<"details">, "children" | "title"> & {
+  children: ReactNode;
+  contentClassName?: string;
+  summaryClassName?: string;
+  summaryLabel?: string;
+  title: ReactNode;
+};
+
 // Native details supplies keyboard interaction and expanded state without custom state.
-export function Accordion({ title, children }: { title: string; children: ReactNode }) {
-  return <details className="ui-accordion"><summary>{title}</summary><div>{children}</div></details>;
+export function Accordion({
+  children,
+  className = "",
+  contentClassName = "",
+  summaryClassName = "",
+  summaryLabel,
+  title,
+  ...props
+}: AccordionProps) {
+  return (
+    <details className={`ui-accordion ${className}`} {...props}>
+      <summary className={summaryClassName} aria-description={summaryLabel}>{title}</summary>
+      <div className={contentClassName}>{children}</div>
+    </details>
+  );
 }
 
-export function StateMessage({ tone, children }: { tone: "loading" | "empty" | "error"; children: ReactNode }) {
-  return <div className={`ui-state ui-state-${tone}`} role={tone === "error" ? "alert" : "status"}
-    aria-busy={tone === "loading" ? true : undefined}>{children}</div>;
+export function StateMessage({
+  tone,
+  children,
+  className = "",
+  ...props
+}: HTMLAttributes<HTMLDivElement> & { tone: "loading" | "empty" | "error" }) {
+  return <div className={`ui-state ui-state-${tone} ${className}`}
+    role={tone === "error" ? "alert" : "status"} aria-busy={tone === "loading" ? true : undefined}
+    {...props}>{children}</div>;
 }

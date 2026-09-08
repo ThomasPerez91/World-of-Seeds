@@ -18,16 +18,13 @@ def test_responsive_styles_cover_supported_mobile_and_orientation_contract() -> 
     assert "flex-wrap: wrap" in styles
 
 
-def test_torrent_table_exposes_card_labels_without_duplicate_mobile_markup() -> None:
+def test_torrent_manager_uses_native_accordions_without_duplicate_mobile_markup() -> None:
     page = (REPOSITORY / "frontend/src/features/torrents/UserDownloadsPage.tsx").read_text()
 
-    for key in (
-        "downloads.name",
-        "downloads.status",
-        "files.size",
-        "downloads.progress",
-        "downloads.updated",
-        "files.actions",
-    ):
-        assert f'data-label={{t("{key}")}}' in page
+    assert '<ul className="torrent-accordion-list"' in page
+    assert "<Accordion" in page
+    assert 'className="torrent-accordion-summary"' in page
+    assert 'className="torrent-card-actions"' in page
+    assert '<table className="torrent-table">' not in page
+    assert 'data-label={t("' not in page
     assert "window.location.reload" not in page

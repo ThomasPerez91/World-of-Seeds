@@ -36,12 +36,18 @@ function torrent(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function renderPage(locale: Locale = "fr") {
+function renderPage(
+  locale: Locale = "fr",
+  callbacks: {
+    onActivityChanged?: () => void;
+    onLocalTransferChanged?: (summary: unknown) => void;
+  } = {},
+) {
   window.localStorage.setItem("wos.preferred-locale", locale);
   return render(
     <I18nProvider>
       <FeedbackProvider>
-        <UserDownloadsPage onSessionExpired={vi.fn()} />
+        <UserDownloadsPage onSessionExpired={vi.fn()} {...callbacks} />
       </FeedbackProvider>
     </I18nProvider>,
   );
@@ -226,6 +232,8 @@ describe("UserDownloadsPage", () => {
       torrent({ id: crypto.randomUUID(), name: "Sans sources", queue_status: "stalled" }),
       torrent({ id: crypto.randomUUID(), name: "Nouvelle tentative", queue_status: "cooldown" }),
       torrent({ id: crypto.randomUUID(), name: "Prêt", state: "ready", progress: 1 }),
+      torrent({ id: crypto.randomUUID(), name: "Archive annulée", state: "cancelled" }),
+      torrent({ id: crypto.randomUUID(), name: "Archive expirée", state: "expired" }),
     ];
     vi.stubGlobal("fetch", vi.fn(async () => response({
       items: rows, offset: 0, limit: 10, total: rows.length,
@@ -241,8 +249,32 @@ describe("UserDownloadsPage", () => {
     expect(screen.getByText("Nouvelle tentative en attente")).toBeTruthy();
     expect(screen.getByText("1005 torrents en attente")).toBeTruthy();
     expect(screen.getByText("La position peut évoluer selon l’équité, la taille et la disponibilité.")).toBeTruthy();
-    expect(within(screen.getByText("Prêt").closest("tr") as HTMLElement).queryByText(/Position|Prochainement/)).toBeNull();
+    const readyCard = screen.getByRole("article", { name: "Prêt" });
+    expect(within(readyCard).queryByText(/Position|Prochainement/)).toBeNull();
+    expect(view.container.querySelector("table")).toBeNull();
+    expect(screen.getAllByRole("article")).toHaveLength(rows.length);
+    expect(screen.queryByRole("button", { name: "Annuler la demande Archive annulée" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Annuler la demande Archive expirée" })).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
+  it("préserve les callbacks d’activité et de récupération locale du Dashboard", async () => {
+    const onActivityChanged = vi.fn();
+    const onLocalTransferChanged = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async () => response({
+      items: [torrent()], offset: 0, limit: 10, total: 1,
+    })));
+
+    renderPage("fr", { onActivityChanged, onLocalTransferChanged });
+
+    await screen.findByRole("article", { name: "Film.mkv" });
+    expect(onActivityChanged).toHaveBeenCalled();
+    expect(onLocalTransferChanged).toHaveBeenCalledWith({
+      active: 0,
+      maximum: 2,
+      status: "idle",
+      waiting: 0,
+    });
   });
 
   it("remplace un rang estimé après une invalidation scheduler et resync", async () => {
@@ -814,14 +846,15 @@ describe("UserDownloadsPage", () => {
     expect(await screen.findByText("Lot terminé")).toBeTruthy();
     expect(screen.getByText("1 ajoutés · 0 déjà présents · 0 invalides · 0 en erreur")).toBeTruthy();
     expect(await screen.findByText("En cours")).toBeTruthy();
-    expect(screen.getByRole("progressbar", { name: "Progression de Film.mkv" }).getAttribute("value")).toBe("0.5");
-    expect(screen.getByRole("columnheader", { name: "Actions" })).toBeTruthy();
-    expect(view.container.querySelector(".torrent-row-actions")).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "Progression de Film.mkv" }).getAttribute("value")).toBe("50");
+    expect(view.container.querySelector("table")).toBeNull();
+    expect(screen.getByRole("article", { name: "Film.mkv" })).toBeTruthy();
+    expect(view.container.querySelector(".torrent-accordion-list")).toBeTruthy();
     expect(view.container.querySelector("[style]")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
-  it("pagine côté serveur et conserve les noms longs dans une cellule à ellipsis", async () => {
+  it("pagine côté serveur et conserve les noms longs dans le résumé accessible", async () => {
     const user = userEvent.setup();
     const longName =
       "Film.Name.2026.MULTi.TRUEFRENCH.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.DTS-HD.MA.7.1-GROUP.mkv";
@@ -850,7 +883,7 @@ describe("UserDownloadsPage", () => {
     const view = renderPage();
 
     expect(await screen.findByTitle(longName)).toBeTruthy();
-    expect(view.container.querySelector(".torrent-name-cell > span")).toBeTruthy();
+    expect(view.container.querySelector(".torrent-summary-heading > strong")).toBeTruthy();
     expect(screen.getByText("Page 1 sur 2 · 11 demandes")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Suivant" }));
 
@@ -920,11 +953,16 @@ describe("UserDownloadsPage", () => {
     );
     const view = renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Annuler la demande Film.mkv" }));
+    const article = await screen.findByRole("article", { name: "Film.mkv" });
+    const details = article.querySelector("details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Annuler la demande Film.mkv" }));
+    expect(details.open).toBe(false);
     expect(await screen.findByText("La demande « Film.mkv » a été annulée.")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(await auditAccessibility(document.body)).toMatchObject({ violations: [] });
     expect(await screen.findByText("Annulé")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Annuler la demande Film.mkv" })).toBeNull();
     expect(calls).toContainEqual({
       method: "DELETE",
       url: "/api/v2/torrents/d86528f5-bc01-4a8b-86a1-74fe3404864b",
