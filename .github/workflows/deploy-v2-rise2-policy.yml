@@ -92,12 +92,12 @@ jobs:
           grep -F 'github.event.workflow_run.head_sha' "$workflow" >/dev/null
           grep -F 'Require current master head' "$workflow" >/dev/null
 
-          if grep -Eq '^[[:space:]]+push:' "$workflow"; then
+          if grep -Eq '^  push:' "$workflow"; then
             echo 'Rise2 deployment must not trigger directly from a master push.' >&2
             exit 1
           fi
 
-          if grep -Eq '^[[:space:]]+pull_request:' "$workflow"; then
+          if grep -Eq '^  pull_request:' "$workflow"; then
             echo 'Rise2 deployment must never trigger from pull requests.' >&2
             exit 1
           fi
