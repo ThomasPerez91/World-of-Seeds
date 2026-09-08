@@ -15,7 +15,7 @@ import { AdminTrashPage } from "./features/admin/AdminTrashPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { FileBrowser } from "./features/files/FileBrowser";
 import { TrashBrowser } from "./features/files/TrashBrowser";
-import { UserDownloadsPage } from "./features/torrents/UserDownloadsPage";
+import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
 import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
 import { LanguageSelector } from "./components/LanguageSelector";
 import {
@@ -508,7 +508,7 @@ function AccountSettingsPage({
   return (
     <section className="settings-page" aria-labelledby="account-settings-title">
       <Button type="button" className="back-button" onClick={onBack}>
-        <BackIcon /> {t("common.backFiles")}
+        <BackIcon /> {t("common.backDashboard")}
       </Button>
       <div className="settings-header">
         <p className="eyebrow">{t("account.eyebrow")}</p>
@@ -629,7 +629,7 @@ function FilesWorkspace({
   revision: number;
 }) {
   const { t } = useI18n();
-  const [activeView, setActiveView] = useState<"files" | "trash" | "downloads">("files");
+  const [activeView, setActiveView] = useState<"files" | "trash">("files");
   const [storage, setStorage] = useState<StorageUsage | null>(null);
 
   return (
@@ -656,13 +656,6 @@ function FilesWorkspace({
         >
           {t("files.trash")}
         </Button>
-        <Button
-          type="button"
-          aria-pressed={activeView === "downloads"}
-          onClick={() => setActiveView("downloads")}
-        >
-          {t("dashboard.downloads")}
-        </Button>
       </div>
       {activeView === "files" ? (
         <div>
@@ -681,9 +674,7 @@ function FilesWorkspace({
             revision={revision}
           />
         </div>
-      ) : (
-        <UserDownloadsPage onSessionExpired={onSessionExpired} />
-      )}
+      ) : null}
     </section>
   );
 }
@@ -702,7 +693,9 @@ function Dashboard({
   onSessionExpired: () => void;
 }) {
   const { t } = useI18n();
-  const [view, setView] = useState<"files" | "settings" | AdminView>("files");
+  const [view, setView] = useState<"dashboard" | "files" | "settings" | AdminView>(() =>
+    new URL(window.location.href).searchParams.has("path") ? "files" : "dashboard",
+  );
   const [filesRevision, setFilesRevision] = useState(0);
   const [filesHomeKey, setFilesHomeKey] = useState(0);
   const handleFilesChanged = useCallback(() => {
@@ -715,6 +708,11 @@ function Dashboard({
     setFilesHomeKey((value) => value + 1);
   }
 
+  function openDashboard() {
+    clearFilePathFromUrl();
+    setView("dashboard");
+  }
+
 
   return (
     <main className="app-shell">
@@ -725,28 +723,46 @@ function Dashboard({
         <Button
           type="button"
           className="wordmark"
-          onClick={openFilesHome}
-          aria-label={t("dashboard.openFiles")}
+          onClick={openDashboard}
+          aria-label={t("dashboard.openDashboard")}
         >
           <BrandMark />
           <span>World of Seeds</span>
           <Badge className="version-badge">v{APP_VERSION}</Badge>
         </Button>
+        <nav className="user-navigation" aria-label={t("dashboard.navigation")}>
+          <Button
+            variant="ghost"
+            aria-current={view === "dashboard" ? "page" : undefined}
+            onClick={openDashboard}
+          >
+            {t("dashboard.title")}
+          </Button>
+          <Button
+            variant="ghost"
+            aria-current={view === "files" ? "page" : undefined}
+            onClick={openFilesHome}
+          >
+            {t("dashboard.files")}
+          </Button>
+        </nav>
         <div className="header-actions">
           <AccountMenu
-          user={user}
-          onOpenAdmin={() => setView("admin-users")}
-          onOpenSettings={() => setView("settings")}
-          onLogout={onLogout}
-          onSessionExpired={onSessionExpired}
+            user={user}
+            onOpenAdmin={() => setView("admin-users")}
+            onOpenSettings={() => setView("settings")}
+            onLogout={onLogout}
+            onSessionExpired={onSessionExpired}
           />
         </div>
       </header>
       <div id="dashboard-content" className="dashboard-content" tabIndex={-1}>
-        {view === "settings" ? (
+        {view === "dashboard" ? (
+          <UserDashboardPage onSessionExpired={onSessionExpired} />
+        ) : view === "settings" ? (
           <AccountSettingsPage
             user={user}
-            onBack={openFilesHome}
+            onBack={openDashboard}
             onChanged={onUserChanged}
             onPasswordChanged={onSessionExpired}
             onSessionExpired={onSessionExpired}

@@ -55,7 +55,7 @@ describe("App", () => {
     await user.type(screen.getByLabelText("Password"), "correct-password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
-    await screen.findByRole("heading", { name: "Mes fichiers" });
+    await screen.findByRole("heading", { name: "Dashboard" });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/locale",
       expect.objectContaining({ method: "PATCH" }),
@@ -128,8 +128,8 @@ describe("App", () => {
 
     const user = userEvent.setup();
     const view = render(<App />);
-    await screen.findByRole("heading", { name: "My files" });
-    expect(screen.getByText("1 KB used")).toBeTruthy();
+    await screen.findByRole("heading", { name: "Dashboard" });
+    expect(await screen.findByText("1 KB available")).toBeTruthy();
     expect(document.documentElement.lang).toBe("en");
 
     await user.click(screen.getByRole("button", { name: "Open account menu" }));
@@ -203,8 +203,8 @@ describe("App", () => {
 
     const user = userEvent.setup();
     const view = render(<App />);
-    const filesTitle = await screen.findByRole("heading", { name: "Mes fichiers" });
-    expect(filesTitle.closest(".file-browser")).toBeNull();
+    const dashboardTitle = await screen.findByRole("heading", { name: "Dashboard" });
+    expect(dashboardTitle.closest(".file-browser")).toBeNull();
     const skipLink = screen.getByRole("link", { name: "Aller au contenu principal" });
     expect(skipLink.getAttribute("href")).toBe("#dashboard-content");
     expect(document.querySelector("#dashboard-content")?.getAttribute("tabindex")).toBe("-1");
@@ -213,6 +213,8 @@ describe("App", () => {
     expect(screen.getAllByText(`v${APP_VERSION}`).length).toBeGreaterThan(0);
     expect(document.querySelector(".account-settings-trigger")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+    await user.click(screen.getByRole("button", { name: "Mes fichiers" }));
+    await screen.findByRole("heading", { name: "Mes fichiers" });
     await screen.findByText("Ce dossier est vide");
     expect(screen.queryByText("La corbeille est vide")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Corbeille" }));
@@ -226,8 +228,8 @@ describe("App", () => {
     ).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
-    await user.click(screen.getByRole("button", { name: "Ouvrir Mes fichiers" }));
-    await screen.findByRole("heading", { name: "Mes fichiers" });
+    await user.click(screen.getByRole("button", { name: "Ouvrir le Dashboard" }));
+    await screen.findByRole("heading", { name: "Dashboard" });
 
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
     await user.click(screen.getByRole("button", { name: "Paramètres du compte" }));
@@ -314,7 +316,7 @@ describe("App", () => {
 
     const user = userEvent.setup();
     const view = render(<App />);
-    await screen.findByRole("heading", { name: "Mes fichiers" });
+    await screen.findByRole("heading", { name: "Dashboard" });
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
     await user.click(screen.getByRole("button", { name: "Administration" }));
     await screen.findByText("guest-a1b2c3");
@@ -370,7 +372,7 @@ describe("App", () => {
 
     const user = userEvent.setup();
     const view = render(<App />);
-    await screen.findByRole("heading", { name: "Mes fichiers" });
+    await screen.findByRole("heading", { name: "Dashboard" });
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
     await user.click(screen.getByRole("button", { name: "Paramètres du compte" }));
 
@@ -677,7 +679,7 @@ describe("App", () => {
 
     const user = userEvent.setup();
     const view = render(<App />);
-    await screen.findByRole("heading", { name: "Mes fichiers" });
+    await screen.findByRole("heading", { name: "Dashboard" });
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
     await user.click(screen.getByRole("button", { name: "Administration" }));
     await screen.findByRole("heading", { name: "Comptes utilisateurs" });

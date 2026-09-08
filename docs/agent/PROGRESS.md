@@ -151,7 +151,7 @@ Décisions validées :
 
 - **UX-00 — TERMINE** : planification documentaire de la refonte dans `roadmap-v2.md`, `PROGRESS.md` et `CONTEXT.md`.
 - **UX-01 — TERMINE** : design system, thèmes, préférence persistée, cartouche Préférences, login/settings/shell.
-- **UX-02 — A FAIRE** : nouveau Dashboard et ses cartouches en composant les données/API existantes.
+- **UX-02 — TERMINE** : nouveau Dashboard et ses cartouches en composant les données/API existantes.
 - **UX-03 — A FAIRE** : gestionnaire de torrents en accordéons avec les contrats actuels.
 - **UX-04 — A FAIRE** : expérience READY et récupération locale, sans nouvelle télémétrie backend.
 - **UX-05 — A FAIRE** : retrait de l'espace utilisateur Fichiers/Corbeille et nettoyage après audit de dépendances.
@@ -201,10 +201,20 @@ Validation locale :
 - Tests axe structurels sur menu/préférences/primitives ; contrastes des tokens de texte sur fond/surface/surface élevée >= 4,5:1 dans les deux palettes.
 - Revue CSS conceptuelle à 320, 375/390, 768, 1024 et desktop large : colonnes mobiles, textes FR/EN, noms longs, erreurs, chargement et menus. **Validation visuelle réelle et mesure d’overflow restantes** : le navigateur de cet environnement bloque la prévisualisation locale. Ne pas présenter cette revue CSS comme une mesure navigateur.
 
-UX-02 n’est pas commencé. Fichiers/Corbeille et le gestionnaire de torrents restent disponibles ; aucun changement qB/NewGreedy/Redis/scheduler/rétention ni refonte structurelle de l’administration.
+UX-02 est terminé sur une branche dédiée : le Dashboard est l’accueil authentifié, Fichiers/Corbeille restent accessibles et le gestionnaire de torrents existant est réutilisé sans accordéons. Aucun changement backend, qB/NewGreedy/Redis/scheduler/rétention ni refonte structurelle de l’administration.
+
+## UX-02 — Nouveau Dashboard utilisateur torrent-centric
+
+- Trois cartouches indépendants composent les contrats existants : activité torrent paginée par 100, récupération locale du navigateur et stockage disponible/total.
+- L’agrégation torrent couvre toutes les pages, exclut les états terminaux non pertinents, évite le double comptage et coalesce les invalidations remontées par `UserDownloadsPage`.
+- Les erreurs et chargements restent isolés par cartouche ; les requêtes sont annulées au démontage.
+- Le shell ouvre désormais le Dashboard après authentification et via le wordmark, avec une navigation compacte conservant Fichiers/Corbeille.
+- Le layout est mobile-first : une colonne par défaut, deux à partir de 600 px et trois à partir de 980 px.
+- La tentative unique de validation visuelle locale a été bloquée au démarrage de Vite par l’environnement (`uv_interface_addresses`). La revue responsive est donc structurelle (CSS/tests DOM et axe), sans prétendre à une mesure navigateur réelle.
+- UX-03 n’est pas commencé : la table, le drag/drop, le multi-upload, le WebSocket et les comportements de téléchargement existants sont conservés.
 
 ## Prochaine tâche
 
-**UX-02 — Nouveau Dashboard utilisateur torrent-centric.**
+**UX-03 — Gestionnaire de torrents en accordéons.**
 
-Tâche distincte, à commencer seulement après validation et intégration de UX-01.
+Tâche distincte, à commencer seulement après validation et intégration de UX-02.

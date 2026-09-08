@@ -19,6 +19,7 @@ import {
 import { useI18n, type MessageKey } from "../../i18n";
 import {
   pickDownloadDirectory,
+  DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
   RecursiveDownloadController,
   type RecursiveTransferErrorCode,
   type RecursiveTransferProgress,
@@ -31,6 +32,30 @@ const PAGE_SIZE = 10;
 const FALLBACK_PAGE_SIZE = 50;
 export const MAX_TORRENT_BATCH_FILES = 50;
 export const TORRENT_UPLOAD_CONCURRENCY = 3;
+
+export interface LocalDownloadSummary {
+  active: number;
+  maximum: number;
+  status: "idle" | RecursiveTransferProgress["status"];
+  waiting: number;
+}
+
+interface UserDownloadsPageProps {
+  onActivityChanged?: () => void;
+  onLocalTransferChanged?: (summary: LocalDownloadSummary) => void;
+  onSessionExpired: () => void;
+}
+
+export function summarizeLocalTransfer(
+  transfer: RecursiveTransferProgress | null,
+): LocalDownloadSummary {
+  return {
+    active: transfer?.queue.filter((item) => item.status === "active").length ?? 0,
+    maximum: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
+    status: transfer?.status ?? "idle",
+    waiting: transfer?.queue.filter((item) => item.status === "waiting").length ?? 0,
+  };
+}
 
 type UploadResultStatus = "queued" | "uploading" | "added" | "duplicate" | "invalid" | "failed";
 
@@ -202,7 +227,11 @@ function TorrentRow({
   );
 }
 
-export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () => void }) {
+export function UserDownloadsPage({
+  onActivityChanged,
+  onLocalTransferChanged,
+  onSessionExpired,
+}: UserDownloadsPageProps) {
   const feedback = useFeedback();
   const { apiError, formatBytes, t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -236,6 +265,10 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
 
   useEffect(() => () => controllerRef.current?.cancel(), []);
 
+  useEffect(() => {
+    onLocalTransferChanged?.(summarizeLocalTransfer(transfer));
+  }, [onLocalTransferChanged, transfer]);
+
   const load = useCallback(async (requestedOffset: number, signal?: AbortSignal) => {
     const generation = ++loadGenerationRef.current;
     setRefreshing(true);
@@ -245,6 +278,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
       setTorrents(result.items);
       setTotal(result.total);
       setPageError("");
+      onActivityChanged?.();
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
       if (caught instanceof ApiError && caught.status === 401) {
@@ -259,7 +293,7 @@ export function UserDownloadsPage({ onSessionExpired }: { onSessionExpired: () =
         setRefreshing(false);
       }
     }
-  }, [apiError, onSessionExpired]);
+  }, [apiError, onActivityChanged, onSessionExpired]);
 
   useEffect(() => {
     const controller = new AbortController();
