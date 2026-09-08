@@ -44,7 +44,10 @@ Principes de design :
 - langue FR/EN conservée comme préférence utilisateur ;
 - surfaces/cartouches compacts, boutons modernes et hiérarchie visuelle plus dense ;
 - éviter les grands titres et espaces vides qui réduisent la densité utile ;
-- réserver les couleurs fortes aux vrais états d'erreur, avertissements et actions destructrices.
+- réserver les couleurs fortes aux vrais états d'erreur, avertissements et actions destructrices ;
+- **mobile-first obligatoire** pour toute nouvelle UI : concevoir les styles et la hiérarchie d'abord pour les petits écrans, puis enrichir progressivement l'expérience aux breakpoints tablette et desktop ;
+- le responsive est un critère de Definition of Done de **chaque PR UX**, pas une finition reportée à UX-06 : aucun débordement horizontal, contrôles tactiles utilisables, textes/noms longs correctement bornés, cartes/accordéons/actions lisibles et opérables sur mobile ;
+- toute modification UI doit être vérifiée sur des largeurs représentatives mobile, tablette et desktop, avec un soin particulier porté aux états chargement/vide/erreur et aux contenus longs.
 
 Principes de scope :
 
