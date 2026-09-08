@@ -7,6 +7,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -124,7 +125,7 @@ async def _fetch_qb_route(
 
 def _qb_lines(
     torrents: list[dict[str, object]],
-    transfer: dict[str, object],
+    transfer: Mapping[str, object],
     *,
     truncated: bool,
 ) -> list[str]:
