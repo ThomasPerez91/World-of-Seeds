@@ -53,10 +53,7 @@ export class DownloadPolicyRequestError extends Error {
 }
 
 interface DirectoryPickerWindow extends Window {
-  showSaveFilePicker?: (options: {
-    suggestedName: string;
-    types?: Array<{ description: string; accept: Record<string, string[]> }>;
-  }) => Promise<LocalFileHandle>;
+  showSaveFilePicker?: (options: { suggestedName: string }) => Promise<LocalFileHandle>;
 }
 
 interface ManagedJob {
@@ -264,9 +261,7 @@ export class BrowserDownloadManager {
   }
 
   cancel(jobId: string): void {
-    const job = this.jobs.get(jobId);
-    if (job === undefined) return;
-    job.controller.cancel();
+    this.jobs.get(jobId)?.controller.cancel();
   }
 
   remove(jobId: string): void {
@@ -317,7 +312,7 @@ export class BrowserDownloadManager {
       directory: options.directory,
       loadManifestPage: options.loadManifestPage,
       concurrency: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
-      acquirePermit: (signal) => this.permits.acquire(signal),
+      fetcher: (input, init) => this.fetchWithPermit(input, init),
       onProgress: (progress) => this.onProgress(id, progress),
     });
     this.jobs.set(id, { controller, snapshot: initial });
@@ -325,6 +320,58 @@ export class BrowserDownloadManager {
     this.emit();
     void controller.start();
     return id;
+  }
+
+  private async fetchWithPermit(
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> {
+    const signal = init?.signal ?? new AbortController().signal;
+    const release = await this.permits.acquire(signal);
+    let response: Response;
+    try {
+      response = await fetch(input, init);
+    } catch (error) {
+      release();
+      throw error;
+    }
+    if (response.body === null) {
+      release();
+      return response;
+    }
+
+    const reader = response.body.getReader();
+    let released = false;
+    const finish = () => {
+      if (released) return;
+      released = true;
+      release();
+    };
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const result = await reader.read();
+          if (result.done) {
+            finish();
+            controller.close();
+          } else {
+            controller.enqueue(result.value);
+          }
+        } catch (error) {
+          finish();
+          controller.error(error);
+        }
+      },
+      async cancel(reason) {
+        finish();
+        await reader.cancel(reason);
+      },
+    });
+    return new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
   }
 
   private onProgress(jobId: string, progress: RecursiveTransferProgress): void {
