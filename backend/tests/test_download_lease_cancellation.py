@@ -64,9 +64,9 @@ async def test_engaged_download_can_finish_after_unsubscribe_but_no_new_lease_st
     )
     lease_id = lease.id
 
-    request = await db_session.get(TorrentRequest, torrent_request_id)
-    assert request is not None
-    request.state = TorrentRequestState.CANCELLED
+    cancelled_request = await db_session.get(TorrentRequest, torrent_request_id)
+    assert cancelled_request is not None
+    cancelled_request.state = TorrentRequestState.CANCELLED
     await db_session.commit()
 
     await manager.renew(lease_id)
@@ -80,19 +80,19 @@ async def test_engaged_download_can_finish_after_unsubscribe_but_no_new_lease_st
             max_concurrent=2,
         )
 
-    torrent = await db_session.get(ManagedTorrent, managed_torrent_id)
-    assert torrent is not None
-    torrent.state = ManagedTorrentState.PURGE_PENDING
-    torrent.purge_after = now
-    torrent.desired_active = False
-    torrent.desired_priority = None
-    torrent.purge_stop_pending = True
+    pending_torrent = await db_session.get(ManagedTorrent, managed_torrent_id)
+    assert pending_torrent is not None
+    pending_torrent.state = ManagedTorrentState.PURGE_PENDING
+    pending_torrent.purge_after = now
+    pending_torrent.desired_active = False
+    pending_torrent.desired_priority = None
+    pending_torrent.purge_stop_pending = True
     await db_session.commit()
     await manager.renew(lease_id)
 
-    torrent = await db_session.get(ManagedTorrent, managed_torrent_id)
-    assert torrent is not None
-    torrent.state = ManagedTorrentState.PURGING
+    purging_torrent = await db_session.get(ManagedTorrent, managed_torrent_id)
+    assert purging_torrent is not None
+    purging_torrent.state = ManagedTorrentState.PURGING
     await db_session.commit()
     with pytest.raises(ManagedDownloadError):
         await manager.renew(lease_id)
