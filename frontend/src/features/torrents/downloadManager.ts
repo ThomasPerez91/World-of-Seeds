@@ -3,6 +3,7 @@ import type {
   TorrentDownloadManifestPageV2,
 } from "../../api/client";
 import {
+  DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
   RecursiveDownloadController,
   type LocalDirectoryHandle,
   type LocalFileHandle,
@@ -22,6 +23,7 @@ export type BrowserDownloadJobStatus =
 export interface BrowserDownloadJobSnapshot {
   id: string;
   torrentId: string;
+  kind: "file" | "folder";
   name: string;
   status: BrowserDownloadJobStatus;
   downloadedBytes: number;
@@ -82,6 +84,76 @@ interface EnqueueFileOptions {
   target: LocalFileHandle;
 }
 
+interface PermitWaiter {
+  resolve: (release: () => void) => void;
+  reject: (error: DOMException) => void;
+  signal: AbortSignal;
+  onAbort: () => void;
+}
+
+class DownloadPermitPool {
+  private limit: number;
+  private active = 0;
+  private readonly waiters: PermitWaiter[] = [];
+
+  constructor(limit: number, private readonly onChange: () => void) {
+    this.limit = limit;
+  }
+
+  get activeCount(): number {
+    return this.active;
+  }
+
+  setLimit(limit: number): void {
+    this.limit = limit;
+    this.drain();
+    this.onChange();
+  }
+
+  acquire(signal: AbortSignal): Promise<() => void> {
+    if (signal.aborted) return Promise.reject(new DOMException("aborted", "AbortError"));
+    return new Promise((resolve, reject) => {
+      const waiter: PermitWaiter = {
+        resolve,
+        reject,
+        signal,
+        onAbort: () => undefined,
+      };
+      waiter.onAbort = () => {
+        const index = this.waiters.indexOf(waiter);
+        if (index >= 0) this.waiters.splice(index, 1);
+        reject(new DOMException("aborted", "AbortError"));
+        this.onChange();
+      };
+      signal.addEventListener("abort", waiter.onAbort, { once: true });
+      this.waiters.push(waiter);
+      this.drain();
+    });
+  }
+
+  private drain(): void {
+    while (this.active < this.limit && this.waiters.length > 0) {
+      const waiter = this.waiters.shift();
+      if (waiter === undefined) break;
+      waiter.signal.removeEventListener("abort", waiter.onAbort);
+      if (waiter.signal.aborted) {
+        waiter.reject(new DOMException("aborted", "AbortError"));
+        continue;
+      }
+      this.active += 1;
+      let released = false;
+      waiter.resolve(() => {
+        if (released) return;
+        released = true;
+        this.active = Math.max(0, this.active - 1);
+        this.drain();
+        this.onChange();
+      });
+      this.onChange();
+    }
+  }
+}
+
 export async function loadBrowserDownloadPolicy(signal?: AbortSignal): Promise<BrowserDownloadPolicy> {
   const response = await fetch("/api/v2/downloads/policy", {
     credentials: "same-origin",
@@ -110,10 +182,7 @@ export async function pickManagedDownloadFile(
 ): Promise<LocalFileHandle> {
   const picker = (target as DirectoryPickerWindow).showSaveFilePicker;
   if (picker === undefined) throw new Error("save_file_picker_unavailable");
-  return picker.call(target, {
-    suggestedName,
-    types: [{ description: "Fichier", accept: { "application/octet-stream": [".*"] } }],
-  });
+  return picker.call(target, { suggestedName });
 }
 
 class SingleTargetDirectory implements LocalDirectoryHandle {
@@ -131,8 +200,8 @@ class SingleTargetDirectory implements LocalDirectoryHandle {
 export class BrowserDownloadManager {
   private readonly jobs = new Map<string, ManagedJob>();
   private readonly order: string[] = [];
-  private readonly active = new Set<string>();
   private maxConcurrentStreams: number;
+  private readonly permits: DownloadPermitPool;
 
   constructor(
     maxConcurrentStreams: number,
@@ -140,18 +209,20 @@ export class BrowserDownloadManager {
   ) {
     this.assertConcurrency(maxConcurrentStreams);
     this.maxConcurrentStreams = maxConcurrentStreams;
+    this.permits = new DownloadPermitPool(maxConcurrentStreams, () => this.emit());
   }
 
   setMaxConcurrentStreams(value: number): void {
     this.assertConcurrency(value);
     this.maxConcurrentStreams = value;
-    this.pump();
+    this.permits.setLimit(value);
     this.emit();
   }
 
   enqueueFolder(options: EnqueueFolderOptions): string {
     return this.enqueue({
       torrentId: options.torrentId,
+      kind: "folder",
       name: options.name,
       firstPage: options.snapshot,
       directory: options.directory,
@@ -170,6 +241,7 @@ export class BrowserDownloadManager {
     };
     return this.enqueue({
       torrentId: options.torrentId,
+      kind: "file",
       name: options.name,
       firstPage: syntheticSnapshot,
       directory: new SingleTargetDirectory(options.target),
@@ -181,44 +253,26 @@ export class BrowserDownloadManager {
 
   pause(jobId: string): void {
     const job = this.jobs.get(jobId);
-    if (job === undefined) return;
-    if (job.snapshot.status === "queued") {
-      job.snapshot = { ...job.snapshot, status: "paused", queuePosition: null };
-      this.emit();
-      return;
-    }
-    if (job.snapshot.status !== "running") return;
+    if (job === undefined || !["queued", "running"].includes(job.snapshot.status)) return;
     job.controller.pause();
   }
 
   resume(jobId: string): void {
     const job = this.jobs.get(jobId);
     if (job === undefined || !["paused", "error"].includes(job.snapshot.status)) return;
-    job.snapshot = { ...job.snapshot, status: "queued", error: null };
-    this.pump();
-    this.emit();
+    void job.controller.resume();
   }
 
   cancel(jobId: string): void {
     const job = this.jobs.get(jobId);
     if (job === undefined) return;
     job.controller.cancel();
-    this.active.delete(jobId);
-    job.snapshot = {
-      ...job.snapshot,
-      status: "cancelled",
-      error: null,
-      queuePosition: null,
-    };
-    this.pump();
-    this.emit();
   }
 
   remove(jobId: string): void {
     const job = this.jobs.get(jobId);
     if (job === undefined || !["completed", "cancelled"].includes(job.snapshot.status)) return;
     this.jobs.delete(jobId);
-    this.active.delete(jobId);
     const index = this.order.indexOf(jobId);
     if (index >= 0) this.order.splice(index, 1);
     this.emit();
@@ -228,11 +282,11 @@ export class BrowserDownloadManager {
     for (const job of this.jobs.values()) job.controller.cancel();
     this.jobs.clear();
     this.order.splice(0);
-    this.active.clear();
   }
 
   private enqueue(options: {
     torrentId: string;
+    kind: "file" | "folder";
     name: string;
     firstPage: TorrentDownloadManifestPageV2;
     directory: LocalDirectoryHandle;
@@ -246,6 +300,7 @@ export class BrowserDownloadManager {
     const initial: BrowserDownloadJobSnapshot = {
       id,
       torrentId: options.torrentId,
+      kind: options.kind,
       name: options.name,
       status: "queued",
       downloadedBytes: 0,
@@ -261,20 +316,24 @@ export class BrowserDownloadManager {
       firstPage: options.firstPage,
       directory: options.directory,
       loadManifestPage: options.loadManifestPage,
-      concurrency: 1,
+      concurrency: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
+      acquirePermit: (signal) => this.permits.acquire(signal),
       onProgress: (progress) => this.onProgress(id, progress),
     });
     this.jobs.set(id, { controller, snapshot: initial });
     this.order.push(id);
-    this.pump();
     this.emit();
+    void controller.start();
     return id;
   }
 
   private onProgress(jobId: string, progress: RecursiveTransferProgress): void {
     const job = this.jobs.get(jobId);
     if (job === undefined) return;
-    const status = progress.status as BrowserDownloadJobStatus;
+    const hasActiveFile = progress.queue.some((item) => item.status === "active");
+    const status: BrowserDownloadJobStatus = progress.status === "running" && !hasActiveFile
+      ? "queued"
+      : progress.status;
     job.snapshot = {
       ...job.snapshot,
       status,
@@ -284,32 +343,7 @@ export class BrowserDownloadManager {
       queue: progress.queue,
       queuePosition: null,
     };
-    if (["paused", "cancelled", "completed", "error"].includes(status)) {
-      this.active.delete(jobId);
-      this.pump();
-    }
     this.emit();
-  }
-
-  private pump(): void {
-    while (this.active.size < this.maxConcurrentStreams) {
-      const nextId = this.order.find((id) => this.jobs.get(id)?.snapshot.status === "queued");
-      if (nextId === undefined) break;
-      const job = this.jobs.get(nextId);
-      if (job === undefined) break;
-      this.active.add(nextId);
-      job.snapshot = { ...job.snapshot, status: "running", queuePosition: null };
-      void job.controller.start().finally(() => {
-        const current = this.jobs.get(nextId);
-        if (current === undefined) return;
-        if (current.snapshot.status === "running") {
-          this.active.delete(nextId);
-          current.snapshot = { ...current.snapshot, status: "error" };
-          this.pump();
-          this.emit();
-        }
-      });
-    }
   }
 
   private emit(): void {
@@ -324,7 +358,7 @@ export class BrowserDownloadManager {
       return [{ ...job.snapshot, queuePosition: null }];
     });
     this.onChange({
-      activeStreams: this.active.size,
+      activeStreams: this.permits.activeCount,
       maxConcurrentStreams: this.maxConcurrentStreams,
       waitingJobs: jobs.filter((job) => job.status === "queued").length,
       jobs,
