@@ -348,15 +348,17 @@ export class BrowserDownloadManager {
 
   private emit(): void {
     let position = 0;
-    const jobs = this.order.flatMap((id) => {
+    const jobs: BrowserDownloadJobSnapshot[] = [];
+    for (const id of this.order) {
       const job = this.jobs.get(id);
-      if (job === undefined) return [];
+      if (job === undefined) continue;
       if (job.snapshot.status === "queued") {
         position += 1;
-        return [{ ...job.snapshot, queuePosition: position }];
+        jobs.push({ ...job.snapshot, queuePosition: position });
+      } else {
+        jobs.push({ ...job.snapshot, queuePosition: null });
       }
-      return [{ ...job.snapshot, queuePosition: null }];
-    });
+    }
     this.onChange({
       activeStreams: this.permits.activeCount,
       maxConcurrentStreams: this.maxConcurrentStreams,
