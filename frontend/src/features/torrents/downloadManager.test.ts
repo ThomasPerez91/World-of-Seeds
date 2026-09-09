@@ -25,6 +25,14 @@ function target(): LocalFileHandle {
   };
 }
 
+function failingTarget(): LocalFileHandle {
+  return {
+    createWritable: vi.fn(async () => {
+      throw new DOMException("denied", "NotAllowedError");
+    }),
+  };
+}
+
 function snapshot(fileId: string): TorrentDownloadManifestPageV2 {
   return {
     snapshot_id: "a".repeat(64),
@@ -39,18 +47,25 @@ function snapshot(fileId: string): TorrentDownloadManifestPageV2 {
   };
 }
 
-afterEach(() => vi.restoreAllMocks());
+function validResponse(): Response {
+  return new Response(new Uint8Array([1]), {
+    headers: { "X-WOS-Manifest-Version": "1" },
+  });
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("BrowserDownloadManager", () => {
-  it("queues overflow jobs instead of failing when the stream limit is reached", async () => {
+  it("starts conservatively until the server policy is applied and queues overflow jobs", async () => {
     const gates = [deferred(), deferred(), deferred()];
     let call = 0;
     vi.stubGlobal("fetch", vi.fn(async () => {
       const index = call++;
       await gates[index].promise;
-      return new Response(new Uint8Array([1]), {
-        headers: { "X-WOS-Manifest-Version": "1" },
-      });
+      return validResponse();
     }));
     let current: BrowserDownloadManagerSnapshot = {
       activeStreams: 0,
@@ -73,8 +88,17 @@ describe("BrowserDownloadManager", () => {
       });
     }
 
+    await vi.waitFor(() => expect(call).toBe(1));
+    expect(current.activeStreams).toBe(1);
+    expect(current.maxConcurrentStreams).toBe(1);
+    expect(current.waitingJobs).toBe(2);
+    expect(current.jobs.map((job) => job.status)).toEqual(["running", "queued", "queued"]);
+
+    manager.setMaxConcurrentStreams(2);
+
     await vi.waitFor(() => expect(call).toBe(2));
     expect(current.activeStreams).toBe(2);
+    expect(current.maxConcurrentStreams).toBe(2);
     expect(current.waitingJobs).toBe(1);
     expect(current.jobs.map((job) => job.status)).toEqual(["running", "running", "queued"]);
 
@@ -95,9 +119,7 @@ describe("BrowserDownloadManager", () => {
     vi.stubGlobal("fetch", vi.fn(async () => {
       const index = call++;
       await gates[index].promise;
-      return new Response(new Uint8Array([1]), {
-        headers: { "X-WOS-Manifest-Version": "1" },
-      });
+      return validResponse();
     }));
     let current: BrowserDownloadManagerSnapshot = {
       activeStreams: 0,
@@ -119,7 +141,8 @@ describe("BrowserDownloadManager", () => {
         target: target(),
       });
     }
-    await vi.waitFor(() => expect(call).toBe(2));
+    await vi.waitFor(() => expect(call).toBe(1));
+    expect(current.waitingJobs).toBe(4);
 
     manager.setMaxConcurrentStreams(20);
 
@@ -130,5 +153,86 @@ describe("BrowserDownloadManager", () => {
 
     gates.forEach((gate) => gate.resolve());
     await vi.waitFor(() => expect(current.activeStreams).toBe(0));
+  });
+
+  it("releases a permit when a response is rejected before its body is consumed", async () => {
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      call += 1;
+      if (call === 1) return new Response(new Uint8Array([1]));
+      return validResponse();
+    }));
+    let current: BrowserDownloadManagerSnapshot = {
+      activeStreams: 0,
+      maxConcurrentStreams: 1,
+      waitingJobs: 0,
+      jobs: [],
+    };
+    const manager = new BrowserDownloadManager(1, (next) => {
+      current = next;
+    });
+    const first = snapshot("invalid-response");
+    const second = snapshot("after-invalid-response");
+
+    manager.enqueueFile({
+      torrentId: "torrent-invalid-response",
+      name: "invalid-response.bin",
+      snapshot: first,
+      file: first.items[0],
+      target: target(),
+    });
+    manager.enqueueFile({
+      torrentId: "torrent-after-invalid-response",
+      name: "after-invalid-response.bin",
+      snapshot: second,
+      file: second.items[0],
+      target: target(),
+    });
+
+    await vi.waitFor(() => expect(call).toBe(2));
+    await vi.waitFor(() => expect(current.jobs[1]?.status).toBe("completed"));
+    expect(current.jobs[0]?.status).toBe("error");
+    expect(current.jobs[0]?.error).toBe("manifest_changed");
+    expect(current.activeStreams).toBe(0);
+  });
+
+  it("releases a permit when opening the local writer fails", async () => {
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      call += 1;
+      return validResponse();
+    }));
+    let current: BrowserDownloadManagerSnapshot = {
+      activeStreams: 0,
+      maxConcurrentStreams: 1,
+      waitingJobs: 0,
+      jobs: [],
+    };
+    const manager = new BrowserDownloadManager(1, (next) => {
+      current = next;
+    });
+    const first = snapshot("writer-denied");
+    const second = snapshot("after-writer-denied");
+
+    manager.enqueueFile({
+      torrentId: "torrent-writer-denied",
+      name: "writer-denied.bin",
+      snapshot: first,
+      file: first.items[0],
+      target: failingTarget(),
+    });
+    manager.enqueueFile({
+      torrentId: "torrent-after-writer-denied",
+      name: "after-writer-denied.bin",
+      snapshot: second,
+      file: second.items[0],
+      target: target(),
+    });
+
+    await vi.waitFor(() => expect(call).toBe(2));
+    await vi.waitFor(() => expect(current.jobs[1]?.status).toBe("completed"));
+    expect(current.jobs[0]?.status).toBe("error");
+    expect(current.jobs[0]?.error).toBe("local_write_denied");
+    expect(current.activeStreams).toBe(0);
   });
 });
