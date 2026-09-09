@@ -6,15 +6,13 @@ import {
   useState,
 } from "react";
 
-import { api, ApiError, type StorageUsage, type User } from "./api/client";
+import { api, ApiError, type User } from "./api/client";
 import { type AdminView } from "./features/admin/AdminPageShell";
 import { AdminStoragePage } from "./features/admin/AdminStoragePage";
 import { AdminServicesPage } from "./features/admin/AdminServicesPage";
 import { AdminSettingsPage } from "./features/admin/AdminSettingsPage";
 import { AdminTrashPage } from "./features/admin/AdminTrashPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
-import { FileBrowser } from "./features/files/FileBrowser";
-import { TrashBrowser } from "./features/files/TrashBrowser";
 import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
 import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
 import { LanguageSelector } from "./components/LanguageSelector";
@@ -25,7 +23,7 @@ import {
 } from "./components/LegalPage";
 import { ThemeProvider } from "./theme";
 import { ThemeSelector } from "./components/ThemeSelector";
-import { Button, Card, Badge, Progress, StateMessage } from "./components/ui";
+import { Button, Card, Badge, StateMessage } from "./components/ui";
 import { APP_VERSION } from "./version";
 import { FeedbackProvider } from "./components/Feedback";
 import { useFeedback } from "./components/Feedback";
@@ -37,7 +35,7 @@ type AuthState =
   | { status: "unavailable" }
   | { status: "authenticated"; user: User };
 
-function clearFilePathFromUrl() {
+function clearLegacyFilePathFromUrl() {
   const url = new URL(window.location.href);
   url.searchParams.delete("path");
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
@@ -596,89 +594,6 @@ function AccountSettingsPage({
   );
 }
 
-function StorageCard({ storage }: { storage: StorageUsage | null }) {
-  const { formatBytes, t } = useI18n();
-  if (storage === null) {
-    return <div className="storage-card storage-card-loading" aria-hidden="true" />;
-  }
-  const percent =
-    storage.total === 0 ? 0 : Math.min((storage.used / storage.total) * 100, 100);
-  return (
-    <div className="storage-card" role="group" aria-label={t("storage.label")}>
-      <div className="storage-copy">
-        <span>{t("storage.used", { value: formatBytes(storage.used) })}</span>
-        <strong>{t("storage.available", { value: formatBytes(storage.available) })}</strong>
-      </div>
-      <Progress
-        className="storage-track"
-        value={percent}
-        label={t("storage.percent", { value: percent.toFixed(0) })}
-      />
-      <span className="storage-total">{t("storage.total", { value: formatBytes(storage.total) })}</span>
-    </div>
-  );
-}
-
-function FilesWorkspace({
-  onFilesChanged,
-  onSessionExpired,
-  revision,
-}: {
-  onFilesChanged: () => void;
-  onSessionExpired: () => void;
-  revision: number;
-}) {
-  const { t } = useI18n();
-  const [activeView, setActiveView] = useState<"files" | "trash">("files");
-  const [storage, setStorage] = useState<StorageUsage | null>(null);
-
-  return (
-    <section className="files-workspace" aria-labelledby="files-page-title">
-      <header className="files-page-header">
-        <div>
-          <p className="eyebrow">{t("files.personalSpace")}</p>
-          <h1 id="files-page-title">{t("dashboard.files")}</h1>
-        </div>
-        <StorageCard storage={storage} />
-      </header>
-      <div className="file-view-tabs" role="group" aria-label={t("files.views")}>
-        <Button
-          type="button"
-          aria-pressed={activeView === "files"}
-          onClick={() => setActiveView("files")}
-        >
-          {t("dashboard.files")}
-        </Button>
-        <Button
-          type="button"
-          aria-pressed={activeView === "trash"}
-          onClick={() => setActiveView("trash")}
-        >
-          {t("files.trash")}
-        </Button>
-      </div>
-      {activeView === "files" ? (
-        <div>
-          <FileBrowser
-            onFilesChanged={onFilesChanged}
-            onSessionExpired={onSessionExpired}
-            onStorageChanged={setStorage}
-            revision={revision}
-          />
-        </div>
-      ) : activeView === "trash" ? (
-        <div>
-          <TrashBrowser
-            onFilesChanged={onFilesChanged}
-            onSessionExpired={onSessionExpired}
-            revision={revision}
-          />
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
 function Dashboard({
   user,
   onUserChanged,
@@ -693,23 +608,14 @@ function Dashboard({
   onSessionExpired: () => void;
 }) {
   const { t } = useI18n();
-  const [view, setView] = useState<"dashboard" | "files" | "settings" | AdminView>(() =>
-    new URL(window.location.href).searchParams.has("path") ? "files" : "dashboard",
-  );
-  const [filesRevision, setFilesRevision] = useState(0);
-  const [filesHomeKey, setFilesHomeKey] = useState(0);
-  const handleFilesChanged = useCallback(() => {
-    setFilesRevision((value) => value + 1);
+  const [view, setView] = useState<"dashboard" | "settings" | AdminView>("dashboard");
+
+  useEffect(() => {
+    clearLegacyFilePathFromUrl();
   }, []);
 
-  function openFilesHome() {
-    clearFilePathFromUrl();
-    setView("files");
-    setFilesHomeKey((value) => value + 1);
-  }
-
   function openDashboard() {
-    clearFilePathFromUrl();
+    clearLegacyFilePathFromUrl();
     setView("dashboard");
   }
 
@@ -738,13 +644,6 @@ function Dashboard({
           >
             {t("dashboard.title")}
           </Button>
-          <Button
-            variant="ghost"
-            aria-current={view === "files" ? "page" : undefined}
-            onClick={openFilesHome}
-          >
-            {t("dashboard.files")}
-          </Button>
         </nav>
         <div className="header-actions">
           <AccountMenu
@@ -769,41 +668,36 @@ function Dashboard({
           />
         ) : view === "admin-users" && user.is_admin ? (
           <AdminUsersPage
-            onBack={openFilesHome}
+            onBack={openDashboard}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-storage" && user.is_admin ? (
           <AdminStoragePage
-            onBack={openFilesHome}
+            onBack={openDashboard}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-services" && user.is_admin ? (
           <AdminServicesPage
-            onBack={openFilesHome}
+            onBack={openDashboard}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-settings" && user.is_admin ? (
           <AdminSettingsPage
-            onBack={openFilesHome}
+            onBack={openDashboard}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-trash" && user.is_admin ? (
           <AdminTrashPage
-            onBack={openFilesHome}
+            onBack={openDashboard}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : (
-          <FilesWorkspace
-            key={filesHomeKey}
-            onFilesChanged={handleFilesChanged}
-            onSessionExpired={onSessionExpired}
-            revision={filesRevision}
-          />
+          <UserDashboardPage onSessionExpired={onSessionExpired} />
         )}
       </div>
       <footer className="app-footer">
@@ -840,7 +734,7 @@ function AppContent() {
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
   const [legalDocument, setLegalDocument] = useState<LegalDocument | null>(null);
   const handleSessionExpired = useCallback(() => {
-    clearFilePathFromUrl();
+    clearLegacyFilePathFromUrl();
     setAuth({ status: "anonymous" });
   }, []);
 
@@ -868,7 +762,7 @@ function AppContent() {
 
   async function logout() {
     await api.logout();
-    clearFilePathFromUrl();
+    clearLegacyFilePathFromUrl();
     setAuth({ status: "anonymous" });
   }
 

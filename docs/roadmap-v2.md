@@ -98,8 +98,9 @@ La file de récupération présentée pendant cette première refonte est celle 
 | UX-02 | MOYEN | UX-01 | TERMINE | Nouveau Dashboard utilisateur comme accueil : cartouches torrents, récupération locale et stockage en composant les API/données existantes, sans nouveau backend de télémétrie. |
 | UX-03 | MOYEN | UX-02 | TERMINE | Remplacer la table actuelle par un gestionnaire de torrents en accordéons ; conserver drag/drop, multi-upload borné, états, progression, queue, WebSocket, annulation/désabonnement et rétention en utilisant le contrat existant. |
 | UX-04 | MOYEN | UX-03 | TERMINE | Recomposer l'expérience READY : fichier unique, manifeste dossier, téléchargement fichier par fichier ou complet, fallback existant, progression/file locale et affichage actif/max sans nouvelle télémétrie backend. |
-| UX-05 | ELEVE | UX-04 | A FAIRE | Retirer l'ancien espace utilisateur Fichiers/Corbeille/création de dossiers et nettoyer le code mort après audit complet des dépendances backend, admin, workspaces, trash et routes `/api/v1/files`. |
-| UX-06 | MOYEN | UX-05 | A FAIRE | Harmoniser l'administration avec le design system, finaliser responsive/accessibilité, supprimer CSS/i18n/tests morts et effectuer le nettoyage final de la refonte. |
+| UX-05 | ELEVE | UX-04 | TERMINE | Retirer l'ancien espace utilisateur Fichiers/Corbeille/création de dossiers et nettoyer le code mort après audit complet des dépendances backend, admin, workspaces, trash et routes `/api/v1/files`. |
+| UX-05B | ELEVE | UX-05 | A FAIRE | Supprimer le filesystem/workspace utilisateur legacy, migrer la capacité stockage du Dashboard vers un contrat partagé dédié et nettoyer les routes/files/trash/workspaces devenus réellement morts sans toucher au `SharedContentStore` torrent. |
+| UX-06 | MOYEN | UX-05B | A FAIRE | Harmoniser l'administration avec le design system, finaliser responsive/accessibilité, supprimer CSS/i18n/tests morts et effectuer le nettoyage final de la refonte. |
 
 ### UX-01 — Design system, thèmes et préférences
 
@@ -177,6 +178,18 @@ Avant suppression, auditer au minimum :
 
 Ne pas supprimer une brique backend uniquement parce que son écran utilisateur disparaît. Retirer ce qui est réellement mort, conserver ou isoler ce qui reste requis par l'administration ou les invariants de sécurité.
 
+### UX-05B — Suppression du filesystem utilisateur legacy
+
+Cette correction doit intervenir avant UX-06 et aligner le runtime sur le modèle torrent-centric durable :
+
+- aucun filesystem métier personnel `/data/<username>` ne doit rester nécessaire ;
+- `ManagedTorrent` représente la copie physique partagée, `TorrentFile` son manifeste et `TorrentRequest` l'abonnement/droit utilisateur ;
+- le Dashboard doit lire la capacité disque via un contrat de stockage partagé dédié au lieu de conserver le navigateur `/api/v1/files` pour deux métriques ;
+- les routes et services de création, renommage, déplacement, téléchargement arbitraire et corbeille utilisateur doivent être supprimés lorsqu'ils sont devenus sans consommateur moderne ;
+- `WorkspaceManager`, `.trash`, `TrashEntry` et l'admin trash doivent être réévalués puis supprimés s'ils ne servent plus que ce modèle user-scoped ;
+- `SharedContentStore` reste l'autorité filesystem moderne du contenu torrent et son répertoire physique `content/<storage-key>` ne doit pas être renommé sans opération OPS distincte ;
+- le désabonnement d'un utilisateur ne supprime pas la copie physique tant qu'une autre demande active existe ; la dernière référence continue à passer par le lifecycle de purge existant.
+
 ### UX-06 — Harmonisation et finition
 
 - appliquer le design system à l'administration ;
@@ -235,7 +248,7 @@ Critère de réouverture : NewGreedy expose une suppression exacte par full SHA-
 
 ## Backlog post-2.0
 
-La priorité produit post-2.0 est désormais la refonte UX `UX-01` à `UX-06` définie ci-dessus.
+La priorité produit post-2.0 est désormais la refonte UX `UX-01` à `UX-06`, avec la correction architecturale `UX-05B` obligatoire avant `UX-06`.
 
 Les autres sujets doivent être créés explicitement à partir d'un besoin produit ou opérateur, puis classés par risque :
 

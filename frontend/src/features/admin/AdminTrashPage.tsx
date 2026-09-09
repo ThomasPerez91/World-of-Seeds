@@ -212,7 +212,7 @@ export function AdminTrashPage({
                   <span className="admin-trash-path">{entry.original_path}</span>
                   <span>
                     {t("admin.deletedOn", {
-                      size: formatBytes(entry.size, t("trash.folderSizeUnknown")),
+                      size: formatBytes(entry.size, t("admin.folderSizeUnknown")),
                       date: formatDate(entry.deleted_at, { dateStyle: "medium", timeStyle: "short" }),
                     })}
                   </span>

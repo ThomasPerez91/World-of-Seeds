@@ -61,12 +61,6 @@ export interface DirectoryListing {
   truncated: boolean;
 }
 
-export interface FileMutation {
-  path: string;
-  name: string;
-  kind: "directory" | "file";
-}
-
 export type TorrentRequestV2State =
   | "requested"
   | "active"
@@ -200,11 +194,6 @@ export interface TrashEntry {
   kind: "directory" | "file";
   size: number | null;
   deleted_at: string;
-}
-
-export interface TrashListing {
-  entries: TrashEntry[];
-  truncated: boolean;
 }
 
 export interface AdminStorageOverview extends StorageUsage {
@@ -712,30 +701,6 @@ export const api = {
     return request<DirectoryListing>(`/files${query}`, { signal });
   },
 
-  fileDownloadUrl(path: string): string {
-    const search = new URLSearchParams({ path });
-    return `/api/v1/files/download?${search.toString()}`;
-  },
-
-  folderDownloadUrl(path: string): string {
-    const search = new URLSearchParams({ path });
-    return `/api/v1/files/download-folder?${search.toString()}`;
-  },
-
-  createDirectory(parent: string, name: string): Promise<FileMutation> {
-    return request<FileMutation>("/files/directory", {
-      method: "POST",
-      body: JSON.stringify({ parent, name }),
-    });
-  },
-
-  renameFile(path: string, basename: string): Promise<FileMutation> {
-    return request<FileMutation>("/files/rename", {
-      method: "PATCH",
-      body: JSON.stringify({ path, basename }),
-    });
-  },
-
   createTorrentRequestV2(file: File): Promise<TorrentRequestV2CreateResult> {
     const form = new FormData();
     form.set("torrent", file, file.name);
@@ -794,36 +759,4 @@ export const api = {
     return `/api/v2/torrents/${encodeURIComponent(torrentRequestId)}/download-archive?${snapshot.toString()}`;
   },
 
-  moveFile(path: string, destinationDirectory: string): Promise<FileMutation> {
-    return request<FileMutation>("/files/move", {
-      method: "POST",
-      body: JSON.stringify({
-        path,
-        destination_directory: destinationDirectory,
-      }),
-    });
-  },
-
-  trashFile(path: string): Promise<TrashEntry> {
-    return request<TrashEntry>("/trash", {
-      method: "POST",
-      body: JSON.stringify({ path }),
-    });
-  },
-
-  listTrash(signal?: AbortSignal): Promise<TrashListing> {
-    return request<TrashListing>("/trash", { signal });
-  },
-
-  restoreTrash(entryId: string): Promise<FileMutation> {
-    return request<FileMutation>(`/trash/${encodeURIComponent(entryId)}/restore`, {
-      method: "POST",
-    });
-  },
-
-  purgeTrash(entryId: string): Promise<void> {
-    return request<void>(`/trash/${encodeURIComponent(entryId)}`, {
-      method: "DELETE",
-    });
-  },
 };

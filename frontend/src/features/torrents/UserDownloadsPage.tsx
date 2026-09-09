@@ -891,7 +891,7 @@ export function UserDownloadsPage({
     <section className="user-downloads" aria-labelledby="user-downloads-title">
       <header className="user-downloads-header">
         <div>
-          <p className="eyebrow">{t("files.personalSpace")}</p>
+          <p className="eyebrow">{t("downloads.workspace")}</p>
           <h2 id="user-downloads-title">{t("downloads.title")}</h2>
           <p>{t("downloads.intro")}</p>
         </div>
