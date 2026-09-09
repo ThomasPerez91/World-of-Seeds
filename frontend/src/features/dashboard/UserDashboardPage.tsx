@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import {
   api,
@@ -66,7 +66,7 @@ function SummaryHeading({
   title,
   titleId,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   title: string;
   titleId: string;
 }) {
