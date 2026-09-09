@@ -44,6 +44,11 @@ jobs:
               'if source_contains(f"from {import_name} import", exclude={module}):',
               1,
           )
+          script = script.replace(
+              'styles = remove_matching_rules(read(styles_path), ".admin-trash")',
+              'styles = re.sub(r"(?ms)^[^{\\n]*\\.admin-trash[^{\\n]*\\{[^{}]*\\}\\s*", "", read(styles_path))',
+              1,
+          )
           exec(compile(script, "post-ux-consolidation.py", "exec"), {"__name__": "__main__"})
           PY
       - name: Sanity-check changed sources
