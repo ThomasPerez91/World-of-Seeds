@@ -36,12 +36,12 @@ esac
 printf '%s\n' "$wos_image" | grep -Eq '^.+@sha256:[0-9a-f]{64}$' \
   || fail "WOS image must use an immutable sha256 digest"
 
-probe=$(printf '%032x' "$$")
-probe_root="$storage/content/$probe"
+probe="rise2preflight$$"
+probe_root="$storage/$probe"
 
 cleanup() {
   case "$probe_root" in
-    "$storage"/content/[0-9a-f][0-9a-f]*) rm -rf -- "$probe_root" ;;
+    "$storage"/rise2preflight[0-9]*) rm -rf -- "$probe_root" ;;
     *) : ;;
   esac
 }
@@ -68,7 +68,7 @@ run_wos_probe() {
     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
     --user "$app_uid:$app_gid" \
     --mount "type=bind,src=$storage,dst=/data" \
-    --env WOS_PREFLIGHT_STORAGE_KEY="$probe" \
+    --env WOS_PREFLIGHT_USER="$probe" \
     --entrypoint python \
     "$wos_image" -c "$1"
 }
@@ -77,54 +77,45 @@ run_wos_probe '
 import os
 import stat
 from pathlib import Path
-from uuid import UUID
-from app.storage import SharedContentStore
+from app.files.workspaces import WorkspaceManager
 
-key = UUID(hex=os.environ["WOS_PREFLIGHT_STORAGE_KEY"])
-store = SharedContentStore(Path("/data"))
-store.prepare(key)
-path = Path("/data") / "content" / key.hex
-mode = stat.S_IMODE(path.stat().st_mode)
-if mode != 0o750:
-    raise SystemExit(f"unexpected managed content mode: {mode:o}")
-with store.open_directory(key):
-    pass
+username = os.environ["WOS_PREFLIGHT_USER"]
+manager = WorkspaceManager(Path("/data"))
+manager.create(username)
+manager.assert_ready(username)
+for path in (Path("/data") / username, Path("/data") / username / "downloads"):
+    mode = stat.S_IMODE(path.stat().st_mode)
+    if mode != 0o750:
+        raise SystemExit(f"unexpected workspace mode: {mode:o}")
 '
 
 compose run --rm --no-deps \
   --user "$qbittorrent_uid:$qbittorrent_gid" \
-  --env WOS_PREFLIGHT_STORAGE_KEY="$probe" \
+  --env WOS_PREFLIGHT_USER="$probe" \
   --entrypoint /bin/sh \
   qbittorrent -ec '
-file="/data/content/$WOS_PREFLIGHT_STORAGE_KEY/qb-created.bin"
+file="/data/$WOS_PREFLIGHT_USER/downloads/qb-created.bin"
 printf "qB storage probe\n" >"$file"
 test -s "$file"
 '
 
 run_wos_probe '
 import os
-import stat
 from pathlib import Path
-from uuid import UUID
-from app.storage import SharedContentStore
+from app.files.workspaces import WorkspaceManager
 
-key = UUID(hex=os.environ["WOS_PREFLIGHT_STORAGE_KEY"])
-store = SharedContentStore(Path("/data"))
-with store.open_directory(key) as directory_fd:
-    metadata = os.stat("qb-created.bin", dir_fd=directory_fd, follow_symlinks=False)
-    if not stat.S_ISREG(metadata.st_mode) or metadata.st_size <= 0:
-        raise SystemExit("qB storage probe file is invalid")
-    os.rename(
-        "qb-created.bin",
-        "wos-renamed.bin",
-        src_dir_fd=directory_fd,
-        dst_dir_fd=directory_fd,
-    )
-    os.unlink("wos-renamed.bin", dir_fd=directory_fd)
-store.remove_empty(key)
+username = os.environ["WOS_PREFLIGHT_USER"]
+manager = WorkspaceManager(Path("/data"))
+manager.assert_ready(username)
+downloads = Path("/data") / username / "downloads"
+source = downloads / "qb-created.bin"
+destination = downloads / "wos-renamed.bin"
+source.rename(destination)
+destination.unlink()
+manager.remove_empty(username)
 '
 
-[ ! -e "$probe_root" ] || fail "WOS did not remove the temporary managed content directory"
+[ ! -e "$probe_root" ] || fail "WOS did not remove the temporary workspace"
 trap - EXIT INT TERM
 
 echo "Rise2 V2 shared-storage smoke passed."

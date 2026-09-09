@@ -19,6 +19,7 @@ from app.auth.security import (
     verify_password,
 )
 from app.core.config import Settings
+from app.files import WorkspaceAlreadyExistsError, WorkspaceError, WorkspaceManager
 from app.models import LoginThrottle, TorrentRequest, TorrentRequestState, User, UserSession
 from app.options import PostgresOptionsRegistry
 from app.scheduler.queue_visibility import user_active_status_changes_ranked_queue
@@ -93,6 +94,7 @@ async def _register_failure(
     try:
         await db.commit()
     except IntegrityError:
+        # A concurrent first failure can race on the throttle primary key.
         await db.rollback()
         concurrent = await db.scalar(
             select(LoginThrottle).where(LoginThrottle.key_hash == key).with_for_update()
@@ -183,6 +185,7 @@ async def change_credentials(
     username_input: str,
     new_password: str,
     settings: Settings,
+    workspace_manager: WorkspaceManager,
 ) -> SessionTokens:
     locked_user = await db.scalar(
         select(User)
@@ -204,24 +207,27 @@ async def change_credentials(
         raise UsernameUnavailableError
 
     now = datetime.now(UTC)
-    locked_user.username = username
-    locked_user.password_hash = hash_password(new_password)
-    locked_user.must_change_credentials = False
-    locked_user.updated_at = now
-    await db.execute(
-        update(UserSession)
-        .where(UserSession.user_id == locked_user.id, UserSession.revoked_at.is_(None))
-        .values(revoked_at=now)
-    )
-    tokens = issue_session(db, user=locked_user, settings=settings, now=now)
+    old_username = locked_user.username
     try:
-        await db.commit()
+        with workspace_manager.rename_for_transaction(old_username, username):
+            locked_user.username = username
+            locked_user.password_hash = hash_password(new_password)
+            locked_user.must_change_credentials = False
+            locked_user.updated_at = now
+
+            await db.execute(
+                update(UserSession)
+                .where(UserSession.user_id == locked_user.id, UserSession.revoked_at.is_(None))
+                .values(revoked_at=now)
+            )
+            tokens = issue_session(db, user=locked_user, settings=settings, now=now)
+            try:
+                await db.commit()
+            except BaseException:
+                await db.rollback()
+                raise
     except IntegrityError as exc:
-        await db.rollback()
         raise UsernameUnavailableError from exc
-    except BaseException:
-        await db.rollback()
-        raise
     return tokens
 
 
@@ -230,6 +236,7 @@ async def change_username(
     *,
     user: User,
     username_input: str,
+    workspace_manager: WorkspaceManager,
 ) -> User:
     locked_user = await db.scalar(
         select(User)
@@ -250,16 +257,18 @@ async def change_username(
     if existing_user is not None:
         raise UsernameUnavailableError
 
-    locked_user.username = username
-    locked_user.updated_at = datetime.now(UTC)
+    old_username = locked_user.username
     try:
-        await db.commit()
+        with workspace_manager.rename_for_transaction(old_username, username):
+            locked_user.username = username
+            locked_user.updated_at = datetime.now(UTC)
+            try:
+                await db.commit()
+            except BaseException:
+                await db.rollback()
+                raise
     except IntegrityError as exc:
-        await db.rollback()
         raise UsernameUnavailableError from exc
-    except BaseException:
-        await db.rollback()
-        raise
 
     await db.refresh(locked_user)
     return locked_user
@@ -301,7 +310,11 @@ async def revoke_session(db: AsyncSession, user_session: UserSession) -> None:
     await db.commit()
 
 
-async def create_managed_user(db: AsyncSession) -> tuple[User, str]:
+async def create_managed_user(
+    db: AsyncSession,
+    *,
+    workspace_manager: WorkspaceManager,
+) -> tuple[User, str]:
     for _ in range(10):
         username = generate_initial_username()
         exists = await db.scalar(
@@ -316,17 +329,21 @@ async def create_managed_user(db: AsyncSession) -> tuple[User, str]:
             password_hash=hash_password(initial_password),
             must_change_credentials=True,
         )
-        db.add(user)
         try:
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()
+            with workspace_manager.provision_for_transaction(username):
+                db.add(user)
+                try:
+                    await db.commit()
+                except BaseException:
+                    await db.rollback()
+                    raise
+        except (IntegrityError, WorkspaceAlreadyExistsError):
             continue
 
         await db.refresh(user)
         return user, initial_password
 
-    raise UsernameUnavailableError
+    raise WorkspaceError("Unable to generate a unique user workspace")
 
 
 async def set_managed_user_active(

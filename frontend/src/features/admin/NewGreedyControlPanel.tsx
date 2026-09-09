@@ -9,16 +9,15 @@ import {
   type NewGreedyOverview,
   type NewGreedyRestartStatus,
 } from "../../api/client";
-import { Dialog } from "../../components/Dialog";
-import { useFeedback } from "../../components/Feedback";
 import {
   DeleteIcon,
   RestartIcon,
   SaveIcon,
   SettingsIcon,
 } from "../../components/icons";
-import { Button } from "../../components/ui";
+import { useFeedback } from "../../components/Feedback";
 import { type MessageKey, useI18n } from "../../i18n";
+import { FileDialog } from "../files/FileDialog";
 import { newGreedyFieldCopy, newGreedySectionLabel } from "./newGreedyTranslations";
 
 type DraftValue = boolean | string;
@@ -27,7 +26,9 @@ function restartStatusMessage(status: NewGreedyRestartStatus): MessageKey {
   if (status.state === "pending") return "admin.ngPending";
   if (status.state === "restarting") return "admin.ngRestarting";
   if (status.state === "healthy") return "admin.ngHealthy";
-  if (status.message_code === "cooldown") return "admin.ngCooldown";
+  if (status.message_code === "cooldown") {
+    return "admin.ngCooldown";
+  }
   if (status.state === "failed") return "admin.ngRestartFailed";
   if (status.state === "rejected") return "admin.ngRestartRejected";
   return "admin.ngRestartReady";
@@ -295,29 +296,31 @@ export function NewGreedyControlPanel({
           <p>{t("admin.ngIntro")}</p>
         </div>
         <div className="service-control-actions">
-          <Button
-            variant="secondary"
-            className="compact-button"
+          <button
+            type="button"
+            className="secondary-button compact-button"
             disabled={
               restartStatus === null ||
               restartControlError !== "" ||
               restartStatus.state === "pending" ||
               restartStatus.state === "restarting"
             }
-            onClick={() => setRestartOpen(true)}
+            onClick={() => {
+              setRestartOpen(true);
+            }}
           >
             <RestartIcon />
             {t("admin.restartNewgreedy")}
-          </Button>
-          <Button
-            variant="danger"
-            className="compact-button"
+          </button>
+          <button
+            type="button"
+            className="danger-outline-button compact-button"
             disabled={overview === null}
             onClick={() => setResetOpen(true)}
           >
             <DeleteIcon />
             {t("admin.resetStats")}
-          </Button>
+          </button>
         </div>
       </div>
 
@@ -328,15 +331,14 @@ export function NewGreedyControlPanel({
             <span>{t("admin.resetStatsDescription")}</span>
             <small>{t("admin.resetStatsWarning")}</small>
           </div>
-          <Button variant="secondary" onClick={() => setResetOpen(false)} disabled={resetting}>
+          <button type="button" className="secondary-button" onClick={() => setResetOpen(false)} disabled={resetting}>
             {t("common.cancel")}
-          </Button>
-          <Button variant="danger" onClick={() => void resetStats()} disabled={resetting} autoFocus>
+          </button>
+          <button type="button" className="danger-button" onClick={() => void resetStats()} disabled={resetting} autoFocus>
             {resetting ? t("admin.resetting") : t("admin.confirmReset")}
-          </Button>
+          </button>
         </div>
       )}
-
       <div
         className={`restart-live-status ${restartStatus?.state ?? "unavailable"}`}
         role="status"
@@ -452,16 +454,16 @@ export function NewGreedyControlPanel({
           </div>
           <div className="newgreedy-config-actions">
             <span>{t("admin.ngRestartNote")}</span>
-            <Button type="submit" disabled={!hasChanges || saving}>
+            <button type="submit" disabled={!hasChanges || saving}>
               <SaveIcon />
               {saving ? t("admin.saving") : t("admin.saveChanges")}
-            </Button>
+            </button>
           </div>
         </form>
       )}
 
       {restartOpen && (
-        <Dialog
+        <FileDialog
           eyebrow={t("admin.adminEyebrow")}
           title={t("admin.restartNewgreedyTitle")}
           description={t("admin.restartNewgreedyDescription")}
@@ -469,22 +471,29 @@ export function NewGreedyControlPanel({
           closeDisabled={requestingRestart}
         >
           <div className="confirmation-content">
-            <p className="permanent-delete-warning">{t("admin.restartNewgreedyWarning")}</p>
+            <p className="permanent-delete-warning">
+              {t("admin.restartNewgreedyWarning")}
+            </p>
             <div className="dialog-actions">
-              <Button
-                variant="secondary"
+              <button
+                type="button"
+                className="secondary-button"
                 onClick={() => setRestartOpen(false)}
                 disabled={requestingRestart}
                 data-initial-focus
               >
                 {t("common.cancel")}
-              </Button>
-              <Button onClick={() => void requestRestart()} disabled={requestingRestart}>
+              </button>
+              <button
+                type="button"
+                onClick={() => void requestRestart()}
+                disabled={requestingRestart}
+              >
                 {requestingRestart ? t("admin.requesting") : t("admin.confirmRestart")}
-              </Button>
+              </button>
             </div>
           </div>
-        </Dialog>
+        </FileDialog>
       )}
     </div>
   );

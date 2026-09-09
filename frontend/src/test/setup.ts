@@ -15,9 +15,6 @@ Object.defineProperty(window, "matchMedia", {
   })),
 });
 
-// The production HTML loads this adapter before React.
-await import("../../public/theme-bootstrap.js");
-
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

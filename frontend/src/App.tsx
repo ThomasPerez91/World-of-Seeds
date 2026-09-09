@@ -6,13 +6,16 @@ import {
   useState,
 } from "react";
 
-import { api, ApiError, type User } from "./api/client";
+import { api, ApiError, type StorageUsage, type User } from "./api/client";
 import { type AdminView } from "./features/admin/AdminPageShell";
 import { AdminStoragePage } from "./features/admin/AdminStoragePage";
 import { AdminServicesPage } from "./features/admin/AdminServicesPage";
 import { AdminSettingsPage } from "./features/admin/AdminSettingsPage";
+import { AdminTrashPage } from "./features/admin/AdminTrashPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
-import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
+import { FileBrowser } from "./features/files/FileBrowser";
+import { TrashBrowser } from "./features/files/TrashBrowser";
+import { UserDownloadsPage } from "./features/torrents/UserDownloadsPage";
 import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
 import { LanguageSelector } from "./components/LanguageSelector";
 import {
@@ -20,9 +23,6 @@ import {
   LegalPage,
   type LegalDocument,
 } from "./components/LegalPage";
-import { ThemeProvider } from "./theme";
-import { ThemeSelector } from "./components/ThemeSelector";
-import { Button, Card, Badge, StateMessage } from "./components/ui";
 import { APP_VERSION } from "./version";
 import { FeedbackProvider } from "./components/Feedback";
 import { useFeedback } from "./components/Feedback";
@@ -34,7 +34,7 @@ type AuthState =
   | { status: "unavailable" }
   | { status: "authenticated"; user: User };
 
-function clearLegacyFilePathFromUrl() {
+function clearFilePathFromUrl() {
   const url = new URL(window.location.href);
   url.searchParams.delete("path");
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
@@ -77,7 +77,7 @@ function ServiceHealth() {
   }, [check]);
 
   return (
-    <Button
+    <button
       type="button"
       className={`service-health ${health}`}
       onClick={() => void check()}
@@ -92,7 +92,7 @@ function ServiceHealth() {
             ? t("health.healthy")
             : t("health.unavailable")}
       </span>
-    </Button>
+    </button>
   );
 }
 
@@ -143,7 +143,7 @@ function LoginScreen({
 
       <section className="form-panel" aria-labelledby="login-title">
         <LanguageSelector />
-        <Card className="form-card">
+        <div className="form-card">
           <p className="eyebrow">{t("login.title")}</p>
           <h2 id="login-title">{t("login.welcome")}</h2>
           <p className="form-intro">{t("login.instructions")}</p>
@@ -170,14 +170,14 @@ function LoginScreen({
               required
             />
 
-            <Button type="submit" disabled={submitting}>
+            <button type="submit" disabled={submitting}>
               {submitting ? t("login.submitting") : t("login.submit")}
-            </Button>
+            </button>
             <p id="login-error" className="form-message error-message" role="alert">
               {error}
             </p>
           </form>
-        </Card>
+        </div>
         <LegalLinks onOpen={onOpenLegal} />
       </section>
     </main>
@@ -290,9 +290,9 @@ function CredentialChangeScreen({
             aria-invalid={error !== ""}
             required
           />
-          <Button type="submit" disabled={submitting}>
+          <button type="submit" disabled={submitting}>
             {submitting ? t("credentials.submitting") : t("credentials.submit")}
-          </Button>
+          </button>
           <p id="credential-error" className="form-message error-message" role="alert">
             {error}
           </p>
@@ -321,7 +321,6 @@ function AccountMenu({
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -331,10 +330,7 @@ function AccountMenu({
     }
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
+      if (event.key === "Escape") setOpen(false);
     }
 
     document.addEventListener("mousedown", closeOnOutsideClick);
@@ -361,12 +357,9 @@ function AccountMenu({
   }
 
   return (
-    <div className="account-menu" ref={containerRef} onBlur={(event) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
-    }}>
-      <Button
+    <div className="account-menu" ref={containerRef}>
+      <button
         type="button"
-        ref={triggerRef}
         className="account-trigger"
         aria-label={t("dashboard.accountMenu")}
         aria-expanded={open}
@@ -378,12 +371,11 @@ function AccountMenu({
         </span>
         <strong>{user.username}</strong>
         <AccountMenuIcon className="account-trigger-icon" />
-      </Button>
+      </button>
       {open && (
         <div id="account-dropdown" className="account-dropdown">
-          <p className="account-name">{user.username}</p>
           {user.is_admin && (
-            <Button
+            <button
               type="button"
               className="account-dropdown-item"
               onClick={() => {
@@ -392,9 +384,9 @@ function AccountMenu({
               }}
             >
               {t("dashboard.admin")}
-            </Button>
+            </button>
           )}
-          <Button
+          <button
             type="button"
             className="account-dropdown-item"
             onClick={() => {
@@ -403,18 +395,16 @@ function AccountMenu({
             }}
           >
             {t("dashboard.account")}
-          </Button>
+          </button>
           <div className="account-dropdown-separator" />
-          <ThemeSelector />
-          <div className="account-dropdown-separator" />
-          <Button
+          <button
             type="button"
             className="account-dropdown-item logout-item"
             onClick={() => void handleLogout()}
             disabled={loggingOut}
           >
             {loggingOut ? t("dashboard.loggingOut") : t("dashboard.logout")}
-          </Button>
+          </button>
         </div>
       )}
     </div>
@@ -435,20 +425,7 @@ function AccountSettingsPage({
   onSessionExpired: () => void;
 }) {
   const feedback = useFeedback();
-  const { apiError, setLocale, t } = useI18n();
-  const [localeSaving, setLocaleSaving] = useState(false);
-  async function changeLocale(locale: Locale) {
-    setLocaleSaving(true);
-    try {
-      onChanged(await api.changeLocale(locale));
-    } catch {
-      setLocale(user.preferred_locale ?? "fr");
-      feedback.toast({ tone: "error", message: t("language.saveFailed") });
-    } finally {
-      setLocaleSaving(false);
-    }
-  }
-
+  const { apiError, t } = useI18n();
   const [usernameSubmitting, setUsernameSubmitting] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordSubmitting, setPasswordSubmitting] = useState(false);
@@ -504,9 +481,9 @@ function AccountSettingsPage({
 
   return (
     <section className="settings-page" aria-labelledby="account-settings-title">
-      <Button type="button" className="back-button" onClick={onBack}>
-        <BackIcon /> {t("common.backDashboard")}
-      </Button>
+      <button type="button" className="back-button" onClick={onBack}>
+        <BackIcon /> {t("common.backFiles")}
+      </button>
       <div className="settings-header">
         <p className="eyebrow">{t("account.eyebrow")}</p>
         <h1 id="account-settings-title">{t("account.title")}</h1>
@@ -514,17 +491,12 @@ function AccountSettingsPage({
           {t("account.intro")}
         </p>
       </div>
-      <Card className="preferences-card" aria-labelledby="preferences-title">
-        <h2 id="preferences-title">{t("preferences.title")}</h2>
-        <p className="settings-section-intro">{t("preferences.intro")}</p>
-        <div className="preferences-grid">
-          <LanguageSelector disabled={localeSaving} onChange={changeLocale} />
-          <div><p className="preference-label">{t("theme.label")}</p><ThemeSelector /></div>
-        </div>
-      </Card>
       <div className="settings-grid">
-        <Card className="settings-card" aria-labelledby="username-settings-title">
+        <section className="settings-card" aria-labelledby="username-settings-title">
           <h2 id="username-settings-title">{t("account.username")}</h2>
+          <p className="settings-section-intro">
+            {t("account.renameHint")}
+          </p>
           <form onSubmit={(event) => void submitUsername(event)}>
             <label htmlFor="settings-username">{t("account.username")}</label>
             <input
@@ -539,13 +511,13 @@ function AccountSettingsPage({
             <p className="field-hint">
               {t("account.usernameHint")}
             </p>
-            <Button type="submit" disabled={usernameSubmitting || username === user.username}>
+            <button type="submit" disabled={usernameSubmitting || username === user.username}>
               {usernameSubmitting ? t("credentials.submitting") : t("account.updateName")}
-            </Button>
+            </button>
           </form>
-        </Card>
+        </section>
 
-        <Card className="settings-card" aria-labelledby="password-settings-title">
+        <section className="settings-card" aria-labelledby="password-settings-title">
           <h2 id="password-settings-title">{t("account.passwordTitle")}</h2>
           <p className="settings-section-intro">
             {t("account.passwordHint")}
@@ -580,12 +552,107 @@ function AccountSettingsPage({
             <p className="form-message error-message" role="alert">
               {passwordError}
             </p>
-            <Button type="submit" disabled={passwordSubmitting}>
+            <button type="submit" disabled={passwordSubmitting}>
               {passwordSubmitting ? t("common.processing") : t("account.updatePassword")}
-            </Button>
+            </button>
           </form>
-        </Card>
+        </section>
       </div>
+    </section>
+  );
+}
+
+function StorageCard({ storage }: { storage: StorageUsage | null }) {
+  const { formatBytes, t } = useI18n();
+  if (storage === null) {
+    return <div className="storage-card storage-card-loading" aria-hidden="true" />;
+  }
+  const percent =
+    storage.total === 0 ? 0 : Math.min((storage.used / storage.total) * 100, 100);
+  return (
+    <div className="storage-card" role="group" aria-label={t("storage.label")}>
+      <div className="storage-copy">
+        <span>{t("storage.used", { value: formatBytes(storage.used) })}</span>
+        <strong>{t("storage.available", { value: formatBytes(storage.available) })}</strong>
+      </div>
+      <progress
+        className="storage-track"
+        max={100}
+        value={percent}
+        aria-label={t("storage.percent", { value: percent.toFixed(0) })}
+      >
+        {percent.toFixed(0)} %
+      </progress>
+      <span className="storage-total">{t("storage.total", { value: formatBytes(storage.total) })}</span>
+    </div>
+  );
+}
+
+function FilesWorkspace({
+  onFilesChanged,
+  onSessionExpired,
+  revision,
+}: {
+  onFilesChanged: () => void;
+  onSessionExpired: () => void;
+  revision: number;
+}) {
+  const { t } = useI18n();
+  const [activeView, setActiveView] = useState<"files" | "trash" | "downloads">("files");
+  const [storage, setStorage] = useState<StorageUsage | null>(null);
+
+  return (
+    <section className="files-workspace" aria-labelledby="files-page-title">
+      <header className="files-page-header">
+        <div>
+          <p className="eyebrow">{t("files.personalSpace")}</p>
+          <h1 id="files-page-title">{t("dashboard.files")}</h1>
+        </div>
+        <StorageCard storage={storage} />
+      </header>
+      <div className="file-view-tabs" role="group" aria-label={t("files.views")}>
+        <button
+          type="button"
+          aria-pressed={activeView === "files"}
+          onClick={() => setActiveView("files")}
+        >
+          {t("dashboard.files")}
+        </button>
+        <button
+          type="button"
+          aria-pressed={activeView === "trash"}
+          onClick={() => setActiveView("trash")}
+        >
+          {t("files.trash")}
+        </button>
+        <button
+          type="button"
+          aria-pressed={activeView === "downloads"}
+          onClick={() => setActiveView("downloads")}
+        >
+          {t("dashboard.downloads")}
+        </button>
+      </div>
+      {activeView === "files" ? (
+        <div>
+          <FileBrowser
+            onFilesChanged={onFilesChanged}
+            onSessionExpired={onSessionExpired}
+            onStorageChanged={setStorage}
+            revision={revision}
+          />
+        </div>
+      ) : activeView === "trash" ? (
+        <div>
+          <TrashBrowser
+            onFilesChanged={onFilesChanged}
+            onSessionExpired={onSessionExpired}
+            revision={revision}
+          />
+        </div>
+      ) : (
+        <UserDownloadsPage onSessionExpired={onSessionExpired} />
+      )}
     </section>
   );
 }
@@ -596,99 +663,111 @@ function Dashboard({
   onLogout,
   onOpenLegal,
   onSessionExpired,
-  hidden = false,
 }: {
   user: User;
   onUserChanged: (user: User) => void;
   onLogout: () => Promise<void>;
   onOpenLegal: (document: LegalDocument) => void;
   onSessionExpired: () => void;
-  hidden?: boolean;
 }) {
-  const { t } = useI18n();
-  const [view, setView] = useState<"dashboard" | "settings" | AdminView>("dashboard");
-
-  useEffect(() => {
-    clearLegacyFilePathFromUrl();
+  const feedback = useFeedback();
+  const { setLocale, t } = useI18n();
+  const [view, setView] = useState<"files" | "settings" | AdminView>("files");
+  const [filesRevision, setFilesRevision] = useState(0);
+  const [filesHomeKey, setFilesHomeKey] = useState(0);
+  const handleFilesChanged = useCallback(() => {
+    setFilesRevision((value) => value + 1);
   }, []);
 
-  function openDashboard() {
-    clearLegacyFilePathFromUrl();
-    setView("dashboard");
+  function openFilesHome() {
+    clearFilePathFromUrl();
+    setView("files");
+    setFilesHomeKey((value) => value + 1);
+  }
+
+  async function changeLocale(locale: Locale) {
+    try {
+      onUserChanged(await api.changeLocale(locale));
+    } catch {
+      setLocale(user.preferred_locale ?? "fr");
+      feedback.toast({ tone: "error", message: t("language.saveFailed") });
+    }
   }
 
   return (
-    <main className="app-shell" hidden={hidden}>
+    <main className="app-shell">
       <a className="skip-link" href="#dashboard-content">
         {t("dashboard.skip")}
       </a>
       <header className="app-header">
-        <Button
+        <button
           type="button"
           className="wordmark"
-          onClick={openDashboard}
-          aria-label={t("dashboard.openDashboard")}
+          onClick={openFilesHome}
+          aria-label={t("dashboard.openFiles")}
         >
           <BrandMark />
           <span>World of Seeds</span>
-          <Badge className="version-badge">v{APP_VERSION}</Badge>
-        </Button>
-        <nav className="user-navigation" aria-label={t("dashboard.navigation")}>
-          <Button
-            variant="ghost"
-            aria-current={view === "dashboard" ? "page" : undefined}
-            onClick={openDashboard}
-          >
-            {t("dashboard.title")}
-          </Button>
-        </nav>
+          <span className="version-badge">v{APP_VERSION}</span>
+        </button>
         <div className="header-actions">
+          <LanguageSelector onChange={changeLocale} />
           <AccountMenu
-            user={user}
-            onOpenAdmin={() => setView("admin-users")}
-            onOpenSettings={() => setView("settings")}
-            onLogout={onLogout}
-            onSessionExpired={onSessionExpired}
+          user={user}
+          onOpenAdmin={() => setView("admin-users")}
+          onOpenSettings={() => setView("settings")}
+          onLogout={onLogout}
+          onSessionExpired={onSessionExpired}
           />
         </div>
       </header>
       <div id="dashboard-content" className="dashboard-content" tabIndex={-1}>
-        <div hidden={view !== "dashboard"}>
-          <UserDashboardPage onSessionExpired={onSessionExpired} />
-        </div>
         {view === "settings" ? (
           <AccountSettingsPage
             user={user}
-            onBack={openDashboard}
+            onBack={openFilesHome}
             onChanged={onUserChanged}
             onPasswordChanged={onSessionExpired}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-users" && user.is_admin ? (
           <AdminUsersPage
-            onBack={openDashboard}
+            onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-storage" && user.is_admin ? (
           <AdminStoragePage
-            onBack={openDashboard}
+            onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-services" && user.is_admin ? (
           <AdminServicesPage
-            onBack={openDashboard}
+            onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
         ) : view === "admin-settings" && user.is_admin ? (
           <AdminSettingsPage
-            onBack={openDashboard}
+            onBack={openFilesHome}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
-        ) : null}
+        ) : view === "admin-trash" && user.is_admin ? (
+          <AdminTrashPage
+            onBack={openFilesHome}
+            onNavigate={setView}
+            onSessionExpired={onSessionExpired}
+          />
+        ) : (
+          <FilesWorkspace
+            key={filesHomeKey}
+            onFilesChanged={handleFilesChanged}
+            onSessionExpired={onSessionExpired}
+            revision={filesRevision}
+          />
+        )}
       </div>
       <footer className="app-footer">
         <span>World of Seeds · v{APP_VERSION}</span>
@@ -711,9 +790,9 @@ function UnavailableScreen({ onRetry }: { onRetry: () => void }) {
         <p className="form-intro">
           {t("unavailable.message")}
         </p>
-        <Button type="button" onClick={onRetry}>
+        <button type="button" onClick={onRetry}>
           {t("common.retry")}
-        </Button>
+        </button>
       </section>
     </main>
   );
@@ -724,7 +803,7 @@ function AppContent() {
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
   const [legalDocument, setLegalDocument] = useState<LegalDocument | null>(null);
   const handleSessionExpired = useCallback(() => {
-    clearLegacyFilePathFromUrl();
+    clearFilePathFromUrl();
     setAuth({ status: "anonymous" });
   }, []);
 
@@ -752,72 +831,56 @@ function AppContent() {
 
   async function logout() {
     await api.logout();
-    clearLegacyFilePathFromUrl();
+    clearFilePathFromUrl();
     setAuth({ status: "anonymous" });
   }
 
-  function renderScreen() {
-    if (auth.status === "authenticated" && !auth.user.must_change_credentials) {
-      return (
-        <>
-          <Dashboard
-            user={auth.user}
-            onUserChanged={(user) => setAuth({ status: "authenticated", user })}
-            onLogout={logout}
-            onOpenLegal={setLegalDocument}
-            onSessionExpired={handleSessionExpired}
-            hidden={legalDocument !== null}
-          />
-          {legalDocument !== null && (
-            <LegalPage
-              document={legalDocument}
-              onBack={() => setLegalDocument(null)}
-              onOpen={setLegalDocument}
-            />
-          )}
-        </>
-      );
-    }
-    if (legalDocument !== null) {
-      return (
-        <LegalPage
-          document={legalDocument}
-          onBack={() => setLegalDocument(null)}
-          onOpen={setLegalDocument}
-        />
-      );
-    }
-
-    if (auth.status === "loading") {
-      return (
-        <main className="loading-page" aria-live="polite" aria-busy="true">
-          <StateMessage tone="loading">{t("app.opening")}</StateMessage>
-        </main>
-      );
-    }
-    if (auth.status === "unavailable") {
-      return <UnavailableScreen onRetry={loadSession} />;
-    }
-    if (auth.status === "anonymous") {
-      return (
-        <LoginScreen
-          onLogin={(user) => setAuth({ status: "authenticated", user })}
-          onOpenLegal={setLegalDocument}
-        />
-      );
-    }
-    if (auth.user.must_change_credentials) {
-      return (
-        <CredentialChangeScreen
-          user={auth.user}
-          onChanged={(user) => setAuth({ status: "authenticated", user })}
-          onOpenLegal={setLegalDocument}
-        />
-      );
-    }
-    return null;
+  if (legalDocument !== null) {
+    return (
+      <LegalPage
+        document={legalDocument}
+        onBack={() => setLegalDocument(null)}
+        onOpen={setLegalDocument}
+      />
+    );
   }
-  return <ThemeProvider user={auth.status === "authenticated" ? auth.user : null}>{renderScreen()}</ThemeProvider>;
+
+  if (auth.status === "loading") {
+    return (
+      <main className="loading-page" aria-live="polite" aria-busy="true">
+        {t("app.opening")}
+      </main>
+    );
+  }
+  if (auth.status === "unavailable") {
+    return <UnavailableScreen onRetry={loadSession} />;
+  }
+  if (auth.status === "anonymous") {
+    return (
+      <LoginScreen
+        onLogin={(user) => setAuth({ status: "authenticated", user })}
+        onOpenLegal={setLegalDocument}
+      />
+    );
+  }
+  if (auth.user.must_change_credentials) {
+    return (
+      <CredentialChangeScreen
+        user={auth.user}
+        onChanged={(user) => setAuth({ status: "authenticated", user })}
+        onOpenLegal={setLegalDocument}
+      />
+    );
+  }
+  return (
+    <Dashboard
+      user={auth.user}
+      onUserChanged={(user) => setAuth({ status: "authenticated", user })}
+      onLogout={logout}
+      onOpenLegal={setLegalDocument}
+      onSessionExpired={handleSessionExpired}
+    />
+  );
 }
 
 export function App() {

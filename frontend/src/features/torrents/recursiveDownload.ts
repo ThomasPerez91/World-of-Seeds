@@ -6,7 +6,6 @@ import type {
 const MAX_MANIFEST_PAGE_SIZE = 500;
 const MAX_BUFFERED_MANIFEST_PAGES = 2;
 const MAX_VISIBLE_QUEUE_ITEMS = 8;
-export const DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY = 2;
 
 export interface WritableFileHandle {
   write(data: Uint8Array): Promise<void>;
@@ -129,7 +128,7 @@ export class RecursiveDownloadController {
   private running: Promise<void> | null = null;
 
   constructor(options: RecursiveDownloadOptions) {
-    const concurrency = options.concurrency ?? DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY;
+    const concurrency = options.concurrency ?? 2;
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) {
       throw new Error("download_concurrency_invalid");
     }
@@ -307,28 +306,17 @@ export class RecursiveDownloadController {
         { headers, credentials: "same-origin", signal: controller.signal },
       );
       if (!this.responseMatchesSnapshot(response, file, offset) || response.body === null) {
-        if (response.body !== null) {
-          await response.body.cancel().catch(() => undefined);
-        }
         throw new TransferFailure("manifest_changed");
       }
-      let writer: WritableFileHandle;
-      try {
-        writer = await localFile.createWritable({ keepExistingData: offset > 0 });
-      } catch (error) {
-        await response.body.cancel().catch(() => undefined);
-        throw error;
-      }
+      const writer = await localFile.createWritable({ keepExistingData: offset > 0 });
       let written = offset;
       let streamError: unknown = null;
-      let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
       try {
         if (this.status !== "running") {
-          await response.body.cancel().catch(() => undefined);
           throw new DOMException("transfer stopped", "AbortError");
         }
         if (offset > 0) await writer.seek(offset);
-        reader = response.body.getReader();
+        const reader = response.body.getReader();
         while (true) {
           const result = await reader.read();
           if (result.done) break;
@@ -341,11 +329,6 @@ export class RecursiveDownloadController {
           this.emit();
         }
       } catch (error) {
-        if (reader === null) {
-          await response.body.cancel().catch(() => undefined);
-        } else {
-          await reader.cancel(error).catch(() => undefined);
-        }
         streamError = error;
       }
       try {

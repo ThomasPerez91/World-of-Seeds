@@ -18,44 +18,16 @@ def test_responsive_styles_cover_supported_mobile_and_orientation_contract() -> 
     assert "flex-wrap: wrap" in styles
 
 
-def test_torrent_manager_uses_native_accordions_without_duplicate_mobile_markup() -> None:
+def test_torrent_table_exposes_card_labels_without_duplicate_mobile_markup() -> None:
     page = (REPOSITORY / "frontend/src/features/torrents/UserDownloadsPage.tsx").read_text()
 
-    assert '<ul className="torrent-accordion-list"' in page
-    assert "<Accordion" in page
-    assert 'className="torrent-accordion-summary"' in page
-    assert 'className="torrent-card-actions"' in page
-    assert '<table className="torrent-table">' not in page
-    assert 'data-label={t("' not in page
+    for key in (
+        "downloads.name",
+        "downloads.status",
+        "files.size",
+        "downloads.progress",
+        "downloads.updated",
+        "files.actions",
+    ):
+        assert f'data-label={{t("{key}")}}' in page
     assert "window.location.reload" not in page
-
-
-def test_admin_finish_is_mobile_first_and_legacy_user_filesystem_ui_is_absent() -> None:
-    admin_styles = (REPOSITORY / "frontend/src/features/admin/admin.css").read_text()
-    shell = (REPOSITORY / "frontend/src/features/admin/AdminPageShell.tsx").read_text()
-    app = (REPOSITORY / "frontend/src/App.tsx").read_text()
-    client = (REPOSITORY / "frontend/src/api/client.ts").read_text()
-
-    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in admin_styles
-    assert "@media (min-width: 600px)" in admin_styles
-    assert "@media (min-width: 900px)" in admin_styles
-    assert "overflow-wrap: anywhere" in admin_styles
-    assert "min-height: 2.75rem" in admin_styles
-    assert 'aria-current={activeView === item.view ? "page" : undefined}' in shell
-    assert '"admin-trash"' not in shell
-    assert "AdminTrashPage" not in app
-    assert 't("account.renameHint")' not in app
-    assert "listAdminTrash" not in client
-    assert "purgeAdminTrash" not in client
-    assert "purgeAllAdminTrash" not in client
-    assert "listFiles" not in client
-    assert not (REPOSITORY / "frontend/src/features/files").exists()
-    assert not (REPOSITORY / "frontend/src/api/storage.ts").exists()
-    assert not (REPOSITORY / "backend/app/files").exists()
-    assert not (REPOSITORY / "backend/app/schemas/files.py").exists()
-    assert not (REPOSITORY / "backend/app/schemas/torrents.py").exists()
-    styles = (REPOSITORY / "frontend/src/styles.css").read_text()
-    translations = (REPOSITORY / "frontend/src/i18n.tsx").read_text()
-    assert ".admin-trash" not in styles
-    assert "error.workspaceUnavailable" not in translations
-    assert "admin.trashItems" not in translations

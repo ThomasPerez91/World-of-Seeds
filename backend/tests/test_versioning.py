@@ -125,15 +125,17 @@ def test_stable_channel_keeps_accepting_v1_versions() -> None:
     namespace["validate_version_format"]("1.3.3", "stable")
 
 
-def test_active_workflows_keep_ci_and_master_deploy_gate() -> None:
+def test_v1_and_v2_workflow_artifacts_are_isolated() -> None:
     workflows = _repository() / ".github/workflows"
     ci = (workflows / "ci.yml").read_text(encoding="utf-8")
-    deploy = (workflows / "deploy-v2-rise2.yml").read_text(encoding="utf-8")
+    release = (workflows / "release.yml").read_text(encoding="utf-8")
+    deploy = (workflows / "deploy.yml").read_text(encoding="utf-8")
+    v2_image = (workflows / "v2-image.yml").read_text(encoding="utf-8")
 
+    assert "      - develop_V2" in ci
     assert '--channel "$WOS_VERSION_CHANNEL"' in ci
-    assert 'workflows: ["CI"]' in deploy
-    assert "github.event.workflow_run.conclusion == 'success'" in deploy
-    assert "github.event.workflow_run.head_branch == 'master'" in deploy
-
-    for retired in ("deploy.yml", "release.yml", "v2-image.yml", "v2-rc.yml"):
-        assert not (workflows / retired).exists()
+    assert "develop_V2" not in release
+    assert "develop_V2" not in deploy
+    assert "world-of-seeds-v2:sha-" in v2_image
+    assert "world-of-seeds:sha-" not in v2_image
+    assert "workflow_run.conclusion == 'success'" in v2_image

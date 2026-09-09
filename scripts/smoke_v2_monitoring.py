@@ -84,7 +84,6 @@ DASHBOARDS = {
     "rise2-docker",
     "wos-v2-operations",
     "rise2-datastores",
-    "wos-v2-torrents-newgreedy",
 }
 
 

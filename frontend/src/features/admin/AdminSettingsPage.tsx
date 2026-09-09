@@ -8,12 +8,11 @@ import {
   type OptionValue,
   type OptionsResponse,
 } from "../../api/client";
-import { Dialog } from "../../components/Dialog";
 import { useFeedback } from "../../components/Feedback";
 import { Notice, type NoticeTone } from "../../components/Notice";
 import { RestartIcon, SaveIcon } from "../../components/icons";
-import { Badge, Button, Card, StateMessage } from "../../components/ui";
 import { type MessageKey, useI18n } from "../../i18n";
+import { FileDialog } from "../files/FileDialog";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 import { optionFieldCopy, optionSectionLabel } from "./optionTranslations";
 
@@ -296,23 +295,25 @@ export function AdminSettingsPage({
 
   return (
     <AdminPageShell activeView="admin-settings" onBack={onBack} onNavigate={onNavigate}>
-      <section className="admin-section options-section" aria-labelledby="admin-options-title" aria-busy={loading}>
+      <section className="admin-section options-section" aria-labelledby="admin-options-title">
         <div className="section-heading options-heading">
           <div>
             <p className="eyebrow">{t("admin.configuration")}</p>
             <h2 id="admin-options-title">{t("admin.functionalSettings")}</h2>
-            <p className="section-intro">{t("admin.settingsIntro")}</p>
+            <p className="section-intro">
+              {t("admin.settingsIntro")}
+            </p>
           </div>
           {options?.service_controls_available === true && (
-            <Button
-              variant="danger"
-              className="restart-wos-button"
+            <button
+              type="button"
+              className="danger-outline-button restart-wos-button"
               disabled={restarting}
               onClick={() => setRestartDialogOpen(true)}
             >
               <RestartIcon className={restarting ? "rotating" : undefined} />
               {restarting ? t("admin.restarting") : t("admin.restartWos")}
-            </Button>
+            </button>
           )}
         </div>
 
@@ -327,23 +328,23 @@ export function AdminSettingsPage({
         )}
 
         {loading && options === null ? (
-          <StateMessage tone="loading">{t("admin.readingConfiguration")}</StateMessage>
+          <p className="admin-loading" role="status">
+            {t("admin.readingConfiguration")}
+          </p>
         ) : options !== null ? (
           <>
             <div className="central-admin-status" aria-label={t("admin.operationalState")}>
-              <Card>
+              <article>
                 <span>Scheduler</span>
-                <Badge tone={options.scheduler.synchronized ? "success" : "warning"}>
-                  {options.scheduler.synchronized ? t("admin.synchronized") : t("admin.reconcileRequired")}
-                </Badge>
+                <strong>{options.scheduler.synchronized ? t("admin.synchronized") : t("admin.reconcileRequired")}</strong>
                 <small>
                   {t("admin.schedulerGeneration", {
                     desired: formatNumber(options.scheduler.desired_generation),
                     applied: formatNumber(options.scheduler.applied_generation),
                   })}
                 </small>
-              </Card>
-              <Card>
+              </article>
+              <article>
                 <span>{t("admin.sharedStorage")}</span>
                 <strong>{formatBytes(options.storage.managed_bytes)}</strong>
                 <small>
@@ -352,8 +353,8 @@ export function AdminSettingsPage({
                     pressure: options.storage.pressure,
                   })}
                 </small>
-              </Card>
-              <Card>
+              </article>
+              <article>
                 <span>{t("admin.userQuota")}</span>
                 <strong>
                   {options.storage.user_quota_bytes === 0
@@ -361,98 +362,102 @@ export function AdminSettingsPage({
                     : formatBytes(options.storage.user_quota_bytes)}
                 </strong>
                 <small>{t("admin.schedulerRounds", { count: formatNumber(options.scheduler.rounds) })}</small>
-              </Card>
+              </article>
             </div>
-
             <form className="options-form" noValidate onSubmit={(event) => void save(event)}>
-              <div className="options-sections">
-                {options.sections.map((section, sectionIndex) => (
-                  <details key={section.id} open={sectionIndex === 0}>
-                    <summary>{optionSectionLabel(section.id, locale, section.label)}</summary>
-                    <div className="options-fields">
-                      {section.fields.map((field) => {
-                        const copy = optionFieldCopy(field.key, locale, {
-                          label: field.label,
-                          description: field.description,
-                        });
-                        const error = fieldErrors[field.key];
-                        const inputId = `option-${field.key.toLowerCase()}`;
-                        const hintId = `${inputId}-hint`;
-                        const errorId = `${inputId}-error`;
-                        return (
-                          <div className={`option-field${error === undefined ? "" : " invalid"}`} key={field.key}>
-                            <div>
-                              <label htmlFor={inputId}>{copy.label}</label>
-                              <p id={hintId}>
-                                {copy.description}
-                                {field.restart_required && (
-                                  <span className="restart-required"> {t("admin.restartRequired")}</span>
-                                )}
-                              </p>
-                            </div>
-                            <div className="option-control">
-                              {field.input_type === "boolean" ? (
+            <div className="options-sections">
+              {options.sections.map((section, sectionIndex) => (
+                <details key={section.id} open={sectionIndex === 0}>
+                  <summary>{optionSectionLabel(section.id, locale, section.label)}</summary>
+                  <div className="options-fields">
+                    {section.fields.map((field) => {
+                      const copy = optionFieldCopy(field.key, locale, {
+                        label: field.label,
+                        description: field.description,
+                      });
+                      const error = fieldErrors[field.key];
+                      const inputId = `option-${field.key.toLowerCase()}`;
+                      const hintId = `${inputId}-hint`;
+                      const errorId = `${inputId}-error`;
+                      return (
+                        <div className={`option-field${error === undefined ? "" : " invalid"}`} key={field.key}>
+                          <div>
+                            <label htmlFor={inputId}>
+                              {copy.label}
+                            </label>
+                            <p id={hintId}>
+                              {copy.description}
+                              {field.restart_required && (
+                                <span className="restart-required"> {t("admin.restartRequired")}</span>
+                              )}
+                            </p>
+                          </div>
+                          <div className="option-control">
+                            {field.input_type === "boolean" ? (
+                              <input
+                                id={inputId}
+                                type="checkbox"
+                                checked={Boolean(draft[field.key])}
+                                disabled={!field.editable || saving}
+                                aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
+                                onChange={(event) => updateDraft(field.key, event.target.checked)}
+                              />
+                            ) : field.input_type === "select" ? (
+                              <select
+                                id={inputId}
+                                value={String(draft[field.key])}
+                                disabled={!field.editable || saving}
+                                aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
+                                aria-invalid={error !== undefined}
+                                onChange={(event) => updateDraft(field.key, event.target.value)}
+                              >
+                                {field.choices.map((choice) => (
+                                  <option value={choice} key={choice}>
+                                    {choice}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <div className="option-number-control">
                                 <input
                                   id={inputId}
-                                  type="checkbox"
-                                  checked={Boolean(draft[field.key])}
-                                  disabled={!field.editable || saving}
-                                  aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
-                                  onChange={(event) => updateDraft(field.key, event.target.checked)}
-                                />
-                              ) : field.input_type === "select" ? (
-                                <select
-                                  id={inputId}
+                                  type="number"
                                   value={String(draft[field.key])}
+                                  min={field.minimum ?? undefined}
+                                  max={field.maximum ?? undefined}
+                                  step={1}
                                   disabled={!field.editable || saving}
                                   aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
                                   aria-invalid={error !== undefined}
                                   onChange={(event) => updateDraft(field.key, event.target.value)}
-                                >
-                                  {field.choices.map((choice) => (
-                                    <option value={choice} key={choice}>{choice}</option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <div className="option-number-control">
-                                  <input
-                                    id={inputId}
-                                    type="number"
-                                    value={String(draft[field.key])}
-                                    min={field.minimum ?? undefined}
-                                    max={field.maximum ?? undefined}
-                                    step={1}
-                                    disabled={!field.editable || saving}
-                                    aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
-                                    aria-invalid={error !== undefined}
-                                    onChange={(event) => updateDraft(field.key, event.target.value)}
-                                  />
-                                  {field.unit !== null && (
-                                    <span>{unitLabels[field.unit] === undefined ? field.unit : t(unitLabels[field.unit])}</span>
-                                  )}
-                                </div>
-                              )}
-                              {error !== undefined && (
-                                <p id={errorId} className="option-error">{error}</p>
-                              )}
-                            </div>
+                                />
+                                {field.unit !== null && (
+                                  <span>{unitLabels[field.unit] === undefined ? field.unit : t(unitLabels[field.unit])}</span>
+                                )}
+                              </div>
+                            )}
+                            {error !== undefined && (
+                              <p id={errorId} className="option-error">
+                                {error}
+                              </p>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </details>
-                ))}
-              </div>
-              <div className="options-actions">
-                <span>{t("admin.secretsNote")}</span>
-                <Button type="submit" disabled={saving || restarting}>
-                  <SaveIcon />
-                  {saving ? t("admin.saving") : t("admin.save")}
-                </Button>
-              </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
+              ))}
+            </div>
+            <div className="options-actions">
+              <span>{t("admin.secretsNote")}</span>
+              <button type="submit" disabled={saving || restarting}>
+                <SaveIcon />
+                {saving ? t("admin.saving") : t("admin.save")}
+              </button>
+            </div>
             </form>
-
-            <Card className="options-audit" aria-labelledby="options-audit-title">
+            <section className="options-audit" aria-labelledby="options-audit-title">
               <h3 id="options-audit-title">{t("admin.audit")}</h3>
               <ol>
                 {options.audit.slice(0, 10).map((event) => (
@@ -471,27 +476,27 @@ export function AdminSettingsPage({
                   </li>
                 ))}
               </ol>
-            </Card>
+            </section>
           </>
         ) : null}
       </section>
 
       {restartDialogOpen && (
-        <Dialog
+        <FileDialog
           eyebrow={t("admin.maintenance")}
           title={t("admin.restartTitle")}
           description={t("admin.restartDescription")}
           onClose={() => setRestartDialogOpen(false)}
         >
           <div className="dialog-actions">
-            <Button variant="secondary" onClick={() => setRestartDialogOpen(false)} data-initial-focus>
+            <button type="button" className="secondary-button" onClick={() => setRestartDialogOpen(false)}>
               {t("common.cancel")}
-            </Button>
-            <Button variant="danger" onClick={() => void requestRestart()}>
+            </button>
+            <button type="button" className="danger-button" onClick={() => void requestRestart()}>
               {t("admin.confirmRestart")}
-            </Button>
+            </button>
           </div>
-        </Dialog>
+        </FileDialog>
       )}
     </AdminPageShell>
   );

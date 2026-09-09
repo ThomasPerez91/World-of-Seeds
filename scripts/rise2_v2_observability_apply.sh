@@ -49,8 +49,7 @@ compose up -d --force-recreate --no-deps \
   postgres-exporter \
   redis-exporter \
   blackbox-exporter \
-  torrent-metrics \
   prometheus \
   grafana
 
-echo "Rise2 V2 observability exporters and torrent metrics applied."
+echo "Rise2 V2 observability exporters applied."

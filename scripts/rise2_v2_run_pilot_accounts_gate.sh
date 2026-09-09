@@ -126,7 +126,7 @@ value={
 assert value["pilot_account_count"] >= 1
 assert value["forced_credential_change"] is True
 assert value["pilot_account_active"] is True
-assert value["account_ready"] is True
+assert value["workspace_ready"] is True
 assert value["credential_file_written"] is True
 assert value["v1_data_moves"] == 0
 assert value["credentials_in_output"] == 0

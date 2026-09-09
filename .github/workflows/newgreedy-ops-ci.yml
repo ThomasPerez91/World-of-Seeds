@@ -3,16 +3,8 @@ name: NewGreedy OPS validation
 on:
   pull_request:
     branches: [develop, master]
-    paths:
-      - ".github/workflows/newgreedy-ops-ci.yml"
-      - ".github/workflows/newgreedy-image.yml"
-      - "ops/newgreedy/**"
   push:
     branches: [develop, master]
-    paths:
-      - ".github/workflows/newgreedy-ops-ci.yml"
-      - ".github/workflows/newgreedy-image.yml"
-      - "ops/newgreedy/**"
 
 permissions:
   contents: read
