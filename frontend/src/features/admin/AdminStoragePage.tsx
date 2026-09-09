@@ -6,6 +6,7 @@ import {
   type AdminReconciliationReport,
   type AdminStorageOverview,
 } from "../../api/client";
+import { Button, Card, Progress, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 
@@ -56,74 +57,74 @@ export function AdminStoragePage({
     overview === null || overview.total === 0
       ? 0
       : Math.min((overview.used / overview.total) * 100, 100);
+  const usageLabel = t("admin.storageUsage", {
+    value: formatNumber(usagePercent, { maximumFractionDigits: 0 }),
+  });
 
   return (
-    <AdminPageShell
-      activeView="admin-storage"
-      onBack={onBack}
-      onNavigate={onNavigate}
-    >
+    <AdminPageShell activeView="admin-storage" onBack={onBack} onNavigate={onNavigate}>
       <section className="admin-section" aria-labelledby="admin-storage-title" aria-busy={loading}>
         <div className="section-heading">
           <div>
             <p className="eyebrow">{t("admin.capacity")}</p>
             <h2 id="admin-storage-title">{t("admin.seedboxStorage")}</h2>
+            <p className="section-intro">{t("admin.storageIntro")}</p>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             className="refresh-button"
             disabled={loading}
             onClick={() => setRevision((current) => current + 1)}
           >
             {t("common.refresh")}
-          </button>
+          </Button>
         </div>
 
-        {loading && overview === null && (
-          <p className="admin-loading" role="status">
-            {t("admin.readingStorage")}
-          </p>
-        )}
-        <p className="form-message error-message" role="alert">
-          {error}
-        </p>
+        {loading && overview === null ? (
+          <StateMessage tone="loading">{t("admin.readingStorage")}</StateMessage>
+        ) : error !== "" && overview === null ? (
+          <StateMessage tone="error">{error}</StateMessage>
+        ) : null}
+
         {overview !== null && (
           <div className="admin-storage-summary">
-            <div className="admin-storage-usage">
-              <div>
-                <span>{t("admin.usedSpace")}</span>
-                <strong>{formatBytes(overview.used)}</strong>
+            <Card className="admin-storage-usage">
+              <div className="admin-storage-usage-heading">
+                <div>
+                  <span>{t("admin.usedSpace")}</span>
+                  <strong>{formatBytes(overview.used)}</strong>
+                </div>
+                <div className="storage-copy-right">
+                  <span>{t("admin.available")}</span>
+                  <strong>{formatBytes(overview.available)}</strong>
+                </div>
               </div>
-              <div className="storage-copy-right">
-                <span>{t("admin.available")}</span>
-                <strong>{formatBytes(overview.available)}</strong>
-              </div>
-              <progress
-                max={100}
-                value={usagePercent}
-                aria-label={t("admin.storageUsage", { value: formatNumber(usagePercent, { maximumFractionDigits: 0 }) })}
-              >
-                {formatNumber(usagePercent, { maximumFractionDigits: 0 })} %
-              </progress>
+              <Progress value={usagePercent} label={usageLabel} />
               <p>
                 {t("admin.storageSummary", {
-                  value: formatNumber(usagePercent, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+                  value: formatNumber(usagePercent, {
+                    minimumFractionDigits: 1,
+                    maximumFractionDigits: 1,
+                  }),
                   total: formatBytes(overview.total),
                 })}
               </p>
-            </div>
-            <div className="admin-metric-card">
+            </Card>
+            <Card className="admin-metric-card">
               <span>{t("admin.activeAccounts")}</span>
               <strong>{formatNumber(overview.active_users)}</strong>
-            </div>
-            <div className="admin-metric-card">
+            </Card>
+            <Card className="admin-metric-card">
               <span>{t("admin.suspendedAccounts")}</span>
               <strong>{formatNumber(overview.suspended_users)}</strong>
-            </div>
+            </Card>
           </div>
         )}
+
+        {error !== "" && overview !== null && <StateMessage tone="error">{error}</StateMessage>}
+
         {reconciliation !== null && (
-          <section className="reconciliation-panel" aria-labelledby="reconciliation-title">
+          <Card className="reconciliation-panel" aria-labelledby="reconciliation-title">
             <div>
               <h3 id="reconciliation-title">{t("admin.reconciliation")}</h3>
               <p>
@@ -157,7 +158,7 @@ export function AdminStoragePage({
             {reconciliation.truncated && (
               <p className="truncated-notice">{t("admin.inventoryTruncated")}</p>
             )}
-          </section>
+          </Card>
         )}
       </section>
     </AdminPageShell>
