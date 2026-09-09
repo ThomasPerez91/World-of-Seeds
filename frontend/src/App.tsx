@@ -11,7 +11,6 @@ import { type AdminView } from "./features/admin/AdminPageShell";
 import { AdminStoragePage } from "./features/admin/AdminStoragePage";
 import { AdminServicesPage } from "./features/admin/AdminServicesPage";
 import { AdminSettingsPage } from "./features/admin/AdminSettingsPage";
-import { AdminTrashPage } from "./features/admin/AdminTrashPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
 import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
@@ -526,9 +525,6 @@ function AccountSettingsPage({
       <div className="settings-grid">
         <Card className="settings-card" aria-labelledby="username-settings-title">
           <h2 id="username-settings-title">{t("account.username")}</h2>
-          <p className="settings-section-intro">
-            {t("account.renameHint")}
-          </p>
           <form onSubmit={(event) => void submitUsername(event)}>
             <label htmlFor="settings-username">{t("account.username")}</label>
             <input
@@ -619,7 +615,6 @@ function Dashboard({
     setView("dashboard");
   }
 
-
   return (
     <main className="app-shell">
       <a className="skip-link" href="#dashboard-content">
@@ -686,12 +681,6 @@ function Dashboard({
           />
         ) : view === "admin-settings" && user.is_admin ? (
           <AdminSettingsPage
-            onBack={openDashboard}
-            onNavigate={setView}
-            onSessionExpired={onSessionExpired}
-          />
-        ) : view === "admin-trash" && user.is_admin ? (
-          <AdminTrashPage
             onBack={openDashboard}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}

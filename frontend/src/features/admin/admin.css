@@ -1,0 +1,414 @@
+/* UX-06: admin-specific composition on top of the shared design-system tokens/primitives. */
+.admin-page {
+  display: grid;
+  width: 100%;
+  gap: 0.75rem;
+}
+
+.admin-back-button {
+  width: fit-content;
+  margin: 0;
+  padding-inline: 0.5rem;
+}
+
+.admin-back-button svg,
+.admin-page .refresh-button svg,
+.admin-page .ui-button svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: 0 0 auto;
+}
+
+.admin-page-header {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.admin-page-heading-copy .eyebrow {
+  margin-bottom: 0.35rem;
+}
+
+.admin-page-header h1 {
+  margin: 0;
+  font-size: clamp(1.45rem, 5vw, 1.9rem);
+  line-height: 1.2;
+}
+
+.admin-navigation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  padding: 0.3rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-background-secondary);
+  overflow: visible;
+}
+
+.admin-navigation .ui-button {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  border-radius: var(--radius-sm);
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+.admin-navigation .ui-button[aria-current="page"] {
+  color: var(--color-text);
+  background: var(--color-surface-elevated);
+  box-shadow: 0 1px 4px var(--color-shadow);
+}
+
+.admin-section {
+  margin-top: 0;
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.admin-section .section-heading {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.admin-section .section-heading h2 {
+  margin-bottom: 0.35rem;
+}
+
+.admin-section .section-intro {
+  max-width: 62rem;
+  margin-bottom: 0;
+  color: var(--color-text-muted);
+  line-height: 1.55;
+}
+
+.admin-section .generator-controls,
+.admin-section .refresh-button,
+.admin-section .restart-wos-button {
+  width: 100%;
+  margin: 0;
+}
+
+.admin-section .generator-controls .ui-button,
+.admin-section .refresh-button,
+.admin-section .restart-wos-button {
+  width: 100%;
+  margin: 0;
+}
+
+.admin-section .ui-state {
+  margin-block: 0.75rem;
+}
+
+.credential-reveal.ui-card {
+  display: grid;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border-color: color-mix(in srgb, var(--color-warning) 28%, var(--color-border));
+  box-shadow: none;
+}
+
+.credential-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 0.4rem;
+}
+
+.credential-row code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.credential-row .ui-button {
+  width: fit-content;
+  min-height: 2.75rem;
+  margin: 0;
+  padding-inline: 0.4rem;
+}
+
+.user-list {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+
+.user-row.ui-card {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.8rem;
+  padding: 0.9rem;
+  background: var(--color-surface-elevated);
+  box-shadow: none;
+}
+
+.user-row > div:nth-child(2) > strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.user-row-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0.5rem;
+}
+
+.user-row-actions .ui-badge {
+  min-height: 2rem;
+  align-items: center;
+}
+
+.user-row-actions .ui-button {
+  flex: 1 1 9rem;
+  width: auto;
+  margin: 0;
+}
+
+.admin-storage-summary {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+
+.admin-storage-usage.ui-card,
+.admin-metric-card.ui-card,
+.reconciliation-panel.ui-card,
+.integration-card.ui-card {
+  box-shadow: none;
+}
+
+.admin-storage-usage.ui-card {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.admin-storage-usage-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.admin-storage-usage-heading > div {
+  min-width: 8rem;
+}
+
+.admin-storage-usage-heading span,
+.admin-metric-card span {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+.admin-storage-usage-heading strong,
+.admin-metric-card strong {
+  display: block;
+  margin-top: 0.2rem;
+  overflow-wrap: anywhere;
+}
+
+.admin-storage-usage .ui-progress {
+  width: 100%;
+}
+
+.admin-storage-usage p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+.admin-metric-card.ui-card {
+  display: grid;
+  align-content: center;
+  min-height: 6rem;
+  padding: 1rem;
+}
+
+.admin-metric-card strong {
+  font-size: 1.35rem;
+}
+
+.reconciliation-panel.ui-card {
+  margin-top: 0.9rem;
+  padding: 1rem;
+}
+
+.integration-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+
+.integration-card.ui-card {
+  padding: 1rem;
+  background: var(--color-surface-elevated);
+}
+
+.integration-card-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.7rem;
+}
+
+.integration-card-heading .integration-status {
+  grid-column: 1 / -1;
+  width: fit-content;
+}
+
+.integration-card-heading h3,
+.integration-card-heading p {
+  overflow-wrap: anywhere;
+}
+
+.admin-service-controls {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.admin-page .service-control-actions,
+.admin-page .dialog-actions,
+.admin-page .options-actions,
+.admin-page .newgreedy-config-actions {
+  flex-wrap: wrap;
+}
+
+.admin-page .service-control-actions .ui-button,
+.admin-page .dialog-actions .ui-button,
+.admin-page .options-actions .ui-button,
+.admin-page .newgreedy-config-actions .ui-button {
+  flex: 1 1 10rem;
+  margin: 0;
+}
+
+.admin-page table {
+  max-width: 100%;
+}
+
+.admin-page code,
+.admin-page dd,
+.admin-page td,
+.admin-page th,
+.admin-page li,
+.admin-page p,
+.admin-page strong,
+.admin-page span {
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 600px) {
+  .admin-page-header,
+  .admin-section {
+    padding: 1.25rem;
+  }
+
+  .admin-navigation {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .credential-row {
+    grid-template-columns: minmax(6rem, 0.6fr) minmax(0, 1.4fr) auto;
+    align-items: center;
+  }
+
+  .user-row.ui-card {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .user-row-actions {
+    grid-column: auto;
+    justify-content: flex-end;
+  }
+
+  .user-row-actions .ui-button {
+    flex: 0 0 auto;
+  }
+
+  .admin-storage-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-storage-usage.ui-card {
+    grid-column: 1 / -1;
+  }
+
+  .integration-card-heading {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .integration-card-heading .integration-status {
+    grid-column: auto;
+  }
+}
+
+@media (min-width: 900px) {
+  .admin-page-header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .admin-navigation {
+    flex: 0 1 38rem;
+  }
+
+  .admin-section .section-heading {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .admin-section .generator-controls,
+  .admin-section .refresh-button,
+  .admin-section .restart-wos-button {
+    width: auto;
+  }
+
+  .admin-section .generator-controls .ui-button,
+  .admin-section .refresh-button,
+  .admin-section .restart-wos-button {
+    width: auto;
+  }
+
+  .admin-storage-summary {
+    grid-template-columns: minmax(0, 2fr) repeat(2, minmax(9rem, 1fr));
+  }
+
+  .admin-storage-usage.ui-card {
+    grid-column: auto;
+  }
+
+  .integration-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 430px) {
+  .admin-section {
+    padding-inline: 0.75rem;
+  }
+
+  .admin-navigation .ui-button {
+    padding-inline: 0.45rem;
+    font-size: 0.78rem;
+  }
+}

@@ -30,37 +30,6 @@ export interface GeneratedCredentials {
   initial_password: string;
 }
 
-export type FileEntryKind = "directory" | "file" | "symlink" | "other";
-
-export interface FileEntry {
-  name: string;
-  path: string;
-  kind: FileEntryKind;
-  size: number | null;
-  modified_at: string;
-  media_type: string | null;
-  blocked: boolean;
-}
-
-export interface StorageUsage {
-  total: number;
-  used: number;
-  available: number;
-}
-
-export interface Breadcrumb {
-  label: string;
-  path: string;
-}
-
-export interface DirectoryListing {
-  path: string;
-  breadcrumbs: Breadcrumb[];
-  entries: FileEntry[];
-  storage: StorageUsage;
-  truncated: boolean;
-}
-
 export type TorrentRequestV2State =
   | "requested"
   | "active"
@@ -187,35 +156,12 @@ export interface TorrentDownloadManifestPageV2 {
 /** A recursively consumed manifest may span pages; the compatibility UI stores one page only. */
 export type TorrentDownloadSnapshotV2 = TorrentDownloadManifestPageV2;
 
-export interface TrashEntry {
-  id: string;
-  original_path: string;
-  name: string;
-  kind: "directory" | "file";
-  size: number | null;
-  deleted_at: string;
-}
-
-export interface AdminStorageOverview extends StorageUsage {
+export interface AdminStorageOverview {
+  total: number;
+  used: number;
+  available: number;
   active_users: number;
   suspended_users: number;
-  trash_entries: number;
-  known_trash_bytes: number;
-}
-
-export interface AdminTrashEntry extends TrashEntry {
-  user_id: string;
-  username: string;
-}
-
-export interface AdminTrashListing {
-  entries: AdminTrashEntry[];
-  truncated: boolean;
-}
-
-export interface AdminTrashPurgeResult {
-  purged: number;
-  remaining: number;
 }
 
 export type ExternalServiceState = "healthy" | "unavailable" | "unconfigured";
@@ -674,31 +620,6 @@ export const api = {
     return request<WosRestartStatus>("/admin/services/wos/restart", {
       method: "POST",
     });
-  },
-
-  listAdminTrash(signal?: AbortSignal): Promise<AdminTrashListing> {
-    return request<AdminTrashListing>("/admin/trash", { signal });
-  },
-
-  purgeAdminTrash(entryId: string): Promise<void> {
-    return request<void>(`/admin/trash/${encodeURIComponent(entryId)}`, {
-      method: "DELETE",
-    });
-  },
-
-  purgeAllAdminTrash(): Promise<AdminTrashPurgeResult> {
-    return request<AdminTrashPurgeResult>("/admin/trash", {
-      method: "DELETE",
-    });
-  },
-
-  listFiles(path: string, signal?: AbortSignal): Promise<DirectoryListing> {
-    const search = new URLSearchParams();
-    if (path !== "") {
-      search.set("path", path);
-    }
-    const query = search.size === 0 ? "" : `?${search.toString()}`;
-    return request<DirectoryListing>(`/files${query}`, { signal });
   },
 
   createTorrentRequestV2(file: File): Promise<TorrentRequestV2CreateResult> {

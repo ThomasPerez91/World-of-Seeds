@@ -2,10 +2,10 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { auditAccessibility } from "../../test/accessibility";
-import { FileDialog } from "./FileDialog";
+import { auditAccessibility } from "../test/accessibility";
+import { Dialog } from "./Dialog";
 
-describe("FileDialog", () => {
+describe("Dialog", () => {
   it("gère le focus, le clavier et restaure le déclencheur", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
@@ -15,11 +15,11 @@ describe("FileDialog", () => {
     opener.focus();
 
     const view = render(
-      <FileDialog title="Confirmer" description="Vérifie cette action." onClose={onClose}>
+      <Dialog title="Confirmer" description="Vérifie cette action." onClose={onClose}>
         <button type="button" data-initial-focus>
           Continuer
         </button>
-      </FileDialog>,
+      </Dialog>,
     );
 
     const continueButton = screen.getByRole("button", { name: "Continuer" });
@@ -30,9 +30,7 @@ describe("FileDialog", () => {
     expect(document.activeElement).toBe(closeButton);
     await user.tab({ shift: true });
     expect(document.activeElement).toBe(continueButton);
-
-    const results = await auditAccessibility(view.container);
-    expect(results.violations).toEqual([]);
+    expect((await auditAccessibility(view.container)).violations).toEqual([]);
 
     await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledOnce();
@@ -41,18 +39,18 @@ describe("FileDialog", () => {
     opener.remove();
   });
 
-  it("bloque toutes les méthodes de fermeture pendant une mutation", async () => {
+  it("bloque toutes les méthodes de fermeture pendant une action", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     render(
-      <FileDialog
-        title="Mutation en cours"
-        description="Le déplacement doit finir."
+      <Dialog
+        title="Action en cours"
+        description="L’opération doit se terminer."
         onClose={onClose}
         closeDisabled
       >
         <button type="button">Patienter</button>
-      </FileDialog>,
+      </Dialog>,
     );
 
     await user.keyboard("{Escape}");

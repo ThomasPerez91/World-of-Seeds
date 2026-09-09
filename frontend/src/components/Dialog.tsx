@@ -1,7 +1,8 @@
 import { type ReactNode, useEffect, useId, useRef } from "react";
 
-import { CloseIcon } from "../../components/icons";
-import { useI18n } from "../../i18n";
+import { CloseIcon } from "./icons";
+import { useI18n } from "../i18n";
+import { IconButton } from "./ui";
 
 const FOCUSABLE_SELECTOR = [
   "button:not(:disabled)",
@@ -12,11 +13,11 @@ const FOCUSABLE_SELECTOR = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(", ");
 
-export function FileDialog({
+export function Dialog({
   children,
   closeDisabled = false,
   description,
-  eyebrow = "Gestion du fichier",
+  eyebrow,
   onClose,
   title,
 }: {
@@ -93,19 +94,18 @@ export function FileDialog({
       >
         <header className="dialog-header">
           <div>
-            <p className="eyebrow">{eyebrow}</p>
+            {eyebrow !== undefined && <p className="eyebrow">{eyebrow}</p>}
             <h3 id={titleId}>{title}</h3>
             <p id={descriptionId}>{description}</p>
           </div>
-          <button
-            type="button"
+          <IconButton
             className="dialog-close"
             onClick={onClose}
-            aria-label={t("common.close")}
+            label={t("common.close")}
             disabled={closeDisabled}
           >
             <CloseIcon />
-          </button>
+          </IconButton>
         </header>
         {children}
       </section>
