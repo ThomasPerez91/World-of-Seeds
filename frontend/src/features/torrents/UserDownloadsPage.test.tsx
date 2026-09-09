@@ -924,6 +924,9 @@ describe("UserDownloadsPage", () => {
           items,
         });
       }
+      if (url.includes("/api/v2/downloads/policy")) {
+        return response({ max_concurrent_streams: 2 });
+      }
       if (url.includes("/files/")) {
         active += 1;
         if (active === 2) markStarted();

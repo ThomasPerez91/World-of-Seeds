@@ -307,17 +307,28 @@ export class RecursiveDownloadController {
         { headers, credentials: "same-origin", signal: controller.signal },
       );
       if (!this.responseMatchesSnapshot(response, file, offset) || response.body === null) {
+        if (response.body !== null) {
+          await response.body.cancel().catch(() => undefined);
+        }
         throw new TransferFailure("manifest_changed");
       }
-      const writer = await localFile.createWritable({ keepExistingData: offset > 0 });
+      let writer: WritableFileHandle;
+      try {
+        writer = await localFile.createWritable({ keepExistingData: offset > 0 });
+      } catch (error) {
+        await response.body.cancel().catch(() => undefined);
+        throw error;
+      }
       let written = offset;
       let streamError: unknown = null;
+      let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
       try {
         if (this.status !== "running") {
+          await response.body.cancel().catch(() => undefined);
           throw new DOMException("transfer stopped", "AbortError");
         }
         if (offset > 0) await writer.seek(offset);
-        const reader = response.body.getReader();
+        reader = response.body.getReader();
         while (true) {
           const result = await reader.read();
           if (result.done) break;
@@ -330,6 +341,11 @@ export class RecursiveDownloadController {
           this.emit();
         }
       } catch (error) {
+        if (reader === null) {
+          await response.body.cancel().catch(() => undefined);
+        } else {
+          await reader.cancel(error).catch(() => undefined);
+        }
         streamError = error;
       }
       try {
