@@ -310,8 +310,12 @@ describe("App", () => {
     expect(screen.getByText("Suspendu")).toBeDefined();
 
     await user.click(screen.getByRole("button", { name: "Supprimer l’accès de guest-a1b2c3" }));
+    await screen.findByRole("heading", { name: "Supprimer l’accès de guest-a1b2c3 ?" });
+    expect(deleteAttempts).toBe(0);
+    await user.click(screen.getByRole("button", { name: "Confirmer la suppression" }));
     await screen.findByText("Impossible de supprimer l’accès de cet utilisateur.");
-    await user.click(screen.getByRole("button", { name: "Supprimer l’accès de guest-a1b2c3" }));
+    expect(screen.getByRole("heading", { name: "Supprimer l’accès de guest-a1b2c3 ?" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Confirmer la suppression" }));
     expect(screen.queryByText("guest-a1b2c3")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });

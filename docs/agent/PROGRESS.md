@@ -118,7 +118,7 @@ Ne jamais pousser directement sur `master` ou `develop`.
 
 ## Refonte UX post-2.0
 
-La refonte de l'expérience utilisateur autour d'un Dashboard **torrent-centric** est désormais complète sur la branche de travail UX-06 et attend son intégration dans `develop`.
+La refonte de l'expérience utilisateur autour d'un Dashboard **torrent-centric** est intégrée dans `develop` (UX-00 à UX-06 terminées).
 
 Décisions validées :
 
@@ -249,6 +249,12 @@ Validation du HEAD fonctionnel UX-06 `dad0ff8a09a2029f557fd135ffd8896629e854b5` 
 - `Dependency and image security` : vert ;
 - `V2 Rise2 deploy policy` : vert ;
 - aucune conversation de review ouverte sur la PR #158.
+
+## Consolidation post-UX-06
+
+Une passe de cohérence post-refonte retire les derniers contrats morts du filesystem utilisateur : namespace backend `app.files`, schémas V1 Files/Torrents non montés, client HTTP stockage dupliqué, traductions et styles de l'ancienne corbeille. La documentation publique/légale est réalignée sur le stockage partagé. La suppression d'un compte admin exige désormais une confirmation qui décrit les vrais effets sur les `TorrentRequest` et le lifecycle partagé.
+
+Cette consolidation ne modifie ni le schéma PostgreSQL, ni `UserTorrent` historique, ni le stockage physique, ni qBittorrent/NewGreedy, ni le lifecycle torrent.
 
 ## Prochaine tâche
 

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api, ApiError, type TorrentRequestV2 } from "../../api/client";
 import {
-  getSharedStorageCapacity,
+  api,
+  ApiError,
   type SharedStorageCapacity,
-} from "../../api/storage";
+  type TorrentRequestV2,
+} from "../../api/client";
 import { Button, Card, Progress, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
 import {
@@ -135,7 +136,7 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
     const controller = new AbortController();
     storageController.current = controller;
     setStorageError("");
-    void getSharedStorageCapacity(controller.signal)
+    void api.getSharedStorageCapacity(controller.signal)
       .then((next) => setStorage(next))
       .catch((caught: unknown) => {
         if (caught instanceof DOMException && caught.name === "AbortError") return;

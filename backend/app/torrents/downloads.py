@@ -23,7 +23,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import StreamingResponse
 from starlette.types import Receive, Scope, Send
 
-from app.files.downloads import OpenedDownload
+from app.http_downloads import OpenedDownload
 from app.models import (
     DownloadLease,
     ManagedTorrent,

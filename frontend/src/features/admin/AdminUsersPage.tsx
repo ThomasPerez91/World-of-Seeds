@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api, ApiError, type GeneratedCredentials, type User } from "../../api/client";
+import { Dialog } from "../../components/Dialog";
 import { useFeedback } from "../../components/Feedback";
 import { Badge, Button, Card, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
@@ -23,6 +24,7 @@ export function AdminUsersPage({
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -91,8 +93,8 @@ export function AdminUsersPage({
     }
   }
 
-  async function deleteAccess(account: User) {
-    if (updatingUserId !== null) return;
+  async function deleteAccess(account: User): Promise<boolean> {
+    if (updatingUserId !== null) return false;
     setUpdatingUserId(account.id);
     try {
       await api.deleteUser(account.id);
@@ -101,12 +103,14 @@ export function AdminUsersPage({
         tone: "success",
         message: t("admin.userDeleted", { name: account.username }),
       });
+      return true;
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
-        return;
+        return false;
       }
       feedback.toast({ tone: "error", message: t("admin.userDeleteFailed") });
+      return false;
     } finally {
       setUpdatingUserId(null);
     }
@@ -202,7 +206,7 @@ export function AdminUsersPage({
                         className="compact-button"
                         aria-label={t("admin.deleteAccessNamed", { name: account.username })}
                         disabled={updatingUserId === account.id}
-                        onClick={() => void deleteAccess(account)}
+                        onClick={() => setDeleteTarget(account)}
                       >
                         {updatingUserId === account.id ? t("admin.deleting") : t("admin.deleteAccess")}
                       </Button>
@@ -214,6 +218,41 @@ export function AdminUsersPage({
           </div>
         )}
       </section>
+      {deleteTarget !== null && (
+        <Dialog
+          eyebrow={t("admin.access")}
+          title={t("admin.deleteTitle", { name: deleteTarget.username })}
+          description={t("admin.deleteDescription")}
+          closeDisabled={updatingUserId === deleteTarget.id}
+          onClose={() => setDeleteTarget(null)}
+        >
+          <p className="dialog-warning">{t("admin.deleteWarning")}</p>
+          <div className="dialog-actions">
+            <Button
+              variant="secondary"
+              data-initial-focus
+              disabled={updatingUserId === deleteTarget.id}
+              onClick={() => setDeleteTarget(null)}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="danger"
+              disabled={updatingUserId === deleteTarget.id}
+              onClick={() => {
+                const account = deleteTarget;
+                void deleteAccess(account).then((deleted) => {
+                  if (deleted) setDeleteTarget(null);
+                });
+              }}
+            >
+              {updatingUserId === deleteTarget.id
+                ? t("admin.deleting")
+                : t("admin.confirmDelete")}
+            </Button>
+          </div>
+        </Dialog>
+      )}
     </AdminPageShell>
   );
 }
