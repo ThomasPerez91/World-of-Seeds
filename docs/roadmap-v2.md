@@ -98,7 +98,7 @@ La file de récupération présentée pendant cette première refonte est celle 
 | UX-02 | MOYEN | UX-01 | TERMINE | Nouveau Dashboard utilisateur comme accueil : cartouches torrents, récupération locale et stockage en composant les API/données existantes, sans nouveau backend de télémétrie. |
 | UX-03 | MOYEN | UX-02 | TERMINE | Remplacer la table actuelle par un gestionnaire de torrents en accordéons ; conserver drag/drop, multi-upload borné, états, progression, queue, WebSocket, annulation/désabonnement et rétention en utilisant le contrat existant. |
 | UX-04 | MOYEN | UX-03 | TERMINE | Recomposer l'expérience READY : fichier unique, manifeste dossier, téléchargement fichier par fichier ou complet, fallback existant, progression/file locale et affichage actif/max sans nouvelle télémétrie backend. |
-| UX-05 | ELEVE | UX-04 | A FAIRE | Retirer l'ancien espace utilisateur Fichiers/Corbeille/création de dossiers et nettoyer le code mort après audit complet des dépendances backend, admin, workspaces, trash et routes `/api/v1/files`. |
+| UX-05 | ELEVE | UX-04 | TERMINE | Retirer l'ancien espace utilisateur Fichiers/Corbeille/création de dossiers et nettoyer le code mort après audit complet des dépendances backend, admin, workspaces, trash et routes `/api/v1/files`. |
 | UX-06 | MOYEN | UX-05 | A FAIRE | Harmoniser l'administration avec le design system, finaliser responsive/accessibilité, supprimer CSS/i18n/tests morts et effectuer le nettoyage final de la refonte. |
 
 ### UX-01 — Design system, thèmes et préférences

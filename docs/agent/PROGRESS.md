@@ -154,7 +154,7 @@ Décisions validées :
 - **UX-02 — TERMINE** : nouveau Dashboard et ses cartouches en composant les données/API existantes.
 - **UX-03 — TERMINE** : gestionnaire de torrents en accordéons avec les contrats actuels.
 - **UX-04 — TERMINE** : expérience READY et récupération locale intégrées aux accordéons, sans nouvelle télémétrie backend.
-- **UX-05 — A FAIRE** : retrait de l'espace utilisateur Fichiers/Corbeille et nettoyage après audit de dépendances.
+- **UX-05 — TERMINE** : retrait de l'espace utilisateur Fichiers/Corbeille et nettoyage ciblé après audit de dépendances.
 - **UX-06 — A FAIRE** : harmonisation admin, responsive, accessibilité et nettoyage final.
 
 Le détail, les dépendances et la Definition of Done de chaque tâche sont dans `docs/roadmap-v2.md`.
@@ -234,8 +234,19 @@ UX-02 est terminé sur une branche dédiée : le Dashboard est l’accueil authe
 - Validation locale : tests ciblés torrents/Dashboard 49 verts avant stabilisation ; `npm run check`, suite frontend complète (105 tests), `npm run build` et policy responsive backend (2 tests) verts.
 - Vite preview a démarré sur `127.0.0.1:4173`, mais le navigateur cloud a bloqué l’URL locale (`ERR_BLOCKED_BY_CLIENT`). La validation visuelle réelle reste donc indisponible ; la validation responsive repose sur les tests DOM/axe, la policy et les règles CSS mobile-first.
 
+## UX-05 — Retrait du legacy utilisateur Fichiers/Corbeille
+
+- Le shell authentifié ne propose plus Fichiers ni Corbeille ; le Dashboard torrent-centric est l’unique accueil utilisateur et le wordmark y ramène depuis les paramètres ou l’administration.
+- Les anciens liens `?path=...` sont ignorés et nettoyés sans erreur avant d’afficher le Dashboard.
+- `FileBrowser`, `TrashBrowser`, `FileMutationDialog`, leurs tests et l’utilitaire de nommage exclusivement partagé par ces composants ont été supprimés.
+- Les méthodes et types frontend réservés à la création, au renommage, au déplacement, au téléchargement arbitraire et à la corbeille utilisateur ont été retirés, ainsi que leurs styles et traductions sans référence.
+- `FileDialog` reste utilisé par l’administration et NewGreedy. `api.listFiles("")`, `GET /api/v1/files`, les workspaces, `downloads`, `.trash`, `TrashEntry` et `AdminTrashPage` restent intacts car le Dashboard, l’administration et les invariants de cycle de vie en dépendent.
+- Aucun backend applicatif, contrat torrent/READY, lifecycle, rétention, qBittorrent, NewGreedy, Redis, scheduler ni structure d’administration n’a été modifié.
+- Validation locale : `npm run check`, suite frontend complète (99 tests), `npm run build` et policy responsive backend (2 tests) verts.
+- Vite preview a démarré sur `127.0.0.1:4173`, mais le navigateur cloud a de nouveau bloqué l’URL locale (`ERR_BLOCKED_BY_CLIENT`). La vérification mobile-first repose donc sur les tests DOM/axe, la policy responsive et l’audit ciblé des styles, sans prétendre à une mesure navigateur réelle.
+
 ## Prochaine tâche
 
-**UX-05 — Retrait du legacy utilisateur Fichiers/Corbeille.**
+**UX-06 — Harmonisation de l’administration et finition.**
 
-Tâche distincte, à commencer seulement après validation et intégration de UX-04, avec l’audit de dépendances prévu par la roadmap.
+Tâche distincte, à commencer seulement après validation et intégration de UX-05. Elle couvre l’harmonisation globale de l’administration, les vérifications responsive/accessibilité finales et le dernier nettoyage transversal.

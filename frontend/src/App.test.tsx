@@ -36,13 +36,12 @@ describe("App", () => {
       if (url.startsWith("/api/v1/files")) {
         return response({
           path: "",
-          breadcrumbs: [{ label: "Mes fichiers", path: "" }],
+          breadcrumbs: [{ label: "Racine", path: "" }],
           entries: [],
           storage: { total: 1000, used: 0, available: 1000 },
           truncated: false,
         }, 200);
       }
-      if (url === "/api/v1/trash") return response({ entries: [], truncated: false }, 200);
       throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -112,7 +111,7 @@ describe("App", () => {
           return response(
             {
               path: "",
-              breadcrumbs: [{ label: "Mes fichiers", path: "" }],
+              breadcrumbs: [{ label: "Racine", path: "" }],
               entries: [],
               storage: { total: 2048, used: 1024, available: 1024 },
               truncated: false,
@@ -120,7 +119,6 @@ describe("App", () => {
             200,
           );
         }
-        if (url === "/api/v1/trash") return response({ entries: [], truncated: false }, 200);
         if (url === "/api/v1/admin/users") return response([currentUser], 200);
         throw new Error(`Unexpected request: ${url}`);
       }),
@@ -159,7 +157,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Réessayer" }));
     await screen.findByRole("heading", { name: "Bienvenue" });
     expect(
-      screen.getByText("Vos fichiers et téléchargements, réunis dans un espace privé."),
+      screen.getByText("Tes téléchargements torrent, réunis dans un espace privé."),
     ).toBeDefined();
     expect(screen.getByText("Tous les services fonctionnent normalement.")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Vérifier l’état du service" }));
@@ -185,16 +183,13 @@ describe("App", () => {
           return response(
             {
               path: "",
-              breadcrumbs: [{ label: "Mes fichiers", path: "" }],
+              breadcrumbs: [{ label: "Racine", path: "" }],
               entries: [],
               storage: { total: 1000, used: 0, available: 1000 },
               truncated: false,
             },
             200,
           );
-        }
-        if (url === "/api/v1/trash") {
-          return response({ entries: [], truncated: false }, 200);
         }
         if (url === "/api/v1/admin/users") return response([currentUser], 200);
         throw new Error(`Requête inattendue : ${url}`);
@@ -204,7 +199,6 @@ describe("App", () => {
     const user = userEvent.setup();
     const view = render(<App />);
     const dashboardTitle = await screen.findByRole("heading", { name: "Dashboard" });
-    expect(dashboardTitle.closest(".file-browser")).toBeNull();
     const skipLink = screen.getByRole("link", { name: "Aller au contenu principal" });
     expect(skipLink.getAttribute("href")).toBe("#dashboard-content");
     expect(document.querySelector("#dashboard-content")?.getAttribute("tabindex")).toBe("-1");
@@ -213,12 +207,8 @@ describe("App", () => {
     expect(screen.getAllByText(`v${APP_VERSION}`).length).toBeGreaterThan(0);
     expect(document.querySelector(".account-settings-trigger")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
-    await user.click(screen.getByRole("button", { name: "Mes fichiers" }));
-    await screen.findByRole("heading", { name: "Mes fichiers" });
-    await screen.findByText("Ce dossier est vide");
-    expect(screen.queryByText("La corbeille est vide")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Corbeille" }));
-    await screen.findByText("La corbeille est vide");
+    expect(screen.queryByRole("button", { name: "Mes fichiers" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Corbeille" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
     await user.click(screen.getByRole("button", { name: "Administration" }));
@@ -239,6 +229,41 @@ describe("App", () => {
       "thomas",
     );
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
+  it("ignore un ancien lien vers le navigateur de fichiers et ouvre le Dashboard", async () => {
+    const currentUser = {
+      id: "bc68aa7c-d753-4db7-8698-acf8d09045a3",
+      username: "thomas",
+      is_admin: false,
+      is_active: true,
+      must_change_credentials: false,
+    };
+    window.history.replaceState({}, "", "/?path=downloads%2Farchive");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/v1/auth/me") return response({ user: currentUser }, 200);
+        if (url.startsWith("/api/v1/files")) {
+          return response({
+            path: "",
+            breadcrumbs: [],
+            entries: [],
+            storage: { total: 1000, used: 0, available: 1000 },
+            truncated: false,
+          }, 200);
+        }
+        throw new Error(`Requête inattendue : ${url}`);
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Dashboard" });
+    expect(new URL(window.location.href).searchParams.has("path")).toBe(false);
+    expect(screen.queryByRole("button", { name: "Mes fichiers" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Corbeille" })).toBeNull();
   });
 
   it("rend les informations légales accessibles avant la connexion", async () => {
@@ -287,7 +312,7 @@ describe("App", () => {
           return response(
             {
               path: "",
-              breadcrumbs: [{ label: "Mes fichiers", path: "" }],
+              breadcrumbs: [{ label: "Racine", path: "" }],
               entries: [],
               storage: { total: 1000, used: 0, available: 1000 },
               truncated: false,
@@ -295,7 +320,6 @@ describe("App", () => {
             200,
           );
         }
-        if (url === "/api/v1/trash") return response({ entries: [], truncated: false }, 200);
         if (url === "/api/v1/admin/users" && init?.method === undefined) {
           return response([admin, guest], 200);
         }
@@ -349,7 +373,7 @@ describe("App", () => {
           return response(
             {
               path: "",
-              breadcrumbs: [{ label: "Mes fichiers", path: "" }],
+              breadcrumbs: [{ label: "Racine", path: "" }],
               entries: [],
               storage: { total: 1000, used: 0, available: 1000 },
               truncated: false,
@@ -357,7 +381,6 @@ describe("App", () => {
             200,
           );
         }
-        if (url === "/api/v1/trash") return response({ entries: [], truncated: false }, 200);
         if (url === "/api/v1/auth/username" && init?.method === "PATCH") {
           currentUser = { ...currentUser, username: "Shadowsun" };
           return response({ user: currentUser }, 200);
@@ -433,7 +456,7 @@ describe("App", () => {
           return response(
             {
               path: "",
-              breadcrumbs: [{ label: "Mes fichiers", path: "" }],
+              breadcrumbs: [{ label: "Racine", path: "" }],
               entries: [],
               storage: { total: 1000, used: 0, available: 1000 },
               truncated: false,
@@ -441,7 +464,6 @@ describe("App", () => {
             200,
           );
         }
-        if (url === "/api/v1/trash") return response({ entries: [], truncated: false }, 200);
         if (url === "/api/v1/admin/users") return response([admin], 200);
         if (url === "/api/v1/admin/services/health") {
           return response(
