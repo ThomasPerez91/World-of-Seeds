@@ -162,8 +162,6 @@ export function AdminUsersPage({
           <StateMessage tone="loading">{t("common.loading")}</StateMessage>
         ) : loadError !== "" ? (
           <StateMessage tone="error">{loadError}</StateMessage>
-        ) : users.length === 0 ? (
-          <StateMessage tone="empty">{t("admin.noUsers")}</StateMessage>
         ) : (
           <div className="user-list">
             {users.map((account) => (
