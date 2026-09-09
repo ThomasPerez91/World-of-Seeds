@@ -12,9 +12,10 @@ import {
   api,
   ApiError,
   parseTorrentRealtimeMessage,
+  type TorrentDownloadFileV2,
+  type TorrentDownloadManifestPageV2,
   type TorrentRequestV2,
   type TorrentRequestV2State,
-  type TorrentDownloadManifestPageV2,
 } from "../../api/client";
 import { useFeedback } from "../../components/Feedback";
 import {
@@ -27,12 +28,20 @@ import {
 import { Accordion, Badge, Button, Progress, StateMessage } from "../../components/ui";
 import { useI18n, type MessageKey } from "../../i18n";
 import {
-  pickDownloadDirectory,
+  BrowserDownloadManager,
+  DownloadPolicyRequestError,
+  loadBrowserDownloadPolicy,
+  pickManagedDownloadFile,
+  supportsManagedFileDownload,
+  type BrowserDownloadJobSnapshot,
+  type BrowserDownloadManagerSnapshot,
+} from "./downloadManager";
+import {
   DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
-  RecursiveDownloadController,
+  pickDownloadDirectory,
+  type LocalTransferQueueItem,
   type RecursiveTransferErrorCode,
   type RecursiveTransferProgress,
-  type LocalTransferQueueItem,
   supportsRecursiveDirectoryDownload,
 } from "./recursiveDownload";
 import { RetentionWarning } from "./RetentionWarning";
@@ -66,6 +75,29 @@ export function summarizeLocalTransfer(
   };
 }
 
+export function summarizeDownloadManager(
+  manager: BrowserDownloadManagerSnapshot,
+): LocalDownloadSummary {
+  const jobs = manager.jobs;
+  const status: LocalDownloadSummary["status"] = manager.activeStreams > 0 || manager.waitingJobs > 0
+    ? "running"
+    : jobs.some((job) => job.status === "error")
+      ? "error"
+      : jobs.some((job) => job.status === "paused")
+        ? "paused"
+        : jobs.length > 0 && jobs.every((job) => job.status === "completed")
+          ? "completed"
+          : jobs.length > 0 && jobs.every((job) => job.status === "cancelled")
+            ? "cancelled"
+            : "idle";
+  return {
+    active: manager.activeStreams,
+    maximum: manager.maxConcurrentStreams,
+    status,
+    waiting: manager.waitingJobs,
+  };
+}
+
 type UploadResultStatus = "queued" | "uploading" | "added" | "duplicate" | "invalid" | "failed";
 
 interface UploadFileResult {
@@ -91,11 +123,11 @@ interface ReadyManifestState {
   snapshot: TorrentDownloadManifestPageV2 | null;
 }
 
-type LocalTransferState = RecursiveTransferProgress & {
-  fileCount: number;
-  name: string;
-  torrentId: string;
-  totalBytes: number;
+const EMPTY_MANAGER_SNAPSHOT: BrowserDownloadManagerSnapshot = {
+  activeStreams: 0,
+  maxConcurrentStreams: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
+  waitingJobs: 0,
+  jobs: [],
 };
 
 const stateLabels: Record<TorrentRequestV2State, MessageKey> = {
@@ -134,19 +166,13 @@ function TorrentQueueVisibility({ torrent }: { torrent: TorrentRequestV2 }) {
   const { t } = useI18n();
   if (torrent.queue_status === null) return null;
   let label: string;
-  if (torrent.queue_status === "downloading") {
-    label = t("downloads.queueDownloading");
-  } else if (torrent.queue_status === "stalled") {
-    label = t("downloads.queueStalled");
-  } else if (torrent.queue_status === "cooldown") {
-    label = t("downloads.queueCooldown");
-  } else if (torrent.queue_position_estimate === 1) {
-    label = t("downloads.queueSoon");
-  } else if (torrent.queue_position_estimate !== null) {
+  if (torrent.queue_status === "downloading") label = t("downloads.queueDownloading");
+  else if (torrent.queue_status === "stalled") label = t("downloads.queueStalled");
+  else if (torrent.queue_status === "cooldown") label = t("downloads.queueCooldown");
+  else if (torrent.queue_position_estimate === 1) label = t("downloads.queueSoon");
+  else if (torrent.queue_position_estimate !== null) {
     label = t("downloads.queuePosition", { position: torrent.queue_position_estimate });
-  } else {
-    label = t("downloads.queueEstimating");
-  }
+  } else label = t("downloads.queueEstimating");
   return (
     <span className={`torrent-queue-status ${torrent.queue_status}`}>
       <QueueIcon />
@@ -173,28 +199,41 @@ function LocalQueueLabel({ item }: { item: LocalTransferQueueItem }) {
   }[item.status] as MessageKey);
 }
 
+function jobStatusLabel(job: BrowserDownloadJobSnapshot, t: (key: MessageKey, params?: Record<string, string | number>) => string) {
+  if (job.status === "queued") return t("downloads.batchQueued");
+  return t(`downloads.localStatus.${job.status}` as MessageKey);
+}
+
 function LocalTransferPanel({
   transfer,
+  maximum,
   onCancel,
   onClose,
   onPause,
   onResume,
 }: {
-  transfer: LocalTransferState;
+  transfer: BrowserDownloadJobSnapshot;
+  maximum: number;
   onCancel: () => void;
   onClose: () => void;
   onPause: () => void;
   onResume: () => void;
 }) {
   const { formatBytes, t } = useI18n();
-  const summary = summarizeLocalTransfer(transfer);
+  const active = transfer.queue.filter((item) => item.status === "active").length;
+  const waiting = transfer.queue.filter((item) => item.status === "waiting").length;
   const error = transfer.error === null ? null : t(transferErrorKeys[transfer.error]);
   return (
     <section className={`recursive-transfer ${transfer.status}`} aria-label={t("downloads.localNamed", { name: transfer.name })}>
       <div className="local-transfer-heading">
         <strong title={transfer.name}>{t("downloads.localRecovery")}</strong>
         <span>
-          {t("downloads.files", { completed: transfer.completedFiles, total: transfer.fileCount, downloaded: formatBytes(transfer.downloadedBytes), size: formatBytes(transfer.totalBytes) })}
+          {t("downloads.files", {
+            completed: transfer.completedFiles,
+            total: transfer.fileCount,
+            downloaded: formatBytes(transfer.downloadedBytes),
+            size: formatBytes(transfer.totalBytes),
+          })}
         </span>
       </div>
       <Progress
@@ -202,12 +241,15 @@ function LocalTransferPanel({
         label={t("downloads.localNamed", { name: transfer.name })}
       />
       <div className="local-transfer-metrics">
-        <span>{t("downloads.localActive", { active: summary.active, maximum: summary.maximum })}</span>
-        <span>{t("downloads.localWaitingCount", { waiting: summary.waiting })}</span>
+        <span>{t("downloads.localActive", { active, maximum })}</span>
+        <span>{t("downloads.localWaitingCount", { waiting })}</span>
         <Badge tone={transfer.status === "error" ? "danger" : transfer.status === "completed" ? "success" : "neutral"}>
-          {t(`downloads.localStatus.${transfer.status}` as MessageKey)}
+          {jobStatusLabel(transfer, t)}
         </Badge>
       </div>
+      {transfer.status === "queued" && transfer.queuePosition !== null && (
+        <p>{t("downloads.localWaiting", { position: transfer.queuePosition })}</p>
+      )}
       {error !== null && <p className="local-transfer-error" role="alert">{error}</p>}
       <p className="local-transfer-volatility">{t("downloads.localQueueVolatility")}</p>
       {transfer.queue.length > 0 && (
@@ -221,7 +263,7 @@ function LocalTransferPanel({
         </ul>
       )}
       <div className="recursive-transfer-actions">
-        {transfer.status === "running" && (
+        {(transfer.status === "running" || transfer.status === "queued") && (
           <Button variant="secondary" onClick={onPause}>{t("downloads.pauseRecovery")}</Button>
         )}
         {(transfer.status === "paused" || transfer.status === "error") && (
@@ -239,43 +281,51 @@ function LocalTransferPanel({
 
 function ReadyTorrentContent({
   manifest,
-  transfer,
-  completeTransferBusy,
+  transfers,
   onCancelTransfer,
   onCloseTransfer,
   onDownloadAll,
+  onDownloadFile,
   onLoadPage,
   onPauseTransfer,
   onResumeTransfer,
   onRetry,
   torrent,
+  maximum,
 }: {
   manifest: ReadyManifestState | undefined;
-  transfer: LocalTransferState | null;
-  completeTransferBusy: boolean;
-  onCancelTransfer: () => void;
-  onCloseTransfer: () => void;
+  transfers: readonly BrowserDownloadJobSnapshot[];
+  onCancelTransfer: (jobId: string) => void;
+  onCloseTransfer: (jobId: string) => void;
   onDownloadAll: () => void;
+  onDownloadFile: (file: TorrentDownloadFileV2, snapshot: TorrentDownloadManifestPageV2) => void;
   onLoadPage: (offset: number) => void;
-  onPauseTransfer: () => void;
-  onResumeTransfer: () => void;
+  onPauseTransfer: (jobId: string) => void;
+  onResumeTransfer: (jobId: string) => void;
   onRetry: () => void;
   torrent: TorrentRequestV2;
+  maximum: number;
 }) {
   const { formatBytes, t } = useI18n();
   const snapshot = manifest?.snapshot ?? null;
   const compatible = !supportsRecursiveDirectoryDownload();
+  const managedFiles = supportsManagedFileDownload();
+  const folderBusy = transfers.some(
+    (transfer) => transfer.kind === "folder" && !["completed", "cancelled"].includes(transfer.status),
+  );
   return (
     <section className="ready-content" aria-label={t("downloads.contentNamed", { name: torrent.name })}>
-      {transfer !== null && (
+      {transfers.map((transfer) => (
         <LocalTransferPanel
+          key={transfer.id}
           transfer={transfer}
-          onCancel={onCancelTransfer}
-          onClose={onCloseTransfer}
-          onPause={onPauseTransfer}
-          onResume={onResumeTransfer}
+          maximum={maximum}
+          onCancel={() => onCancelTransfer(transfer.id)}
+          onClose={() => onCloseTransfer(transfer.id)}
+          onPause={() => onPauseTransfer(transfer.id)}
+          onResume={() => onResumeTransfer(transfer.id)}
         />
-      )}
+      ))}
       {manifest === undefined || (manifest.loading && snapshot === null) ? (
         <StateMessage tone="loading">{t("downloads.manifestLoading")}</StateMessage>
       ) : manifest.error !== "" && snapshot === null ? (
@@ -291,7 +341,7 @@ function ReadyTorrentContent({
               <span>{t(snapshot.file_count === 1 ? "downloads.contentSummaryOne" : "downloads.contentSummaryMany", { count: snapshot.file_count, size: formatBytes(snapshot.total_size) })}</span>
             </div>
             {snapshot.file_count > 1 && !compatible && (
-              <Button disabled={completeTransferBusy} onClick={onDownloadAll}>
+              <Button disabled={folderBusy} onClick={onDownloadAll}>
                 <DownloadIcon /> {t("downloads.downloadAll")}
               </Button>
             )}
@@ -319,13 +369,24 @@ function ReadyTorrentContent({
               <li key={file.id}>
                 <span title={file.relative_path}>{file.relative_path}</span>
                 <span>{formatBytes(file.size)}</span>
-                <a
-                  href={api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id)}
-                  download={file.relative_path.split("/").at(-1)}
-                  aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
-                >
-                  {t("common.download")}
-                </a>
+                {managedFiles ? (
+                  <button
+                    type="button"
+                    className="ready-file-download-button"
+                    aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
+                    onClick={() => onDownloadFile(file, snapshot)}
+                  >
+                    {t("common.download")}
+                  </button>
+                ) : (
+                  <a
+                    href={api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id)}
+                    download={file.relative_path.split("/").at(-1)}
+                    aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
+                  >
+                    {t("common.download")}
+                  </a>
+                )}
               </li>
             ))}
           </ul>
@@ -403,10 +464,7 @@ function TorrentItem({
                 <TorrentQueueVisibility torrent={torrent} />
               </span>
               <span className="torrent-summary-progress">
-                <Progress
-                  label={t("downloads.progressFor", { name: torrent.name })}
-                  value={percent}
-                />
+                <Progress label={t("downloads.progressFor", { name: torrent.name })} value={percent} />
                 <strong>{percent} %</strong>
               </span>
               <span className="torrent-details-cue" aria-hidden="true">{t("downloads.details")}</span>
@@ -421,9 +479,7 @@ function TorrentItem({
           {error !== null && <p className="torrent-detail-error" role="alert">{error}</p>}
           {details}
         </Accordion>
-        {torrent.state === "ready" && (
-          <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />
-        )}
+        {torrent.state === "ready" && <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />}
         <div className="torrent-card-actions">
           {torrent.state === "ready" ? (
             <Button type="button" disabled={downloadBusy} onClick={() => {
@@ -475,19 +531,35 @@ export function UserDownloadsPage({
   const [uploadBatch, setUploadBatch] = useState<UploadBatchState | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [pageError, setPageError] = useState("");
+  const [managerSnapshot, setManagerSnapshot] = useState<BrowserDownloadManagerSnapshot>(EMPTY_MANAGER_SNAPSHOT);
   const loadGenerationRef = useRef(0);
-  const controllerRef = useRef<RecursiveDownloadController | null>(null);
-  const [transfer, setTransfer] = useState<LocalTransferState | null>(null);
+  const managerRef = useRef<BrowserDownloadManager | null>(null);
+  if (managerRef.current === null) {
+    managerRef.current = new BrowserDownloadManager(
+      DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
+      setManagerSnapshot,
+    );
+  }
   const [readyManifests, setReadyManifests] = useState<Record<string, ReadyManifestState>>({});
   const readyManifestsRef = useRef(readyManifests);
   readyManifestsRef.current = readyManifests;
   const manifestRequestsRef = useRef(new Map<string, Promise<TorrentDownloadManifestPageV2 | null>>());
 
-  useEffect(() => () => controllerRef.current?.cancel(), []);
+  useEffect(() => () => managerRef.current?.dispose(), []);
 
   useEffect(() => {
-    onLocalTransferChanged?.(summarizeLocalTransfer(transfer));
-  }, [onLocalTransferChanged, transfer]);
+    onLocalTransferChanged?.(summarizeDownloadManager(managerSnapshot));
+  }, [managerSnapshot, onLocalTransferChanged]);
+
+  const refreshDownloadPolicy = useCallback(() => {
+    const controller = new AbortController();
+    void loadBrowserDownloadPolicy(controller.signal)
+      .then((policy) => managerRef.current?.setMaxConcurrentStreams(policy.max_concurrent_streams))
+      .catch((caught: unknown) => {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        if (caught instanceof DownloadPolicyRequestError && caught.status === 401) onSessionExpired();
+      });
+  }, [onSessionExpired]);
 
   const load = useCallback(async (requestedOffset: number, signal?: AbortSignal) => {
     const generation = ++loadGenerationRef.current;
@@ -600,7 +672,6 @@ export function UserDownloadsPage({
         runRefresh();
       });
     };
-
     const refreshFromEvent = () => {
       if (!active) return;
       if (refreshPending) {
@@ -609,7 +680,6 @@ export function UserDownloadsPage({
       }
       runRefresh();
     };
-
     const refreshOpenManifest = (torrentId: string) => {
       const current = readyManifestsRef.current[torrentId];
       if (!active || current?.snapshot === null || current === undefined) return;
@@ -628,7 +698,6 @@ export function UserDownloadsPage({
         refreshOpenManifest(torrentId);
       });
     };
-
     const connect = () => {
       if (!active || typeof WebSocket === "undefined") return;
       socket = api.openTorrentEventsV2();
@@ -640,9 +709,7 @@ export function UserDownloadsPage({
         const message = parseTorrentRealtimeMessage(event.data);
         if (message === null || message.type === "heartbeat") return;
         refreshFromEvent();
-        if (message.type === "torrent.retention_extended") {
-          refreshOpenManifest(message.request_id);
-        }
+        if (message.type === "torrent.retention_extended") refreshOpenManifest(message.request_id);
       };
       socket.onerror = () => socket?.close();
       socket.onclose = () => {
@@ -666,10 +733,7 @@ export function UserDownloadsPage({
     const files = Array.from(fileList);
     if (files.length === 0) return;
     if (files.length > MAX_TORRENT_BATCH_FILES) {
-      feedback.toast({
-        tone: "error",
-        message: t("downloads.batchTooLarge", { count: MAX_TORRENT_BATCH_FILES }),
-      });
+      feedback.toast({ tone: "error", message: t("downloads.batchTooLarge", { count: MAX_TORRENT_BATCH_FILES }) });
       if (inputRef.current !== null) inputRef.current.value = "";
       return;
     }
@@ -732,20 +796,16 @@ export function UserDownloadsPage({
           }
           updateResult(
             resultIndex,
-            caught instanceof ApiError && (caught.status === 413 || caught.status === 422)
-                ? "invalid"
-                : "failed",
+            caught instanceof ApiError && (caught.status === 413 || caught.status === 422) ? "invalid" : "failed",
           );
         }
       }
     };
 
-    await Promise.all(
-      Array.from(
-        { length: Math.min(TORRENT_UPLOAD_CONCURRENCY, queuedIndexes.length) },
-        () => worker(),
-      ),
-    );
+    await Promise.all(Array.from(
+      { length: Math.min(TORRENT_UPLOAD_CONCURRENCY, queuedIndexes.length) },
+      () => worker(),
+    ));
     setUploading(false);
     setUploadBatch((current) => current === null ? null : { ...current, active: 0, done: true });
 
@@ -776,58 +836,60 @@ export function UserDownloadsPage({
     void submitBatch(event.target.files ?? []);
   }
 
-  async function startRecursiveDownload(
-    torrent: TorrentRequestV2,
-    snapshot: TorrentDownloadManifestPageV2,
-  ) {
+  async function startRecursiveDownload(torrent: TorrentRequestV2, snapshot: TorrentDownloadManifestPageV2) {
     if (!supportsRecursiveDirectoryDownload() || snapshot.offset !== 0) return;
     try {
       const directory = await pickDownloadDirectory();
-      const update = (progress: RecursiveTransferProgress) => {
-        setTransfer({
-          ...progress,
-          torrentId: torrent.id,
-          name: torrent.name,
-          totalBytes: snapshot.total_size,
-          fileCount: snapshot.file_count,
-        });
-        if (progress.status === "completed") {
-          feedback.toast({ tone: "success", message: t("downloads.completed", { name: torrent.name }) });
-        } else if (progress.status === "error") {
-          feedback.toast({
-            tone: "error",
-            message: progress.error === null ? t("downloads.failed") : t(transferErrorKeys[progress.error]),
-          });
-        }
-      };
-      const controller = new RecursiveDownloadController({
-        torrentRequestId: torrent.id,
-        firstPage: snapshot,
+      managerRef.current?.enqueueFolder({
+        torrentId: torrent.id,
+        name: torrent.name,
+        snapshot,
         directory,
-        loadManifestPage: (requestedOffset, snapshotId, signal) =>
-          api.getTorrentDownloadManifestPageV2(
-            torrent.id,
-            requestedOffset,
-            snapshotId,
-            signal,
-            snapshot.limit,
-          ),
-        onProgress: update,
+        loadManifestPage: (requestedOffset, snapshotId, signal) => api.getTorrentDownloadManifestPageV2(
+          torrent.id,
+          requestedOffset,
+          snapshotId,
+          signal,
+          snapshot.limit,
+        ),
       });
-      controllerRef.current = controller;
-      await controller.start();
+      refreshDownloadPolicy();
     } catch (caught) {
-      if (caught instanceof DOMException && caught.name === "AbortError") {
-        return;
-      }
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      feedback.toast({
-        tone: "error",
-        message: apiError(caught, "downloads.failed"),
+      feedback.toast({ tone: "error", message: apiError(caught, "downloads.failed") });
+    }
+  }
+
+  async function startManagedFileDownload(
+    torrent: TorrentRequestV2,
+    snapshot: TorrentDownloadManifestPageV2,
+    file: TorrentDownloadFileV2,
+  ) {
+    if (!supportsManagedFileDownload()) {
+      const link = document.createElement("a");
+      link.href = api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id);
+      link.download = file.relative_path.split("/").at(-1) ?? file.relative_path;
+      link.click();
+      return;
+    }
+    try {
+      const name = file.relative_path.split("/").at(-1) ?? file.relative_path;
+      const target = await pickManagedDownloadFile(name);
+      managerRef.current?.enqueueFile({
+        torrentId: torrent.id,
+        name,
+        snapshot,
+        file,
+        target,
       });
+      refreshDownloadPolicy();
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      feedback.toast({ tone: "error", message: apiError(caught, "downloads.failed") });
     }
   }
 
@@ -835,21 +897,8 @@ export function UserDownloadsPage({
     const existing = readyManifestsRef.current[torrent.id];
     const snapshot = existing?.firstPage ?? await loadReadyManifest(torrent.id);
     if (directSingleFile && snapshot?.file_count === 1 && snapshot.items.length === 1) {
-      const file = snapshot.items[0];
-      const link = document.createElement("a");
-      link.href = api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id);
-      link.download = file.relative_path.split("/").at(-1) ?? file.relative_path;
-      link.click();
+      await startManagedFileDownload(torrent, snapshot, snapshot.items[0]);
     }
-  }
-
-  function cancelTransfer() {
-    controllerRef.current?.cancel();
-  }
-
-  function closeTransfer() {
-    controllerRef.current = null;
-    setTransfer(null);
   }
 
   async function cancelTorrentRequest(torrent: TorrentRequestV2) {
@@ -857,10 +906,7 @@ export function UserDownloadsPage({
     setCancellingId(torrent.id);
     try {
       await api.cancelTorrentRequestV2(torrent.id);
-      feedback.toast({
-        tone: "success",
-        message: t("downloads.cancelledNamed", { name: torrent.name }),
-      });
+      feedback.toast({ tone: "success", message: t("downloads.cancelledNamed", { name: torrent.name }) });
       setReadyManifests((states) => {
         const next = { ...states };
         delete next[torrent.id];
@@ -872,10 +918,7 @@ export function UserDownloadsPage({
         onSessionExpired();
         return;
       }
-      feedback.toast({
-        tone: "error",
-        message: apiError(caught, "downloads.cancelFailed"),
-      });
+      feedback.toast({ tone: "error", message: apiError(caught, "downloads.cancelFailed") });
     } finally {
       setCancellingId(null);
     }
@@ -883,9 +926,7 @@ export function UserDownloadsPage({
 
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const queueTotal = torrents.find(
-    (torrent) => torrent.queue_total_estimate !== null,
-  )?.queue_total_estimate ?? null;
+  const queueTotal = torrents.find((torrent) => torrent.queue_total_estimate !== null)?.queue_total_estimate ?? null;
 
   return (
     <section className="user-downloads" aria-labelledby="user-downloads-title">
@@ -900,12 +941,7 @@ export function UserDownloadsPage({
             <DownloadIcon />
             <span>{uploading ? t("downloads.adding") : t("downloads.upload")}</span>
           </button>
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={refreshing}
-            onClick={() => void load(offset)}
-          >
+          <button type="button" className="secondary-button" disabled={refreshing} onClick={() => void load(offset)}>
             <RefreshIcon className={refreshing ? "rotating" : undefined} />
             <span>{refreshing ? t("downloads.refreshing") : t("common.refresh")}</span>
           </button>
@@ -935,12 +971,7 @@ export function UserDownloadsPage({
         <DownloadIcon />
         <strong>{t("downloads.dropTitle")}</strong>
         <span>{t("downloads.dropHint")}</span>
-        <button
-          type="button"
-          className="secondary-button compact-button"
-          disabled={uploading}
-          onClick={() => inputRef.current?.click()}
-        >
+        <button type="button" className="secondary-button compact-button" disabled={uploading} onClick={() => inputRef.current?.click()}>
           {t("downloads.upload")}
         </button>
       </div>
@@ -974,22 +1005,28 @@ export function UserDownloadsPage({
             {uploadBatch.results.map((result, index) => (
               <li key={`${result.name}-${result.file.lastModified}-${index}`}>
                 <span title={result.name}>{result.name}</span>
-                <strong className={`batch-result ${result.status}`}>
-                  {t(uploadStatusLabels[result.status])}
-                </strong>
+                <strong className={`batch-result ${result.status}`}>{t(uploadStatusLabels[result.status])}</strong>
               </li>
             ))}
           </ul>
         </section>
       )}
 
+      {managerSnapshot.jobs.length > 0 && (
+        <aside className="torrent-queue-summary local-download-manager-summary" aria-live="polite">
+          <QueueIcon />
+          <div>
+            <strong>{t("downloads.localActive", { active: managerSnapshot.activeStreams, maximum: managerSnapshot.maxConcurrentStreams })}</strong>
+            <span>{t("downloads.localWaitingCount", { waiting: managerSnapshot.waitingJobs })}</span>
+          </div>
+        </aside>
+      )}
+
       {pageError !== "" && (
         <StateMessage tone="error" className="browser-state torrent-page-error">
           <strong>{t("downloads.trackingUnavailable")}</strong>
           <p>{pageError}</p>
-          <Button type="button" onClick={() => void load(offset)}>
-            {t("common.retry")}
-          </Button>
+          <Button type="button" onClick={() => void load(offset)}>{t("common.retry")}</Button>
         </StateMessage>
       )}
 
@@ -1011,17 +1048,13 @@ export function UserDownloadsPage({
           <ul className="torrent-accordion-list" aria-label={t("downloads.requests")} aria-busy={refreshing}>
             {torrents.map((torrent) => {
               const manifest = readyManifests[torrent.id];
-              const localTransfer = transfer?.torrentId === torrent.id ? transfer : null;
-              const completeTransferBusy = transfer !== null
-                && (transfer.status === "running" || transfer.status === "paused" || transfer.status === "error");
+              const transfers = managerSnapshot.jobs.filter((job) => job.torrentId === torrent.id);
               return (
                 <TorrentItem
                   key={torrent.id}
                   torrent={torrent}
                   onRefresh={() => void load(offset)}
-                  onOpen={torrent.state === "ready" && manifest === undefined
-                    ? () => void openReadyTorrent(torrent)
-                    : undefined}
+                  onOpen={torrent.state === "ready" && manifest === undefined ? () => void openReadyTorrent(torrent) : undefined}
                   onDownload={() => void openReadyTorrent(torrent, true)}
                   onCancel={() => void cancelTorrentRequest(torrent)}
                   cancelBusy={cancellingId === torrent.id}
@@ -1030,8 +1063,8 @@ export function UserDownloadsPage({
                     <ReadyTorrentContent
                       torrent={torrent}
                       manifest={manifest}
-                      transfer={localTransfer}
-                      completeTransferBusy={completeTransferBusy}
+                      transfers={transfers}
+                      maximum={managerSnapshot.maxConcurrentStreams}
                       onLoadPage={(requestedOffset) => void loadReadyManifest(
                         torrent.id,
                         requestedOffset,
@@ -1044,14 +1077,13 @@ export function UserDownloadsPage({
                       )}
                       onDownloadAll={() => {
                         const firstPage = readyManifestsRef.current[torrent.id]?.firstPage;
-                        if (firstPage !== null && firstPage !== undefined && !completeTransferBusy) {
-                          void startRecursiveDownload(torrent, firstPage);
-                        }
+                        if (firstPage !== null && firstPage !== undefined) void startRecursiveDownload(torrent, firstPage);
                       }}
-                      onPauseTransfer={() => controllerRef.current?.pause()}
-                      onResumeTransfer={() => void controllerRef.current?.resume()}
-                      onCancelTransfer={cancelTransfer}
-                      onCloseTransfer={closeTransfer}
+                      onDownloadFile={(file, snapshot) => void startManagedFileDownload(torrent, snapshot, file)}
+                      onPauseTransfer={(jobId) => managerRef.current?.pause(jobId)}
+                      onResumeTransfer={(jobId) => managerRef.current?.resume(jobId)}
+                      onCancelTransfer={(jobId) => managerRef.current?.cancel(jobId)}
+                      onCloseTransfer={(jobId) => managerRef.current?.remove(jobId)}
                     />
                   ) : undefined}
                 />
