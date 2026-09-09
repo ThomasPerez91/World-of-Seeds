@@ -1,4 +1,12 @@
-import { type ChangeEvent, type DragEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type DragEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import {
   api,
@@ -75,6 +83,21 @@ interface UploadBatchState {
   total: number;
 }
 
+interface ReadyManifestState {
+  error: string;
+  firstPage: TorrentDownloadManifestPageV2 | null;
+  loading: boolean;
+  requestedOffset: number;
+  snapshot: TorrentDownloadManifestPageV2 | null;
+}
+
+type LocalTransferState = RecursiveTransferProgress & {
+  fileCount: number;
+  name: string;
+  torrentId: string;
+  totalBytes: number;
+};
+
 const stateLabels: Record<TorrentRequestV2State, MessageKey> = {
   requested: "downloads.requested",
   active: "downloads.active",
@@ -150,6 +173,187 @@ function LocalQueueLabel({ item }: { item: LocalTransferQueueItem }) {
   }[item.status] as MessageKey);
 }
 
+function LocalTransferPanel({
+  transfer,
+  onCancel,
+  onClose,
+  onPause,
+  onResume,
+}: {
+  transfer: LocalTransferState;
+  onCancel: () => void;
+  onClose: () => void;
+  onPause: () => void;
+  onResume: () => void;
+}) {
+  const { formatBytes, t } = useI18n();
+  const summary = summarizeLocalTransfer(transfer);
+  const error = transfer.error === null ? null : t(transferErrorKeys[transfer.error]);
+  return (
+    <section className={`recursive-transfer ${transfer.status}`} aria-label={t("downloads.localNamed", { name: transfer.name })}>
+      <div className="local-transfer-heading">
+        <strong title={transfer.name}>{t("downloads.localRecovery")}</strong>
+        <span>
+          {t("downloads.files", { completed: transfer.completedFiles, total: transfer.fileCount, downloaded: formatBytes(transfer.downloadedBytes), size: formatBytes(transfer.totalBytes) })}
+        </span>
+      </div>
+      <Progress
+        value={transfer.totalBytes === 0 ? 0 : (transfer.downloadedBytes / transfer.totalBytes) * 100}
+        label={t("downloads.localNamed", { name: transfer.name })}
+      />
+      <div className="local-transfer-metrics">
+        <span>{t("downloads.localActive", { active: summary.active, maximum: summary.maximum })}</span>
+        <span>{t("downloads.localWaitingCount", { waiting: summary.waiting })}</span>
+        <Badge tone={transfer.status === "error" ? "danger" : transfer.status === "completed" ? "success" : "neutral"}>
+          {t(`downloads.localStatus.${transfer.status}` as MessageKey)}
+        </Badge>
+      </div>
+      {error !== null && <p className="local-transfer-error" role="alert">{error}</p>}
+      <p className="local-transfer-volatility">{t("downloads.localQueueVolatility")}</p>
+      {transfer.queue.length > 0 && (
+        <ul className="local-transfer-queue" aria-label={t("downloads.localQueue")}>
+          {transfer.queue.map((item) => (
+            <li key={`${item.id}-${item.status}`} className={item.status}>
+              <span title={item.relativePath}>{item.relativePath}</span>
+              <strong><LocalQueueLabel item={item} /></strong>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="recursive-transfer-actions">
+        {transfer.status === "running" && (
+          <Button variant="secondary" onClick={onPause}>{t("downloads.pauseRecovery")}</Button>
+        )}
+        {(transfer.status === "paused" || transfer.status === "error") && (
+          <Button onClick={onResume}>{t("downloads.resumeRecovery")}</Button>
+        )}
+        {transfer.status === "completed" || transfer.status === "cancelled" ? (
+          <Button variant="secondary" onClick={onClose}>{t("common.close")}</Button>
+        ) : (
+          <Button variant="secondary" onClick={onCancel}>{t("downloads.cancelRecovery")}</Button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ReadyTorrentContent({
+  manifest,
+  transfer,
+  completeTransferBusy,
+  onCancelTransfer,
+  onCloseTransfer,
+  onDownloadAll,
+  onLoadPage,
+  onPauseTransfer,
+  onResumeTransfer,
+  onRetry,
+  torrent,
+}: {
+  manifest: ReadyManifestState | undefined;
+  transfer: LocalTransferState | null;
+  completeTransferBusy: boolean;
+  onCancelTransfer: () => void;
+  onCloseTransfer: () => void;
+  onDownloadAll: () => void;
+  onLoadPage: (offset: number) => void;
+  onPauseTransfer: () => void;
+  onResumeTransfer: () => void;
+  onRetry: () => void;
+  torrent: TorrentRequestV2;
+}) {
+  const { formatBytes, t } = useI18n();
+  const snapshot = manifest?.snapshot ?? null;
+  const compatible = !supportsRecursiveDirectoryDownload();
+  return (
+    <section className="ready-content" aria-label={t("downloads.contentNamed", { name: torrent.name })}>
+      {transfer !== null && (
+        <LocalTransferPanel
+          transfer={transfer}
+          onCancel={onCancelTransfer}
+          onClose={onCloseTransfer}
+          onPause={onPauseTransfer}
+          onResume={onResumeTransfer}
+        />
+      )}
+      {manifest === undefined || (manifest.loading && snapshot === null) ? (
+        <StateMessage tone="loading">{t("downloads.manifestLoading")}</StateMessage>
+      ) : manifest.error !== "" && snapshot === null ? (
+        <StateMessage tone="error">
+          <span>{manifest.error}</span>
+          <Button variant="secondary" onClick={onRetry}>{t("common.retry")}</Button>
+        </StateMessage>
+      ) : snapshot !== null ? (
+        <>
+          <header className="ready-content-heading">
+            <div>
+              <h3>{t("downloads.content")}</h3>
+              <span>{t(snapshot.file_count === 1 ? "downloads.contentSummaryOne" : "downloads.contentSummaryMany", { count: snapshot.file_count, size: formatBytes(snapshot.total_size) })}</span>
+            </div>
+            {snapshot.file_count > 1 && !compatible && (
+              <Button disabled={completeTransferBusy} onClick={onDownloadAll}>
+                <DownloadIcon /> {t("downloads.downloadAll")}
+              </Button>
+            )}
+            {snapshot.file_count > 1 && compatible && snapshot.archive_available && (
+              <a
+                className="download-fallback-archive"
+                href={api.torrentArchiveDownloadUrlV2(torrent.id, snapshot.snapshot_id)}
+                download={`${torrent.name}.zip`}
+              >
+                <DownloadIcon /> {t("downloads.archive")}
+              </a>
+            )}
+          </header>
+          {compatible && snapshot.file_count > 1 && (
+            <p className="ready-compatibility-note">{t("downloads.compatHint")}</p>
+          )}
+          {manifest.error !== "" && (
+            <StateMessage tone="error" className="ready-manifest-error">
+              <span>{manifest.error}</span>
+              <Button variant="secondary" onClick={onRetry}>{t("common.retry")}</Button>
+            </StateMessage>
+          )}
+          <ul className="ready-file-list">
+            {snapshot.items.map((file) => (
+              <li key={file.id}>
+                <span title={file.relative_path}>{file.relative_path}</span>
+                <span>{formatBytes(file.size)}</span>
+                <a
+                  href={api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id)}
+                  download={file.relative_path.split("/").at(-1)}
+                  aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
+                >
+                  {t("common.download")}
+                </a>
+              </li>
+            ))}
+          </ul>
+          {snapshot.file_count > FALLBACK_PAGE_SIZE && (
+            <nav className="ready-manifest-pagination" aria-label={t("downloads.compatPagination")}>
+              <Button
+                variant="secondary"
+                disabled={manifest.loading || snapshot.offset === 0}
+                onClick={() => onLoadPage(Math.max(0, snapshot.offset - FALLBACK_PAGE_SIZE))}
+              >
+                {t("common.previous")}
+              </Button>
+              <span>{Math.floor(snapshot.offset / FALLBACK_PAGE_SIZE) + 1} / {Math.ceil(snapshot.file_count / FALLBACK_PAGE_SIZE)}</span>
+              <Button
+                variant="secondary"
+                disabled={manifest.loading || snapshot.offset + snapshot.items.length >= snapshot.file_count}
+                onClick={() => onLoadPage(snapshot.offset + snapshot.items.length)}
+              >
+                {t("common.next")}
+              </Button>
+            </nav>
+          )}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 function TorrentItem({
   torrent,
   onRefresh,
@@ -157,6 +361,8 @@ function TorrentItem({
   onCancel,
   cancelBusy,
   downloadBusy,
+  details,
+  onOpen,
 }: {
   torrent: TorrentRequestV2;
   onRefresh: () => void;
@@ -164,8 +370,11 @@ function TorrentItem({
   onCancel: () => void;
   cancelBusy: boolean;
   downloadBusy: boolean;
+  details?: ReactNode;
+  onOpen?: () => void;
 }) {
   const { formatBytes, formatDate, t } = useI18n();
+  const detailsRef = useRef<HTMLDetailsElement>(null);
   const percent = Math.round(torrent.progress * 100);
   const error = torrent.error_code === null
     ? null
@@ -174,9 +383,10 @@ function TorrentItem({
     <li className="torrent-accordion-item">
       <article className="torrent-accordion-card" aria-label={torrent.name}>
         <Accordion
+          ref={detailsRef}
           className="torrent-accordion"
           summaryClassName="torrent-accordion-toggle"
-          summaryLabel={t("downloads.detailsNamed", { name: torrent.name })}
+          onToggle={(event) => { if (event.currentTarget.open) onOpen?.(); }}
           title={(
             <span className="torrent-accordion-summary">
               <span className="torrent-summary-heading">
@@ -209,13 +419,17 @@ function TorrentItem({
             <div><dt>{t("downloads.updated")}</dt><dd>{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
           </dl>
           {error !== null && <p className="torrent-detail-error" role="alert">{error}</p>}
+          {details}
         </Accordion>
         {torrent.state === "ready" && (
           <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />
         )}
         <div className="torrent-card-actions">
           {torrent.state === "ready" ? (
-            <Button type="button" disabled={downloadBusy} onClick={onDownload}>
+            <Button type="button" disabled={downloadBusy} onClick={() => {
+              if (detailsRef.current !== null) detailsRef.current.open = true;
+              onDownload();
+            }}>
               <DownloadIcon />
               <span>{t("common.download")}</span>
             </Button>
@@ -231,10 +445,10 @@ function TorrentItem({
               variant="danger"
               disabled={cancelBusy}
               onClick={onCancel}
-              aria-label={t("downloads.cancelNamed", { name: torrent.name })}
+              aria-label={t(torrent.state === "ready" ? "downloads.deleteNamed" : "downloads.cancelNamed", { name: torrent.name })}
             >
               <DeleteIcon />
-              <span>{cancelBusy ? t("downloads.cancelling") : t("common.cancel")}</span>
+              <span>{cancelBusy ? t("downloads.cancelling") : t(torrent.state === "ready" ? "common.delete" : "common.cancel")}</span>
             </Button>
           )}
         </div>
@@ -249,7 +463,7 @@ export function UserDownloadsPage({
   onSessionExpired,
 }: UserDownloadsPageProps) {
   const feedback = useFeedback();
-  const { apiError, formatBytes, t } = useI18n();
+  const { apiError, t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const [torrents, setTorrents] = useState<TorrentRequestV2[]>([]);
   const [total, setTotal] = useState(0);
@@ -263,21 +477,11 @@ export function UserDownloadsPage({
   const [pageError, setPageError] = useState("");
   const loadGenerationRef = useRef(0);
   const controllerRef = useRef<RecursiveDownloadController | null>(null);
-  const [transfer, setTransfer] = useState<(
-    RecursiveTransferProgress & {
-      name: string;
-      totalBytes: number;
-      fileCount: number;
-    }
-  ) | null>(null);
-  const [fallback, setFallback] = useState<{
-    torrentId: string;
-    name: string;
-    snapshot: TorrentDownloadManifestPageV2;
-  } | null>(null);
-  const fallbackRef = useRef(fallback);
-  fallbackRef.current = fallback;
-  const [fallbackLoading, setFallbackLoading] = useState(false);
+  const [transfer, setTransfer] = useState<LocalTransferState | null>(null);
+  const [readyManifests, setReadyManifests] = useState<Record<string, ReadyManifestState>>({});
+  const readyManifestsRef = useRef(readyManifests);
+  readyManifestsRef.current = readyManifests;
+  const manifestRequestsRef = useRef(new Map<string, Promise<TorrentDownloadManifestPageV2 | null>>());
 
   useEffect(() => () => controllerRef.current?.cancel(), []);
 
@@ -311,6 +515,70 @@ export function UserDownloadsPage({
     }
   }, [apiError, onActivityChanged, onSessionExpired]);
 
+  const loadReadyManifest = useCallback((
+    torrentId: string,
+    requestedOffset = 0,
+    requestedSnapshot: string | null = null,
+  ): Promise<TorrentDownloadManifestPageV2 | null> => {
+    const current = readyManifestsRef.current[torrentId];
+    const snapshotId = requestedOffset === 0
+      ? null
+      : requestedSnapshot ?? current?.firstPage?.snapshot_id ?? current?.snapshot?.snapshot_id ?? null;
+    const key = `${torrentId}:${requestedOffset}:${snapshotId ?? "fresh"}`;
+    const pending = manifestRequestsRef.current.get(key);
+    if (pending !== undefined) return pending;
+    setReadyManifests((states) => ({
+      ...states,
+      [torrentId]: {
+        error: "",
+        firstPage: states[torrentId]?.firstPage ?? null,
+        loading: true,
+        requestedOffset,
+        snapshot: states[torrentId]?.snapshot ?? null,
+      },
+    }));
+    const request = api.getTorrentDownloadManifestPageV2(
+      torrentId,
+      requestedOffset,
+      snapshotId,
+      undefined,
+      FALLBACK_PAGE_SIZE,
+    ).then((page) => {
+      if (page.offset !== requestedOffset || (snapshotId !== null && page.snapshot_id !== snapshotId)) {
+        throw new Error("manifest_changed");
+      }
+      setReadyManifests((states) => ({
+        ...states,
+        [torrentId]: {
+          error: "",
+          firstPage: requestedOffset === 0 ? page : states[torrentId]?.firstPage ?? null,
+          loading: false,
+          requestedOffset,
+          snapshot: page,
+        },
+      }));
+      return page;
+    }).catch((caught: unknown) => {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return null;
+      }
+      setReadyManifests((states) => ({
+        ...states,
+        [torrentId]: {
+          error: apiError(caught, "downloads.manifestFailed"),
+          firstPage: states[torrentId]?.firstPage ?? null,
+          loading: false,
+          requestedOffset,
+          snapshot: states[torrentId]?.snapshot ?? null,
+        },
+      }));
+      return null;
+    }).finally(() => manifestRequestsRef.current.delete(key));
+    manifestRequestsRef.current.set(key, request);
+    return request;
+  }, [apiError, onSessionExpired]);
+
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
@@ -319,8 +587,8 @@ export function UserDownloadsPage({
     let hasConnected = false;
     let refreshPending = false;
     let refreshQueued = false;
-    let fallbackRefreshPending = false;
-    let fallbackRefreshQueued = false;
+    const manifestRefreshPending = new Set<string>();
+    const manifestRefreshQueued = new Set<string>();
 
     const runRefresh = (signal?: AbortSignal) => {
       if (!active) return;
@@ -342,37 +610,22 @@ export function UserDownloadsPage({
       runRefresh();
     };
 
-    const refreshOpenFallback = () => {
-      const current = fallbackRef.current;
-      if (!active || current === null) return;
-      if (fallbackRefreshPending) {
-        fallbackRefreshQueued = true;
+    const refreshOpenManifest = (torrentId: string) => {
+      const current = readyManifestsRef.current[torrentId];
+      if (!active || current?.snapshot === null || current === undefined) return;
+      if (manifestRefreshPending.has(torrentId)) {
+        manifestRefreshQueued.add(torrentId);
         return;
       }
-      fallbackRefreshPending = true;
-      const targetId = current.torrentId;
-      void api.getTorrentDownloadManifestPageV2(
-        targetId,
+      manifestRefreshPending.add(torrentId);
+      void loadReadyManifest(
+        torrentId,
         current.snapshot.offset,
-        current.snapshot.snapshot_id,
-        undefined,
-        FALLBACK_PAGE_SIZE,
-      ).then((snapshot) => {
-        if (!active) return;
-        setFallback((latest) => latest?.torrentId === targetId ? { ...latest, snapshot } : latest);
-      }).catch((caught: unknown) => {
-        if (!active) return;
-        setFallback((latest) => latest?.torrentId === targetId ? null : latest);
-        if (caught instanceof ApiError && caught.status === 401) {
-          onSessionExpired();
-          return;
-        }
-        feedback.toast({ tone: "error", message: apiError(caught, "downloads.manifestFailed") });
-      }).finally(() => {
-        fallbackRefreshPending = false;
-        if (!fallbackRefreshQueued) return;
-        fallbackRefreshQueued = false;
-        refreshOpenFallback();
+        current.firstPage?.snapshot_id ?? current.snapshot.snapshot_id,
+      ).finally(() => {
+        manifestRefreshPending.delete(torrentId);
+        if (!manifestRefreshQueued.delete(torrentId)) return;
+        refreshOpenManifest(torrentId);
       });
     };
 
@@ -387,10 +640,9 @@ export function UserDownloadsPage({
         const message = parseTorrentRealtimeMessage(event.data);
         if (message === null || message.type === "heartbeat") return;
         refreshFromEvent();
-        if (
-          message.type === "torrent.retention_extended"
-          && fallbackRef.current?.torrentId === message.request_id
-        ) refreshOpenFallback();
+        if (message.type === "torrent.retention_extended") {
+          refreshOpenManifest(message.request_id);
+        }
       };
       socket.onerror = () => socket?.close();
       socket.onclose = () => {
@@ -407,7 +659,7 @@ export function UserDownloadsPage({
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, [apiError, feedback, load, offset, onSessionExpired]);
+  }, [load, loadReadyManifest, offset]);
 
   async function submitBatch(fileList: FileList | File[]) {
     if (uploading) return;
@@ -524,36 +776,17 @@ export function UserDownloadsPage({
     void submitBatch(event.target.files ?? []);
   }
 
-  async function startRecursiveDownload(torrent: TorrentRequestV2) {
-    if (!supportsRecursiveDirectoryDownload()) {
-      try {
-        const snapshot = await api.getTorrentDownloadManifestPageV2(
-          torrent.id, 0, null, undefined, FALLBACK_PAGE_SIZE,
-        );
-        setFallback({ torrentId: torrent.id, name: torrent.name, snapshot });
-        feedback.toast({
-          tone: "warning",
-          message: t("downloads.compatHint"),
-        });
-      } catch (caught) {
-        if (caught instanceof ApiError && caught.status === 401) {
-          onSessionExpired();
-          return;
-        }
-        feedback.toast({
-          tone: "error",
-          message: apiError(caught, "downloads.manifestFailed"),
-        });
-      }
-      return;
-    }
+  async function startRecursiveDownload(
+    torrent: TorrentRequestV2,
+    snapshot: TorrentDownloadManifestPageV2,
+  ) {
+    if (!supportsRecursiveDirectoryDownload() || snapshot.offset !== 0) return;
     try {
-      const snapshotPromise = api.getTorrentDownloadManifestPageV2(torrent.id);
-      const directoryPromise = pickDownloadDirectory();
-      const [snapshot, directory] = await Promise.all([snapshotPromise, directoryPromise]);
+      const directory = await pickDownloadDirectory();
       const update = (progress: RecursiveTransferProgress) => {
         setTransfer({
           ...progress,
+          torrentId: torrent.id,
           name: torrent.name,
           totalBytes: snapshot.total_size,
           fileCount: snapshot.file_count,
@@ -598,28 +831,25 @@ export function UserDownloadsPage({
     }
   }
 
-  async function loadFallbackPage(requestedOffset: number) {
-    if (fallback === null || fallbackLoading) return;
-    setFallbackLoading(true);
-    try {
-      const page = await api.getTorrentDownloadManifestPageV2(
-        fallback.torrentId,
-        requestedOffset,
-        fallback.snapshot.snapshot_id,
-        undefined,
-        FALLBACK_PAGE_SIZE,
-      );
-      setFallback((current) => current === null ? null : { ...current, snapshot: page });
-    } catch (caught) {
-      feedback.toast({ tone: "error", message: apiError(caught, "downloads.manifestFailed") });
-    } finally {
-      setFallbackLoading(false);
+  async function openReadyTorrent(torrent: TorrentRequestV2, directSingleFile = false) {
+    const existing = readyManifestsRef.current[torrent.id];
+    const snapshot = existing?.firstPage ?? await loadReadyManifest(torrent.id);
+    if (directSingleFile && snapshot?.file_count === 1 && snapshot.items.length === 1) {
+      const file = snapshot.items[0];
+      const link = document.createElement("a");
+      link.href = api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id);
+      link.download = file.relative_path.split("/").at(-1) ?? file.relative_path;
+      link.click();
     }
   }
 
   function cancelTransfer() {
     controllerRef.current?.cancel();
+  }
+
+  function closeTransfer() {
     controllerRef.current = null;
+    setTransfer(null);
   }
 
   async function cancelTorrentRequest(torrent: TorrentRequestV2) {
@@ -631,7 +861,11 @@ export function UserDownloadsPage({
         tone: "success",
         message: t("downloads.cancelledNamed", { name: torrent.name }),
       });
-      if (fallback?.torrentId === torrent.id) setFallback(null);
+      setReadyManifests((states) => {
+        const next = { ...states };
+        delete next[torrent.id];
+        return next;
+      });
       await load(offset);
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
@@ -759,118 +993,6 @@ export function UserDownloadsPage({
         </StateMessage>
       )}
 
-      {transfer !== null && (
-        <section className={`recursive-transfer ${transfer.status}`} aria-label={t("downloads.local")}>
-          <div>
-            <strong title={transfer.name}>{transfer.name}</strong>
-            <span aria-live="polite">
-              {t("downloads.files", { completed: transfer.completedFiles, total: transfer.fileCount, downloaded: formatBytes(transfer.downloadedBytes), size: formatBytes(transfer.totalBytes) })}
-            </span>
-          </div>
-          <progress
-            value={transfer.downloadedBytes}
-            max={Math.max(1, transfer.totalBytes)}
-            aria-label={t("downloads.localNamed", { name: transfer.name })}
-          />
-          <p className="local-transfer-volatility">{t("downloads.localQueueVolatility")}</p>
-          {transfer.queue.length > 0 && (
-            <ul className="local-transfer-queue" aria-label={t("downloads.localQueue")}>
-              {transfer.queue.map((item) => (
-                <li key={`${item.id}-${item.status}`} className={item.status}>
-                  <span title={item.relativePath}>{item.relativePath}</span>
-                  <strong><LocalQueueLabel item={item} /></strong>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="recursive-transfer-actions">
-            {transfer.status === "running" && (
-              <button type="button" className="secondary-button" onClick={() => controllerRef.current?.pause()}>
-                {t("common.pause")}
-              </button>
-            )}
-            {(transfer.status === "paused" || transfer.status === "error") && (
-              <button type="button" onClick={() => void controllerRef.current?.resume()}>
-                {t("common.resume")}
-              </button>
-            )}
-            {transfer.status === "completed" || transfer.status === "cancelled" ? (
-              <button type="button" className="secondary-button" onClick={() => setTransfer(null)}>
-                {t("common.close")}
-              </button>
-            ) : (
-              <button type="button" className="danger-button" onClick={cancelTransfer}>
-                {t("common.cancel")}
-              </button>
-            )}
-          </div>
-        </section>
-      )}
-
-      {fallback !== null && (
-        <section className="download-fallback" aria-labelledby="download-fallback-title">
-          <header>
-            <div>
-              <strong id="download-fallback-title" title={fallback.name}>{fallback.name}</strong>
-              <span>{t("downloads.files", { completed: 0, total: fallback.snapshot.file_count, downloaded: formatBytes(0), size: formatBytes(fallback.snapshot.total_size) })}</span>
-            </div>
-            <button type="button" className="secondary-button" onClick={() => setFallback(null)}>
-              {t("common.close")}
-            </button>
-          </header>
-          <RetentionWarning retentionExpiresAt={fallback.snapshot.retention_expires_at} />
-          {fallback.snapshot.archive_available && (
-            <a
-              className="download-fallback-archive"
-              href={api.torrentArchiveDownloadUrlV2(fallback.torrentId, fallback.snapshot.snapshot_id)}
-              download={`${fallback.name}.zip`}
-            >
-              <DownloadIcon />
-              {t("downloads.archive")}
-            </a>
-          )}
-          <ul>
-            {fallback.snapshot.items.map((file) => (
-                <li key={file.id}>
-                  <span title={file.relative_path}>{file.relative_path}</span>
-                  <span>{formatBytes(file.size)}</span>
-                  <a
-                    href={api.torrentFileDownloadUrlV2(
-                      fallback.torrentId,
-                      file.id,
-                      fallback.snapshot.snapshot_id,
-                    )}
-                    download={file.relative_path.split("/").at(-1)}
-                  >
-                    {t("common.download")}
-                  </a>
-                </li>
-              ))}
-          </ul>
-          {fallback.snapshot.file_count > FALLBACK_PAGE_SIZE && (
-            <nav aria-label={t("downloads.compatPagination")}>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={fallbackLoading || fallback.snapshot.offset === 0}
-                onClick={() => void loadFallbackPage(Math.max(0, fallback.snapshot.offset - FALLBACK_PAGE_SIZE))}
-              >
-                {t("common.previous")}
-              </button>
-              <span>{Math.floor(fallback.snapshot.offset / FALLBACK_PAGE_SIZE) + 1} / {Math.ceil(fallback.snapshot.file_count / FALLBACK_PAGE_SIZE)}</span>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={fallbackLoading || fallback.snapshot.offset + fallback.snapshot.items.length >= fallback.snapshot.file_count}
-                onClick={() => void loadFallbackPage(fallback.snapshot.offset + fallback.snapshot.items.length)}
-              >
-                {t("common.next")}
-              </button>
-            </nav>
-          )}
-        </section>
-      )}
-
       {loading ? (
         <StateMessage tone="loading" className="torrent-list-state">{t("downloads.reading")}</StateMessage>
       ) : torrents.length === 0 ? (
@@ -887,17 +1009,54 @@ export function UserDownloadsPage({
             </aside>
           )}
           <ul className="torrent-accordion-list" aria-label={t("downloads.requests")} aria-busy={refreshing}>
-            {torrents.map((torrent) => (
-              <TorrentItem
-                key={torrent.id}
-                torrent={torrent}
-                onRefresh={() => void load(offset)}
-                onDownload={() => void startRecursiveDownload(torrent)}
-                onCancel={() => void cancelTorrentRequest(torrent)}
-                cancelBusy={cancellingId === torrent.id}
-                downloadBusy={transfer?.status === "running" || transfer?.status === "paused"}
-              />
-            ))}
+            {torrents.map((torrent) => {
+              const manifest = readyManifests[torrent.id];
+              const localTransfer = transfer?.torrentId === torrent.id ? transfer : null;
+              const completeTransferBusy = transfer !== null
+                && (transfer.status === "running" || transfer.status === "paused" || transfer.status === "error");
+              return (
+                <TorrentItem
+                  key={torrent.id}
+                  torrent={torrent}
+                  onRefresh={() => void load(offset)}
+                  onOpen={torrent.state === "ready" && manifest === undefined
+                    ? () => void openReadyTorrent(torrent)
+                    : undefined}
+                  onDownload={() => void openReadyTorrent(torrent, true)}
+                  onCancel={() => void cancelTorrentRequest(torrent)}
+                  cancelBusy={cancellingId === torrent.id}
+                  downloadBusy={torrent.state === "ready" && manifest?.loading === true && manifest.snapshot === null}
+                  details={torrent.state === "ready" ? (
+                    <ReadyTorrentContent
+                      torrent={torrent}
+                      manifest={manifest}
+                      transfer={localTransfer}
+                      completeTransferBusy={completeTransferBusy}
+                      onLoadPage={(requestedOffset) => void loadReadyManifest(
+                        torrent.id,
+                        requestedOffset,
+                        manifest?.firstPage?.snapshot_id ?? manifest?.snapshot?.snapshot_id ?? null,
+                      )}
+                      onRetry={() => void loadReadyManifest(
+                        torrent.id,
+                        manifest?.requestedOffset ?? 0,
+                        manifest?.firstPage?.snapshot_id ?? manifest?.snapshot?.snapshot_id ?? null,
+                      )}
+                      onDownloadAll={() => {
+                        const firstPage = readyManifestsRef.current[torrent.id]?.firstPage;
+                        if (firstPage !== null && firstPage !== undefined && !completeTransferBusy) {
+                          void startRecursiveDownload(torrent, firstPage);
+                        }
+                      }}
+                      onPauseTransfer={() => controllerRef.current?.pause()}
+                      onResumeTransfer={() => void controllerRef.current?.resume()}
+                      onCancelTransfer={cancelTransfer}
+                      onCloseTransfer={closeTransfer}
+                    />
+                  ) : undefined}
+                />
+              );
+            })}
           </ul>
           <nav className="torrent-pagination" aria-label={t("downloads.pagination")}>
             <button

@@ -5197,3 +5197,273 @@ select { min-height: 2.75rem; }
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+/* UX-04: READY content and local recovery live inside each torrent accordion. */
+.ready-content {
+  display: grid;
+  min-width: 0;
+  gap: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.ready-content-heading {
+  display: grid;
+  min-width: 0;
+  gap: 0.7rem;
+}
+
+.ready-content-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.ready-content-heading h3,
+.ready-content-heading span,
+.ready-compatibility-note,
+.local-transfer-error {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ready-content-heading h3 {
+  color: var(--color-text);
+  font-size: 0.82rem;
+}
+
+.ready-content-heading span,
+.ready-compatibility-note {
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.ready-content-heading > button,
+.ready-content-heading > a {
+  width: 100%;
+  min-height: 2.75rem;
+  justify-content: center;
+}
+
+.ready-file-list {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  list-style: none;
+}
+
+.ready-file-list li {
+  display: grid;
+  min-width: 0;
+  gap: 0.3rem;
+  padding: 0.7rem;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-background-secondary);
+  font-size: 0.7rem;
+}
+
+.ready-file-list li:first-child {
+  border-top: 0;
+}
+
+.ready-file-list li > span:first-child {
+  min-width: 0;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.ready-file-list li > span:nth-child(2) {
+  color: var(--color-text-muted);
+}
+
+.ready-file-list li > a {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.ready-manifest-pagination {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ready-manifest-pagination button {
+  width: 100%;
+  min-height: 2.75rem;
+}
+
+.ready-manifest-pagination > span {
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.ready-manifest-error {
+  margin: 0;
+}
+
+.recursive-transfer {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+}
+
+.local-transfer-heading {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.local-transfer-heading strong,
+.local-transfer-heading span {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.local-transfer-heading span,
+.local-transfer-volatility,
+.local-transfer-error {
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.local-transfer-metrics {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.7rem;
+  color: var(--color-text-subtle);
+  font-size: 0.68rem;
+}
+
+.local-transfer-error,
+.local-transfer-volatility {
+  grid-column: auto;
+}
+
+.local-transfer-error {
+  color: var(--color-danger);
+}
+
+.local-transfer-queue {
+  grid-column: auto;
+}
+
+.local-transfer-queue li {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 0.25rem;
+}
+
+.local-transfer-queue li > span {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.recursive-transfer-actions {
+  display: grid;
+  grid-column: auto;
+  grid-row: auto;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.recursive-transfer-actions button {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.7rem;
+}
+
+@media (min-width: 600px) {
+  .ready-content-heading {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .ready-content-heading > button,
+  .ready-content-heading > a {
+    width: auto;
+  }
+
+  .ready-file-list li {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .ready-file-list li > span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ready-file-list li > a {
+    min-width: 7.5rem;
+    padding-inline: 0.7rem;
+  }
+
+  .local-transfer-queue li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .local-transfer-queue li > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .recursive-transfer-actions {
+    grid-template-columns: repeat(2, minmax(0, max-content));
+    justify-content: end;
+  }
+
+  .recursive-transfer-actions button {
+    width: auto;
+  }
+}
+
+@media (min-width: 900px) {
+  .recursive-transfer {
+    grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem);
+    align-items: center;
+  }
+
+  .recursive-transfer progress,
+  .local-transfer-metrics,
+  .local-transfer-volatility,
+  .local-transfer-error,
+  .local-transfer-queue {
+    grid-column: 1 / -1;
+  }
+
+  .recursive-transfer-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}

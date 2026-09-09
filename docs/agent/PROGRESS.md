@@ -1,6 +1,6 @@
 # World of Seeds — Progress
 
-## Etat courant — 8 septembre 2026
+## Etat courant — 9 septembre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
@@ -153,7 +153,7 @@ Décisions validées :
 - **UX-01 — TERMINE** : design system, thèmes, préférence persistée, cartouche Préférences, login/settings/shell.
 - **UX-02 — TERMINE** : nouveau Dashboard et ses cartouches en composant les données/API existantes.
 - **UX-03 — TERMINE** : gestionnaire de torrents en accordéons avec les contrats actuels.
-- **UX-04 — A FAIRE** : expérience READY et récupération locale, sans nouvelle télémétrie backend.
+- **UX-04 — TERMINE** : expérience READY et récupération locale intégrées aux accordéons, sans nouvelle télémétrie backend.
 - **UX-05 — A FAIRE** : retrait de l'espace utilisateur Fichiers/Corbeille et nettoyage après audit de dépendances.
 - **UX-06 — A FAIRE** : harmonisation admin, responsive, accessibilité et nettoyage final.
 
@@ -221,10 +221,21 @@ UX-02 est terminé sur une branche dédiée : le Dashboard est l’accueil authe
 - Le layout est mobile-first, sans largeur minimale de table, avec noms longs bornés et contrôles tactiles de 44 px.
 - Validation locale : `npm run check`, `npm run test` (97 tests) et `npm run build` verts ; tests ciblés DOM/axe verts.
 - La tentative unique de validation visuelle locale a de nouveau été bloquée au démarrage de Vite par l’environnement (`uv_interface_addresses`). La revue responsive reste structurelle, sans prétendre à une mesure navigateur réelle.
-- UX-04 n’est pas commencé : l’expérience READY et la récupération locale ne sont pas recomposées au-delà de leur intégration existante.
+- UX-04 est terminé : l’expérience READY et la récupération locale sont désormais composées dans chaque accordéon concerné.
+
+## UX-04 — Expérience READY et récupération locale
+
+- Le manifeste READY est chargé à la demande, sans préchargement global, et reste isolé par torrent avec son chargement, ses erreurs, son retry, sa pagination bornée à 50 et son snapshot cohérent.
+- Un READY mono-fichier utilise un téléchargement natif serveur → navigateur avec lien durable visible ; les multi-fichiers exposent chemins, tailles, liens individuels et action Télécharger tout dans leur accordéon.
+- Le téléchargement complet réutilise `RecursiveDownloadController` avec la page zéro mise en cache, même lorsque l’utilisateur consulte une page ultérieure ; le mode incompatible conserve les liens individuels et le ZIP uniquement lorsqu’il est disponible.
+- La récupération locale est rattachée au bon torrent avec progression, actifs/max, attente, queue bornée, pause, reprise, annulation locale, erreur et fermeture après fin ; le callback Dashboard reste inchangé.
+- Supprimer un READY reste distinct d’annuler sa récupération locale et conserve l’autorité de `cancelTorrentRequestV2`.
+- Aucun backend applicatif, lifecycle, rétention, télémétrie, qBittorrent, NewGreedy, Redis, scheduler, Fichiers ou Corbeille n’a été modifié.
+- Validation locale : tests ciblés torrents/Dashboard 49 verts avant stabilisation ; `npm run check`, suite frontend complète (105 tests), `npm run build` et policy responsive backend (2 tests) verts.
+- Vite preview a démarré sur `127.0.0.1:4173`, mais le navigateur cloud a bloqué l’URL locale (`ERR_BLOCKED_BY_CLIENT`). La validation visuelle réelle reste donc indisponible ; la validation responsive repose sur les tests DOM/axe, la policy et les règles CSS mobile-first.
 
 ## Prochaine tâche
 
-**UX-04 — Expérience READY et récupération locale.**
+**UX-05 — Retrait du legacy utilisateur Fichiers/Corbeille.**
 
-Tâche distincte, à commencer seulement après validation et intégration de UX-03.
+Tâche distincte, à commencer seulement après validation et intégration de UX-04, avec l’audit de dépendances prévu par la roadmap.
