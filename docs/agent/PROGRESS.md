@@ -118,7 +118,7 @@ Ne jamais pousser directement sur `master` ou `develop`.
 
 ## Refonte UX post-2.0
 
-La priorité produit post-2.0 est une refonte de l'expérience utilisateur autour d'un Dashboard **torrent-centric**.
+La refonte de l'expérience utilisateur autour d'un Dashboard **torrent-centric** est désormais complète sur la branche de travail UX-06 et attend son intégration dans `develop`.
 
 Décisions validées :
 
@@ -143,7 +143,7 @@ Décisions validées :
 - **UX-04 — TERMINE** : expérience READY et récupération locale intégrées aux accordéons.
 - **UX-05 — TERMINE** : retrait de l'espace utilisateur Fichiers/Corbeille.
 - **UX-05B — TERMINE** : suppression du filesystem/workspace utilisateur legacy et consolidation sur le stockage partagé torrent.
-- **UX-06 — A FAIRE** : harmonisation admin, responsive, accessibilité et nettoyage final.
+- **UX-06 — TERMINE** : harmonisation admin, responsive/accessibilité et nettoyage frontend final.
 
 Le détail, les dépendances et la Definition of Done de chaque tâche sont dans `docs/roadmap-v2.md`.
 
@@ -229,8 +229,29 @@ Validation de la PR #157 avant finalisation documentaire :
 - Container image + smokes V2 : vert ;
 - V2 Rise2 deploy policy : vert.
 
+## UX-06 — Harmonisation administration, responsive et finition
+
+- Le shell administration et les vues Utilisateurs, Services, Paramètres et Stockage utilisent les primitives partagées `Button`, `Card`, `Badge`, `Progress` et `StateMessage` lorsque pertinent.
+- La composition admin est isolée dans `frontend/src/features/admin/admin.css`, avec base mobile-first puis enrichissements tablette/desktop.
+- La navigation admin conserve `aria-current`, des cibles tactiles d'au moins 2,75 rem et des contenus longs bornés sans overflow horizontal attendu.
+- Le dialogue générique a été extrait de l'ancien namespace `features/files` vers `components/Dialog`, avec gestion du focus, fermeture clavier et tests axe conservés.
+- Les derniers reliquats frontend du filesystem/trash utilisateur supprimé par UX-05B ont été retirés : module `features/files`, ancien écran admin corbeille devenu sans backend moderne, contrats API associés et route frontend morte.
+- Le Dashboard, le gestionnaire torrent, READY, les récupérations locales et les contrats backend torrent restent inchangés.
+- La policy responsive interdit la réintroduction du module filesystem frontend et vérifie le contrat mobile-first de l'administration.
+
+Validation du HEAD fonctionnel UX-06 `dad0ff8a09a2029f557fd135ffd8896629e854b5` avant le commit documentaire final :
+
+- frontend `npm run check` : vert ;
+- frontend `npm run test` : vert ;
+- frontend `npm run build` : vert ;
+- backend Ruff / format / mypy / pytest : verts ;
+- `Container image` et smokes V2 : verts ;
+- `Dependency and image security` : vert ;
+- `V2 Rise2 deploy policy` : vert ;
+- aucune conversation de review ouverte sur la PR #158.
+
 ## Prochaine tâche
 
-**UX-06 — Harmonisation administration, responsive, accessibilité et nettoyage final.**
+La séquence **UX-00 → UX-06 est terminée**. Aucun chantier UX supplémentaire n'est présumé automatiquement.
 
-UX-06 doit partir du `develop` courant après intégration de UX-05B. Il ne doit pas réintroduire de navigateur/workspace/trash utilisateur ni de second modèle de stockage. Son scope est la cohérence visuelle de l'administration, les derniers reliquats frontend/CSS/i18n/tests, l'accessibilité et la vérification responsive finale.
+Le prochain développement doit repartir d'un besoin produit, maintenance, sécurité ou exploitation explicitement défini, depuis le `develop` courant après intégration de la PR #158. La promotion en production reste une PR séparée `develop → master`.
