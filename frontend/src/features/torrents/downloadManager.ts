@@ -12,6 +12,8 @@ import {
   type RecursiveTransferProgress,
 } from "./recursiveDownload";
 
+const CONSERVATIVE_INITIAL_STREAM_LIMIT = 1;
+
 export type BrowserDownloadJobStatus =
   | "queued"
   | "running"
@@ -217,12 +219,12 @@ export class BrowserDownloadManager {
   private readonly permits: DownloadPermitPool;
 
   constructor(
-    maxConcurrentStreams: number,
+    provisionalMaxConcurrentStreams: number,
     private readonly onChange: (snapshot: BrowserDownloadManagerSnapshot) => void,
   ) {
-    this.assertConcurrency(maxConcurrentStreams);
-    this.maxConcurrentStreams = maxConcurrentStreams;
-    this.permits = new DownloadPermitPool(maxConcurrentStreams, () => this.emit());
+    this.assertConcurrency(provisionalMaxConcurrentStreams);
+    this.maxConcurrentStreams = CONSERVATIVE_INITIAL_STREAM_LIMIT;
+    this.permits = new DownloadPermitPool(CONSERVATIVE_INITIAL_STREAM_LIMIT, () => this.emit());
   }
 
   setMaxConcurrentStreams(value: number): void {
