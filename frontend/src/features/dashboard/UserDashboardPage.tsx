@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api, ApiError, type StorageUsage, type TorrentRequestV2 } from "../../api/client";
+import { api, ApiError, type TorrentRequestV2 } from "../../api/client";
+import {
+  getSharedStorageCapacity,
+  type SharedStorageCapacity,
+} from "../../api/storage";
 import { Button, Card, Progress, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
 import {
@@ -87,7 +91,7 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
   const { apiError, formatBytes, t } = useI18n();
   const [activity, setActivity] = useState<TorrentActivitySummary | null>(null);
   const [activityError, setActivityError] = useState("");
-  const [storage, setStorage] = useState<StorageUsage | null>(null);
+  const [storage, setStorage] = useState<SharedStorageCapacity | null>(null);
   const [storageError, setStorageError] = useState("");
   const [local, setLocal] = useState<LocalDownloadSummary>(idleLocalSummary);
   const activityController = useRef<AbortController | null>(null);
@@ -131,8 +135,8 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
     const controller = new AbortController();
     storageController.current = controller;
     setStorageError("");
-    void api.listFiles("", controller.signal)
-      .then((listing) => setStorage(listing.storage))
+    void getSharedStorageCapacity(controller.signal)
+      .then((next) => setStorage(next))
       .catch((caught: unknown) => {
         if (caught instanceof DOMException && caught.name === "AbortError") return;
         if (caught instanceof ApiError && caught.status === 401) {
@@ -158,9 +162,9 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
     };
   }, [refreshActivity, refreshStorage]);
 
-  const usedPercent = storage === null || storage.total === 0
+  const usedPercent = storage === null || storage.total_bytes === 0
     ? 0
-    : Math.min(100, Math.max(0, (storage.used / storage.total) * 100));
+    : Math.min(100, Math.max(0, (storage.used_bytes / storage.total_bytes) * 100));
 
   return (
     <section className="user-dashboard" aria-labelledby="user-dashboard-title">
@@ -203,9 +207,9 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
           ) : (
             <>
               <p className="dashboard-summary-value">
-                {t("dashboard.storageAvailable", { value: formatBytes(storage.available) })}
+                {t("dashboard.storageAvailable", { value: formatBytes(storage.available_bytes) })}
               </p>
-              <p>{t("dashboard.storageTotal", { value: formatBytes(storage.total) })}</p>
+              <p>{t("dashboard.storageTotal", { value: formatBytes(storage.total_bytes) })}</p>
               <Progress
                 label={t("dashboard.storageProgress", { value: usedPercent.toFixed(0) })}
                 value={usedPercent}

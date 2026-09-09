@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { api, type TorrentRequestV2 } from "../../api/client";
+import * as storageApi from "../../api/storage";
 import { FeedbackProvider } from "../../components/Feedback";
 import { I18nProvider, type Locale } from "../../i18n";
 import { auditAccessibility } from "../../test/accessibility";
@@ -89,12 +90,10 @@ describe("UserDashboardPage", () => {
       limit,
       total: limit === 100 ? 3 : 0,
     }));
-    vi.spyOn(api, "listFiles").mockResolvedValue({
-      path: "",
-      breadcrumbs: [],
-      entries: [],
-      storage: { total: 2_048, used: 1_024, available: 1_024 },
-      truncated: false,
+    vi.spyOn(storageApi, "getSharedStorageCapacity").mockResolvedValue({
+      total_bytes: 2_048,
+      used_bytes: 1_024,
+      available_bytes: 1_024,
     });
     const view = renderDashboard();
 
@@ -112,7 +111,7 @@ describe("UserDashboardPage", () => {
 
   it("isole les erreurs des cartouches et permet leur nouvelle tentative", async () => {
     const torrents = vi.spyOn(api, "listTorrentRequestsV2").mockRejectedValue(new Error("offline"));
-    const files = vi.spyOn(api, "listFiles").mockRejectedValue(new Error("offline"));
+    const storage = vi.spyOn(storageApi, "getSharedStorageCapacity").mockRejectedValue(new Error("offline"));
     const view = renderDashboard("en");
 
     expect(await screen.findByText("Torrent activity is temporarily unavailable.")).toBeTruthy();
@@ -123,7 +122,7 @@ describe("UserDashboardPage", () => {
     await userEvent.click(retries[0]);
     await userEvent.click(retries[1]);
     await waitFor(() => expect(torrents.mock.calls.length).toBeGreaterThan(2));
-    expect(files.mock.calls.length).toBeGreaterThan(1);
+    expect(storage.mock.calls.length).toBeGreaterThan(1);
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
@@ -157,7 +156,7 @@ describe("UserDashboardPage", () => {
       capturedSignal = signal;
       return new Promise(() => undefined);
     });
-    vi.spyOn(api, "listFiles").mockImplementation((_path, signal) => {
+    vi.spyOn(storageApi, "getSharedStorageCapacity").mockImplementation((signal) => {
       return new Promise((_resolve, reject) => signal?.addEventListener("abort", () => {
         reject(new DOMException("aborted", "AbortError"));
       }));

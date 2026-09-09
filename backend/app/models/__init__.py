@@ -25,7 +25,6 @@ from app.models.torrent_v2 import (
     TrackerDiagnosticCode,
     UserStorageUsage,
 )
-from app.models.trash import TrashEntry
 from app.models.v1_import import V1ImportItem, V1ImportRun, V1ImportRunStatus
 
 __all__ = [
@@ -54,7 +53,6 @@ __all__ = [
     "TorrentJobState",
     "TorrentRequest",
     "TorrentRequestState",
-    "TrashEntry",
     "User",
     "UserSession",
     "UserTorrent",

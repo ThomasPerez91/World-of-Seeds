@@ -22,8 +22,6 @@ from app.auth.service import (
     revoke_session,
 )
 from app.core.config import CSRF_COOKIE_NAME, Settings
-from app.files import WorkspaceError
-from app.files.dependencies import WorkspaceManagerDependency
 from app.schemas.auth import (
     AuthResponse,
     ChangeCredentialsRequest,
@@ -125,7 +123,6 @@ async def update_credentials(
     response: Response,
     db: DbSession,
     settings: AppSettings,
-    workspace_manager: WorkspaceManagerDependency,
     context: Annotated[AuthContext, Depends(require_csrf)],
 ) -> AuthResponse:
     try:
@@ -136,7 +133,6 @@ async def update_credentials(
             username_input=payload.username,
             new_password=payload.new_password,
             settings=settings,
-            workspace_manager=workspace_manager,
         )
     except AuthenticationFailedError as exc:
         raise HTTPException(
@@ -150,11 +146,6 @@ async def update_credentials(
             status_code=status.HTTP_409_CONFLICT,
             detail=_detail("username_unavailable", str(exc), "username"),
         ) from exc
-    except WorkspaceError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=_detail("user_workspace_unavailable", "User workspace is unavailable"),
-        ) from exc
 
     set_auth_cookies(response, tokens, settings)
     return AuthResponse(user=UserResponse.model_validate(context.user))
@@ -164,7 +155,6 @@ async def update_credentials(
 async def update_username(
     payload: ChangeUsernameRequest,
     db: DbSession,
-    workspace_manager: WorkspaceManagerDependency,
     context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
 ) -> AuthResponse:
     try:
@@ -172,7 +162,6 @@ async def update_username(
             db,
             user=context.user,
             username_input=payload.username,
-            workspace_manager=workspace_manager,
         )
     except AuthenticationFailedError as exc:
         raise HTTPException(
@@ -183,11 +172,6 @@ async def update_username(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=_detail("username_unavailable", str(exc), "username"),
-        ) from exc
-    except WorkspaceError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=_detail("user_workspace_unavailable", "User workspace is unavailable"),
         ) from exc
     return AuthResponse(user=UserResponse.model_validate(user))
 

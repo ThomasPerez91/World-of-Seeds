@@ -10,9 +10,10 @@ Les états de tâche volatils appartiennent à `PROGRESS.md`.
 
 World of Seeds est une application privée de gestion de seedbox avec :
 
-- gestionnaire de fichiers authentifié ;
 - soumission et suivi de torrents ;
+- Dashboard utilisateur torrent-centric ;
 - stockage physique partagé et déduplication ;
+- récupération READY vers le navigateur ;
 - workers durables et scheduler équitable ;
 - administration des comptes, quotas, options et opérations de récupération ;
 - observabilité Prometheus/Grafana.
@@ -24,39 +25,35 @@ La ligne de production active est **V2**.
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
 
-## Direction produit post-2.0 — refonte UX planifiée
+## Direction produit post-2.0 — UX torrent-centric
 
-La prochaine évolution produit validée est une refonte progressive de l'interface utilisateur autour d'un **Dashboard torrent-centric**.
+La refonte UX post-2.0 est structurée autour d'un **Dashboard torrent-centric**.
 
-Cette section décrit une direction durable approuvée, pas un état déjà déployé : les PR UX-01 à UX-06 doivent être intégrées séparément et conserver une application fonctionnelle entre chaque étape.
+Cible utilisateur durable :
 
-Cible utilisateur :
-
-- après authentification, le Dashboard devient l'accueil principal ;
+- après authentification, le Dashboard est l'accueil principal ;
 - le parcours central est ajout `.torrent` -> file/téléchargement -> READY -> récupération locale -> suppression/désabonnement ;
-- l'ancien navigateur de fichiers utilisateur, la corbeille utilisateur et les actions de création libre de dossiers ne font plus partie de la cible UX et doivent être retirés lors de UX-05 après audit de leurs dépendances techniques ;
-- les écrans admin restent disponibles et sont harmonisés avec le nouveau design lors de UX-06.
+- le navigateur de fichiers utilisateur, la corbeille utilisateur, les actions de création libre de dossiers et les workspaces métier personnels ne font plus partie du runtime moderne ;
+- les écrans admin restent disponibles et sont harmonisés avec le design system lors de UX-06.
 
 Principes de design :
 
-- palettes claire et sombre plus lisibles et moins oppressantes que l'UI 2.0 initiale ;
+- palettes claire et sombre lisibles et douces ;
 - thème `light`, `dark` ou `system` avec préférence persistée par utilisateur ;
 - langue FR/EN conservée comme préférence utilisateur ;
-- surfaces/cartouches compacts, boutons modernes et hiérarchie visuelle plus dense ;
+- surfaces/cartouches compacts, boutons modernes et hiérarchie visuelle dense ;
 - éviter les grands titres et espaces vides qui réduisent la densité utile ;
 - réserver les couleurs fortes aux vrais états d'erreur, avertissements et actions destructrices ;
-- **mobile-first obligatoire** pour toute nouvelle UI : concevoir les styles et la hiérarchie d'abord pour les petits écrans, puis enrichir progressivement l'expérience aux breakpoints tablette et desktop ;
-- le responsive est un critère de Definition of Done de **chaque PR UX**, pas une finition reportée à UX-06 : aucun débordement horizontal, contrôles tactiles utilisables, textes/noms longs correctement bornés, cartes/accordéons/actions lisibles et opérables sur mobile ;
-- toute modification UI doit être vérifiée sur des largeurs représentatives mobile, tablette et desktop, avec un soin particulier porté aux états chargement/vide/erreur et aux contenus longs.
+- **mobile-first obligatoire** pour toute nouvelle UI ;
+- le responsive est un critère de Definition of Done de **chaque PR UX** : aucun débordement horizontal, contrôles tactiles utilisables, textes/noms longs bornés, cartes/accordéons/actions lisibles et opérables sur mobile ;
+- toute modification UI doit être vérifiée sur des largeurs représentatives mobile, tablette et desktop, avec les états chargement/vide/erreur et les contenus longs.
 
 Principes de scope :
 
-- réutiliser en priorité les données et contrats déjà exposés par l'API ;
-- UX-02 à UX-04 ne doivent pas ajouter du backend uniquement pour afficher seeders, peers, ETA, vitesse qBittorrent, ratio ou une télémétrie globale de récupération ;
+- réutiliser en priorité les données et contrats existants ;
 - le frontend ne doit jamais contacter qBittorrent ou NewGreedy directement ;
-- si une donnée de confort n'est pas déjà disponible, l'omettre de la première refonte et la traiter ultérieurement dans une tâche dédiée ;
-- la file de récupération affichée pendant cette première refonte est la file locale du contrôleur navigateur existant : nombre de transferts actifs, concurrence maximale locale et positions disponibles pour les éléments en attente ; elle n'est pas une file globale autoritaire inter-utilisateurs ou multi-appareils ;
-- l'annulation d'un torrent doit conserver le modèle V2 existant : désabonnement d'un utilisateur lorsqu'il reste d'autres droits actifs, puis lifecycle de purge seulement lorsqu'il ne reste plus de demande active ;
+- la file de récupération affichée est celle du contrôleur navigateur local : nombre de transferts actifs, concurrence maximale locale et positions disponibles pour les éléments en attente ; elle n'est pas une file globale autoritaire inter-utilisateurs ou multi-appareils ;
+- l'annulation d'un torrent conserve le modèle V2 : désabonnement d'un utilisateur lorsqu'il reste d'autres droits actifs, puis lifecycle de purge seulement lorsqu'il ne reste plus de demande active ;
 - V2-32D reste bloquée : ne pas prétendre supprimer précisément les statistiques NewGreedy lors d'une dernière annulation tant que NewGreedy n'offre pas le contrat full-hash requis.
 
 Le découpage de référence est `UX-01` à `UX-06` dans `docs/roadmap-v2.md`. `PROGRESS.md` indique la tâche courante.
@@ -152,6 +149,23 @@ Elle est montée dans WOS et qBittorrent comme :
 
 Ce stockage est un bind mount hôte, pas un filesystem éphémère de conteneur.
 
+### Modèle de stockage moderne
+
+Le runtime moderne n'utilise plus de filesystem métier personnel `/data/<username>`.
+
+- `SharedContentStore` est l'autorité filesystem du contenu torrent ;
+- le contenu physique reste sous `/data/content/<storage-key>` ;
+- `ManagedTorrent` représente une copie physique partagée ;
+- `TorrentFile` représente son manifeste ;
+- `TorrentRequest` représente le droit/abonnement d'un utilisateur ;
+- plusieurs utilisateurs peuvent partager le même `ManagedTorrent` sans duplication physique ;
+- la suppression d'un droit ou d'un compte ne supprime pas la copie physique tant qu'une autre demande active existe ;
+- la dernière référence passe par le lifecycle de purge normal ;
+- `GET /api/v2/storage` expose au Dashboard la capacité disque partagée sans réintroduire un navigateur de fichiers ;
+- les primitives HTTP Range/stream utilisées par READY sont indépendantes de l'ancien filesystem utilisateur.
+
+Ne pas renommer `content/<storage-key>` ni migrer physiquement le stockage dans une PR applicative ordinaire. Un changement de disposition disque demande une opération OPS dédiée et un rollback explicite.
+
 Les données structurées et états techniques utilisent des volumes/paths persistants dédiés :
 
 - PostgreSQL : `postgres_v2_data` ;
@@ -191,11 +205,11 @@ Etat du dernier déploiement :
 
 ## Authentification et autorisation
 
-- Toutes les routes fichiers/torrents exigent un utilisateur authentifié.
+- Toutes les routes torrent/READY/stockage utilisateur exigent un utilisateur authentifié.
 - Les routes d'administration exigent le rôle administrateur.
 - Le serveur résout l'utilisateur ; ne jamais faire confiance à un username envoyé par le client.
-- Les workspaces sont validés côté serveur avant toute opération filesystem ou qBittorrent.
-- Un utilisateur ne peut agir que dans son workspace.
+- Les droits sur le contenu torrent sont portés par `TorrentRequest`, pas par un chemin de workspace fourni par le client.
+- Le client ne peut jamais choisir un chemin hôte ou un save path qBittorrent.
 - Ne jamais révéler chemins hôte, secrets, passkeys ou données d'un autre utilisateur dans une réponse API.
 
 ## Préférences d’interface
@@ -206,13 +220,14 @@ Etat du dernier déploiement :
 - Le bootstrap externe same-origin `theme-bootstrap.js` applique avant React la dernière préférence locale (`wos.preferred-theme`), ou `system` si absente/invalide/inaccessible. Le compte devient autoritaire lors de la connexion/restauration de session ; le cache ne contient aucun secret.
 - Le provider englobe tous les écrans, suit les changements de `prefers-color-scheme` en mode système et centralise les écritures. Une sauvegarde échouée rétablit le choix précédent sans invalider la session. Les réponses d’une session quittée sont ignorées.
 
-## Invariants filesystem
+## Invariants filesystem et téléchargement
 
-- Les chemins clients sont relatifs au workspace authentifié.
-- Refuser chemins absolus, `..`, évasions de racine et traversées de symlinks.
-- Les opérations sensibles utilisent des résolutions sûres/descripteurs quand possible.
+- Aucun chemin hôte n'est accepté depuis le client.
+- Les chemins de manifeste torrent sont relatifs au contenu géré et doivent rester bornés par les validations serveur.
+- Refuser chemins absolus, `..`, évasions de racine et traversées de symlinks lors de toute résolution filesystem.
+- Les ouvertures sensibles utilisent des résolutions sûres/descripteurs et `O_NOFOLLOW` lorsque prévu par les primitives de téléchargement.
 - Ne jamais résoudre un problème de permissions avec `chmod 777`.
-- Les extensions protégées sont reconstruites côté serveur lors d'un rename.
+- Les téléchargements READY doivent conserver les contrôles Range, leases, limites de concurrence et validation du manifeste.
 - Les noms longs et chemins imbriqués ne doivent pas provoquer de débordement horizontal mobile.
 
 ## Torrent et sécurité tracker
@@ -298,7 +313,7 @@ L'interface torrent charge un état PostgreSQL autoritaire puis reçoit des év�
 
 Les téléchargements récursifs utilisent un manifeste paginé/progressif et une concurrence bornée. Ne pas attendre un manifeste énorme complet avant de démarrer les premiers fichiers.
 
-Pendant la refonte UX, conserver ces mécanismes et les recomposer dans le Dashboard/les accordéons au lieu de créer un second système de suivi parallèle.
+Conserver ces mécanismes dans le Dashboard/les accordéons au lieu de créer un second système de suivi parallèle.
 
 ## Observabilité
 

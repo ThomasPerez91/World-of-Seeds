@@ -15,7 +15,6 @@ from sqlalchemy import delete, func, or_, select
 from app.auth.service import change_username, create_managed_user
 from app.core.config import get_settings
 from app.core.database import engine, session_factory
-from app.files import WorkspaceManager
 from app.models import ManagedTorrent, TorrentFile, User
 
 CAMPAIGN_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,15}$")
@@ -155,7 +154,6 @@ async def pilot_create(campaign: str) -> dict[str, int | bool]:
     if credential_path.exists() or credential_path.is_symlink():
         raise RuntimeError("pilot credential staging path already exists")
 
-    workspace_manager = WorkspaceManager(settings.data_root)
     async with session_factory() as session:
         existing = await session.scalar(
             select(User).where(func.lower(User.username) == username.lower())
@@ -163,15 +161,11 @@ async def pilot_create(campaign: str) -> dict[str, int | bool]:
         await session.rollback()
         if existing is not None:
             raise RuntimeError("pilot account already exists")
-        user, initial_password = await create_managed_user(
-            session,
-            workspace_manager=workspace_manager,
-        )
+        user, initial_password = await create_managed_user(session)
         user = await change_username(
             session,
             user=user,
             username_input=username,
-            workspace_manager=workspace_manager,
         )
         forced = user.must_change_credentials
         active = user.is_active and user.deleted_at is None
@@ -183,12 +177,11 @@ async def pilot_create(campaign: str) -> dict[str, int | bool]:
         stream.flush()
         os.fsync(stream.fileno())
 
-    workspace = Path(settings.data_root) / username
     return {
         "pilot_account_count": 1,
         "forced_credential_change": forced,
         "pilot_account_active": active,
-        "workspace_ready": workspace.is_dir() and not workspace.is_symlink(),
+        "account_ready": forced and active,
         "credential_file_written": credential_path.is_file() and not credential_path.is_symlink(),
         "v1_data_moves": 0,
         "credentials_in_output": 0,
@@ -199,7 +192,6 @@ async def pilot_create(campaign: str) -> dict[str, int | bool]:
 
 async def pilot_inspect(campaign: str) -> dict[str, int | bool]:
     username = _pilot_username(campaign)
-    settings = get_settings()
     async with session_factory() as session:
         users = list(
             (
@@ -209,14 +201,13 @@ async def pilot_inspect(campaign: str) -> dict[str, int | bool]:
             ).all()
         )
         await session.rollback()
-    workspace = Path(settings.data_root) / username
+    active = bool(users and users[0].is_active and users[0].deleted_at is None)
+    forced = bool(users and users[0].must_change_credentials)
     return {
         "pilot_account_count": len(users),
-        "forced_credential_change": bool(users and users[0].must_change_credentials),
-        "pilot_account_active": bool(
-            users and users[0].is_active and users[0].deleted_at is None
-        ),
-        "workspace_ready": workspace.is_dir() and not workspace.is_symlink(),
+        "forced_credential_change": forced,
+        "pilot_account_active": active,
+        "account_ready": bool(users) and forced and active,
     }
 
 

@@ -8,7 +8,7 @@ World of Seeds V2 est désormais la ligne de production active.
 - Production : Rise2.
 - Branche de production : `master`.
 - Branche d'intégration : `develop`.
-- Le dernier `develop` vérifié au démarrage de la planification UX post-2.0 est `3e1f9db9fd8af1e51334266d4747feeb941a3511` (PR #148). Tout nouvel agent doit néanmoins faire un `fetch` et vérifier le HEAD réel avant de créer sa branche.
+- Le dernier `develop` doit toujours être vérifié par `fetch` avant de créer une nouvelle branche.
 - `develop_V2` est une branche historique/legacy de la phase de construction V2 ; ne plus l'utiliser pour les nouveaux développements.
 - La V1 `1.3.3` reste figée par son tag/release et sur l'ancien serveur uniquement comme solution de rollback pendant la fenêtre de conservation ; elle n'est plus la production active et son ancien déploiement GitHub est désactivé.
 
@@ -28,10 +28,11 @@ Runtime principal :
 - Caddy ;
 - Prometheus, Grafana, node-exporter et cAdvisor.
 
-Le stockage utilisateur est un bind mount hôte, hors conteneurs :
+Le stockage média est un bind mount hôte partagé, hors conteneurs :
 
 - hôte : `/srv/world-of-seeds-v2/data` ;
-- conteneurs WOS/qB : `/data`.
+- conteneurs WOS/qB : `/data` ;
+- contenu torrent moderne : `/data/content/<storage-key>` via `SharedContentStore`.
 
 Les données persistantes ne sont pas recréées lors d'un déploiement applicatif standard : PostgreSQL, Redis, qBittorrent et NewGreedy sont préservés et leurs IDs de conteneur sont contrôlés pendant le déploiement.
 
@@ -62,21 +63,6 @@ La release stable historique reste ancrée au SHA applicatif `4814d4636e4a14edfa
 ## CI/CD production
 
 Le canal de déploiement GitHub Actions vers Rise2 est opérationnel.
-
-Premier passage manuel validé :
-
-- workflow : `Deploy V2 to Rise2` ;
-- run : `34204307209` ;
-- SHA : `2164c4411d84fd4381f7e58370189eef86ecc263` ;
-- résultat : SUCCESS.
-
-Premier passage automatique validé :
-
-- CI `master` : run `34205528939` / CI #443 ;
-- SHA : `7010fa9f2a86cd74961bfc60eaaab5c2f7aa5f14` ;
-- déploiement automatique : run `34205834353` ;
-- événement : `workflow_run` ;
-- résultat : SUCCESS.
 
 Contrat courant :
 
@@ -132,31 +118,32 @@ Ne jamais pousser directement sur `master` ou `develop`.
 
 ## Refonte UX post-2.0
 
-La priorité produit post-2.0 est désormais une refonte de l'expérience utilisateur autour d'un Dashboard **torrent-centric**.
+La priorité produit post-2.0 est une refonte de l'expérience utilisateur autour d'un Dashboard **torrent-centric**.
 
 Décisions validées :
 
-- la page d'accueil utilisateur devient un Dashboard de suivi des torrents ;
-- l'ancien espace utilisateur Fichiers/Corbeille n'est plus la cible produit et sera retiré après audit de ses dépendances ;
-- le Dashboard présente des synthèses torrents, récupération locale et stockage en réutilisant d'abord les contrats déjà disponibles ;
-- le gestionnaire de torrents adopte une présentation compacte en accordéons ;
-- l'ajout `.torrent` par clic et glisser/déposer, la progression, les états de queue, le WebSocket, l'annulation/désabonnement, la rétention et le manifeste READY existants sont à réutiliser, pas à réécrire ;
-- la première refonte n'ajoute pas de backend seulement pour seeders, peers, ETA, vitesse qB, ratio ou télémétrie globale de récupération ;
-- la récupération affichée dans cette phase correspond à la file locale du contrôleur navigateur existant : nombre actif / concurrence maximale locale et positions d'attente disponibles ; elle n'est pas une file globale autoritaire multi-appareils ;
-- le thème doit offrir `light`, `dark` et `system` avec préférence utilisateur persistée ; la préférence de langue FR/EN existante reste conservée ;
-- les couleurs doivent être plus claires et douces, les boutons plus modernes et les couleurs sémantiques fortes réservées aux vrais avertissements/actions destructrices ;
-- le login, les paramètres, le shell utilisateur et ensuite l'administration doivent converger vers le même design system.
+- la page d'accueil utilisateur est le Dashboard de suivi des torrents ;
+- l'ancien espace utilisateur Fichiers/Corbeille et le filesystem métier personnel sont retirés ;
+- le stockage physique torrent est partagé et reste géré par `SharedContentStore` ;
+- `ManagedTorrent` porte la copie physique, `TorrentFile` le manifeste et `TorrentRequest` le droit/abonnement utilisateur ;
+- le Dashboard présente synthèses torrents, récupération locale et capacité du stockage partagé ;
+- le gestionnaire de torrents adopte une présentation en accordéons ;
+- l'ajout `.torrent`, la progression, les états de queue, le WebSocket, l'annulation/désabonnement, la rétention et le manifeste READY existants sont réutilisés ;
+- la récupération affichée reste celle du contrôleur navigateur local, pas une file globale autoritaire multi-appareils ;
+- le frontend ne contacte jamais qBittorrent ou NewGreedy directement ;
+- le thème offre `light`, `dark` et `system` avec préférence persistée, et la langue FR/EN reste conservée ;
+- le mobile-first et le responsive restent un critère de Definition of Done de chaque PR UX.
 
 ### Découpage des tâches
 
-- **UX-00 — TERMINE** : planification documentaire de la refonte dans `roadmap-v2.md`, `PROGRESS.md` et `CONTEXT.md`.
-- **UX-01 — TERMINE** : design system, thèmes, préférence persistée, cartouche Préférences, login/settings/shell.
-- **UX-02 — TERMINE** : nouveau Dashboard et ses cartouches en composant les données/API existantes.
-- **UX-03 — TERMINE** : gestionnaire de torrents en accordéons avec les contrats actuels.
-- **UX-04 — TERMINE** : expérience READY et récupération locale intégrées aux accordéons, sans nouvelle télémétrie backend.
-- **UX-05 — TERMINE** : retrait de l'espace utilisateur Fichiers/Corbeille et nettoyage ciblé après audit de dépendances.
-- **UX-05B — A FAIRE** : supprimer le filesystem/workspace utilisateur legacy, migrer le Dashboard vers un contrat de capacité du stockage partagé et nettoyer les routes/files/trash/workspaces devenus réellement morts.
-- **UX-06 — A FAIRE** : harmonisation admin, responsive, accessibilité et nettoyage final, après UX-05B.
+- **UX-00 — TERMINE** : planification documentaire de la refonte.
+- **UX-01 — TERMINE** : design system, thèmes, préférence persistée, login/settings/shell.
+- **UX-02 — TERMINE** : nouveau Dashboard et ses cartouches.
+- **UX-03 — TERMINE** : gestionnaire de torrents en accordéons.
+- **UX-04 — TERMINE** : expérience READY et récupération locale intégrées aux accordéons.
+- **UX-05 — TERMINE** : retrait de l'espace utilisateur Fichiers/Corbeille.
+- **UX-05B — TERMINE** : suppression du filesystem/workspace utilisateur legacy et consolidation sur le stockage partagé torrent.
+- **UX-06 — A FAIRE** : harmonisation admin, responsive, accessibilité et nettoyage final.
 
 Le détail, les dépendances et la Definition of Done de chaque tâche sont dans `docs/roadmap-v2.md`.
 
@@ -180,74 +167,70 @@ Les PR encore ouvertes contre `develop_V2` sont historiques et ne doivent pas ê
 
 ## UX-01 — Design system, thèmes et préférences
 
-Implémentation terminée sur une branche dédiée issue de `develop` vérifié à
-`2e1b0fff899361839748393d1c7dd24a855bd3c4` (UX-00 / PR #149).
-Intégration soumise aux checks de la PR, sans merge automatique.
-
-- Palettes Light/Dark à tokens partagés ; couleurs fixes des écrans conservés reliées aux tokens sans refonte de leur structure.
-- `preferred_theme` (`light`, `dark`, `system`) persistant ; migration additive `20260908_23`, défaut serveur `system`, CHECK et downgrade.
-- `PATCH /api/v1/auth/theme` authentifié avec CSRF, y compris pendant le changement initial des identifiants, comme la langue.
-- Bootstrap externe same-origin avant React ; cache navigateur avant authentification, préférence du compte à la restauration de session/connexion ; suivi dynamique du système.
-- Provider partagé, changement optimiste, retour au choix précédent et erreur accessible si sauvegarde impossible ; une réponse d’une ancienne session ne change pas le compte suivant.
-- Cartouche Préférences langue/thème ; sélection rapide dans le menu compte ; langue retirée du header authentifié et conservée sur les écrans de connexion.
-- Primitives natives légères Button, IconButton, Card, Badge, Progress, Accordion et StateMessage ; feedback existant conservé.
-- Login, credentials, shell et paramètres compacts, bases CSS mobiles puis enrichissements à 600/900 px ; contrôles tactiles, noms longs et menu borné au viewport.
-
-Validation locale :
-
-- `npm run check`, `npm run test` (90 tests), `npm run build` : verts.
-- Ruff check/format et `mypy app tests` : verts.
-- Auth : 17 tests verts ; test PostgreSQL de migration conditionné à `WOS_DATABASE_URL`, exécuté par la CI et sauté localement faute de service PostgreSQL natif.
-- SQL réel produit par Alembic exécuté avec PostgreSQL embarqué PGlite : upgrade/downgrade/upgrade, comptes existants, défaut, valeurs autorisées, CHECK et NOT NULL validés. Aucune dépendance PGlite ajoutée au projet.
-- Tests axe structurels sur menu/préférences/primitives ; contrastes des tokens de texte sur fond/surface/surface élevée >= 4,5:1 dans les deux palettes.
-- Revue CSS conceptuelle à 320, 375/390, 768, 1024 et desktop large : colonnes mobiles, textes FR/EN, noms longs, erreurs, chargement et menus. **Validation visuelle réelle et mesure d'overflow restantes** : le navigateur de cet environnement bloque la prévisualisation locale. Ne pas présenter cette revue CSS comme une mesure navigateur.
-
-UX-02 est terminé sur une branche dédiée : le Dashboard est l’accueil authentifié, Fichiers/Corbeille restent accessibles et le gestionnaire de torrents existant est réutilisé sans accordéons. Aucun changement backend, qB/NewGreedy/Redis/scheduler/rétention ni refonte structurelle de l’administration.
+- Palettes Light/Dark à tokens partagés.
+- `preferred_theme` (`light`, `dark`, `system`) persistant ; migration additive `20260908_23`, défaut serveur `system`.
+- `PATCH /api/v1/auth/theme` authentifié avec CSRF.
+- Provider partagé, suivi dynamique du système et rollback optimiste en cas d'échec de sauvegarde.
+- Cartouche Préférences langue/thème et sélection rapide dans le menu compte.
+- Primitives natives légères Button, IconButton, Card, Badge, Progress, Accordion et StateMessage.
+- Login, credentials, shell et paramètres compacts et mobile-first.
 
 ## UX-02 — Nouveau Dashboard utilisateur torrent-centric
 
-- Trois cartouches indépendants composent les contrats existants : activité torrent paginée par 100, récupération locale du navigateur et stockage disponible/total.
-- L’agrégation torrent couvre toutes les pages, exclut les états terminaux non pertinents, évite le double comptage et coalesce les invalidations remontées par `UserDownloadsPage`.
-- Les erreurs et chargements restent isolés par cartouche ; les requêtes sont annulées au démontage.
-- Le shell ouvre désormais le Dashboard après authentification et via le wordmark, avec une navigation compacte conservant Fichiers/Corbeille.
-- Le layout est mobile-first : une colonne par défaut, deux à partir de 600 px et trois à partir de 980 px.
-- La tentative unique de validation visuelle locale a été bloquée au démarrage de Vite par l’environnement (`uv_interface_addresses`). La revue responsive est donc structurelle (CSS/tests DOM et axe), sans prétendre à une mesure navigateur réelle.
-- UX-03 est terminé : la table a été remplacée par des accordéons, sans modifier le drag/drop, le multi-upload, le WebSocket ni les comportements de téléchargement existants.
+- Trois cartouches : activité torrent, récupération locale du navigateur et stockage.
+- Agrégation torrent paginée côté frontend sans nouvel endpoint décoratif.
+- Erreurs et chargements isolés par cartouche.
+- Dashboard comme accueil authentifié.
+- Layout mobile-first.
 
 ## UX-03 — Gestionnaire de torrents en accordéons
 
-- La table principale est remplacée par une liste de cartes utilisant la primitive native `details/summary`, avec résumé compact, progression, état, queue, rétention et actions accessibles hors du toggle.
-- Le panneau ouvert ajoute les dates et l’erreur existantes ; aucune télémétrie backend, donnée qB/NewGreedy ou nouvelle logique READY n’est introduite.
-- Pagination, WebSocket/reconnect/resync, annulation/désabonnement, drag/drop, multi-upload borné, manifeste/fallback, récupération locale et callbacks UX-02 sont conservés.
-- Le layout est mobile-first, sans largeur minimale de table, avec noms longs bornés et contrôles tactiles de 44 px.
-- Validation locale : `npm run check`, `npm run test` (97 tests) et `npm run build` verts ; tests ciblés DOM/axe verts.
-- La tentative unique de validation visuelle locale a de nouveau été bloquée au démarrage de Vite par l’environnement (`uv_interface_addresses`). La revue responsive reste structurelle, sans prétendre à une mesure navigateur réelle.
-- UX-04 est terminé : l’expérience READY et la récupération locale sont désormais composées dans chaque accordéon concerné.
+- Liste de cartes `details/summary` avec résumé compact, progression, état, queue, rétention et actions.
+- Détails limités aux données déjà exposées.
+- Pagination, WebSocket/reconnect/resync, annulation/désabonnement, drag/drop et multi-upload conservés.
+- Contrôles tactiles et noms longs bornés.
 
 ## UX-04 — Expérience READY et récupération locale
 
-- Le manifeste READY est chargé à la demande, sans préchargement global, et reste isolé par torrent avec son chargement, ses erreurs, son retry, sa pagination bornée à 50 et son snapshot cohérent.
-- Un READY mono-fichier utilise un téléchargement natif serveur → navigateur avec lien durable visible ; les multi-fichiers exposent chemins, tailles, liens individuels et action Télécharger tout dans leur accordéon.
-- Le téléchargement complet réutilise `RecursiveDownloadController` avec la page zéro mise en cache, même lorsque l’utilisateur consulte une page ultérieure ; le mode incompatible conserve les liens individuels et le ZIP uniquement lorsqu’il est disponible.
-- La récupération locale est rattachée au bon torrent avec progression, actifs/max, attente, queue bornée, pause, reprise, annulation locale, erreur et fermeture après fin ; le callback Dashboard reste inchangé.
-- Supprimer un READY reste distinct d’annuler sa récupération locale et conserve l’autorité de `cancelTorrentRequestV2`.
-- Aucun backend applicatif, lifecycle, rétention, télémétrie, qBittorrent, NewGreedy, Redis, scheduler, Fichiers ou Corbeille n’a été modifié.
-- Validation locale : tests ciblés torrents/Dashboard 49 verts avant stabilisation ; `npm run check`, suite frontend complète (105 tests), `npm run build` et policy responsive backend (2 tests) verts.
-- Vite preview a démarré sur `127.0.0.1:4173`, mais le navigateur cloud a bloqué l’URL locale (`ERR_BLOCKED_BY_CLIENT`). La validation visuelle réelle reste donc indisponible ; la validation responsive repose sur les tests DOM/axe, la policy et les règles CSS mobile-first.
+- Manifeste READY chargé à la demande et paginé.
+- Mono-fichier en téléchargement natif ; multi-fichiers avec liens individuels et téléchargement complet.
+- `RecursiveDownloadController` réutilisé pour la récupération locale.
+- Pause/reprise/annulation/progression locale conservées.
+- Suppression READY distincte de l'annulation d'une récupération locale.
 
 ## UX-05 — Retrait du legacy utilisateur Fichiers/Corbeille
 
-- Le shell authentifié ne propose plus Fichiers ni Corbeille ; le Dashboard torrent-centric est l’unique accueil utilisateur et le wordmark y ramène depuis les paramètres ou l’administration.
-- Les anciens liens `?path=...` sont ignorés et nettoyés sans erreur avant d’afficher le Dashboard.
-- `FileBrowser`, `TrashBrowser`, `FileMutationDialog`, leurs tests et l’utilitaire de nommage exclusivement partagé par ces composants ont été supprimés.
-- Les méthodes et types frontend réservés à la création, au renommage, au déplacement, au téléchargement arbitraire et à la corbeille utilisateur ont été retirés, ainsi que leurs styles et traductions sans référence.
-- `FileDialog` reste utilisé par l’administration et NewGreedy. `api.listFiles("")`, `GET /api/v1/files`, les workspaces, `downloads`, `.trash`, `TrashEntry` et `AdminTrashPage` restent intacts dans UX-05 ; cette conservation est transitoire et sera réévaluée dans UX-05B selon le modèle de stockage partagé torrent-centric.
-- Aucun backend applicatif, contrat torrent/READY, lifecycle, rétention, qBittorrent, NewGreedy, Redis, scheduler ni structure d’administration n’a été modifié.
-- Validation locale : `npm run check`, suite frontend complète (99 tests), `npm run build` et policy responsive backend (2 tests) verts.
-- Vite preview a démarré sur `127.0.0.1:4173`, mais le navigateur cloud a de nouveau bloqué l’URL locale (`ERR_BLOCKED_BY_CLIENT`). La vérification mobile-first repose donc sur les tests DOM/axe, la policy responsive et l’audit ciblé des styles, sans prétendre à une mesure navigateur réelle.
+- Le shell authentifié ne propose plus Fichiers ni Corbeille.
+- Les anciens liens `?path=...` sont ignorés et nettoyés.
+- Les composants frontend user files/trash et les actions de mutation associées ont été retirés.
+- Cette étape avait volontairement conservé temporairement les routes/workspaces backend nécessaires à l'ancien contrat de stockage du Dashboard avant UX-05B.
+
+## UX-05B — Suppression du filesystem utilisateur legacy et stockage partagé
+
+- `GET /api/v1/files`, les routes de mutation fichier et les routes trash utilisateur ont été retirées du runtime moderne.
+- Les services de browsing/mutation/workspace utilisateur legacy ont été supprimés ; le package `app.files` ne conserve plus que la compatibilité minimale des primitives HTTP de téléchargement READY.
+- `WorkspaceManager` n'est plus requis par la création, le renommage ou la suppression de comptes.
+- `TrashEntry` et la table `trash_entries` sont retirés via migration Alembic `20260909_24_drop_legacy_user_trash.py` avec downgrade couvert.
+- Le Dashboard lit désormais la capacité partagée via `GET /api/v2/storage` au lieu d'utiliser le navigateur de fichiers pour obtenir deux métriques.
+- `SharedContentStore` reste l'autorité filesystem du contenu torrent et conserve la disposition physique `/data/content/<storage-key>` ; aucun renommage disque n'est introduit par cette PR.
+- Le lifecycle torrent et la déduplication ne changent pas : plusieurs `TorrentRequest` peuvent partager un `ManagedTorrent`; la suppression d'un compte/droit ne détruit pas la copie tant qu'une autre demande active existe, et la dernière référence passe par la purge normale.
+- Les primitives HTTP Range/stream nécessaires aux téléchargements READY ont été extraites du filesystem legacy afin de conserver les comportements Range/leases/ZIP existants.
+- L'administration n'expose plus de navigation ou métriques de corbeille legacy ; les reliquats frontend non accessibles peuvent être supprimés lors du nettoyage final UX-06 sans rouvrir le backend legacy.
+- Les smokes/policies Rise2 ont été adaptés au stockage partagé.
+
+Validation de la PR #157 avant finalisation documentaire :
+
+- migrations upgrade/downgrade/upgrade : vert ;
+- Ruff check + format : verts ;
+- mypy app/tests : vert ;
+- pytest backend : vert ;
+- frontend check/tests/build : verts ;
+- Dependency and image security : vert ;
+- Container image + smokes V2 : vert ;
+- V2 Rise2 deploy policy : vert.
 
 ## Prochaine tâche
 
-**UX-05B — Suppression du filesystem utilisateur legacy et consolidation du stockage partagé.**
+**UX-06 — Harmonisation administration, responsive, accessibilité et nettoyage final.**
 
-Tâche distincte à commencer seulement après validation et intégration de UX-05. Elle doit supprimer les workspaces/files/trash utilisateur devenus morts, conserver `SharedContentStore` comme stockage physique partagé, traiter `TorrentRequest` comme abonnement utilisateur et migrer la carte stockage du Dashboard vers un contrat dédié avant UX-06.
+UX-06 doit partir du `develop` courant après intégration de UX-05B. Il ne doit pas réintroduire de navigateur/workspace/trash utilisateur ni de second modèle de stockage. Son scope est la cohérence visuelle de l'administration, les derniers reliquats frontend/CSS/i18n/tests, l'accessibilité et la vérification responsive finale.

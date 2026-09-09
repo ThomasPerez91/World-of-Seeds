@@ -22,7 +22,6 @@ from app.models.base import Base, utc_now
 if TYPE_CHECKING:
     from app.models.torrent import UserTorrent
     from app.models.torrent_v2 import TorrentRequest, UserStorageUsage
-    from app.models.trash import TrashEntry
 
 
 class User(Base):
@@ -52,11 +51,6 @@ class User(Base):
     )
 
     sessions: Mapped[list[UserSession]] = relationship(
-        back_populates="user",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
-    trash_entries: Mapped[list[TrashEntry]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
