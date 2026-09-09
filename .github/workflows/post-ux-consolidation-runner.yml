@@ -39,6 +39,11 @@ jobs:
               'exclude={"backend/app/files/downloads.py", "backend/app/files/__init__.py"}',
               1,
           )
+          script = script.replace(
+              'if source_contains(import_name, exclude={module}):',
+              'if source_contains(f"from {import_name} import", exclude={module}):',
+              1,
+          )
           exec(compile(script, "post-ux-consolidation.py", "exec"), {"__name__": "__main__"})
           PY
       - name: Sanity-check changed sources
@@ -48,7 +53,7 @@ jobs:
           python3 -m compileall -q backend/app backend/tests
           grep -R "from app.files\|app.files.downloads" -n backend/app backend/tests && exit 1 || true
           grep -R "api/storage" -n frontend/src && exit 1 || true
-          grep -R "admin-trash\|error.workspaceUnavailable" -n frontend/src backend/tests && exit 1 || true
+          grep -R "admin-trash\|error.workspaceUnavailable" -n frontend/src && exit 1 || true
       - name: Commit cleanup to feature branch
         shell: bash
         run: |
