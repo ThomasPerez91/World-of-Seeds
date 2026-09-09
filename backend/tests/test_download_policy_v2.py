@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.security import hash_password
 from app.models import User
+from app.options import PostgresOptionsRegistry
 
 
 @pytest.mark.asyncio
@@ -23,6 +24,7 @@ async def test_download_policy_exposes_configured_stream_limit(
             password_hash=hash_password("correct-horse-battery"),
         )
     )
+    await PostgresOptionsRegistry().initialize(db_session)
     await db_session.commit()
     login = await client.post(
         "/api/v1/auth/login",
