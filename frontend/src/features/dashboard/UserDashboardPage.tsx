@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   api,
@@ -6,11 +6,6 @@ import {
   type SharedStorageCapacity,
   type TorrentRequestV2,
 } from "../../api/client";
-import {
-  ActivityIcon,
-  LocalDownloadIcon,
-  StorageIcon,
-} from "../../components/icons";
 import { Button, Card, Progress, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
 import {
@@ -61,25 +56,6 @@ export async function loadTorrentActivity(signal: AbortSignal): Promise<TorrentA
   return summary;
 }
 
-function SummaryHeading({
-  icon,
-  title,
-  titleId,
-}: {
-  icon: ReactNode;
-  title: string;
-  titleId: string;
-}) {
-  return (
-    <div className="dashboard-summary-heading">
-      <div className="dashboard-summary-title">
-        <span className="summary-icon" aria-hidden="true">{icon}</span>
-        <h2 id={titleId}>{title}</h2>
-      </div>
-    </div>
-  );
-}
-
 export function LocalDownloadCard({ local }: { local: LocalDownloadSummary }) {
   const { t } = useI18n();
   const content = local.status === "idle" || local.status === "completed" || local.status === "cancelled"
@@ -98,11 +74,7 @@ export function LocalDownloadCard({ local }: { local: LocalDownloadSummary }) {
         );
   return (
     <Card className="dashboard-summary-card" aria-labelledby="local-card-title">
-      <SummaryHeading
-        icon={<LocalDownloadIcon />}
-        title={t("dashboard.local")}
-        titleId="local-card-title"
-      />
+      <h2 id="local-card-title">{t("dashboard.local")}</h2>
       {content}
       <p className="dashboard-summary-note">{t("dashboard.localNote")}</p>
     </Card>
@@ -205,11 +177,7 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
 
       <div className="dashboard-summary-grid">
         <Card className="dashboard-summary-card" aria-labelledby="activity-card-title">
-          <SummaryHeading
-            icon={<ActivityIcon />}
-            title={t("dashboard.activity")}
-            titleId="activity-card-title"
-          />
+          <h2 id="activity-card-title">{t("dashboard.activity")}</h2>
           {activityError !== "" ? (
             <StateMessage tone="error">
               <span>{activityError}</span>
@@ -229,11 +197,7 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
         <LocalDownloadCard local={local} />
 
         <Card className="dashboard-summary-card" aria-labelledby="storage-card-title">
-          <SummaryHeading
-            icon={<StorageIcon />}
-            title={t("dashboard.storage")}
-            titleId="storage-card-title"
-          />
+          <h2 id="storage-card-title">{t("dashboard.storage")}</h2>
           {storageError !== "" ? (
             <StateMessage tone="error">
               <span>{storageError}</span>

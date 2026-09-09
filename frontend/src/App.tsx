@@ -13,7 +13,7 @@ import { AdminServicesPage } from "./features/admin/AdminServicesPage";
 import { AdminSettingsPage } from "./features/admin/AdminSettingsPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
-import { AccountMenuIcon, BackIcon, HomeIcon, SettingsIcon } from "./components/icons";
+import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
 import { LanguageSelector } from "./components/LanguageSelector";
 import {
   LegalLinks,
@@ -43,7 +43,7 @@ function clearLegacyFilePathFromUrl() {
 function BrandMark() {
   return (
     <div className="brand-mark" aria-hidden="true">
-      <img src="/brand-mark.svg" alt="" />
+      <BrandIcon />
     </div>
   );
 }
@@ -605,7 +605,7 @@ function Dashboard({
   onSessionExpired: () => void;
   hidden?: boolean;
 }) {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   const [view, setView] = useState<"dashboard" | "settings" | AdminView>("dashboard");
 
   useEffect(() => {
@@ -639,16 +639,7 @@ function Dashboard({
             aria-current={view === "dashboard" ? "page" : undefined}
             onClick={openDashboard}
           >
-            <HomeIcon />
-            <span>{t("dashboard.title")}</span>
-          </Button>
-          <Button
-            variant="ghost"
-            aria-current={view === "settings" ? "page" : undefined}
-            onClick={() => setView("settings")}
-          >
-            <SettingsIcon />
-            <span>{locale === "fr" ? "Paramètres" : "Settings"}</span>
+            {t("dashboard.title")}
           </Button>
         </nav>
         <div className="header-actions">

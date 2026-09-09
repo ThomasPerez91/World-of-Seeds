@@ -1,28 +1,23 @@
 import {
-  Activity,
   ArrowLeft,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   CircleAlert,
-  Database,
   Download,
   File,
   FileVideo,
   Folder,
   FolderInput,
-  Gauge,
-  Home,
+  LockKeyhole,
   Info,
   LoaderCircle,
-  LockKeyhole,
   ListOrdered,
-  MonitorDown,
   Pencil,
+  Gauge,
   RefreshCw,
   RotateCw,
   Save,
-  Search,
   Server,
   Settings2,
   Sprout,
@@ -41,26 +36,6 @@ const decorative = {
 
 export function BrandIcon(props: AppIconProps) {
   return <Sprout {...decorative} {...props} />;
-}
-
-export function HomeIcon(props: AppIconProps) {
-  return <Home {...decorative} {...props} />;
-}
-
-export function ActivityIcon(props: AppIconProps) {
-  return <Activity {...decorative} {...props} />;
-}
-
-export function StorageIcon(props: AppIconProps) {
-  return <Database {...decorative} {...props} />;
-}
-
-export function LocalDownloadIcon(props: AppIconProps) {
-  return <MonitorDown {...decorative} {...props} />;
-}
-
-export function SearchIcon(props: AppIconProps) {
-  return <Search {...decorative} {...props} />;
 }
 
 export function FolderIcon(props: AppIconProps) {
