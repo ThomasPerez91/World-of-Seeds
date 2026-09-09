@@ -7,15 +7,13 @@ export type AdminView =
   | "admin-users"
   | "admin-services"
   | "admin-settings"
-  | "admin-storage"
-  | "admin-trash";
+  | "admin-storage";
 
 const navigation: { view: AdminView; label: MessageKey }[] = [
   { view: "admin-users", label: "admin.users" },
   { view: "admin-services", label: "admin.services" },
   { view: "admin-settings", label: "admin.settings" },
   { view: "admin-storage", label: "admin.storage" },
-  { view: "admin-trash", label: "admin.trash" },
 ];
 
 export function AdminPageShell({
@@ -33,7 +31,7 @@ export function AdminPageShell({
   return (
     <section className="admin-page" aria-labelledby="administration-title">
       <button type="button" className="back-button" onClick={onBack}>
-        <BackIcon /> {t("common.backFiles")}
+        <BackIcon /> {t("common.backDashboard")}
       </button>
       <header className="admin-page-header">
         <h1 id="administration-title">{t("admin.title")}</h1>
