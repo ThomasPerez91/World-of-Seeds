@@ -2,7 +2,7 @@ import asyncio
 from typing import cast
 
 import pytest
-from starlette.types import Message, Scope
+from starlette.types import Message, Receive, Scope, Send
 
 from app.core.archive_queue import ArchiveDownloadQueueMiddleware
 
@@ -14,7 +14,7 @@ async def test_archive_requests_wait_for_the_previous_stream() -> None:
     release_first = asyncio.Event()
     calls = 0
 
-    async def downstream(scope: Scope, receive, send) -> None:  # type: ignore[no-untyped-def]
+    async def downstream(scope: Scope, receive: Receive, send: Send) -> None:
         nonlocal calls
         del scope, receive
         calls += 1
