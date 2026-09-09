@@ -229,7 +229,6 @@ export class BrowserDownloadManager {
     this.jobs.clear();
     this.order.splice(0);
     this.active.clear();
-    this.emit();
   }
 
   private enqueue(options: {
