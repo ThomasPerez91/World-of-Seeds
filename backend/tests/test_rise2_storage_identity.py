@@ -61,17 +61,18 @@ def test_rise2_newgreedy_and_qbittorrent_are_the_only_torrent_egress_members() -
     assert "networks: [torrent, torrent-egress]" in newgreedy
 
 
-def test_rise2_storage_smoke_exercises_both_immutable_runtime_identities() -> None:
+def test_rise2_storage_smoke_exercises_shared_content_with_both_runtime_identities() -> None:
     script = (_repository() / "scripts" / "rise2_v2_storage_smoke.sh").read_text(encoding="utf-8")
 
-    assert 'WorkspaceManager(Path("/data"))' in script
-    assert "manager.create(username)" in script
+    assert 'SharedContentStore(Path("/data"))' in script
+    assert "store.prepare(key)" in script
+    assert 'Path("/data") / "content" / key.hex' in script
     assert "mode != 0o750" in script
     assert '--user "$qbittorrent_uid:$qbittorrent_gid"' in script
     assert 'printf "qB storage probe\\n" >"$file"' in script
-    assert "source.rename(destination)" in script
-    assert "destination.unlink()" in script
-    assert "manager.remove_empty(username)" in script
+    assert 'os.rename(' in script
+    assert 'os.unlink("wos-renamed.bin", dir_fd=directory_fd)' in script
+    assert "store.remove_empty(key)" in script
     assert "docker compose" in script
     assert "--no-deps" in script
 
