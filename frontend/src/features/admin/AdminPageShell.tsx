@@ -7,7 +7,8 @@ export type AdminView =
   | "admin-users"
   | "admin-services"
   | "admin-settings"
-  | "admin-storage";
+  | "admin-storage"
+  | "admin-trash";
 
 const navigation: { view: AdminView; label: MessageKey }[] = [
   { view: "admin-users", label: "admin.users" },
