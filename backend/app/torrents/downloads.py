@@ -405,18 +405,15 @@ class DownloadLeaseManager:
             )
             finishing_cancelled_download = (
                 managed is not None
-                and managed.state in {
+                and managed.state
+                in {
                     ManagedTorrentState.READY,
                     ManagedTorrentState.PURGE_PENDING,
                 }
                 and request is not None
                 and request.state is TorrentRequestState.CANCELLED
             )
-            can_finish = (
-                ready_right
-                or finishing_expired_download
-                or finishing_cancelled_download
-            )
+            can_finish = ready_right or finishing_expired_download or finishing_cancelled_download
             if user is None or lease is None or not can_finish:
                 raise ManagedDownloadError("download lease was lost")
             lease.renewed_at = now
