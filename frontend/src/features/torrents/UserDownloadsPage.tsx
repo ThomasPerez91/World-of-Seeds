@@ -79,7 +79,14 @@ export function summarizeDownloadManager(
   manager: BrowserDownloadManagerSnapshot,
 ): LocalDownloadSummary {
   const jobs = manager.jobs;
-  const status: LocalDownloadSummary["status"] = manager.activeStreams > 0 || manager.waitingJobs > 0
+  const waitingStreams = jobs.reduce(
+    (count, job) => count + job.queue.filter(
+      (item) => item.status === "waiting" || (job.status === "queued" && item.status === "active"),
+    ).length,
+    0,
+  );
+  const waiting = Math.max(manager.waitingJobs, waitingStreams);
+  const status: LocalDownloadSummary["status"] = manager.activeStreams > 0 || waiting > 0
     ? "running"
     : jobs.some((job) => job.status === "error")
       ? "error"
@@ -94,7 +101,7 @@ export function summarizeDownloadManager(
     active: manager.activeStreams,
     maximum: manager.maxConcurrentStreams,
     status,
-    waiting: manager.waitingJobs,
+    waiting,
   };
 }
 
@@ -927,6 +934,7 @@ export function UserDownloadsPage({
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const queueTotal = torrents.find((torrent) => torrent.queue_total_estimate !== null)?.queue_total_estimate ?? null;
+  const localDownloadSummary = summarizeDownloadManager(managerSnapshot);
 
   return (
     <section className="user-downloads" aria-labelledby="user-downloads-title">
@@ -1016,8 +1024,8 @@ export function UserDownloadsPage({
         <aside className="torrent-queue-summary local-download-manager-summary" aria-live="polite">
           <QueueIcon />
           <div>
-            <strong>{t("downloads.localActive", { active: managerSnapshot.activeStreams, maximum: managerSnapshot.maxConcurrentStreams })}</strong>
-            <span>{t("downloads.localWaitingCount", { waiting: managerSnapshot.waitingJobs })}</span>
+            <strong>{t("downloads.localActive", { active: localDownloadSummary.active, maximum: localDownloadSummary.maximum })}</strong>
+            <span>{t("downloads.localWaitingCount", { waiting: localDownloadSummary.waiting })}</span>
           </div>
         </aside>
       )}
