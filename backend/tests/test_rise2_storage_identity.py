@@ -70,7 +70,7 @@ def test_rise2_storage_smoke_exercises_shared_content_with_both_runtime_identiti
     assert "mode != 0o750" in script
     assert '--user "$qbittorrent_uid:$qbittorrent_gid"' in script
     assert 'printf "qB storage probe\\n" >"$file"' in script
-    assert 'os.rename(' in script
+    assert "os.rename(" in script
     assert 'os.unlink("wos-renamed.bin", dir_fd=directory_fd)' in script
     assert "store.remove_empty(key)" in script
     assert "docker compose" in script
