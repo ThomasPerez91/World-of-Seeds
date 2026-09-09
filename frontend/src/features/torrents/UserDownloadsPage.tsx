@@ -206,22 +206,18 @@ function jobStatusLabel(job: BrowserDownloadJobSnapshot, t: (key: MessageKey, pa
 
 function LocalTransferPanel({
   transfer,
-  maximum,
   onCancel,
   onClose,
   onPause,
   onResume,
 }: {
   transfer: BrowserDownloadJobSnapshot;
-  maximum: number;
   onCancel: () => void;
   onClose: () => void;
   onPause: () => void;
   onResume: () => void;
 }) {
   const { formatBytes, t } = useI18n();
-  const active = transfer.queue.filter((item) => item.status === "active").length;
-  const waiting = transfer.queue.filter((item) => item.status === "waiting").length;
   const error = transfer.error === null ? null : t(transferErrorKeys[transfer.error]);
   return (
     <section className={`recursive-transfer ${transfer.status}`} aria-label={t("downloads.localNamed", { name: transfer.name })}>
@@ -241,8 +237,6 @@ function LocalTransferPanel({
         label={t("downloads.localNamed", { name: transfer.name })}
       />
       <div className="local-transfer-metrics">
-        <span>{t("downloads.localActive", { active, maximum })}</span>
-        <span>{t("downloads.localWaitingCount", { waiting })}</span>
         <Badge tone={transfer.status === "error" ? "danger" : transfer.status === "completed" ? "success" : "neutral"}>
           {jobStatusLabel(transfer, t)}
         </Badge>
@@ -291,7 +285,6 @@ function ReadyTorrentContent({
   onResumeTransfer,
   onRetry,
   torrent,
-  maximum,
 }: {
   manifest: ReadyManifestState | undefined;
   transfers: readonly BrowserDownloadJobSnapshot[];
@@ -304,7 +297,6 @@ function ReadyTorrentContent({
   onResumeTransfer: (jobId: string) => void;
   onRetry: () => void;
   torrent: TorrentRequestV2;
-  maximum: number;
 }) {
   const { formatBytes, t } = useI18n();
   const snapshot = manifest?.snapshot ?? null;
@@ -319,7 +311,6 @@ function ReadyTorrentContent({
         <LocalTransferPanel
           key={transfer.id}
           transfer={transfer}
-          maximum={maximum}
           onCancel={() => onCancelTransfer(transfer.id)}
           onClose={() => onCloseTransfer(transfer.id)}
           onPause={() => onPauseTransfer(transfer.id)}
@@ -534,6 +525,7 @@ export function UserDownloadsPage({
   const [managerSnapshot, setManagerSnapshot] = useState<BrowserDownloadManagerSnapshot>(EMPTY_MANAGER_SNAPSHOT);
   const loadGenerationRef = useRef(0);
   const managerRef = useRef<BrowserDownloadManager | null>(null);
+  const completedDownloadNotificationsRef = useRef(new Set<string>());
   if (managerRef.current === null) {
     managerRef.current = new BrowserDownloadManager(
       DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
@@ -550,6 +542,14 @@ export function UserDownloadsPage({
   useEffect(() => {
     onLocalTransferChanged?.(summarizeDownloadManager(managerSnapshot));
   }, [managerSnapshot, onLocalTransferChanged]);
+
+  useEffect(() => {
+    for (const job of managerSnapshot.jobs) {
+      if (job.status !== "completed" || completedDownloadNotificationsRef.current.has(job.id)) continue;
+      completedDownloadNotificationsRef.current.add(job.id);
+      feedback.toast({ tone: "success", message: t("downloads.completed", { name: job.name }) });
+    }
+  }, [feedback, managerSnapshot.jobs, t]);
 
   const refreshDownloadPolicy = useCallback(() => {
     const controller = new AbortController();
@@ -1064,7 +1064,6 @@ export function UserDownloadsPage({
                       torrent={torrent}
                       manifest={manifest}
                       transfers={transfers}
-                      maximum={managerSnapshot.maxConcurrentStreams}
                       onLoadPage={(requestedOffset) => void loadReadyManifest(
                         torrent.id,
                         requestedOffset,
