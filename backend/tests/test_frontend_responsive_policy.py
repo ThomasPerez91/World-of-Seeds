@@ -28,3 +28,25 @@ def test_torrent_manager_uses_native_accordions_without_duplicate_mobile_markup(
     assert '<table className="torrent-table">' not in page
     assert 'data-label={t("' not in page
     assert "window.location.reload" not in page
+
+
+def test_admin_finish_is_mobile_first_and_legacy_user_filesystem_ui_is_absent() -> None:
+    admin_styles = (REPOSITORY / "frontend/src/features/admin/admin.css").read_text()
+    shell = (REPOSITORY / "frontend/src/features/admin/AdminPageShell.tsx").read_text()
+    app = (REPOSITORY / "frontend/src/App.tsx").read_text()
+    client = (REPOSITORY / "frontend/src/api/client.ts").read_text()
+
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in admin_styles
+    assert "@media (min-width: 600px)" in admin_styles
+    assert "@media (min-width: 900px)" in admin_styles
+    assert "overflow-wrap: anywhere" in admin_styles
+    assert "min-height: 2.75rem" in admin_styles
+    assert 'aria-current={activeView === item.view ? "page" : undefined}' in shell
+    assert '"admin-trash"' not in shell
+    assert "AdminTrashPage" not in app
+    assert 't("account.renameHint")' not in app
+    assert "listAdminTrash" not in client
+    assert "purgeAdminTrash" not in client
+    assert "purgeAllAdminTrash" not in client
+    assert "listFiles" not in client
+    assert not (REPOSITORY / "frontend/src/features/files").exists()
