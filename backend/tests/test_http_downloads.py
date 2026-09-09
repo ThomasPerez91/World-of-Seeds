@@ -1,5 +1,6 @@
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -53,7 +54,7 @@ def test_empty_file_has_no_satisfiable_range() -> None:
         parse_range_header("bytes=0-", 0)
 
 
-def test_if_range_matches_strong_etag_and_http_date(tmp_path) -> None:
+def test_if_range_matches_strong_etag_and_http_date(tmp_path: Path) -> None:
     path = tmp_path / "download.bin"
     path.write_bytes(b"content")
     descriptor = os.open(path, os.O_RDONLY)
@@ -76,7 +77,7 @@ def test_if_range_matches_strong_etag_and_http_date(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_stream_download_is_chunked_and_closes_descriptor(tmp_path) -> None:
+async def test_stream_download_is_chunked_and_closes_descriptor(tmp_path: Path) -> None:
     path = tmp_path / "download.bin"
     path.write_bytes(b"0123456789")
     descriptor = os.open(path, os.O_RDONLY)
