@@ -68,7 +68,6 @@ export function AdminStoragePage({
           <div>
             <p className="eyebrow">{t("admin.capacity")}</p>
             <h2 id="admin-storage-title">{t("admin.seedboxStorage")}</h2>
-            <p className="section-intro">{t("admin.storageIntro")}</p>
           </div>
           <Button
             variant="secondary"
