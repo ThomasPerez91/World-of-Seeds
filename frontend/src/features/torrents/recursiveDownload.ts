@@ -77,15 +77,12 @@ type ManifestPageLoader = (
   signal: AbortSignal,
 ) => Promise<TorrentDownloadManifestPageV2>;
 
-type PermitAcquirer = (signal: AbortSignal) => Promise<() => void>;
-
 interface RecursiveDownloadOptions {
   torrentRequestId: string;
   firstPage: TorrentDownloadManifestPageV2;
   directory: LocalDirectoryHandle;
   loadManifestPage: ManifestPageLoader;
   concurrency?: number;
-  acquirePermit?: PermitAcquirer;
   fetcher?: typeof fetch;
   onProgress: (progress: RecursiveTransferProgress) => void;
 }
@@ -112,7 +109,6 @@ export class RecursiveDownloadController {
   private readonly directory: LocalDirectoryHandle;
   private readonly loadManifestPage: ManifestPageLoader;
   private readonly concurrency: number;
-  private readonly acquirePermit: PermitAcquirer | undefined;
   private readonly fetcher: typeof fetch;
   private readonly onProgress: (progress: RecursiveTransferProgress) => void;
   private readonly offsets = new Map<string, number>();
@@ -153,7 +149,6 @@ export class RecursiveDownloadController {
     this.directory = options.directory;
     this.loadManifestPage = options.loadManifestPage;
     this.concurrency = concurrency;
-    this.acquirePermit = options.acquirePermit;
     this.fetcher = options.fetcher ?? fetch;
     this.onProgress = options.onProgress;
     this.pendingFiles = [...options.firstPage.items];
@@ -202,29 +197,6 @@ export class RecursiveDownloadController {
         const file = await this.takeNextFile();
         if (file === null) return;
         if (this.failedFileId === file.id) this.failedFileId = null;
-
-        let releasePermit = () => undefined;
-        const permitController = new AbortController();
-        this.activeRequests.add(permitController);
-        try {
-          if (this.acquirePermit !== undefined) {
-            releasePermit = await this.acquirePermit(permitController.signal);
-          }
-        } catch (error) {
-          if (error instanceof DOMException && error.name === "AbortError") return;
-          this.pendingFiles.unshift(file);
-          this.failedFileId = file.id;
-          this.fail(error);
-          return;
-        } finally {
-          this.activeRequests.delete(permitController);
-        }
-        if (this.status !== "running") {
-          releasePermit();
-          this.pendingFiles.unshift(file);
-          return;
-        }
-
         this.activeFiles.set(file.id, file);
         this.emit();
         try {
@@ -242,7 +214,6 @@ export class RecursiveDownloadController {
           return;
         } finally {
           this.activeFiles.delete(file.id);
-          releasePermit();
           this.emit();
         }
       }
