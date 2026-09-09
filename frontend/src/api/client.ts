@@ -1,3 +1,5 @@
+import type { Theme } from "../theme";
+
 export interface User {
   id: string;
   username: string;
@@ -5,6 +7,7 @@ export interface User {
   is_active: boolean;
   must_change_credentials: boolean;
   preferred_locale?: "fr" | "en";
+  preferred_theme?: Theme;
 }
 
 interface AuthResponse {
@@ -25,43 +28,6 @@ export interface LivenessHealth {
 export interface GeneratedCredentials {
   user: User;
   initial_password: string;
-}
-
-export type FileEntryKind = "directory" | "file" | "symlink" | "other";
-
-export interface FileEntry {
-  name: string;
-  path: string;
-  kind: FileEntryKind;
-  size: number | null;
-  modified_at: string;
-  media_type: string | null;
-  blocked: boolean;
-}
-
-export interface StorageUsage {
-  total: number;
-  used: number;
-  available: number;
-}
-
-export interface Breadcrumb {
-  label: string;
-  path: string;
-}
-
-export interface DirectoryListing {
-  path: string;
-  breadcrumbs: Breadcrumb[];
-  entries: FileEntry[];
-  storage: StorageUsage;
-  truncated: boolean;
-}
-
-export interface FileMutation {
-  path: string;
-  name: string;
-  kind: "directory" | "file";
 }
 
 export type TorrentRequestV2State =
@@ -190,40 +156,18 @@ export interface TorrentDownloadManifestPageV2 {
 /** A recursively consumed manifest may span pages; the compatibility UI stores one page only. */
 export type TorrentDownloadSnapshotV2 = TorrentDownloadManifestPageV2;
 
-export interface TrashEntry {
-  id: string;
-  original_path: string;
-  name: string;
-  kind: "directory" | "file";
-  size: number | null;
-  deleted_at: string;
+export interface SharedStorageCapacity {
+  total_bytes: number;
+  used_bytes: number;
+  available_bytes: number;
 }
 
-export interface TrashListing {
-  entries: TrashEntry[];
-  truncated: boolean;
-}
-
-export interface AdminStorageOverview extends StorageUsage {
+export interface AdminStorageOverview {
+  total: number;
+  used: number;
+  available: number;
   active_users: number;
   suspended_users: number;
-  trash_entries: number;
-  known_trash_bytes: number;
-}
-
-export interface AdminTrashEntry extends TrashEntry {
-  user_id: string;
-  username: string;
-}
-
-export interface AdminTrashListing {
-  entries: AdminTrashEntry[];
-  truncated: boolean;
-}
-
-export interface AdminTrashPurgeResult {
-  purged: number;
-  remaining: number;
 }
 
 export type ExternalServiceState = "healthy" | "unavailable" | "unconfigured";
@@ -564,6 +508,14 @@ export const api = {
     return response.user;
   },
 
+  async changeTheme(preferredTheme: Theme): Promise<User> {
+    const response = await request<AuthResponse>("/auth/theme", {
+      method: "PATCH",
+      body: JSON.stringify({ preferred_theme: preferredTheme }),
+    });
+    return response.user;
+  },
+
   listUsers(): Promise<User[]> {
     return request<User[]>("/admin/users");
   },
@@ -585,6 +537,10 @@ export const api = {
     return request<void>(`/admin/users/${encodeURIComponent(userId)}`, {
       method: "DELETE",
     });
+  },
+
+  getSharedStorageCapacity(signal?: AbortSignal): Promise<SharedStorageCapacity> {
+    return requestV2<SharedStorageCapacity>("/storage", { signal });
   },
 
   getAdminStorage(): Promise<AdminStorageOverview> {
@@ -676,55 +632,6 @@ export const api = {
     });
   },
 
-  listAdminTrash(signal?: AbortSignal): Promise<AdminTrashListing> {
-    return request<AdminTrashListing>("/admin/trash", { signal });
-  },
-
-  purgeAdminTrash(entryId: string): Promise<void> {
-    return request<void>(`/admin/trash/${encodeURIComponent(entryId)}`, {
-      method: "DELETE",
-    });
-  },
-
-  purgeAllAdminTrash(): Promise<AdminTrashPurgeResult> {
-    return request<AdminTrashPurgeResult>("/admin/trash", {
-      method: "DELETE",
-    });
-  },
-
-  listFiles(path: string, signal?: AbortSignal): Promise<DirectoryListing> {
-    const search = new URLSearchParams();
-    if (path !== "") {
-      search.set("path", path);
-    }
-    const query = search.size === 0 ? "" : `?${search.toString()}`;
-    return request<DirectoryListing>(`/files${query}`, { signal });
-  },
-
-  fileDownloadUrl(path: string): string {
-    const search = new URLSearchParams({ path });
-    return `/api/v1/files/download?${search.toString()}`;
-  },
-
-  folderDownloadUrl(path: string): string {
-    const search = new URLSearchParams({ path });
-    return `/api/v1/files/download-folder?${search.toString()}`;
-  },
-
-  createDirectory(parent: string, name: string): Promise<FileMutation> {
-    return request<FileMutation>("/files/directory", {
-      method: "POST",
-      body: JSON.stringify({ parent, name }),
-    });
-  },
-
-  renameFile(path: string, basename: string): Promise<FileMutation> {
-    return request<FileMutation>("/files/rename", {
-      method: "PATCH",
-      body: JSON.stringify({ path, basename }),
-    });
-  },
-
   createTorrentRequestV2(file: File): Promise<TorrentRequestV2CreateResult> {
     const form = new FormData();
     form.set("torrent", file, file.name);
@@ -783,36 +690,4 @@ export const api = {
     return `/api/v2/torrents/${encodeURIComponent(torrentRequestId)}/download-archive?${snapshot.toString()}`;
   },
 
-  moveFile(path: string, destinationDirectory: string): Promise<FileMutation> {
-    return request<FileMutation>("/files/move", {
-      method: "POST",
-      body: JSON.stringify({
-        path,
-        destination_directory: destinationDirectory,
-      }),
-    });
-  },
-
-  trashFile(path: string): Promise<TrashEntry> {
-    return request<TrashEntry>("/trash", {
-      method: "POST",
-      body: JSON.stringify({ path }),
-    });
-  },
-
-  listTrash(signal?: AbortSignal): Promise<TrashListing> {
-    return request<TrashListing>("/trash", { signal });
-  },
-
-  restoreTrash(entryId: string): Promise<FileMutation> {
-    return request<FileMutation>(`/trash/${encodeURIComponent(entryId)}/restore`, {
-      method: "POST",
-    });
-  },
-
-  purgeTrash(entryId: string): Promise<void> {
-    return request<void>(`/trash/${encodeURIComponent(entryId)}`, {
-      method: "DELETE",
-    });
-  },
 };

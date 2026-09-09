@@ -54,14 +54,15 @@ function LegalNotice() {
         <p>
           Le service traite uniquement les données nécessaires à la gestion des accès, à la
           sécurité et aux opérations demandées : nom d’utilisateur, empreinte du mot de passe,
-          état du compte, sessions, compteurs anti-abus et métadonnées de corbeille. Les mots de
-          passe et jetons de session ne sont pas conservés en clair.
+          état du compte, sessions, compteurs anti-abus, demandes torrent et métadonnées
+          techniques nécessaires aux récupérations. Les mots de passe et jetons de session ne
+          sont pas conservés en clair.
         </p>
         <p>
           Ces informations sont accessibles à l’administrateur du service et sont hébergées sur
           son infrastructure OVH. Elles sont conservées tant que l’accès est actif. Après
-          désactivation, certaines métadonnées peuvent rester archivées le temps nécessaire à la
-          sécurité, à l’intégrité des fichiers et à leur purge technique.
+          désactivation, certaines métadonnées peuvent rester le temps nécessaire à la sécurité,
+          à la rétention du contenu partagé et à sa purge technique.
         </p>
       </section>
 
@@ -86,7 +87,7 @@ function LegalNotice() {
         </a>
       </section>
 
-      <p className="legal-updated">Dernière mise à jour : 15 août 2026.</p>
+      <p className="legal-updated">Dernière mise à jour : 9 septembre 2026.</p>
     </>
   );
 }
@@ -100,9 +101,9 @@ function TermsOfUse() {
       <section>
         <h2>Objet</h2>
         <p>
-          Le service permet à un cercle restreint d’utilisateurs autorisés de gérer et récupérer
-          les fichiers de leur espace personnel. L’accès est gratuit, révocable et ne constitue
-          ni une offre commerciale ni un service ouvert au public.
+          Le service permet à un cercle restreint d’utilisateurs autorisés de soumettre et suivre
+          des torrents puis de récupérer les contenus READY auxquels leur compte a droit. L’accès
+          est gratuit, révocable et ne constitue ni une offre commerciale ni un service ouvert au public.
         </p>
       </section>
 
@@ -130,17 +131,18 @@ function TermsOfUse() {
           Sont notamment interdits : le partage d’accès, les contenus illicites, les tentatives de
           contournement de l’isolation des comptes, l’exploration du serveur, les attaques, les
           automatismes abusifs et toute consommation de ressources susceptible de dégrader le
-          service ou les espaces des autres utilisateurs.
+          service ou les droits des autres utilisateurs.
         </p>
       </section>
 
       <section>
-        <h2>Fichiers et disponibilité</h2>
+        <h2>Contenus et disponibilité</h2>
         <p>
-          Les actions de renommage, déplacement, restauration et suppression sont exécutées à ta
-          demande. Vérifie la destination et conserve une copie des fichiers importants. Le
-          service peut être interrompu pour maintenance et aucune disponibilité permanente n’est
-          garantie.
+          L’annulation retire le droit de ton compte sur un torrent. Un contenu physique partagé
+          reste conservé tant qu’un autre droit actif existe ; la dernière référence suit la
+          rétention et la purge prévues par le service. Conserve une copie locale des contenus
+          importants : le service peut être interrompu pour maintenance et aucune disponibilité
+          permanente n’est garantie.
         </p>
       </section>
 
@@ -153,7 +155,7 @@ function TermsOfUse() {
         </p>
       </section>
 
-      <p className="legal-updated">Dernière mise à jour : 15 août 2026.</p>
+      <p className="legal-updated">Dernière mise à jour : 9 septembre 2026.</p>
     </>
   );
 }

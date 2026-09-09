@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 
 import { api, ApiError, type GeneratedCredentials, type User } from "../../api/client";
+import { Dialog } from "../../components/Dialog";
 import { useFeedback } from "../../components/Feedback";
+import { Badge, Button, Card, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 
@@ -19,20 +21,33 @@ export function AdminUsersPage({
   const [users, setUsers] = useState<User[]>([]);
   const [credentials, setCredentials] = useState<GeneratedCredentials | null>(null);
   const [loadError, setLoadError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
 
   useEffect(() => {
+    let active = true;
+    setLoading(true);
     void api
       .listUsers()
-      .then(setUsers)
+      .then((result) => {
+        if (active) setUsers(result);
+      })
       .catch((caught: unknown) => {
+        if (!active) return;
         if (caught instanceof ApiError && caught.status === 401) {
           onSessionExpired();
           return;
         }
         setLoadError(t("admin.usersLoadFailed"));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
+    return () => {
+      active = false;
+    };
   }, [onSessionExpired, t]);
 
   async function generateUser() {
@@ -78,8 +93,8 @@ export function AdminUsersPage({
     }
   }
 
-  async function deleteAccess(account: User) {
-    if (updatingUserId !== null) return;
+  async function deleteAccess(account: User): Promise<boolean> {
+    if (updatingUserId !== null) return false;
     setUpdatingUserId(account.id);
     try {
       await api.deleteUser(account.id);
@@ -88,12 +103,14 @@ export function AdminUsersPage({
         tone: "success",
         message: t("admin.userDeleted", { name: account.username }),
       });
+      return true;
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
-        return;
+        return false;
       }
       feedback.toast({ tone: "error", message: t("admin.userDeleteFailed") });
+      return false;
     } finally {
       setUpdatingUserId(null);
     }
@@ -110,110 +127,132 @@ export function AdminUsersPage({
   }
 
   return (
-    <AdminPageShell
-      activeView="admin-users"
-      onBack={onBack}
-      onNavigate={onNavigate}
-    >
-      <section className="admin-section" aria-labelledby="admin-users-title">
+    <AdminPageShell activeView="admin-users" onBack={onBack} onNavigate={onNavigate}>
+      <section className="admin-section" aria-labelledby="admin-users-title" aria-busy={loading}>
         <div className="section-heading">
           <div>
             <p className="eyebrow">{t("admin.access")}</p>
             <h2 id="admin-users-title">{t("admin.userAccounts")}</h2>
-            <p className="section-intro">
-              {t("admin.userIntro")}
-            </p>
+            <p className="section-intro">{t("admin.userIntro")}</p>
           </div>
           <div className="generator-controls">
-            <button
-              type="button"
-              className="compact-button"
-              onClick={() => void generateUser()}
-              disabled={generating}
-            >
+            <Button onClick={() => void generateUser()} disabled={generating}>
               {generating ? t("admin.generating") : t("admin.generateUser")}
-            </button>
+            </Button>
           </div>
         </div>
 
         {credentials !== null && (
-          <div className="credential-reveal" role="status">
+          <Card className="credential-reveal" role="status">
             <strong>{t("admin.credentialsWarning")}</strong>
             <div className="credential-row">
               <span>{t("admin.username")}</span>
               <code>{credentials.user.username}</code>
-              <button
-                type="button"
-                className="text-button"
-                onClick={() => void copy(credentials.user.username)}
-              >
+              <Button variant="ghost" className="text-button" onClick={() => void copy(credentials.user.username)}>
                 {t("admin.copy")}
-              </button>
+              </Button>
             </div>
             <div className="credential-row">
               <span>{t("admin.password")}</span>
               <code>{credentials.initial_password}</code>
-              <button
-                type="button"
-                className="text-button"
-                onClick={() => void copy(credentials.initial_password)}
-              >
+              <Button variant="ghost" className="text-button" onClick={() => void copy(credentials.initial_password)}>
                 {t("admin.copy")}
-              </button>
+              </Button>
             </div>
-          </div>
+          </Card>
         )}
 
-        {loadError !== "" && (
-          <p className="form-message error-message" role="alert">{loadError}</p>
+        {loading && users.length === 0 ? (
+          <StateMessage tone="loading">{t("common.loading")}</StateMessage>
+        ) : loadError !== "" ? (
+          <StateMessage tone="error">{loadError}</StateMessage>
+        ) : (
+          <div className="user-list">
+            {users.map((account) => (
+              <Card className="user-row" key={account.id}>
+                <div className="avatar" aria-hidden="true">
+                  {account.username.slice(0, 1).toUpperCase()}
+                </div>
+                <div>
+                  <strong>{account.username}</strong>
+                  <span>
+                    {account.is_admin
+                      ? t("admin.administrator")
+                      : account.must_change_credentials
+                        ? t("admin.personalizationPending")
+                        : t("admin.configuredUser")}
+                  </span>
+                </div>
+                <div className="user-row-actions">
+                  <Badge tone={account.is_active ? "success" : "warning"}>
+                    {account.is_active ? t("admin.active") : t("admin.suspended")}
+                  </Badge>
+                  {!account.is_admin && (
+                    <>
+                      <Button
+                        variant="secondary"
+                        className="compact-button"
+                        aria-label={t("admin.accountNamed", {
+                          action: account.is_active ? t("admin.suspend") : t("admin.reactivate"),
+                          name: account.username,
+                        })}
+                        disabled={updatingUserId === account.id}
+                        onClick={() => void setActive(account, !account.is_active)}
+                      >
+                        {account.is_active ? t("admin.suspend") : t("admin.reactivate")}
+                      </Button>
+                      <Button
+                        variant="danger"
+                        className="compact-button"
+                        aria-label={t("admin.deleteAccessNamed", { name: account.username })}
+                        disabled={updatingUserId === account.id}
+                        onClick={() => setDeleteTarget(account)}
+                      >
+                        {updatingUserId === account.id ? t("admin.deleting") : t("admin.deleteAccess")}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </Card>
+            ))}
+          </div>
         )}
-        <div className="user-list">
-          {users.map((account) => (
-            <div className="user-row" key={account.id}>
-              <div className="avatar" aria-hidden="true">
-                {account.username.slice(0, 1).toUpperCase()}
-              </div>
-              <div>
-                <strong>{account.username}</strong>
-                <span>
-                  {account.is_admin
-                    ? t("admin.administrator")
-                    : account.must_change_credentials
-                      ? t("admin.personalizationPending")
-                      : t("admin.configuredUser")}
-                </span>
-              </div>
-              <div className="user-row-actions">
-                <span className={account.is_active ? "status-pill" : "status-pill inactive"}>
-                  {account.is_active ? t("admin.active") : t("admin.suspended")}
-                </span>
-                {!account.is_admin && (
-                  <>
-                    <button
-                      type="button"
-                      className="secondary-button compact-button"
-                      aria-label={t("admin.accountNamed", { action: account.is_active ? t("admin.suspend") : t("admin.reactivate"), name: account.username })}
-                      disabled={updatingUserId === account.id}
-                      onClick={() => void setActive(account, !account.is_active)}
-                    >
-                      {account.is_active ? t("admin.suspend") : t("admin.reactivate")}
-                    </button>
-                    <button
-                      type="button"
-                      className="danger-outline-button compact-button"
-                      aria-label={t("admin.deleteAccessNamed", { name: account.username })}
-                      disabled={updatingUserId === account.id}
-                      onClick={() => void deleteAccess(account)}
-                    >
-                      {updatingUserId === account.id ? t("admin.deleting") : t("admin.deleteAccess")}
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
       </section>
+      {deleteTarget !== null && (
+        <Dialog
+          eyebrow={t("admin.access")}
+          title={t("admin.deleteTitle", { name: deleteTarget.username })}
+          description={t("admin.deleteDescription")}
+          closeDisabled={updatingUserId === deleteTarget.id}
+          onClose={() => setDeleteTarget(null)}
+        >
+          <p className="dialog-warning">{t("admin.deleteWarning")}</p>
+          <div className="dialog-actions">
+            <Button
+              variant="secondary"
+              data-initial-focus
+              disabled={updatingUserId === deleteTarget.id}
+              onClick={() => setDeleteTarget(null)}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="danger"
+              disabled={updatingUserId === deleteTarget.id}
+              onClick={() => {
+                const account = deleteTarget;
+                void deleteAccess(account).then((deleted) => {
+                  if (deleted) setDeleteTarget(null);
+                });
+              }}
+            >
+              {updatingUserId === deleteTarget.id
+                ? t("admin.deleting")
+                : t("admin.confirmDelete")}
+            </Button>
+          </div>
+        </Dialog>
+      )}
     </AdminPageShell>
   );
 }

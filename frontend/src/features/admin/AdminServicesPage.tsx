@@ -11,6 +11,7 @@ import {
   QBittorrentServiceIcon,
   RefreshIcon,
 } from "../../components/icons";
+import { Badge, Button, Card, StateMessage } from "../../components/ui";
 import { type MessageKey, useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 import { NewGreedyControlPanel } from "./NewGreedyControlPanel";
@@ -31,6 +32,12 @@ function serviceMessage(service: ExternalServiceHealth): MessageKey {
   return "admin.serviceUnavailableDescription";
 }
 
+function statusTone(status: ExternalServiceHealth["status"]): "success" | "warning" | "danger" {
+  if (status === "healthy") return "success";
+  if (status === "unconfigured") return "warning";
+  return "danger";
+}
+
 function ServiceCard({
   children,
   description,
@@ -44,7 +51,7 @@ function ServiceCard({
 }) {
   const { formatNumber, t } = useI18n();
   return (
-    <article
+    <Card
       className={`integration-card ${health.status}`}
       aria-label={`${name} : ${t(statusCopy[health.status])}`}
     >
@@ -56,10 +63,9 @@ function ServiceCard({
           <h3>{name}</h3>
           <p>{description}</p>
         </div>
-        <span className={`integration-status ${health.status}`}>
-          <span aria-hidden="true" />
+        <Badge tone={statusTone(health.status)} className="integration-status">
           {t(statusCopy[health.status])}
-        </span>
+        </Badge>
       </div>
       <p className="integration-service-message">{t(serviceMessage(health))}</p>
       <dl className="integration-metadata">
@@ -72,7 +78,7 @@ function ServiceCard({
           <dd>{health.version ?? "—"}</dd>
         </div>
       </dl>
-    </article>
+    </Card>
   );
 }
 
@@ -123,33 +129,31 @@ export function AdminServicesPage({
 
   return (
     <AdminPageShell activeView="admin-services" onBack={onBack} onNavigate={onNavigate}>
-      <section className="admin-section services-section" aria-labelledby="admin-services-title">
+      <section className="admin-section services-section" aria-labelledby="admin-services-title" aria-busy={loading}>
         <div className="section-heading">
           <div>
             <p className="eyebrow">{t("admin.supervision")}</p>
             <h2 id="admin-services-title">{t("admin.torrentServices")}</h2>
             <p className="section-intro">{t("admin.servicesIntro")}</p>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             className="refresh-button services-refresh-button"
             disabled={loading}
             onClick={() => void load()}
           >
             <RefreshIcon className={loading ? "rotating" : undefined} />
             {loading ? t("admin.servicesChecking") : t("common.refresh")}
-          </button>
+          </Button>
         </div>
 
-        <p className="form-message error-message" role="alert">
-          {error}
-        </p>
-        {health === null ? (
-          <div className="integration-grid integration-grid-loading" role="status">
-            <span>{t("admin.servicesLoading")}</span>
-          </div>
+        {error !== "" && health === null ? (
+          <StateMessage tone="error">{error}</StateMessage>
+        ) : health === null ? (
+          <StateMessage tone="loading">{t("admin.servicesLoading")}</StateMessage>
         ) : (
           <div className="integration-status-region">
+            {error !== "" && <StateMessage tone="error">{error}</StateMessage>}
             <div className="integration-grid">
               <ServiceCard
                 name="NewGreedy"
@@ -167,19 +171,21 @@ export function AdminServicesPage({
               </ServiceCard>
             </div>
             <p className="services-last-check">
-              {t("admin.lastCheck", { date: formatDate(health.checked_at, {
+              {t("admin.lastCheck", {
+                date: formatDate(health.checked_at, {
                   dateStyle: "short",
                   timeStyle: "medium",
-                }) })}
+                }),
+              })}
             </p>
           </div>
         )}
 
         {health?.service_controls_available === true && (
-          <>
+          <div className="admin-service-controls">
             <TorrentMonitoringPanel onSessionExpired={onSessionExpired} />
             <NewGreedyControlPanel onSessionExpired={onSessionExpired} />
-          </>
+          </div>
         )}
       </section>
     </AdminPageShell>

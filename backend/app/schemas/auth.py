@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 Username = Annotated[str, StringConstraints(min_length=3, max_length=32)]
 Password = Annotated[str, StringConstraints(min_length=12, max_length=256)]
 Locale = Literal["fr", "en"]
+Theme = Literal["light", "dark", "system"]
 
 
 class LoginRequest(BaseModel):
@@ -22,6 +23,7 @@ class UserResponse(BaseModel):
     is_active: bool
     must_change_credentials: bool
     preferred_locale: Locale
+    preferred_theme: Theme
 
 
 class AuthResponse(BaseModel):
@@ -45,6 +47,10 @@ class ChangePasswordRequest(BaseModel):
 
 class ChangeLocaleRequest(BaseModel):
     preferred_locale: Locale
+
+
+class ChangeThemeRequest(BaseModel):
+    preferred_theme: Theme
 
 
 class UserStatusRequest(BaseModel):

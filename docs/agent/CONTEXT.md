@@ -2,382 +2,346 @@
 
 ## Purpose
 
-This document is the stable handoff for agents working on World of Seeds.
-It describes the product, invariants, security boundaries, and contribution rules.
-Keep volatile task status out of this file; use `PROGRESS.md` for that.
+Ce document est le handoff durable pour les agents travaillant sur World of Seeds.
+Il décrit l'état de production, l'architecture, les invariants de sécurité et les règles de contribution.
+Les états de tâche volatils appartiennent à `PROGRESS.md`.
 
-## Product
+## Produit et production
 
-World of Seeds is a private seedbox management application.
-It provides authenticated users with a browser-based file manager.
-It also provides controlled torrent submission to a shared qBittorrent service.
-Administrators manage users, storage, and instance-wide functional options.
-The current production line is V1.
-The stable V1 maintenance release documented here is `1.3.3`.
+World of Seeds est une application privée de gestion de seedbox avec :
 
-## Repository and branches
+- soumission et suivi de torrents ;
+- Dashboard utilisateur torrent-centric ;
+- stockage physique partagé et déduplication ;
+- récupération READY vers le navigateur ;
+- workers durables et scheduler équitable ;
+- administration des comptes, quotas, options et opérations de récupération ;
+- observabilité Prometheus/Grafana.
 
-- Repository: `ThomasPerez91/World-of-Seeds`.
-- `master` is the stable V1 production/release branch.
-- `develop` is the V1 preservation and maintenance branch.
-- `develop_V2` is the permanent V2 integration branch.
-- V1 maintenance starts from and returns to `develop` through a pull request.
-- V1 releases move from `develop` to `master` through a pull request.
-- Every V2 task starts from the latest `develop_V2` and returns to `develop_V2` through a
-  pull request.
-- Never merge V2 feature work directly to `develop` or `master`.
-- Do not merge when required CI checks are red.
+La ligne de production active est **V2**.
 
-## Technology
+- version stable : `2.0.0` ;
+- production : Rise2 ;
+- domaine public : `world-of-seeds.fr` ;
+- V1 `1.3.3` : legacy/rollback seulement.
 
-- Backend: Python, FastAPI, SQLAlchemy, Alembic, Pydantic.
-- Database: PostgreSQL.
-- Frontend: React, TypeScript, Vite.
-- Frontend tests: Vitest, Testing Library, axe accessibility checks.
-- Backend tests: pytest.
-- Formatting and linting: Ruff.
-- Type checking: mypy and TypeScript.
-- Packaging and locking: uv and npm.
-- Runtime delivery: Docker Compose and a production container image.
+## Direction produit post-2.0 — UX torrent-centric
 
-## Deployment topology
+La refonte UX post-2.0 est structurée autour d'un **Dashboard torrent-centric**.
 
-- The V1 application stack is driven by `compose.yaml` and
-  `deploy/compose.production.yaml`.
-- PostgreSQL is internal and must not publish a host port.
-- The application port is bound to the host only as documented.
-- qBittorrent is an external dependency used through its Web API.
-- The host seedbox root is `/srv/seedbox`.
-- Both the application and qBittorrent must see that root as `/data`.
-- A user's download directory is `/data/<username>/downloads`.
-- Never solve permissions by introducing `chmod 777`.
-- Deployment variables are documented in `.env.example` and deployment docs.
-- The V2 target is a separate Rise2 stack integrating WOS API/workers, PostgreSQL, Redis,
-  qBittorrent, NewGreedy, ingress, Prometheus, Grafana, node-exporter, and cAdvisor.
-- Rise2 uses secrets, networks, volumes, storage, and monitoring isolated from V1.
-- The pinned NewGreedy 1.7.5 runtime keeps its writable CA in a dedicated volume mounted at
-  `/root/.mitmproxy`. Its config is a read-only `/app/config.ini` bind, while `stats.json`,
-  `torrent_registry.json`, `newgreedy.log`, and `purge_pending.json` are individually backed by
-  one root-owned persistent state directory. Do not replace these paths with `/app/data`, mount a
-  volume over `/app`, or force the service away from the image's validated root user. NewGreedy
-  retains all dropped capabilities, no-new-privileges, a read-only root filesystem, and no host
-  port.
+Cible utilisateur durable :
 
-## Authentication and authorization
+- après authentification, le Dashboard est l'accueil principal ;
+- le parcours central est ajout `.torrent` -> file/téléchargement -> READY -> récupération locale -> suppression/désabonnement ;
+- le navigateur de fichiers utilisateur, la corbeille utilisateur, les actions de création libre de dossiers et les workspaces métier personnels ne font plus partie du runtime moderne ;
+- les écrans admin restent disponibles et sont harmonisés avec le design system lors de UX-06.
 
-- All user file and torrent routes require authentication.
-- Administrative routes additionally require the administrator role.
-- Server-side code resolves the authenticated user; never trust a client username.
-- User workspace validation happens before any filesystem or qBittorrent action.
-- A user may act only inside the workspace assigned to that user.
-- API responses must not reveal server paths, credentials, or other users' data.
+Principes de design :
 
-## File-manager invariants
+- palettes claire et sombre lisibles et douces ;
+- thème `light`, `dark` ou `system` avec préférence persistée par utilisateur ;
+- langue FR/EN conservée comme préférence utilisateur ;
+- surfaces/cartouches compacts, boutons modernes et hiérarchie visuelle dense ;
+- éviter les grands titres et espaces vides qui réduisent la densité utile ;
+- réserver les couleurs fortes aux vrais états d'erreur, avertissements et actions destructrices ;
+- **mobile-first obligatoire** pour toute nouvelle UI ;
+- le responsive est un critère de Definition of Done de **chaque PR UX** : aucun débordement horizontal, contrôles tactiles utilisables, textes/noms longs bornés, cartes/accordéons/actions lisibles et opérables sur mobile ;
+- toute modification UI doit être vérifiée sur des largeurs représentatives mobile, tablette et desktop, avec les états chargement/vide/erreur et les contenus longs.
 
-- All paths are interpreted relative to the authenticated user's workspace.
-- Reject absolute paths, `..` traversal, and escapes from the workspace root.
-- Reject symlink traversal for protected file operations.
-- File rename accepts only a new basename from the client.
-- The backend preserves and reconstructs the protected file extension.
-- Compound extensions such as `.tar.gz` must remain intact.
-- Files without an extension and hidden files require explicit test coverage.
-- Folder creation is limited to one new path component at a time.
-- A successful folder creation refreshes the listing and shows a success notice.
-- A failed folder creation keeps the user on the page and shows an error notice.
-- The UI exposes separate Name and Extension columns.
-- Long names must not cause horizontal page overflow on mobile widths.
-- Breadcrumbs may wrap or scroll within their own container.
+Principes de scope :
 
-## Folder archive downloads
+- réutiliser en priorité les données et contrats existants ;
+- le frontend ne doit jamais contacter qBittorrent ou NewGreedy directement ;
+- la file de récupération affichée est celle du contrôleur navigateur local : nombre de transferts actifs, concurrence maximale locale et positions disponibles pour les éléments en attente ; elle n'est pas une file globale autoritaire inter-utilisateurs ou multi-appareils ;
+- l'annulation d'un torrent conserve le modèle V2 : désabonnement d'un utilisateur lorsqu'il reste d'autres droits actifs, puis lifecycle de purge seulement lorsqu'il ne reste plus de demande active ;
+- V2-32D reste bloquée : ne pas prétendre supprimer précisément les statistiques NewGreedy lors d'une dernière annulation tant que NewGreedy n'offre pas le contrat full-hash requis.
 
-- Folder downloads are streamed as ZIP archives.
-- Archives use `ZIP_STORED`; do not recompress user data.
-- Archive bytes are generated directly into the HTTP response; do not create a temporary ZIP.
-- Admit only one concurrent folder archive per application process.
-- Source traversal must be descriptor based where supported.
-- Use `O_NOFOLLOW` protections where available.
-- Refuse symlinks and path escapes instead of following them.
-- Enforce the configured maximum source size before producing the archive.
-- Release the archive concurrency slot after the response completes, disconnects, or fails.
-- Never write generated archives into a user's visible download tree.
+Le découpage de référence est `UX-01` à `UX-06` dans `docs/roadmap-v2.md`. `PROGRESS.md` indique la tâche courante.
 
-## Torrent submission
+## Repository et branches
 
-- Each authenticated multipart upload carries one `.torrent` file. A frontend multi-upload batch
-  issues several independent bounded requests rather than creating one large backend transaction.
-- The server parses bencode strictly and rejects malformed metainfo.
-- The exact raw bencoded `info` dictionary bytes define the info hash.
-- Do not re-encode `info` before computing the hash.
-- Announce URLs are restricted to the configured C411 tracker host allowlist.
-- The tracker URL is rewritten server-side to include the WOS passkey.
-- The default allowed hosts are `c411.org` and `tk.c411.tw`.
-- The canonical path is `/announce/{URL-encoded WOS passkey}` on an allowed tracker.
-- The WOS passkey is read only from `WOS_C411_PASSKEY`.
-- It is represented as a secret value in application settings.
-- A passkey supplied inside uploaded metainfo is discarded from memory.
-- Never persist a user passkey in the database.
-- Never return a passkey to the frontend or an API client.
-- Never write a passkey to logs, notifications, options, or diagnostics.
-- Functional options must not expose or store this passkey.
+Repository : `ThomasPerez91/World-of-Seeds`.
 
-## qBittorrent integration
+Branches courantes :
 
-- Rise2 derives the private qB bootstrap from the existing deployment integration registry;
-  no independent WebUI credential source or manual UI initialization is required. Host validation
-  and CSRF stay enabled, `qbittorrent` is explicitly allowed, and NewGreedy proxies trackers but
-  never peers. Runtime reconciliation occurs before qB starts and preserves unrelated profile state.
-- Workers/scheduler read the existing registry through a private read-only directory at startup, keeping
-  it out of normalized Compose environment output. The API never receives that secret.
-  Preflight derives mode-0600 files under stable `${WOS_V2_QBITTORRENT_CONFIG_PATH}.runtime/{qb,wos}`
-  directories. Each consumer receives only its directory. Atomic rotation remains visible through
-  existing mounts; stop all credential consumers before rotation and restart them together.
+- `master` : production V2 ;
+- `develop` : intégration V2 ;
+- `develop_V2` : historique de construction V2, à ne plus utiliser pour les nouveaux travaux.
 
-- qBittorrent login must support the documented Web API response variants.
-- HTTP 204 and a body equal to `Ok.` are accepted login results.
-- `Fails.`, HTTP 401, and request failures are handled as failures.
-- The save path is always derived server-side.
-- The client cannot provide or override `save_path`.
-- The derived save path is `/data/<username>/downloads`.
-- Validate the user's workspace before submitting anything to qBittorrent.
-- Store only safe torrent metadata needed for user-specific status display.
-- The `user_torrents` table associates a submission with its owner.
-- Torrent listings are filtered by the authenticated user.
-- Normalize qBittorrent states before sending them to the frontend.
-- Polling must tolerate temporary qBittorrent unavailability.
+Flux obligatoire :
 
-## V2 scheduler authority and download slots
+```text
+feature/* -> develop -> master -> CI vert -> Rise2
+```
 
-- The V2 scheduler is the sole authority that decides which managed torrents may download.
-- The global number of active downloads is PostgreSQL-configurable; the expected operating
-  range is normally one or two, but no implementation may hardcode either value.
-- A torrent must be added to qBittorrent stopped or through an equivalent safe sequence, so it
-  cannot download before the first scheduler decision.
-- Completed torrents may keep seeding in qBittorrent and consume zero active-download slots.
-- Scheduling cost is based on robust remaining bytes, not the original total size alone.
-- Weighted fairness, persistent deficit, size classes, aging, anti-starvation, per-user caps, and
-  future account weights remain required when active-slot authority is hardened.
-- Stall detection is based on durable useful-progress observations, not only an instantaneous
-  zero download speed. PostgreSQL owns cooldown and retry state so a restart cannot erase it.
-- A shared physical torrent enters the weighted-fair queue of every active owner but may be
-  selected only once per cycle. The persisted user cursor rotates the charged beneficiary across
-  cycles and restarts; the selected beneficiary's cap, deficit, and future account weight apply,
-  without ever creating another physical torrent.
-- Each scheduler control cycle contains every currently active download first, then fills the
-  remaining capacity up to 200 from a circular `(created_at, id)` PostgreSQL scan cursor. The
-  cursor is durable in the singleton scheduler row, so backlogs beyond one window keep progressing
-  across cycles and process restarts instead of blocking the scheduler.
-- A completed managed torrent records its first `READY` timestamp and a durable automatic
-  expiration derived from the historical number of distinct requesting users. Later requests may
-  extend that deadline but never shorten it; cancelled and expired requests remain part of the
-  historical popularity count.
-- READY expiration is claimed from a partial indexed PostgreSQL scan in bounded batches. It expires
-  active rights and accounting atomically, persists `PURGE_PENDING`, a scheduler stop intent, and
-  one immediate purge job. Redis only accelerates worker wake-up and realtime refresh.
-- Entering `PURGE_PENDING`, including cancellation of the last owner while downloading, must be
-  stopped through the scheduler's qBittorrent control gateway. The API never issues qB start/stop
-  calls. Physical deletion remains worker-side and waits for all durable download leases to end.
+Règles :
 
-## V2 realtime state delivery
+- chaque changement part du dernier `develop` sur une branche dédiée ;
+- chaque branche revient vers `develop` via PR ;
+- une promotion production passe par une PR `develop -> master` ;
+- ne jamais pousser directement sur `develop` ou `master` ;
+- ne jamais merger avec un check requis rouge ;
+- résoudre les conversations de review avant merge ;
+- `master` et `develop` sont protégées, force-push et suppression interdits.
 
-- The V2 downloads page performs one authoritative PostgreSQL-backed load, then receives only
-  significant domain transitions through an API WebSocket; it must not poll the complete list
-  every ten seconds.
-- A worker or scheduler publishes a lightweight Redis event only after the corresponding database
-  transaction commits. Redis and WebSockets remain non-authoritative and may lose events.
-- Reconnection performs an authoritative GET resynchronization, and the UI retains an explicit
-  manual refresh action.
-- Progress changes do not produce an event for every fractional percentage update.
-- An idle WebSocket holds no SQL session and performs no periodic SQL query; its heartbeat is
-  network-only.
+Checks obligatoires sur les branches protégées :
 
-## V2 recursive transfer scalability
+- `backend` ;
+- `frontend` ;
+- `Container image` ;
+- `Dependency and image security` ;
+- `Validate restricted Rise2 deploy path`.
 
-- Recursive browser downloads consume a stable manifest snapshot progressively: fetch the first
-  page, start transfers, then prefetch later pages through a bounded queue.
-- The browser must not load a complete very large manifest before transferring the first file.
-- Resume offsets become durable only after the corresponding local write has succeeded. Resume
-  validates the actual local size whenever the browser API permits it and handles write, close,
-  abort, permission, missing-device, and disk-full failures without skipping bytes.
+## Technologie
 
-## V2 operational recovery
+- Backend : Python, FastAPI, SQLAlchemy, Alembic, Pydantic.
+- Base : PostgreSQL.
+- Coordination/cache non autoritaire : Redis.
+- Frontend : React, TypeScript, Vite.
+- Tests frontend : Vitest, Testing Library, axe.
+- Tests backend : pytest.
+- Lint/format : Ruff.
+- Typage : mypy + TypeScript.
+- Packaging : uv + npm.
+- Runtime : Docker Compose.
+- Torrent : qBittorrent + NewGreedy.
+- Ingress : Caddy.
+- Monitoring : Prometheus, Grafana, node-exporter, cAdvisor.
 
-- Production workers fail fast when required integration configuration is missing or invalid;
-  development and test fixtures remain explicitly supported.
-- Only the scheduler and workers may receive the production integration registry and join the
-  torrent network. They publish secret-free, per-account integration health and immutable,
-  bounded qBittorrent inventory snapshots to PostgreSQL. The API, Prometheus metrics, and
-  administrative reconciliation consume those durable observations without integration
-  credentials or direct qBittorrent/NewGreedy access; stale or incomplete observations fail
-  closed.
-- The V2 API runs as exactly one process until a representative load test authorizes a topology
-  change. Download/archive admission remains process-local under that enforced topology; Redis is
-  not promoted to a durable or distributed limiter without measured need.
-- The deterministic 100-account suite and the disposable complete-profile smoke validate the
-  single-process invariants and bounded PostgreSQL use in CI. They do not replace the sustained
-  CPU/RAM/I/O and failure-injection acceptance on Rise2; that host validation remains mandatory
-  before the pilot and before any API process-count change.
-- `StorageLedger.managed_bytes` is the declared capacity reserved by non-purged managed torrents,
-  including content not fully downloaded yet. It is not a filesystem measurement; observed media
-  capacity is represented separately by `disk_total_bytes` and `disk_free_bytes`.
-- A qBittorrent reset or state loss must reconcile deterministically with PostgreSQL and shared
-  storage. Missing qB rows cannot remain as permanent phantom downloads in the UI.
-- Administrative recovery operations may reconcile, cancel, or purge orphaned requests through
-  safe business actions. Cancelling an orphan revokes SQL rights without deleting physical data;
-  metadata purge is allowed only after exact qBittorrent and shared-storage checks both prove the
-  physical torrent absent. Recovery never deletes files automatically while ownership or physical
-  state is ambiguous. The API only enqueues idempotent durable recovery jobs; a worker performs
-  external checks and persists the result in PostgreSQL.
+## Topologie Rise2
 
-## Torrent user experience
+Checkout opérateur :
 
-- A torrent queue number exposed to users is always an estimate of the physical
-  `ManagedTorrent`'s rank in the eligible backlog's deterministic `(created_at, id)` scan order.
-  It deliberately does not rotate with the scheduler's circular scan cursor and is never a FIFO
-  promise or browser-side scheduling prediction; the real weighted-fair selector remains the sole
-  authority for admission and qBittorrent controls.
-- Exact per-file positions exist only inside the bounded recursive-download queue controlled by
-  the current browser. A `.torrent` remains an atomic BitTorrent acquisition; users may choose
-  individual files only after READY when transferring manifest content to their own device.
+`/opt/world-of-seeds-v2`
 
-- The upload page supports drag and drop and an explicit, accessible file-selection control on
-  desktop and mobile. Both paths accept multiple `.torrent` files in one action.
-- Multi-upload remains a set of independent backend requests driven by a bounded frontend queue.
-  The batch size and concurrency are capped, each file retains its own result, one failure does not
-  cancel the others, and completion may trigger one authoritative list refresh.
-- The page shows only torrents associated with the current user.
-- Torrent state uses the existing WebSocket plus manual/authoritative refresh model. Multi-upload
-  must not reintroduce periodic list polling, a full page reload, or unbounded parallel requests.
-- User torrent and manifest contracts expose only the PostgreSQL-authoritative absolute READY
-  expiration. The browser may derive accessible 48-hour warning and 24-hour danger countdowns
-  locally, but only a backend state transition or authoritative resynchronization may mark content
-  expired. A shared retention extension invalidates every active owner's view.
-- Long torrent names wrap or truncate without breaking mobile layout.
-- Mobile behavior is covered at 320, 360, 375, 390, 430, and 768 pixel widths, in portrait and
-  landscape, without relying on drag and drop as the only submission path.
+Environment/secrets :
 
-## Notifications
+`/etc/world-of-seeds-v2/environment`
 
-- Use the shared toast system for punctual user-action feedback. Durable page states such as an
-  unavailable service, a list that cannot load, or an empty result remain inline.
-- Use success for completed actions.
-- Use error for failed actions that need correction or retry.
-- Use warning for degraded or risky states.
-- Use information for neutral guidance.
-- Use progress for operations still running.
-- Toasts provide `aria-live` semantics, keyboard access, manual close, reasonable automatic
-  expiry, bounded stacking, and a mobile-safe layout.
-- Notifications must not contain secrets or internal absolute paths.
+Compose de production :
 
-## Frontend interaction and visual policy
+`deploy/compose.rise2.v2.yaml`
 
-- Destructive delete actions do not use a confirmation-only modal. They use an explicit label and
-  danger styling, remain keyboard and screen-reader accessible, disable while pending, and reject
-  double submission. Irreversible trash deletion and administrative purge retain an explicit,
-  accessible inline confirmation step without opening a modal. Dialogs that collect required
-  information or serve a purpose beyond asking "are you sure?" remain allowed.
-- The visual palette is expressed through centralized design tokens for backgrounds, surfaces,
-  text, borders, semantic states, focus, hover, and elevation. Components must not accumulate
-  arbitrary duplicated colors, and important contrast must meet WCAG expectations.
-- Every user and administration surface is responsive across the supported mobile widths and
-  desktop. Tables use cards, data labels, a dedicated mobile layout, or narrowly scoped local
-  scrolling rather than causing global horizontal overflow.
-- Long filenames and torrent names cannot hide actions or expand the page. Primary actions remain
-  available without hover, touch targets remain usable, focus stays coherent after mutations, and
-  orientation changes never require a page reload.
+Services principaux :
 
-## Functional options
+- `ingress` ;
+- `migrate` ;
+- `api` ;
+- `worker` (répliqué, normalement 2) ;
+- `scheduler` (singleton) ;
+- `postgres` ;
+- `redis` ;
+- `qbittorrent` ;
+- `newgreedy` ;
+- monitoring.
 
-- V1 instance-wide functional options are stored through the existing option model.
-- Options may control safe limits such as maximum archive source size.
-- Secret credentials do not belong in functional options.
-- Option changes must retain existing validation and administrative authorization.
-- Restart behavior must use the centralized safe WOS restart path.
-- V2 safe dynamic options are authoritative in PostgreSQL and audited.
-- Infrastructure paths, service URLs, credentials, encryption keys, and TLS material remain
-  environment/deployment secrets and are never editable as functional options.
+Seul l'ingress publie les ports publics 80/443. PostgreSQL, Redis, qBittorrent et NewGreedy ne publient aucun port hôte public.
 
-## Database changes
+## Stockage et persistance
 
-- Schema changes require an Alembic migration.
-- Migrations must upgrade cleanly from the current `develop` baseline.
-- Models, schemas, routes, and migrations must stay consistent.
-- User-owned rows require an explicit ownership relationship.
-- Database records must not contain tracker passkeys or uploaded metainfo secrets.
+Racine média V2 hôte :
 
-## Testing requirements
+`/srv/world-of-seeds-v2/data`
 
-- Run `uv run ruff check .`.
-- Run `uv run ruff format --check .`.
-- Run `uv run mypy app tests` from the backend project context.
-- Run the complete backend pytest suite.
-- Run `npm run check` in the frontend.
-- Run the complete frontend test suite.
-- Run the frontend production build.
-- Validate deployment artifacts and application version consistency.
-- Build and start the production stack in CI.
-- Verify the application image reports the expected version.
-- Verify PostgreSQL is not published.
-- Verify the application port exposure remains host-only.
-- Add regression tests for every security boundary changed.
-- Add accessibility assertions for new interactive controls.
+Elle est montée dans WOS et qBittorrent comme :
 
-## Versioning and release
+`/data`
 
-- Keep all version declarations synchronized.
-- Use `scripts/versioning.py` for version changes and consistency checks.
-- Update dependency locks when dependency declarations change.
-- The current V1 maintenance release version is `1.3.3`.
-- The release PR targets `master` from `develop`.
-- Merge the release only after backend, frontend, and container CI are green.
-- Confirm the resulting `master` and `develop` commit identifiers at handoff.
+Ce stockage est un bind mount hôte, pas un filesystem éphémère de conteneur.
 
-## Security review checklist
+### Modèle de stockage moderne
 
-- Search for credentials before committing.
-- Confirm `.env` files and runtime secrets remain untracked.
-- Confirm no API response includes a passkey.
-- Confirm no log call includes uploaded announce URLs with credentials.
-- Confirm client input cannot select another user's workspace.
-- Confirm filesystem operations remain beneath the workspace root.
-- Confirm archive traversal refuses symlinks.
-- Confirm archive resources and concurrency slots are released on success and error.
-- Confirm torrent upload accepts only the intended file type and tracker.
-- Confirm the database contains ownership metadata but no passkey.
+Le runtime moderne n'utilise plus de filesystem métier personnel `/data/<username>`.
 
-## Agent workflow
+- `SharedContentStore` est l'autorité filesystem du contenu torrent ;
+- le contenu physique reste sous `/data/content/<storage-key>` ;
+- `ManagedTorrent` représente une copie physique partagée ;
+- `TorrentFile` représente son manifeste ;
+- `TorrentRequest` représente le droit/abonnement d'un utilisateur ;
+- plusieurs utilisateurs peuvent partager le même `ManagedTorrent` sans duplication physique ;
+- la suppression d'un droit ou d'un compte ne supprime pas la copie physique tant qu'une autre demande active existe ;
+- la dernière référence passe par le lifecycle de purge normal ;
+- `GET /api/v2/storage` expose au Dashboard la capacité disque partagée sans réintroduire un navigateur de fichiers ;
+- les primitives HTTP Range/stream utilisées par READY sont indépendantes de l'ancien filesystem utilisateur.
 
-- Read this file and `PROGRESS.md` before changing the repository.
-- Inspect the working tree before editing.
-- Preserve unrelated user changes.
-- Make focused commits with descriptive messages.
-- Keep PR descriptions explicit about behavior, security, tests, and deployment.
-- Read failing CI job logs only when a job fails.
-- Apply the smallest correct fix and rerun the full affected workflow.
-- Update `PROGRESS.md` at the end of each substantial PR.
-- Update this file only when stable architecture or policy changes.
-- Never place secrets, tokens, passkeys, or private URLs in agent documents.
+Ne pas renommer `content/<storage-key>` ni migrer physiquement le stockage dans une PR applicative ordinaire. Un changement de disposition disque demande une opération OPS dédiée et un rollback explicite.
 
-## Official V1/V2 separation rule
+Les données structurées et états techniques utilisent des volumes/paths persistants dédiés :
 
-V1 `1.3.3` is released. V1 maintenance remains isolated on `develop` and `master`.
-V2 work is authorized only as a scoped branch from `develop_V2`, with its own pull request
-back to `develop_V2`. Do not mix V1 hotfixes and V2 implementation. The future V2 release
-and Rise2 deployment require an explicit, separately validated workflow; they do not imply
-direct feature merges to `master`.
+- PostgreSQL : `postgres_v2_data` ;
+- Redis : `redis_v2_data` ;
+- qBittorrent : `qbittorrent_v2_config` ;
+- NewGreedy state : `/srv/world-of-seeds-v2/newgreedy-state` ;
+- Prometheus/Grafana/Caddy : volumes V2 dédiés.
 
-For every task, read only this file and `PROGRESS.md` first, then only the files required by
-the task. Avoid repository-wide re-analysis and opportunistic refactors. Run targeted tests
-during development and the complete CI once when ready. Update `PROGRESS.md` at the end;
-change this file only for durable policy or architecture decisions.
+Ne jamais utiliser `docker compose down --volumes` dans une opération de déploiement ou rollback ordinaire.
 
-## Authoritative references
+Le stockage média Rise2 est volontairement distinct de la V1. Les opérations de backup/restauration doivent préserver le contrat documenté dans les scripts et runbooks Rise2.
 
-- `README.md` for product setup and common commands.
-- `docs/architecture-v1.md` for the current architecture.
-- `docs/deployment-ovh.md` for production deployment.
-- `.env.example` for supported environment variables without secret values.
-- `compose.yaml` and `deploy/compose.production.yaml` for V1 runtime wiring.
-- `docs/architecture-v2.md`, `docs/roadmap-v2.md`, and
-  `docs/deployment-rise2-v2.md` for the V2 target and delivery order.
-- `.github/workflows/` for required automated checks.
-- `docs/agent/PROGRESS.md` for the current handoff state.
+## Déploiement production
+
+Le workflow `Deploy V2 to Rise2` est le canal production officiel.
+
+Déclencheurs :
+
+- automatique après succès du workflow `CI` sur un `push` de `master` ;
+- manuel via `workflow_dispatch` pour une opération contrôlée.
+
+Contrat de sécurité :
+
+- la révision cible est le SHA exact du CI `master` réussi ;
+- un run obsolète est refusé si le HEAD de `master` a changé ;
+- l'image est construite pour `linux/amd64` ;
+- l'image est publiée sur GHCR et déployée par digest immuable ;
+- l'identité SSH `wosdeploy` est dédiée, sans shell général, avec commande forcée ;
+- le helper root vérifie à nouveau le HEAD de `master`, l'historique fast-forward et les labels OCI ;
+- le déploiement standard recrée seulement la couche applicative WOS/ingress ;
+- PostgreSQL, Redis, qBittorrent et NewGreedy doivent rester présents, healthy et non recréés ;
+- les changements sensibles qB/NewGreedy/topologie Compose bloquent le canal automatique.
+
+Etat du dernier déploiement :
+
+`/var/lib/world-of-seeds-v2/deploy/current.env`
+
+## Authentification et autorisation
+
+- Toutes les routes torrent/READY/stockage utilisateur exigent un utilisateur authentifié.
+- Les routes d'administration exigent le rôle administrateur.
+- Le serveur résout l'utilisateur ; ne jamais faire confiance à un username envoyé par le client.
+- Les droits sur le contenu torrent sont portés par `TorrentRequest`, pas par un chemin de workspace fourni par le client.
+- Le client ne peut jamais choisir un chemin hôte ou un save path qBittorrent.
+- Ne jamais révéler chemins hôte, secrets, passkeys ou données d'un autre utilisateur dans une réponse API.
+
+## Préférences d’interface
+
+- `User.preferred_theme` est obligatoire, vaut `light`, `dark` ou `system` et a pour défaut serveur `system` (migration `20260908_23`). Le champ est exposé dans les réponses utilisateur.
+- `PATCH /api/v1/auth/theme` reçoit `{ "preferred_theme": "dark" }` et retourne `AuthResponse`, avec les mêmes exigences authentification/CSRF que la langue. Aucune modification des règles de credentials/session.
+- `data-theme="light|dark"` sur `document.documentElement` représente le thème effectif ; `system` est une préférence, jamais une palette CSS.
+- Le bootstrap externe same-origin `theme-bootstrap.js` applique avant React la dernière préférence locale (`wos.preferred-theme`), ou `system` si absente/invalide/inaccessible. Le compte devient autoritaire lors de la connexion/restauration de session ; le cache ne contient aucun secret.
+- Le provider englobe tous les écrans, suit les changements de `prefers-color-scheme` en mode système et centralise les écritures. Une sauvegarde échouée rétablit le choix précédent sans invalider la session. Les réponses d’une session quittée sont ignorées.
+
+## Invariants filesystem et téléchargement
+
+- Aucun chemin hôte n'est accepté depuis le client.
+- Les chemins de manifeste torrent sont relatifs au contenu géré et doivent rester bornés par les validations serveur.
+- Refuser chemins absolus, `..`, évasions de racine et traversées de symlinks lors de toute résolution filesystem.
+- Les ouvertures sensibles utilisent des résolutions sûres/descripteurs et `O_NOFOLLOW` lorsque prévu par les primitives de téléchargement.
+- Ne jamais résoudre un problème de permissions avec `chmod 777`.
+- Les téléchargements READY doivent conserver les contrôles Range, leases, limites de concurrence et validation du manifeste.
+- Les noms longs et chemins imbriqués ne doivent pas provoquer de débordement horizontal mobile.
+
+## Torrent et sécurité tracker
+
+- Parser le bencode strictement.
+- Le hash est calculé depuis les octets bruts exacts du dictionnaire `info`; ne jamais le réencoder avant calcul.
+- Les trackers sont allowlistés côté serveur.
+- Les passkeys et credentials restent des secrets de déploiement ; ne jamais les persister dans les tables métier, logs, diagnostics ou réponses frontend.
+- Les références multi-comptes sont opaques côté domaine.
+
+## qBittorrent / NewGreedy
+
+qBittorrent et NewGreedy sont des services internes Rise2.
+
+- qB utilise le même stockage `/data` que WOS ;
+- le save path est dérivé côté serveur ;
+- le client ne peut pas choisir un chemin hôte ;
+- le scheduler est l'autorité de start/stop ;
+- qB doit recevoir un torrent arrêté avant la première décision scheduler ;
+- les torrents externes/non WOS restent hors contrôle destructif de WOS ;
+- NewGreedy proxy les trackers, pas les peers ;
+- NewGreedy garde sa CA et son état persistant dédiés ;
+- aucun port qB/NewGreedy n'est publié sur l'hôte.
+
+V2-32D reste bloqué : NewGreedy v1.7.5 ne garantit pas une suppression exacte et durable par SHA-1 complet. Ne pas implémenter de contournement par préfixe/reset global/édition directe.
+
+## Scheduler et jobs
+
+PostgreSQL est l'autorité durable.
+
+Redis est un accélérateur de coordination/cache/notifications ; une perte Redis ne doit pas supprimer la vérité métier.
+
+Le scheduler :
+
+- est singleton ;
+- décide seul des torrents actifs ;
+- respecte une limite globale configurable ;
+- maintient équité pondérée, déficit, aging/anti-starvation et caps ;
+- ne compte pas les torrents READY/seeding comme slots actifs ;
+- utilise les octets restants/observations utiles plutôt que seulement la taille totale ;
+- persiste cooldown et état de contrôle afin de survivre aux redémarrages.
+
+Les workers :
+
+- claim les jobs PostgreSQL durablement ;
+- exécutent les effets qB/storage ;
+- sont idempotents et tolèrent crash/reprise ;
+- publient les transitions temps réel seulement après commit.
+
+## Déduplication, stockage et quotas
+
+Un `ManagedTorrent` représente un torrent physique partagé.
+
+Les `TorrentRequest` représentent les droits utilisateurs.
+
+- Un infohash physique ne doit pas être téléchargé plusieurs fois pour plusieurs utilisateurs.
+- Les quotas utilisateurs sont logiques et transactionnels.
+- Le stockage physique partagé est comptabilisé séparément.
+- Les opérations de purge sont idempotentes et attendent les leases de téléchargement.
+- Le stockage observé et le ledger applicatif sont des notions distinctes.
+
+## Rétention READY
+
+Chaque torrent physique READY possède une date de première disponibilité et une échéance durable.
+
+La rétention dépend de la popularité historique et peut être prolongée par de nouvelles demandes avant expiration, jamais raccourcie.
+
+A l'échéance :
+
+- les droits actifs sont expirés atomiquement ;
+- le torrent passe vers `PURGE_PENDING` ;
+- un stop scheduler durable est enregistré ;
+- une purge worker idempotente est créée ;
+- les leases existants peuvent terminer, mais aucun nouveau droit expiré n'est accordé.
+
+## Temps réel et transferts navigateur
+
+L'interface torrent charge un état PostgreSQL autoritaire puis reçoit des événements WebSocket non autoritaires.
+
+- pas de polling complet toutes les dix secondes ;
+- après reconnexion, faire une resynchronisation GET autoritaire ;
+- un WebSocket idle ne doit pas maintenir de session SQL.
+
+Les téléchargements récursifs utilisent un manifeste paginé/progressif et une concurrence bornée. Ne pas attendre un manifeste énorme complet avant de démarrer les premiers fichiers.
+
+Conserver ces mécanismes dans le Dashboard/les accordéons au lieu de créer un second système de suivi parallèle.
+
+## Observabilité
+
+Prometheus/Grafana surveillent application, jobs, scheduler, DB, Redis, qB, stockage et hôte.
+
+Les métriques doivent rester sans secrets et à cardinalité bornée.
+
+Les exporters internes ne doivent pas publier de nouveaux ports hôte sans décision explicite.
+
+## Backup et rollback
+
+Les sauvegardes off-host Rise2 et le restore drill sont des éléments obligatoires du dispositif de production.
+
+Rollback applicatif :
+
+- préserver PostgreSQL, Redis, qBittorrent, NewGreedy, CA et stockage ;
+- restaurer un digest applicatif validé ;
+- recréer uniquement les services applicatifs nécessaires ;
+- vérifier API, workers, scheduler et intégrations ;
+- ne jamais supprimer les volumes pendant un rollback ordinaire.
+
+L'ancien serveur V1 reste seulement une possibilité de rollback trafic pendant la fenêtre décidée par l'opérateur. Ne pas supposer qu'il restera éternellement disponible.
+
+## Documentation
+
+- `docs/agent/CONTEXT.md` : invariants durables et architecture courante.
+- `docs/agent/PROGRESS.md` : état opérationnel et dernière étape accomplie.
+- `docs/roadmap-v2.md` : historique de la construction V2, règles post-2.0 et roadmap UX post-2.0.
+- `docs/deployment-rise2-github-actions.md` : CI/CD production.
+
+Toute modification durable d'architecture, de direction produit ou de flux de release doit mettre ces fichiers en cohérence dans la même PR.

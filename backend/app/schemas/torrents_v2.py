@@ -32,6 +32,10 @@ class TorrentRequestV2ListingResponse(BaseModel):
     total: int
 
 
+class TorrentDownloadPolicyResponse(BaseModel):
+    max_concurrent_streams: int = Field(ge=1, le=20)
+
+
 class TorrentDownloadFileResponse(BaseModel):
     id: uuid.UUID
     file_index: int = Field(ge=0)

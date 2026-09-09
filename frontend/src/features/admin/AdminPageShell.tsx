@@ -1,21 +1,20 @@
 import type { ReactNode } from "react";
 
 import { BackIcon } from "../../components/icons";
+import { Button } from "../../components/ui";
 import { useI18n, type MessageKey } from "../../i18n";
 
 export type AdminView =
   | "admin-users"
   | "admin-services"
   | "admin-settings"
-  | "admin-storage"
-  | "admin-trash";
+  | "admin-storage";
 
 const navigation: { view: AdminView; label: MessageKey }[] = [
   { view: "admin-users", label: "admin.users" },
   { view: "admin-services", label: "admin.services" },
   { view: "admin-settings", label: "admin.settings" },
   { view: "admin-storage", label: "admin.storage" },
-  { view: "admin-trash", label: "admin.trash" },
 ];
 
 export function AdminPageShell({
@@ -32,21 +31,24 @@ export function AdminPageShell({
   const { t } = useI18n();
   return (
     <section className="admin-page" aria-labelledby="administration-title">
-      <button type="button" className="back-button" onClick={onBack}>
-        <BackIcon /> {t("common.backFiles")}
-      </button>
+      <Button variant="ghost" className="back-button admin-back-button" onClick={onBack}>
+        <BackIcon /> {t("common.backDashboard")}
+      </Button>
       <header className="admin-page-header">
-        <h1 id="administration-title">{t("admin.title")}</h1>
+        <div className="admin-page-heading-copy">
+          <p className="eyebrow">{t("admin.adminEyebrow")}</p>
+          <h1 id="administration-title">{t("admin.title")}</h1>
+        </div>
         <nav className="admin-navigation" aria-label={t("admin.navigation")}>
           {navigation.map((item) => (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               key={item.view}
               aria-current={activeView === item.view ? "page" : undefined}
               onClick={() => onNavigate(item.view)}
             >
               {t(item.label)}
-            </button>
+            </Button>
           ))}
         </nav>
       </header>

@@ -58,3 +58,55 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 64
+
+  torrent-metrics:
+    image: ${WOS_V2_IMAGE:?set immutable WOS_V2_IMAGE digest}
+    pull_policy: always
+    restart: unless-stopped
+    user: "0:0"
+    working_dir: /app/backend
+    command: [python, -m, app.observability.torrent_metrics_exporter]
+    environment:
+      WOS_TORRENT_METRICS_PORT: "9101"
+      WOS_TORRENT_METRICS_SECRET_PATH: /run/secrets/integration_registry
+      WOS_TORRENT_METRICS_NEWGREEDY_STATS_PATH: /newgreedy/stats.json
+    depends_on:
+      qbittorrent:
+        condition: service_healthy
+      newgreedy:
+        condition: service_healthy
+    volumes:
+      - type: bind
+        source: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}.runtime/wos
+        target: /run/secrets
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${WOS_V2_NEWGREEDY_STATE_HOST_PATH:?set WOS_V2_NEWGREEDY_STATE_HOST_PATH}/stats.json
+        target: /newgreedy/stats.json
+        read_only: true
+        bind: {create_host_path: false}
+    networks: [torrent, monitoring]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/health', timeout=2)
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  prometheus:
+    volumes:
+      - type: bind
+        source: ../monitoring/prometheus/prometheus.rise2.yml
+        target: /etc/prometheus/prometheus.yml
+        read_only: true
