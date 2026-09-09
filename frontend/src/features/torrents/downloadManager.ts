@@ -82,6 +82,7 @@ interface EnqueueFileOptions {
 }
 
 interface PermitWaiter {
+  jobId: string;
   resolve: (release: () => void) => void;
   reject: (error: DOMException) => void;
   signal: AbortSignal;
@@ -91,6 +92,7 @@ interface PermitWaiter {
 class DownloadPermitPool {
   private limit: number;
   private active = 0;
+  private readonly activeByJob = new Map<string, number>();
   private readonly waiters: PermitWaiter[] = [];
 
   constructor(limit: number, private readonly onChange: () => void) {
@@ -101,16 +103,25 @@ class DownloadPermitPool {
     return this.active;
   }
 
+  activeFor(jobId: string): number {
+    return this.activeByJob.get(jobId) ?? 0;
+  }
+
+  waitingFor(jobId: string): number {
+    return this.waiters.filter((waiter) => waiter.jobId === jobId).length;
+  }
+
   setLimit(limit: number): void {
     this.limit = limit;
     this.drain();
     this.onChange();
   }
 
-  acquire(signal: AbortSignal): Promise<() => void> {
+  acquire(jobId: string, signal: AbortSignal): Promise<() => void> {
     if (signal.aborted) return Promise.reject(new DOMException("aborted", "AbortError"));
     return new Promise((resolve, reject) => {
       const waiter: PermitWaiter = {
+        jobId,
         resolve,
         reject,
         signal,
@@ -138,11 +149,15 @@ class DownloadPermitPool {
         continue;
       }
       this.active += 1;
+      this.activeByJob.set(waiter.jobId, this.activeFor(waiter.jobId) + 1);
       let released = false;
       waiter.resolve(() => {
         if (released) return;
         released = true;
         this.active = Math.max(0, this.active - 1);
+        const jobActive = this.activeFor(waiter.jobId);
+        if (jobActive <= 1) this.activeByJob.delete(waiter.jobId);
+        else this.activeByJob.set(waiter.jobId, jobActive - 1);
         this.drain();
         this.onChange();
       });
@@ -312,7 +327,7 @@ export class BrowserDownloadManager {
       directory: options.directory,
       loadManifestPage: options.loadManifestPage,
       concurrency: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
-      fetcher: (input, init) => this.fetchWithPermit(input, init),
+      fetcher: (input, init) => this.fetchWithPermit(id, input, init),
       onProgress: (progress) => this.onProgress(id, progress),
     });
     this.jobs.set(id, { controller, snapshot: initial });
@@ -323,11 +338,12 @@ export class BrowserDownloadManager {
   }
 
   private async fetchWithPermit(
+    jobId: string,
     input: RequestInfo | URL,
     init?: RequestInit,
   ): Promise<Response> {
     const signal = init?.signal ?? new AbortController().signal;
-    const release = await this.permits.acquire(signal);
+    const release = await this.permits.acquire(jobId, signal);
     let response: Response;
     try {
       response = await fetch(input, init);
@@ -377,13 +393,9 @@ export class BrowserDownloadManager {
   private onProgress(jobId: string, progress: RecursiveTransferProgress): void {
     const job = this.jobs.get(jobId);
     if (job === undefined) return;
-    const hasActiveFile = progress.queue.some((item) => item.status === "active");
-    const status: BrowserDownloadJobStatus = progress.status === "running" && !hasActiveFile
-      ? "queued"
-      : progress.status;
     job.snapshot = {
       ...job.snapshot,
-      status,
+      status: progress.status,
       downloadedBytes: progress.downloadedBytes,
       completedFiles: progress.completedFiles,
       error: progress.error,
@@ -399,11 +411,15 @@ export class BrowserDownloadManager {
     for (const id of this.order) {
       const job = this.jobs.get(id);
       if (job === undefined) continue;
-      if (job.snapshot.status === "queued") {
+      const waitingForPermit = job.snapshot.status === "running"
+        && this.permits.activeFor(id) === 0
+        && this.permits.waitingFor(id) > 0;
+      const status: BrowserDownloadJobStatus = waitingForPermit ? "queued" : job.snapshot.status;
+      if (status === "queued") {
         position += 1;
-        jobs.push({ ...job.snapshot, queuePosition: position });
+        jobs.push({ ...job.snapshot, status, queuePosition: position });
       } else {
-        jobs.push({ ...job.snapshot, queuePosition: null });
+        jobs.push({ ...job.snapshot, status, queuePosition: null });
       }
     }
     this.onChange({
