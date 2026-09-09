@@ -1,0 +1,442 @@
+name: Post-UX consolidation helper
+
+on:
+  push:
+    branches:
+      - refactor/post-ux-consolidation
+    paths:
+      - .github/workflows/post-ux-consolidation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Apply bounded post-UX cleanup
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from __future__ import annotations
+
+          import re
+          from pathlib import Path
+
+          ROOT = Path.cwd()
+
+          def read(path: str) -> str:
+              return (ROOT / path).read_text(encoding="utf-8")
+
+          def write(path: str, content: str) -> None:
+              (ROOT / path).write_text(content, encoding="utf-8")
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              content = read(path)
+              count = content.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected one occurrence, found {count}: {old[:80]!r}")
+              write(path, content.replace(old, new, 1))
+
+          def source_contains(needle: str, *, exclude: set[str] | None = None) -> bool:
+              excluded = exclude or set()
+              for base in (ROOT / "backend", ROOT / "frontend"):
+                  for path in base.rglob("*"):
+                      rel = path.relative_to(ROOT).as_posix()
+                      if rel in excluded or not path.is_file() or path.suffix not in {".py", ".ts", ".tsx"}:
+                          continue
+                      if needle in path.read_text(encoding="utf-8"):
+                          return True
+              return False
+
+          # 1. Retire the final backend compatibility namespace for the old file browser.
+          for path in (ROOT / "backend").rglob("*.py"):
+              if "backend/app/files/" in path.as_posix():
+                  continue
+              content = path.read_text(encoding="utf-8")
+              updated = content.replace("from app.files.downloads import", "from app.http_downloads import")
+              if updated != content:
+                  path.write_text(updated, encoding="utf-8")
+
+          if source_contains("app.files.downloads", exclude={"backend/app/files/downloads.py"}):
+              raise RuntimeError("app.files.downloads still has a modern consumer")
+
+          for legacy in (
+              "backend/app/files/downloads.py",
+              "backend/app/files/__init__.py",
+          ):
+              path = ROOT / legacy
+              if not path.exists():
+                  raise RuntimeError(f"expected legacy file is missing: {legacy}")
+              path.unlink()
+
+          files_dir = ROOT / "backend/app/files"
+          if files_dir.exists() and not any(files_dir.iterdir()):
+              files_dir.rmdir()
+
+          for module, import_name in (
+              ("backend/app/schemas/files.py", "app.schemas.files"),
+              ("backend/app/schemas/torrents.py", "app.schemas.torrents"),
+          ):
+              if source_contains(import_name, exclude={module}):
+                  raise RuntimeError(f"{module} still has a runtime consumer")
+              path = ROOT / module
+              if not path.exists():
+                  raise RuntimeError(f"expected dead schema is missing: {module}")
+              path.unlink()
+
+          # 2. Reuse the common V2 HTTP client for shared storage capacity.
+          client_path = "frontend/src/api/client.ts"
+          client = read(client_path)
+          snapshot_marker = "/** A recursively consumed manifest may span pages; the compatibility UI stores one page only. */\nexport type TorrentDownloadSnapshotV2 = TorrentDownloadManifestPageV2;\n\n"
+          if snapshot_marker not in client:
+              raise RuntimeError("client storage type insertion marker changed")
+          client = client.replace(
+              snapshot_marker,
+              snapshot_marker
+              + "export interface SharedStorageCapacity {\n"
+              + "  total_bytes: number;\n"
+              + "  used_bytes: number;\n"
+              + "  available_bytes: number;\n"
+              + "}\n\n",
+              1,
+          )
+          method_marker = "  getAdminStorage(): Promise<AdminStorageOverview> {\n"
+          if method_marker not in client:
+              raise RuntimeError("client storage method insertion marker changed")
+          client = client.replace(
+              method_marker,
+              "  getSharedStorageCapacity(signal?: AbortSignal): Promise<SharedStorageCapacity> {\n"
+              "    return requestV2<SharedStorageCapacity>(\"/storage\", { signal });\n"
+              "  },\n\n"
+              + method_marker,
+              1,
+          )
+          write(client_path, client)
+
+          dashboard_path = "frontend/src/features/dashboard/UserDashboardPage.tsx"
+          dashboard = read(dashboard_path)
+          old_imports = '''import { api, ApiError, type TorrentRequestV2 } from "../../api/client";\nimport {\n  getSharedStorageCapacity,\n  type SharedStorageCapacity,\n} from "../../api/storage";'''
+          new_imports = '''import {\n  api,\n  ApiError,\n  type SharedStorageCapacity,\n  type TorrentRequestV2,\n} from "../../api/client";'''
+          if old_imports not in dashboard:
+              raise RuntimeError("dashboard storage import marker changed")
+          dashboard = dashboard.replace(old_imports, new_imports, 1)
+          dashboard = dashboard.replace(
+              "void getSharedStorageCapacity(controller.signal)",
+              "void api.getSharedStorageCapacity(controller.signal)",
+              1,
+          )
+          if "api/storage" in dashboard or "getSharedStorageCapacity(controller.signal)" in dashboard.replace("api.getSharedStorageCapacity(controller.signal)", ""):
+              raise RuntimeError("dashboard still uses the standalone storage client")
+          write(dashboard_path, dashboard)
+
+          storage_client = ROOT / "frontend/src/api/storage.ts"
+          if not storage_client.exists():
+              raise RuntimeError("standalone storage client unexpectedly missing")
+          storage_client.unlink()
+
+          # 3. Add an explicit, accurate confirmation before deleting account access.
+          users_path = "frontend/src/features/admin/AdminUsersPage.tsx"
+          users = read(users_path)
+          users = users.replace(
+              'import { api, ApiError, type GeneratedCredentials, type User } from "../../api/client";\n',
+              'import { api, ApiError, type GeneratedCredentials, type User } from "../../api/client";\nimport { Dialog } from "../../components/Dialog";\n',
+              1,
+          )
+          users = users.replace(
+              '  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);\n',
+              '  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);\n  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);\n',
+              1,
+          )
+          old_delete = '''  async function deleteAccess(account: User) {\n    if (updatingUserId !== null) return;\n    setUpdatingUserId(account.id);\n    try {\n      await api.deleteUser(account.id);\n      setUsers((current) => current.filter((candidate) => candidate.id !== account.id));\n      feedback.toast({\n        tone: "success",\n        message: t("admin.userDeleted", { name: account.username }),\n      });\n    } catch (caught) {\n      if (caught instanceof ApiError && caught.status === 401) {\n        onSessionExpired();\n        return;\n      }\n      feedback.toast({ tone: "error", message: t("admin.userDeleteFailed") });\n    } finally {\n      setUpdatingUserId(null);\n    }\n  }'''
+          new_delete = '''  async function deleteAccess(account: User): Promise<boolean> {\n    if (updatingUserId !== null) return false;\n    setUpdatingUserId(account.id);\n    try {\n      await api.deleteUser(account.id);\n      setUsers((current) => current.filter((candidate) => candidate.id !== account.id));\n      feedback.toast({\n        tone: "success",\n        message: t("admin.userDeleted", { name: account.username }),\n      });\n      return true;\n    } catch (caught) {\n      if (caught instanceof ApiError && caught.status === 401) {\n        onSessionExpired();\n        return false;\n      }\n      feedback.toast({ tone: "error", message: t("admin.userDeleteFailed") });\n      return false;\n    } finally {\n      setUpdatingUserId(null);\n    }\n  }'''
+          if old_delete not in users:
+              raise RuntimeError("AdminUsersPage delete function marker changed")
+          users = users.replace(old_delete, new_delete, 1)
+          old_button = '                        onClick={() => void deleteAccess(account)}\n'
+          new_button = '                        onClick={() => setDeleteTarget(account)}\n'
+          if old_button not in users:
+              raise RuntimeError("AdminUsersPage delete button marker changed")
+          users = users.replace(old_button, new_button, 1)
+          dialog = '''\n      {deleteTarget !== null && (\n        <Dialog\n          eyebrow={t("admin.access")}\n          title={t("admin.deleteTitle", { name: deleteTarget.username })}\n          description={t("admin.deleteDescription")}\n          closeDisabled={updatingUserId === deleteTarget.id}\n          onClose={() => setDeleteTarget(null)}\n        >\n          <p className="dialog-warning">{t("admin.deleteWarning")}</p>\n          <div className="dialog-actions">\n            <Button\n              variant="secondary"\n              data-initial-focus\n              disabled={updatingUserId === deleteTarget.id}\n              onClick={() => setDeleteTarget(null)}\n            >\n              {t("common.cancel")}\n            </Button>\n            <Button\n              variant="danger"\n              disabled={updatingUserId === deleteTarget.id}\n              onClick={() => {\n                const account = deleteTarget;\n                void deleteAccess(account).then((deleted) => {\n                  if (deleted) setDeleteTarget(null);\n                });\n              }}\n            >\n              {updatingUserId === deleteTarget.id\n                ? t("admin.deleting")\n                : t("admin.confirmDelete")}\n            </Button>\n          </div>\n        </Dialog>\n      )}\n'''
+          closing = "      </section>\n    </AdminPageShell>"
+          if closing not in users:
+              raise RuntimeError("AdminUsersPage dialog insertion marker changed")
+          users = users.replace(closing, "      </section>" + dialog + "    </AdminPageShell>", 1)
+          write(users_path, users)
+
+          # 4. Remove dead legacy translations and refresh account deletion copy.
+          i18n_path = "frontend/src/i18n.tsx"
+          i18n = read(i18n_path)
+          replacements = {
+              '    "admin.deleteDescription": "Le compte sera désactivé, ses sessions fermées et son dossier sera conservé.",':
+                  '    "admin.deleteDescription": "Le compte sera désactivé, ses sessions seront fermées et ses droits sur ses torrents actifs seront retirés.",',
+              '    "admin.deleteWarning": "Les fichiers ne seront pas supprimés, mais cet utilisateur ne pourra plus se connecter.",':
+                  '    "admin.deleteWarning": "Un contenu partagé reste disponible tant qu’un autre utilisateur y est abonné. La dernière référence suit la rétention puis la purge normales.",',
+              '    "admin.deleteDescription": "The account will be disabled, its sessions closed, and its folder retained.",':
+                  '    "admin.deleteDescription": "The account will be disabled, its sessions closed, and its rights to active torrents removed.",',
+              '    "admin.deleteWarning": "Files will not be deleted, but this user will no longer be able to sign in.",':
+                  '    "admin.deleteWarning": "Shared content remains available while another user is subscribed. The last reference follows the normal retention and purge lifecycle.",',
+          }
+          for old, new in replacements.items():
+              if i18n.count(old) != 1:
+                  raise RuntimeError(f"i18n delete copy marker changed: {old}")
+              i18n = i18n.replace(old, new, 1)
+
+          dead_keys = {
+              "common.backFiles",
+              "common.rename",
+              "common.move",
+              "dashboard.openFiles",
+              "account.renameHint",
+              "error.workspaceUnavailable",
+              "error.filePathInvalid",
+              "error.filePathBlocked",
+              "error.directoryMissing",
+              "error.trashEntryMissing",
+              "error.trashRestoreConflict",
+              "error.trashIntegrity",
+              "error.trashUnverified",
+              "error.trashPurgeIncomplete",
+              "admin.trash",
+              "admin.trashItems",
+              "admin.knownTrashSize",
+              "admin.knownTrashNote",
+              "admin.globalCleanup",
+              "admin.userTrash",
+              "admin.emptyAllTrash",
+              "admin.trashLoadFailed",
+              "admin.trashTruncated",
+              "admin.allTrashEmpty",
+              "admin.noTrashCleanup",
+              "admin.deletePermanently",
+              "admin.emptyTrashDescription",
+              "admin.deleteTrashDescription",
+              "admin.permanentWarning",
+              "admin.deletingTrash",
+              "admin.deleteAll",
+              "admin.trashPurged",
+              "admin.purgeAllComplete",
+              "admin.purgeAllRemaining",
+              "admin.purgeAllResult",
+              "admin.purgeIntegrityFailed",
+              "admin.purgeFailed",
+              "admin.deletedOn",
+              "admin.deleteTrashNamed",
+          }
+          frontend_usage = "\n".join(
+              path.read_text(encoding="utf-8")
+              for path in (ROOT / "frontend/src").rglob("*")
+              if path.is_file() and path.suffix in {".ts", ".tsx"} and path.name != "i18n.tsx"
+          )
+          lines = i18n.splitlines(keepends=True)
+          retained: list[str] = []
+          removed_counts = {key: 0 for key in dead_keys}
+          key_pattern = re.compile(r'^\s*"([^"]+)":')
+          for line in lines:
+              match = key_pattern.match(line)
+              key = match.group(1) if match else None
+              if key in dead_keys:
+                  if f'"{key}"' in frontend_usage:
+                      raise RuntimeError(f"refusing to remove translation still used by frontend: {key}")
+                  removed_counts[key] += 1
+                  continue
+              retained.append(line)
+          for key, count in removed_counts.items():
+              if count not in {0, 2}:
+                  raise RuntimeError(f"unexpected locale count for {key}: {count}")
+          i18n = "".join(retained)
+          for key in dead_keys:
+              if f'"{key}":' in i18n:
+                  raise RuntimeError(f"dead translation survived cleanup: {key}")
+          write(i18n_path, i18n)
+
+          # 5. Remove only CSS that belonged to the deleted admin trash screen.
+          def remove_matching_rules(css: str, needle: str) -> str:
+              def matching_brace(text: str, opening: int) -> int:
+                  depth = 0
+                  quote: str | None = None
+                  escaped = False
+                  i = opening
+                  while i < len(text):
+                      char = text[i]
+                      if quote is not None:
+                          if escaped:
+                              escaped = False
+                          elif char == "\\":
+                              escaped = True
+                          elif char == quote:
+                              quote = None
+                          i += 1
+                          continue
+                      if char in {'"', "'"}:
+                          quote = char
+                      elif text.startswith("/*", i):
+                          end = text.find("*/", i + 2)
+                          if end == -1:
+                              raise RuntimeError("unterminated CSS comment")
+                          i = end + 2
+                          continue
+                      elif char == "{":
+                          depth += 1
+                      elif char == "}":
+                          depth -= 1
+                          if depth == 0:
+                              return i
+                      i += 1
+                  raise RuntimeError("unbalanced CSS")
+
+              def process(segment: str) -> str:
+                  out: list[str] = []
+                  cursor = 0
+                  while cursor < len(segment):
+                      opening = segment.find("{", cursor)
+                      if opening == -1:
+                          out.append(segment[cursor:])
+                          break
+                      closing = matching_brace(segment, opening)
+                      header = segment[cursor:opening]
+                      body = segment[opening + 1:closing]
+                      stripped = header.strip()
+                      if stripped.startswith(("@media", "@supports", "@layer")):
+                          cleaned = process(body)
+                          if cleaned.strip():
+                              out.append(header + "{" + cleaned + "}")
+                      elif needle not in header:
+                          out.append(header + "{" + body + "}")
+                      cursor = closing + 1
+                  return "".join(out)
+
+              return process(css)
+
+          styles_path = "frontend/src/styles.css"
+          styles = remove_matching_rules(read(styles_path), ".admin-trash")
+          if ".admin-trash" in styles:
+              raise RuntimeError("legacy admin trash CSS remains")
+          write(styles_path, styles)
+
+          # 6. Keep legal copy aligned with the torrent-centric product.
+          legal_path = "frontend/src/components/LegalPage.tsx"
+          legal = read(legal_path)
+          legal_replacements = {
+              "          état du compte, sessions, compteurs anti-abus et métadonnées de corbeille. Les mots de\n          passe et jetons de session ne sont pas conservés en clair.":
+                  "          état du compte, sessions, compteurs anti-abus, demandes torrent et métadonnées\n          techniques nécessaires aux récupérations. Les mots de passe et jetons de session ne\n          sont pas conservés en clair.",
+              "          désactivation, certaines métadonnées peuvent rester archivées le temps nécessaire à la\n          sécurité, à l’intégrité des fichiers et à leur purge technique.":
+                  "          désactivation, certaines métadonnées peuvent rester le temps nécessaire à la sécurité,\n          à la rétention du contenu partagé et à sa purge technique.",
+              "          Le service permet à un cercle restreint d’utilisateurs autorisés de gérer et récupérer\n          les fichiers de leur espace personnel. L’accès est gratuit, révocable et ne constitue\n          ni une offre commerciale ni un service ouvert au public.":
+                  "          Le service permet à un cercle restreint d’utilisateurs autorisés de soumettre et suivre\n          des torrents puis de récupérer les contenus READY auxquels leur compte a droit. L’accès\n          est gratuit, révocable et ne constitue ni une offre commerciale ni un service ouvert au public.",
+              "          service ou les espaces des autres utilisateurs.":
+                  "          service ou les droits des autres utilisateurs.",
+              "        <h2>Fichiers et disponibilité</h2>\n        <p>\n          Les actions de renommage, déplacement, restauration et suppression sont exécutées à ta\n          demande. Vérifie la destination et conserve une copie des fichiers importants. Le\n          service peut être interrompu pour maintenance et aucune disponibilité permanente n’est\n          garantie.\n        </p>":
+                  "        <h2>Contenus et disponibilité</h2>\n        <p>\n          L’annulation retire le droit de ton compte sur un torrent. Un contenu physique partagé\n          reste conservé tant qu’un autre droit actif existe ; la dernière référence suit la\n          rétention et la purge prévues par le service. Conserve une copie locale des contenus\n          importants : le service peut être interrompu pour maintenance et aucune disponibilité\n          permanente n’est garantie.\n        </p>",
+              "Dernière mise à jour : 15 août 2026.": "Dernière mise à jour : 9 septembre 2026.",
+          }
+          for old, new in legal_replacements.items():
+              count = legal.count(old)
+              expected = 2 if old == "Dernière mise à jour : 15 août 2026." else 1
+              if count != expected:
+                  raise RuntimeError(f"LegalPage marker changed; expected {expected}, got {count}: {old[:70]!r}")
+              legal = legal.replace(old, new)
+          for stale in ("métadonnées de corbeille", "espace personnel", "renommage, déplacement, restauration"):
+              if stale in legal:
+                  raise RuntimeError(f"stale legal copy remains: {stale}")
+          write(legal_path, legal)
+
+          # 7. Rewrite the public README around the active V2, not the retired V1 filesystem.
+          readme = '''# World of Seeds\n\nWorld of Seeds est une application web privée de gestion de seedbox. La ligne active est la **V2**, déployée sur Rise2 avec FastAPI, React/TypeScript, PostgreSQL, Redis, qBittorrent et NewGreedy.\n\n## État du projet\n\n- version de production actuelle : `2.0.0` ;\n- `master` : production V2 ;\n- `develop` : intégration V2 ;\n- `develop_V2` : historique de construction, sans nouveau développement ;\n- déploiement production : workflow GitHub Actions `Deploy V2 to Rise2` après CI `master` verte.\n\nL'expérience utilisateur est torrent-centric : ajout d'un `.torrent`, suivi de file/progression, état READY, récupération locale et désabonnement. Il n'existe plus de navigateur de fichiers, de workspace ou de corbeille par utilisateur dans le runtime moderne.\n\n## Architecture\n\nPostgreSQL est l'autorité métier. Redis sert uniquement à la coordination et aux signaux éphémères. qBittorrent et NewGreedy sont des services internes et ne sont jamais contactés directement par le navigateur.\n\nLe stockage physique est partagé :\n\n- `ManagedTorrent` représente une copie physique ;\n- `TorrentFile` représente son manifeste ;\n- `TorrentRequest` représente le droit/abonnement d'un utilisateur ;\n- `SharedContentStore` conserve le contenu sous `/data/content/<storage-key>` ;\n- plusieurs utilisateurs peuvent donc partager une seule copie physique ;\n- retirer un droit ne détruit pas le contenu tant qu'une autre demande active existe ; la dernière référence passe par le lifecycle normal de rétention/purge.\n\nAucun chemin hôte ni `save_path` arbitraire n'est accepté depuis le client. Les passkeys tracker restent des secrets d'infrastructure et ne sont jamais persistées dans les tables métier, logs ou réponses frontend.\n\n## Développement local\n\nBackend :\n\n```bash\ncd backend\nuv sync --frozen --dev\nuv run uvicorn app.main:app --reload\n```\n\nFrontend :\n\n```bash\ncd frontend\nnpm ci\nnpm run check\nnpm run test\nnpm run dev\n```\n\nValidation backend complète :\n\n```bash\ncd backend\nuv run ruff check .\nuv run ruff format --check .\nuv run mypy app tests\nuv run pytest\n```\n\n`VERSION` reste la source canonique de version applicative. Les changements de version passent par `scripts/versioning.py` et la CI vérifie les miroirs Python/npm ainsi que l'image.\n\n## Contribution et livraison\n\nTout changement part du dernier `develop` sur une branche dédiée et revient par pull request. Les checks requis sont : backend, frontend, image conteneur, sécurité dépendances/image et policy Rise2. Aucun push direct n'est fait sur `develop` ou `master`.\n\nLa promotion en production est une PR séparée `develop -> master`. Après merge et CI `master` verte, Rise2 déploie le digest immuable validé sans recréer PostgreSQL, Redis, qBittorrent, NewGreedy ni les volumes persistants.\n\n## Documentation\n\n- `docs/agent/CONTEXT.md` : contexte durable et invariants actuels ;\n- `docs/agent/PROGRESS.md` : état des tâches ;\n- `docs/architecture-v2.md` : architecture V2 ;\n- `docs/deployment-rise2-v2.md` : déploiement et rollback Rise2 ;\n- `docs/roadmap-v2.md` : historique et roadmap.\n'''
+          write("README.md", readme)
+
+          # 8. Replace stale V1-era V2 architecture with the architecture actually running today.
+          architecture = '''# Architecture de World of Seeds V2\n\n## Statut et branches\n\nWorld of Seeds V2 est la ligne active. La version stable actuellement en production est `2.0.0` sur Rise2. La V1 `1.3.3` n'est plus qu'une référence historique/rollback.\n\n- `master` porte la production V2 ;\n- `develop` est la branche d'intégration V2 ;\n- `develop_V2` est historique et ne reçoit plus de nouveaux travaux ;\n- chaque changement part du dernier `develop`, passe par une branche dédiée et une PR vers `develop` ;\n- une promotion production passe ensuite par une PR `develop -> master`.\n\nLes branches protégées exigent les checks backend, frontend, image conteneur, sécurité dépendances/image et policy de déploiement Rise2.\n\n## Topologie\n\n```mermaid\nflowchart TB\n    Browser["Navigateur"] --> Ingress["Caddy / TLS"]\n    Ingress --> API["API WOS"]\n    API --> PG["PostgreSQL · autorité"]\n    API --> Redis["Redis · coordination"]\n    Scheduler["Scheduler singleton"] --> PG\n    Scheduler --> Redis\n    Worker["Workers"] --> PG\n    Worker --> Redis\n    Worker --> Services["qBittorrent + NewGreedy"]\n    API --> Storage["Stockage partagé"]\n    Worker --> Storage\n    Prometheus --> Grafana\n```\n\nSeul l'ingress publie 80/443. PostgreSQL, Redis, qBittorrent, NewGreedy et les exporters restent sur les réseaux internes. L'API, les workers et le scheduler utilisent la même image applicative avec des commandes distinctes.\n\n## Autorité et modèle métier\n\nPostgreSQL est l'autorité de l'état métier et des jobs critiques. Redis accélère la coordination mais sa perte ne doit ni perdre un job ni autoriser une suppression. qBittorrent exécute les torrents mais n'est pas l'autorité des droits utilisateur.\n\n| Entité | Rôle |\n| --- | --- |\n| `ManagedTorrent` | Torrent physique WOS partagé, infohash unique et clé de stockage serveur |\n| `TorrentRequest` | Demande et droit d'un utilisateur sur un `ManagedTorrent` |\n| `TorrentFile` | Manifeste validé des fichiers et chemins relatifs |\n| `TorrentJob` | Travail durable, claimable et idempotent |\n| `DownloadLease` | Protection temporaire d'un contenu servi contre la purge |\n| `TrackerActivity` | Diagnostic tracker expurgé des secrets |\n\nDeux uploads concurrents du même infohash convergent vers une seule copie physique et plusieurs `TorrentRequest`. Une annulation ou suppression de compte retire uniquement les droits concernés. Si aucune demande active ne reste, le lifecycle existant applique rétention puis purge ; il n'existe pas de second système de corbeille métier.\n\n## Jobs, scheduler et reprise\n\nLes jobs durables vivent en PostgreSQL. Les workers les claim avec expiration, retries bornés, backoff et vérification d'idempotence. Une réponse qBittorrent ambiguë est réconciliée par infohash avant toute répétition.\n\nLe scheduler détient une lease singleton PostgreSQL, applique l'équité pondérée, les plafonds de concurrence et les limites de débit, et suspend les nouvelles admissions sous pression disque critique. Ses décisions désirées sont persistées avant les effets qBittorrent afin qu'un nouveau propriétaire de lease puisse reprendre après crash.\n\n## Stockage partagé\n\n```text\n/data/\n├── content/<storage-key>/   # copies physiques partagées gérées par SharedContentStore\n├── control/                 # états techniques non publics\n└── work/                    # temporaires techniques bornés, lorsque requis\n```\n\nLe runtime moderne n'a aucun workspace métier `/data/<username>` et aucune corbeille utilisateur. `SharedContentStore` est l'autorité filesystem du contenu torrent et utilise des clés UUID générées par le serveur. Le client ne fournit jamais de chemin hôte ou de destination qBittorrent.\n\nLes chemins du manifeste `TorrentFile` restent relatifs, validés et bornés. Les ouvertures sensibles refusent les chemins absolus, `..`, les évasions de racine et les symlinks ; les primitives utilisent des descripteurs et `O_NOFOLLOW` lorsque nécessaire.\n\n`GET /api/v2/storage` expose seulement la capacité partagée utile au Dashboard (`total_bytes`, `used_bytes`, `available_bytes`) et ne réintroduit aucun navigateur de fichiers.\n\n## READY et récupération locale\n\nUn utilisateur ne peut récupérer que les fichiers d'un `TorrentRequest` READY qui lui appartient. Le serveur produit un snapshot de manifeste stable, conserve les contrôles HTTP Range/ETag, les leases et les limites de concurrence, et peut streamer un ZIP borné lorsqu'il est disponible.\n\nLa récupération récursive principale est pilotée par le navigateur à partir du manifeste. Sa file est locale au navigateur : elle n'est jamais présentée comme une file globale autoritaire multi-appareils.\n\n## Authentification et suppression de compte\n\nLes sessions sont opaques, révocables et protégées par CSRF. Les routes métier résolvent l'utilisateur côté serveur ; aucun username fourni par le client ne détermine un chemin ou un droit de contenu.\n\nLa suppression d'un accès administré révoque les sessions, désactive le compte et annule ses demandes torrent actives via le même service métier que l'annulation utilisateur. Une copie partagée reste présente si d'autres demandes actives existent ; la dernière référence suit la rétention et la purge normales.\n\n## Trackers, qBittorrent et NewGreedy\n\nLes métainfo torrent sont parsés strictement et l'infohash est calculé depuis les octets bruts exacts du dictionnaire `info`. Les trackers sont allowlistés. Les passkeys et credentials restent dans les secrets d'infrastructure et ne sont jamais persistés dans les tables métier, logs, métriques ou réponses frontend.\n\nqBittorrent et NewGreedy sont internes à Rise2. Le scheduler est l'autorité des décisions start/stop WOS et les effets destructifs qB sont bornés aux torrents portant l'identité WOS. V2-32D reste bloqué tant que NewGreedy ne fournit pas une suppression exacte et durable par SHA-1 complet ; aucun contournement par préfixe/reset global/édition directe n'est autorisé.\n\n## Configuration, observabilité et sécurité\n\nLes options fonctionnelles sûres sont typées, bornées, auditées et stockées en PostgreSQL. Secrets, URLs internes, chemins hôte, ports, UID/GID et clés restent dans le déploiement.\n\nPrometheus/Grafana couvrent API, workers, scheduler, PostgreSQL, Redis, qBittorrent, stockage, hôte et conteneurs. Les métriques et logs ne portent ni passkey, ni chemin hôte utilisateur, ni infohash complet comme label.\n\n## Déploiement Rise2 et rollback\n\nLe checkout opérateur est `/opt/world-of-seeds-v2`, l'environnement `/etc/world-of-seeds-v2/environment` et le Compose production `deploy/compose.rise2.v2.yaml`.\n\nLe workflow `Deploy V2 to Rise2` déploie le SHA `master` dont la CI a réussi, construit/publie une image immuable et déploie son digest. Le canal standard recrée uniquement la couche applicative nécessaire ; PostgreSQL, Redis, qBittorrent, NewGreedy et les volumes persistants doivent rester présents.\n\nLe rollback applicatif redéploie un digest compatible. Les migrations destructives suivent une stratégie explicitement réversible/expand-contract et les opérations de stockage physique requièrent un plan OPS et un rollback dédié. `docker compose down --volumes` n'appartient jamais à un déploiement ou rollback ordinaire.\n\nLe détail opératoire reste dans [`deployment-rise2-v2.md`](deployment-rise2-v2.md).\n'''
+          write("docs/architecture-v2.md", architecture)
+
+          progress_path = "docs/agent/PROGRESS.md"
+          progress = read(progress_path)
+          old_progress = "La refonte de l'expérience utilisateur autour d'un Dashboard **torrent-centric** est désormais complète sur la branche de travail UX-06 et attend son intégration dans `develop`."
+          new_progress = "La refonte de l'expérience utilisateur autour d'un Dashboard **torrent-centric** est intégrée dans `develop` (UX-00 à UX-06 terminées)."
+          if old_progress not in progress:
+              raise RuntimeError("PROGRESS UX-06 integration marker changed")
+          progress = progress.replace(old_progress, new_progress, 1)
+          marker = "## Prochaine tâche\n"
+          consolidation = '''## Consolidation post-UX-06\n\nUne passe de cohérence post-refonte retire les derniers contrats morts du filesystem utilisateur : namespace backend `app.files`, schémas V1 Files/Torrents non montés, client HTTP stockage dupliqué, traductions et styles de l'ancienne corbeille. La documentation publique/légale est réalignée sur le stockage partagé. La suppression d'un compte admin exige désormais une confirmation qui décrit les vrais effets sur les `TorrentRequest` et le lifecycle partagé.\n\nCette consolidation ne modifie ni le schéma PostgreSQL, ni `UserTorrent` historique, ni le stockage physique, ni qBittorrent/NewGreedy, ni le lifecycle torrent.\n\n'''
+          if marker not in progress:
+              raise RuntimeError("PROGRESS next-task marker changed")
+          progress = progress.replace(marker, consolidation + marker, 1)
+          write(progress_path, progress)
+
+          # 9. Tests/policies: confirmation must gate DELETE and dead namespaces must stay gone.
+          app_test_path = "frontend/src/App.test.tsx"
+          app_test = read(app_test_path)
+          old_test = '''    await user.click(screen.getByRole("button", { name: "Supprimer l’accès de guest-a1b2c3" }));\n    await screen.findByText("Impossible de supprimer l’accès de cet utilisateur.");\n    await user.click(screen.getByRole("button", { name: "Supprimer l’accès de guest-a1b2c3" }));\n    expect(screen.queryByText("guest-a1b2c3")).toBeNull();'''
+          new_test = '''    await user.click(screen.getByRole("button", { name: "Supprimer l’accès de guest-a1b2c3" }));\n    await screen.findByRole("heading", { name: "Supprimer l’accès de guest-a1b2c3 ?" });\n    expect(deleteAttempts).toBe(0);\n    await user.click(screen.getByRole("button", { name: "Confirmer la suppression" }));\n    await screen.findByText("Impossible de supprimer l’accès de cet utilisateur.");\n    expect(screen.getByRole("heading", { name: "Supprimer l’accès de guest-a1b2c3 ?" })).toBeTruthy();\n    await user.click(screen.getByRole("button", { name: "Confirmer la suppression" }));\n    expect(screen.queryByText("guest-a1b2c3")).toBeNull();'''
+          if old_test not in app_test:
+              raise RuntimeError("App delete-flow test marker changed")
+          write(app_test_path, app_test.replace(old_test, new_test, 1))
+
+          responsive_path = "backend/tests/test_frontend_responsive_policy.py"
+          responsive = read(responsive_path)
+          anchor = '    assert not (REPOSITORY / "frontend/src/features/files").exists()\n'
+          if anchor not in responsive:
+              raise RuntimeError("responsive cleanup policy marker changed")
+          responsive = responsive.replace(
+              anchor,
+              anchor
+              + '    assert not (REPOSITORY / "frontend/src/api/storage.ts").exists()\n'
+              + '    assert not (REPOSITORY / "backend/app/files").exists()\n'
+              + '    assert not (REPOSITORY / "backend/app/schemas/files.py").exists()\n'
+              + '    assert not (REPOSITORY / "backend/app/schemas/torrents.py").exists()\n'
+              + '    styles = (REPOSITORY / "frontend/src/styles.css").read_text()\n'
+              + '    translations = (REPOSITORY / "frontend/src/i18n.tsx").read_text()\n'
+              + '    assert ".admin-trash" not in styles\n'
+              + '    assert "error.workspaceUnavailable" not in translations\n'
+              + '    assert "admin.trashItems" not in translations\n',
+              1,
+          )
+          write(responsive_path, responsive)
+
+          # Final bounded consistency assertions.
+          forbidden_current = {
+              "README.md": ("/data/<username>", "corbeille privée par utilisateur", "La V1 applicative est complète"),
+              "docs/architecture-v2.md": ("trash/<user-id>", "master` reste la production V1", "develop_V2` est la branche permanente"),
+              "frontend/src/components/LegalPage.tsx": ("métadonnées de corbeille", "espace personnel"),
+          }
+          for path, needles in forbidden_current.items():
+              content = read(path)
+              for needle in needles:
+                  if needle in content:
+                      raise RuntimeError(f"stale product contract remains in {path}: {needle}")
+
+          if (ROOT / "backend/app/files").exists():
+              raise RuntimeError("legacy backend app.files directory still exists")
+          if (ROOT / "frontend/src/api/storage.ts").exists():
+              raise RuntimeError("duplicate frontend storage client still exists")
+          PY
+
+      - name: Sanity-check changed sources
+        shell: bash
+        run: |
+          git diff --check
+          python3 -m compileall -q backend/app backend/tests
+          grep -R "from app.files\|app.files.downloads" -n backend/app backend/tests && exit 1 || true
+          grep -R "api/storage" -n frontend/src && exit 1 || true
+          grep -R "admin-trash\|error.workspaceUnavailable" -n frontend/src backend/tests && exit 1 || true
+
+      - name: Commit cleanup to feature branch
+        shell: bash
+        run: |
+          git status --short
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No cleanup changes produced" >&2
+            exit 1
+          fi
+          git commit -m "refactor: consolidate post-UX architecture"
+          git push origin HEAD:refactor/post-ux-consolidation
