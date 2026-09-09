@@ -50,3 +50,12 @@ def test_admin_finish_is_mobile_first_and_legacy_user_filesystem_ui_is_absent() 
     assert "purgeAllAdminTrash" not in client
     assert "listFiles" not in client
     assert not (REPOSITORY / "frontend/src/features/files").exists()
+    assert not (REPOSITORY / "frontend/src/api/storage.ts").exists()
+    assert not (REPOSITORY / "backend/app/files").exists()
+    assert not (REPOSITORY / "backend/app/schemas/files.py").exists()
+    assert not (REPOSITORY / "backend/app/schemas/torrents.py").exists()
+    styles = (REPOSITORY / "frontend/src/styles.css").read_text()
+    translations = (REPOSITORY / "frontend/src/i18n.tsx").read_text()
+    assert ".admin-trash" not in styles
+    assert "error.workspaceUnavailable" not in translations
+    assert "admin.trashItems" not in translations

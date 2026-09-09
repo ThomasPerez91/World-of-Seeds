@@ -1,42 +1,39 @@
 # World of Seeds
 
-Interface web privée de gestion de seedbox, conçue pour être déployée en Docker sur un serveur Ubuntu.
+World of Seeds est une application web privée de gestion de seedbox. La ligne active est la **V2**, déployée sur Rise2 avec FastAPI, React/TypeScript, PostgreSQL, Redis, qBittorrent et NewGreedy.
 
 ## État du projet
 
-Les capacités fonctionnelles principales de la V1 sont en place :
+- version de production actuelle : `2.0.0` ;
+- `master` : production V2 ;
+- `develop` : intégration V2 ;
+- `develop_V2` : historique de construction, sans nouveau développement ;
+- déploiement production : workflow GitHub Actions `Deploy V2 to Rise2` après CI `master` verte.
 
-- API FastAPI typée ;
-- interface React/Vite TypeScript ;
-- PostgreSQL non exposé sur l'hôte ;
-- authentification par session et comptes administrés sans expiration ;
-- espaces `/data/<username>/downloads` créés depuis une structure JSON versionnée ;
-- renommage coordonné du compte et de son dossier avec compensation en cas d'échec SQL ;
-- navigation sécurisée avec métadonnées, fil d'Ariane et espace disque ;
-- téléchargement en flux avec HTTP Range, reprise, ETag et Last-Modified ;
-- création de dossier, renommage avec extension protégée et déplacement atomique sans écrasement ;
-- téléchargement de dossiers en ZIP sans recompression des contenus ;
-- corbeille privée par utilisateur, restauration avec détection de collision et purge définitive ;
-- pages d’administration dédiées aux utilisateurs, au stockage global et au nettoyage des corbeilles ;
-- supervision privée de NewGreedy et qBittorrent, liste des torrents et configuration NewGreedy contrôlée ;
-- dépôt utilisateur de `.torrent` C411, remplacement sûr de la passkey et suivi personnel via WOS ;
-- redémarrage NewGreedy médié par systemd, sans socket Docker dans le conteneur applicatif ;
-- image Docker unique pour l'API et le frontend ;
-- montage hôte limité à `/srv/seedbox:/data` ;
-- contrôles de qualité automatisés.
+L'expérience utilisateur est torrent-centric : ajout d'un `.torrent`, suivi de file/progression, état READY, récupération locale et désabonnement. Il n'existe plus de navigateur de fichiers, de workspace ou de corbeille par utilisateur dans le runtime moderne.
 
-La V1 applicative est complète et la conception de la V2 est engagée. Toute PR de release
-fusionnée dans `master` prépare une release en brouillon, construit l’image depuis le commit
-immuable, vérifie sa version, publie la release puis déploie le digest validé sur OVH. Le
-déclenchement manuel reste disponible en secours.
+## Architecture
 
-## Démarrage local sans Docker
+PostgreSQL est l'autorité métier. Redis sert uniquement à la coordination et aux signaux éphémères. qBittorrent et NewGreedy sont des services internes et ne sont jamais contactés directement par le navigateur.
+
+Le stockage physique est partagé :
+
+- `ManagedTorrent` représente une copie physique ;
+- `TorrentFile` représente son manifeste ;
+- `TorrentRequest` représente le droit/abonnement d'un utilisateur ;
+- `SharedContentStore` conserve le contenu sous `/data/content/<storage-key>` ;
+- plusieurs utilisateurs peuvent donc partager une seule copie physique ;
+- retirer un droit ne détruit pas le contenu tant qu'une autre demande active existe ; la dernière référence passe par le lifecycle normal de rétention/purge.
+
+Aucun chemin hôte ni `save_path` arbitraire n'est accepté depuis le client. Les passkeys tracker restent des secrets d'infrastructure et ne sont jamais persistées dans les tables métier, logs ou réponses frontend.
+
+## Développement local
 
 Backend :
 
 ```bash
 cd backend
-uv sync --dev
+uv sync --frozen --dev
 uv run uvicorn app.main:app --reload
 ```
 
@@ -50,88 +47,28 @@ npm run test
 npm run dev
 ```
 
-Après une modification des dépendances Python, le verrou destiné à l'image Docker se
-régénère depuis `uv.lock` :
+Validation backend complète :
 
 ```bash
 cd backend
-uv lock
-uv export --frozen --no-dev --no-emit-project --no-header \
-  --format requirements.txt --output-file requirements.lock
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy app tests
+uv run pytest
 ```
 
-La CI refuse une divergence entre ces deux fichiers. L'image installe uniquement les
-versions et empreintes cryptographiques ainsi exportées.
+`VERSION` reste la source canonique de version applicative. Les changements de version passent par `scripts/versioning.py` et la CI vérifie les miroirs Python/npm ainsi que l'image.
 
-`VERSION` est la source canonique de version applicative. Pour préparer une nouvelle
-version et mettre à jour ses miroirs Python/npm :
+## Contribution et livraison
 
-```bash
-python3 scripts/versioning.py set 1.3.0
-python3 scripts/versioning.py check --expected-tag v1.3.0 --print-version
-```
+Tout changement part du dernier `develop` sur une branche dédiée et revient par pull request. Les checks requis sont : backend, frontend, image conteneur, sécurité dépendances/image et policy Rise2. Aucun push direct n'est fait sur `develop` ou `master`.
 
-La CI vérifie les miroirs et le label OCI de l’image avant qu’une release stable puisse être
-publiée.
+La promotion en production est une PR séparée `develop -> master`. Après merge et CI `master` verte, Rise2 déploie le digest immuable validé sans recréer PostgreSQL, Redis, qBittorrent, NewGreedy ni les volumes persistants.
 
-## Déploiement Docker
+## Documentation
 
-Le déploiement ne doit pas être lancé avant d'avoir configuré `.env` et préparé les permissions de `/srv/seedbox` :
-
-```bash
-cp .env.example .env
-docker compose config
-docker compose build
-docker compose up -d postgres
-docker compose run --rm app alembic -c backend/alembic.ini upgrade head
-docker compose run --rm app python -m app.cli migrate-workspaces
-docker compose up -d app
-docker compose exec app python -m app.cli create-admin --username admin
-```
-
-L'application écoute uniquement sur `127.0.0.1:18081`. Depuis un Mac :
-
-```bash
-ssh -N -L 18081:127.0.0.1:18081 ovh
-```
-
-Puis ouvrir <http://127.0.0.1:18081>.
-
-En production, WOS rejoint aussi le réseau Docker externe `torrent-internal` pour joindre
-les API de NewGreedy et qBittorrent sans publier de nouveau port. Ce réseau ne donne aucun
-accès au socket Docker. Le redémarrage NewGreedy passe par un fichier de requête borné sous
-`/srv/seedbox/.wos-control` et un service systemd limité à la recréation de cet unique
-service.
-
-Pour les téléchargements personnels, qBittorrent doit monter `/srv/seedbox` sur `/data` et
-WOS lui transmet uniquement `/data/<username>/downloads`, calculé depuis le compte
-authentifié. Le navigateur ne fournit aucun `save_path`. La passkey C411 WOS reste
-uniquement dans `.env` via `WOS_C411_PASSKEY` ; celle d’un torrent utilisateur est remplacée
-en mémoire puis abandonnée, sans écriture en base, dans `.options`, dans Redis ou dans les
-logs.
-
-Le mot de passe administrateur est demandé interactivement et n'est ni placé dans `.env`, ni écrit dans les logs. Pour l'accès initial par tunnel HTTP, `WOS_COOKIE_SECURE=false`. Cette valeur devra devenir `true` en même temps que l'ajout de HTTPS.
-
-La commande de création de l'administrateur initialise aussi
-`/srv/seedbox/admin/downloads`. `APP_UID` et `APP_GID` doivent donc
-correspondre à une identité ayant le droit de créer des dossiers sous `/srv/seedbox`.
-Il ne faut pas appliquer de `chown -R` ou de `chmod -R` à l'aveugle sur les données
-existantes ; les permissions seront vérifiées précisément pendant le déploiement accompagné.
-
-La commande `migrate-workspaces` déplace de façon atomique les anciens espaces
-`/srv/seedbox/users/<username>` vers `/srv/seedbox/<username>`. Elle est idempotente,
-refuse toute collision et ne touche jamais aux répertoires qBittorrent historiques
-`/srv/seedbox/downloads` et `/srv/seedbox/watch`. Elle retire uniquement les anciens
-`watch` propres aux utilisateurs lorsqu'ils sont vides ; un dossier non vide est conservé
-mais masqué par le navigateur.
-
-La V1 reste documentée dans [`docs/architecture-v1.md`](docs/architecture-v1.md). La cible
-V2, ses transitions métier et son découpage de PR sont décrits dans
-[`docs/architecture-v2.md`](docs/architecture-v2.md),
-[`docs/state-machines-v2.md`](docs/state-machines-v2.md) et
-[`docs/roadmap-v2.md`](docs/roadmap-v2.md). La coexistence avec les chemins qBittorrent
-actuels est détaillée dans [`docs/storage-migration.md`](docs/storage-migration.md).
-
-Le déploiement GitHub Actions et l'installation sécurisée de l'identité technique OVH
-sont détaillés pas à pas dans
-[`docs/deployment-ovh.md`](docs/deployment-ovh.md).
+- `docs/agent/CONTEXT.md` : contexte durable et invariants actuels ;
+- `docs/agent/PROGRESS.md` : état des tâches ;
+- `docs/architecture-v2.md` : architecture V2 ;
+- `docs/deployment-rise2-v2.md` : déploiement et rollback Rise2 ;
+- `docs/roadmap-v2.md` : historique et roadmap.

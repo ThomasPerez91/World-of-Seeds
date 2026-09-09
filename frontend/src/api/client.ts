@@ -156,6 +156,12 @@ export interface TorrentDownloadManifestPageV2 {
 /** A recursively consumed manifest may span pages; the compatibility UI stores one page only. */
 export type TorrentDownloadSnapshotV2 = TorrentDownloadManifestPageV2;
 
+export interface SharedStorageCapacity {
+  total_bytes: number;
+  used_bytes: number;
+  available_bytes: number;
+}
+
 export interface AdminStorageOverview {
   total: number;
   used: number;
@@ -531,6 +537,10 @@ export const api = {
     return request<void>(`/admin/users/${encodeURIComponent(userId)}`, {
       method: "DELETE",
     });
+  },
+
+  getSharedStorageCapacity(signal?: AbortSignal): Promise<SharedStorageCapacity> {
+    return requestV2<SharedStorageCapacity>("/storage", { signal });
   },
 
   getAdminStorage(): Promise<AdminStorageOverview> {

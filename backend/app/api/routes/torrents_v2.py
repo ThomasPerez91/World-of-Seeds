@@ -33,7 +33,7 @@ from app.auth.dependencies import (
 from app.coordination import RedisSubscriptionUnavailable, TorrentEventType, TorrentRealtimeEvent
 from app.coordination.dependencies import RedisCoordinatorDependency
 from app.core.config import Settings, get_settings
-from app.files.downloads import (
+from app.http_downloads import (
     ByteRange,
     RangeNotSatisfiableError,
     if_range_matches,

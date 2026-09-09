@@ -3238,20 +3238,6 @@ select:focus-visible {
   color: var(--color-primary);
 }
 
-.admin-trash-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-}
-
-.admin-trash-actions button {
-  width: auto;
-  height: auto;
-  min-height: 2.75rem;
-  margin: 0;
-  padding: 0.7rem 0.9rem;
-}
-
 .admin-empty-state {
   display: grid;
   gap: 0.35rem;
@@ -3268,52 +3254,10 @@ select:focus-visible {
   color: var(--color-text);
 }
 
-.admin-trash-list {
-  display: grid;
-  gap: 0.65rem;
-  margin: 1.25rem 0 0;
-  padding: 0;
-  list-style: none;
-}
 
-.admin-trash-list li {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.9rem;
-  padding: 0.9rem;
-  border: 1px solid var(--color-border);
-  border-radius: 0.9rem;
-  background: var(--color-background-secondary);
-}
 
-.admin-trash-list button {
-  width: auto;
-  margin: 0;
-}
 
-.admin-trash-copy {
-  min-width: 0;
-}
 
-.admin-trash-copy > div:first-child {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.55rem;
-}
-
-.admin-trash-copy strong,
-.admin-trash-path {
-  overflow-wrap: anywhere;
-}
-
-.admin-trash-copy > span {
-  display: block;
-  margin-top: 0.2rem;
-  color: var(--color-text-muted);
-  font-size: 0.74rem;
-}
 
 .admin-user-badge {
   flex: 0 0 auto;
@@ -3394,13 +3338,7 @@ select:focus-visible {
   .integration-grid {
     grid-template-columns: 1fr;
   }
-
-  .admin-trash-actions {
-    align-items: stretch;
-    flex-wrap: wrap;
-  }
-
-  .credential-row {
+.credential-row {
     grid-template-columns: 1fr auto;
   }
 
