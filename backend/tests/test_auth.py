@@ -139,7 +139,7 @@ async def test_user_persists_supported_interface_locale(
 
 
 @pytest.mark.asyncio
-async def test_admin_generates_initial_credentials_and_user_changes_them(
+async def test_admin_generates_initial_credentials_and_user_changes_them_without_workspace(
     client: AsyncClient,
     db_session: AsyncSession,
     data_root: Path,
@@ -162,8 +162,7 @@ async def test_admin_generates_initial_credentials_and_user_changes_them(
     assert initial["user"]["must_change_credentials"] is True
     assert "expires_at" not in initial["user"]
     assert len(initial["initial_password"]) >= 12
-    initial_workspace = data_root / initial["user"]["username"]
-    assert {entry.name for entry in initial_workspace.iterdir()} == {"downloads"}
+    assert not (data_root / initial["user"]["username"]).exists()
 
     generated_user = await db_session.scalar(
         select(User).where(User.username == initial["user"]["username"])
@@ -194,7 +193,6 @@ async def test_admin_generates_initial_credentials_and_user_changes_them(
         headers=csrf_header(client),
     )
     assert case_insensitive_collision.status_code == 409
-    assert initial_workspace.is_dir()
 
     changed = await client.patch(
         "/api/v1/auth/credentials",
@@ -208,8 +206,7 @@ async def test_admin_generates_initial_credentials_and_user_changes_them(
     assert changed.status_code == 200
     assert changed.json()["user"]["username"] == "Shadowsun"
     assert changed.json()["user"]["must_change_credentials"] is False
-    assert not initial_workspace.exists()
-    assert (data_root / "Shadowsun" / "downloads").is_dir()
+    assert not (data_root / "Shadowsun").exists()
 
     active_sessions = (
         await db_session.scalars(
@@ -232,7 +229,7 @@ async def test_admin_generates_initial_credentials_and_user_changes_them(
 
 
 @pytest.mark.asyncio
-async def test_user_updates_username_then_password_in_separate_flows(
+async def test_user_updates_username_without_moving_legacy_files_then_updates_password(
     client: AsyncClient,
     db_session: AsyncSession,
     data_root: Path,
@@ -242,9 +239,9 @@ async def test_user_updates_username_then_password_in_separate_flows(
         username="thomas",
         password="current-password-long",
     )
-    workspace = data_root / "thomas"
-    (workspace / "downloads").mkdir(parents=True)
-    marker = workspace / "downloads" / "movie.mkv"
+    legacy_workspace = data_root / "thomas"
+    (legacy_workspace / "downloads").mkdir(parents=True)
+    marker = legacy_workspace / "downloads" / "movie.mkv"
     marker.write_bytes(b"content")
     await login(client, "thomas", "current-password-long")
 
@@ -256,8 +253,8 @@ async def test_user_updates_username_then_password_in_separate_flows(
 
     assert renamed.status_code == 200
     assert renamed.json()["user"]["username"] == "Shadowsun"
-    assert not workspace.exists()
-    assert (data_root / "Shadowsun" / "downloads" / "movie.mkv").read_bytes() == b"content"
+    assert marker.read_bytes() == b"content"
+    assert not (data_root / "Shadowsun").exists()
     assert (await client.get("/api/v1/auth/me")).json()["user"]["username"] == "Shadowsun"
 
     wrong_password = await client.patch(
@@ -302,7 +299,7 @@ async def test_user_updates_username_then_password_in_separate_flows(
 
 
 @pytest.mark.asyncio
-async def test_admin_can_suspend_resume_and_delete_access_without_removing_files(
+async def test_admin_can_suspend_resume_and_delete_access_without_removing_legacy_files(
     client: AsyncClient,
     db_session: AsyncSession,
     data_root: Path,
@@ -321,6 +318,7 @@ async def test_admin_can_suspend_resume_and_delete_access_without_removing_files
     username = credentials["user"]["username"]
     password = credentials["initial_password"]
     marker = data_root / username / "downloads" / "keep-me.mkv"
+    marker.parent.mkdir(parents=True)
     marker.write_bytes(b"content")
 
     client.cookies.clear()
