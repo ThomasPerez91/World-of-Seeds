@@ -102,7 +102,7 @@ La file de récupération présentée reste celle gérée localement par le cont
 | UX-04 | MOYEN | UX-03 | TERMINE | Recomposer l'expérience READY et la récupération locale sans nouvelle télémétrie backend. |
 | UX-05 | ELEVE | UX-04 | TERMINE | Retirer l'ancien espace utilisateur Fichiers/Corbeille/création de dossiers et nettoyer le code frontend mort. |
 | UX-05B | ELEVE | UX-05 | TERMINE | Supprimer le filesystem/workspace utilisateur legacy, migrer la capacité Dashboard vers un contrat partagé dédié et nettoyer routes/files/trash/workspaces morts sans toucher au `SharedContentStore` torrent. |
-| UX-06 | MOYEN | UX-05B | A FAIRE | Harmoniser l'administration avec le design system, finaliser responsive/accessibilité, supprimer CSS/i18n/tests/composants morts et effectuer le nettoyage final. |
+| UX-06 | MOYEN | UX-05B | TERMINE | Harmoniser l'administration avec le design system, finaliser responsive/accessibilité, supprimer les reliquats frontend morts et effectuer le nettoyage final. |
 
 ### UX-01 — Design system, thèmes et préférences
 
@@ -174,14 +174,17 @@ Validation : migrations aller/retour, Ruff, mypy, pytest, frontend check/tests/b
 
 ### UX-06 — Harmonisation et finition
 
-Prochaine tâche :
+UX-06 clôt la séquence de refonte :
 
-- appliquer le design system à l'administration ;
-- vérifier mobile/tablette/desktop ;
-- conserver navigation clavier, labels accessibles et tests axe ;
-- nettoyer les derniers CSS, traductions, composants et tests morts, y compris d'éventuels reliquats frontend du legacy désormais inaccessibles ;
-- auditer les liens/actions user-facing afin qu'aucune entrée Fichiers/Corbeille ne subsiste ;
-- ne pas réintroduire de workspace utilisateur, de trash utilisateur ni un second modèle de stockage.
+- le shell administration et les vues Utilisateurs, Services, Paramètres et Stockage sont alignés sur les primitives du design system ;
+- la composition admin est mobile-first, avec navigation et actions tactiles, noms longs bornés et enrichissement progressif tablette/desktop ;
+- les états loading/error, badges, cartes, progression et boutons sont harmonisés sans changer les contrats métier ;
+- `Dialog` est devenu un composant générique partagé hors du namespace legacy `features/files`, avec focus trap, Escape, restauration du focus et test axe ;
+- le dernier module frontend `features/files`, l'ancien écran admin corbeille rendu obsolète par UX-05B et les contrats client correspondants sont supprimés ;
+- la policy responsive vérifie explicitement le contrat mobile-first admin et l'absence de réintroduction du filesystem frontend ;
+- le Dashboard, les accordéons torrent, READY, la récupération locale, qBittorrent, NewGreedy, Redis, scheduler, rétention et stockage partagé ne changent pas fonctionnellement.
+
+Validation du HEAD fonctionnel UX-06 `dad0ff8a09a2029f557fd135ffd8896629e854b5` avant finalisation documentaire : frontend check/tests/build, backend Ruff/format/mypy/pytest, sécurité, image/smokes V2 et policy Rise2 verts. Aucune conversation de review ouverte sur la PR #158.
 
 ## Jalons de validation désormais acquis
 
@@ -233,9 +236,9 @@ Critère de réouverture : NewGreedy expose une suppression exacte par full SHA-
 
 ## Backlog post-2.0
 
-La priorité produit post-2.0 restante est **UX-06**.
+La séquence prioritaire **UX-00 → UX-06 est terminée**. Aucun UX-07 n'est créé implicitement.
 
-Les autres sujets doivent être créés explicitement à partir d'un besoin produit ou opérateur, puis classés par risque :
+Les nouveaux sujets doivent être créés explicitement à partir d'un besoin produit ou opérateur, puis classés par risque :
 
 - **RAPIDE** : changement local, pas de migration/topologie ;
 - **MOYEN** : plusieurs couches ou migration additive simple ;
