@@ -136,6 +136,7 @@ class DownloadPermitPool {
       signal.addEventListener("abort", waiter.onAbort, { once: true });
       this.waiters.push(waiter);
       this.drain();
+      this.onChange();
     });
   }
 
