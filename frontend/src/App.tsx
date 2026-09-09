@@ -596,12 +596,14 @@ function Dashboard({
   onLogout,
   onOpenLegal,
   onSessionExpired,
+  hidden = false,
 }: {
   user: User;
   onUserChanged: (user: User) => void;
   onLogout: () => Promise<void>;
   onOpenLegal: (document: LegalDocument) => void;
   onSessionExpired: () => void;
+  hidden?: boolean;
 }) {
   const { t } = useI18n();
   const [view, setView] = useState<"dashboard" | "settings" | AdminView>("dashboard");
@@ -616,7 +618,7 @@ function Dashboard({
   }
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" hidden={hidden}>
       <a className="skip-link" href="#dashboard-content">
         {t("dashboard.skip")}
       </a>
@@ -651,9 +653,10 @@ function Dashboard({
         </div>
       </header>
       <div id="dashboard-content" className="dashboard-content" tabIndex={-1}>
-        {view === "dashboard" ? (
+        <div hidden={view !== "dashboard"}>
           <UserDashboardPage onSessionExpired={onSessionExpired} />
-        ) : view === "settings" ? (
+        </div>
+        {view === "settings" ? (
           <AccountSettingsPage
             user={user}
             onBack={openDashboard}
@@ -685,9 +688,7 @@ function Dashboard({
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
           />
-        ) : (
-          <UserDashboardPage onSessionExpired={onSessionExpired} />
-        )}
+        ) : null}
       </div>
       <footer className="app-footer">
         <span>World of Seeds · v{APP_VERSION}</span>
@@ -756,6 +757,27 @@ function AppContent() {
   }
 
   function renderScreen() {
+    if (auth.status === "authenticated" && !auth.user.must_change_credentials) {
+      return (
+        <>
+          <Dashboard
+            user={auth.user}
+            onUserChanged={(user) => setAuth({ status: "authenticated", user })}
+            onLogout={logout}
+            onOpenLegal={setLegalDocument}
+            onSessionExpired={handleSessionExpired}
+            hidden={legalDocument !== null}
+          />
+          {legalDocument !== null && (
+            <LegalPage
+              document={legalDocument}
+              onBack={() => setLegalDocument(null)}
+              onOpen={setLegalDocument}
+            />
+          )}
+        </>
+      );
+    }
     if (legalDocument !== null) {
       return (
         <LegalPage
@@ -793,15 +815,7 @@ function AppContent() {
         />
       );
     }
-    return (
-      <Dashboard
-        user={auth.user}
-        onUserChanged={(user) => setAuth({ status: "authenticated", user })}
-        onLogout={logout}
-        onOpenLegal={setLegalDocument}
-        onSessionExpired={handleSessionExpired}
-      />
-    );
+    return null;
   }
   return <ThemeProvider user={auth.status === "authenticated" ? auth.user : null}>{renderScreen()}</ThemeProvider>;
 }
