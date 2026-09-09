@@ -40,6 +40,16 @@ export interface BrowserDownloadManagerSnapshot {
   jobs: readonly BrowserDownloadJobSnapshot[];
 }
 
+export interface BrowserDownloadPolicy {
+  max_concurrent_streams: number;
+}
+
+export class DownloadPolicyRequestError extends Error {
+  constructor(readonly status: number) {
+    super("download_policy_request_failed");
+  }
+}
+
 interface DirectoryPickerWindow extends Window {
   showSaveFilePicker?: (options: {
     suggestedName: string;
@@ -70,6 +80,24 @@ interface EnqueueFileOptions {
   snapshot: TorrentDownloadManifestPageV2;
   file: TorrentDownloadFileV2;
   target: LocalFileHandle;
+}
+
+export async function loadBrowserDownloadPolicy(signal?: AbortSignal): Promise<BrowserDownloadPolicy> {
+  const response = await fetch("/api/v2/downloads/policy", {
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+    signal,
+  });
+  if (!response.ok) throw new DownloadPolicyRequestError(response.status);
+  const policy = (await response.json()) as Partial<BrowserDownloadPolicy>;
+  if (
+    !Number.isInteger(policy.max_concurrent_streams)
+    || (policy.max_concurrent_streams ?? 0) < 1
+    || (policy.max_concurrent_streams ?? 0) > 20
+  ) {
+    throw new Error("download_policy_invalid");
+  }
+  return policy as BrowserDownloadPolicy;
 }
 
 export function supportsManagedFileDownload(target: Window = window): boolean {
@@ -112,7 +140,6 @@ export class BrowserDownloadManager {
   ) {
     this.assertConcurrency(maxConcurrentStreams);
     this.maxConcurrentStreams = maxConcurrentStreams;
-    this.emit();
   }
 
   setMaxConcurrentStreams(value: number): void {
