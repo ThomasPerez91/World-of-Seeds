@@ -391,9 +391,7 @@ class DownloadLeaseManager:
                 if lease is not None
                 else None
             )
-            owner_can_download = (
-                user is not None and user.is_active and user.deleted_at is None
-            )
+            owner_can_download = user is not None and user.is_active and user.deleted_at is None
             ready_right = (
                 managed is not None
                 and managed.state is ManagedTorrentState.READY
