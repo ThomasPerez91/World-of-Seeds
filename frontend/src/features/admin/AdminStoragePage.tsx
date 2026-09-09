@@ -88,52 +88,39 @@ export function AdminStoragePage({
           {error}
         </p>
         {overview !== null && (
-          <>
-            <div className="admin-storage-summary">
-              <div className="admin-storage-usage">
-                <div>
-                  <span>{t("admin.usedSpace")}</span>
-                  <strong>{formatBytes(overview.used)}</strong>
-                </div>
-                <div className="storage-copy-right">
-                  <span>{t("admin.available")}</span>
-                  <strong>{formatBytes(overview.available)}</strong>
-                </div>
-                <progress
-                  max={100}
-                  value={usagePercent}
-                  aria-label={t("admin.storageUsage", { value: formatNumber(usagePercent, { maximumFractionDigits: 0 }) })}
-                >
-                  {formatNumber(usagePercent, { maximumFractionDigits: 0 })} %
-                </progress>
-                <p>
-                  {t("admin.storageSummary", {
-                    value: formatNumber(usagePercent, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
-                    total: formatBytes(overview.total),
-                  })}
-                </p>
+          <div className="admin-storage-summary">
+            <div className="admin-storage-usage">
+              <div>
+                <span>{t("admin.usedSpace")}</span>
+                <strong>{formatBytes(overview.used)}</strong>
               </div>
-              <div className="admin-metric-card">
-                <span>{t("admin.activeAccounts")}</span>
-                <strong>{formatNumber(overview.active_users)}</strong>
+              <div className="storage-copy-right">
+                <span>{t("admin.available")}</span>
+                <strong>{formatBytes(overview.available)}</strong>
               </div>
-              <div className="admin-metric-card">
-                <span>{t("admin.suspendedAccounts")}</span>
-                <strong>{formatNumber(overview.suspended_users)}</strong>
-              </div>
-              <div className="admin-metric-card">
-                <span>{t("admin.trashItems")}</span>
-                <strong>{formatNumber(overview.trash_entries)}</strong>
-              </div>
-              <div className="admin-metric-card">
-                <span>{t("admin.knownTrashSize")}</span>
-                <strong>{formatBytes(overview.known_trash_bytes)}</strong>
-              </div>
+              <progress
+                max={100}
+                value={usagePercent}
+                aria-label={t("admin.storageUsage", { value: formatNumber(usagePercent, { maximumFractionDigits: 0 }) })}
+              >
+                {formatNumber(usagePercent, { maximumFractionDigits: 0 })} %
+              </progress>
+              <p>
+                {t("admin.storageSummary", {
+                  value: formatNumber(usagePercent, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+                  total: formatBytes(overview.total),
+                })}
+              </p>
             </div>
-            <p className="admin-data-note">
-              {t("admin.knownTrashNote")}
-            </p>
-          </>
+            <div className="admin-metric-card">
+              <span>{t("admin.activeAccounts")}</span>
+              <strong>{formatNumber(overview.active_users)}</strong>
+            </div>
+            <div className="admin-metric-card">
+              <span>{t("admin.suspendedAccounts")}</span>
+              <strong>{formatNumber(overview.suspended_users)}</strong>
+            </div>
+          </div>
         )}
         {reconciliation !== null && (
           <section className="reconciliation-panel" aria-labelledby="reconciliation-title">
