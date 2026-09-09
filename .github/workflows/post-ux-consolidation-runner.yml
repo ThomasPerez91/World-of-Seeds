@@ -50,6 +50,20 @@ jobs:
               1,
           )
           exec(compile(script, "post-ux-consolidation.py", "exec"), {"__name__": "__main__"})
+
+          dashboard_test_path = Path("frontend/src/features/dashboard/UserDashboardPage.test.tsx")
+          dashboard_test = dashboard_test_path.read_text(encoding="utf-8")
+          legacy_import = 'import * as storageApi from "../../api/storage";\n'
+          if dashboard_test.count(legacy_import) != 1:
+              raise RuntimeError("dashboard storage test import marker changed")
+          dashboard_test = dashboard_test.replace(legacy_import, "", 1)
+          dashboard_test = dashboard_test.replace(
+              'vi.spyOn(storageApi, "getSharedStorageCapacity")',
+              'vi.spyOn(api, "getSharedStorageCapacity")',
+          )
+          if "storageApi" in dashboard_test or "api/storage" in dashboard_test:
+              raise RuntimeError("dashboard tests still depend on standalone storage client")
+          dashboard_test_path.write_text(dashboard_test, encoding="utf-8")
           PY
       - name: Sanity-check changed sources
         shell: bash
