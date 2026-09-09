@@ -68,7 +68,7 @@ def test_if_range_matches_strong_etag_and_http_date(tmp_path) -> None:
     try:
         assert if_range_matches('"etag"', download) is True
         assert if_range_matches('"stale"', download) is False
-        assert if_range_matches("W/\"etag\"", download) is False
+        assert if_range_matches('W/"etag"', download) is False
         assert if_range_matches("Wed, 09 Sep 2026 12:00:00 GMT", download) is True
         assert if_range_matches("Wed, 09 Sep 2026 11:59:59 GMT", download) is False
     finally:
