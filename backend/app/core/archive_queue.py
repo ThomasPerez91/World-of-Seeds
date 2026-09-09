@@ -50,7 +50,4 @@ class ArchiveDownloadQueueMiddleware:
         if scope["type"] != "http" or scope.get("method") != "GET":
             return False
         path = scope.get("path", "")
-        return (
-            path.startswith("/api/v2/torrents/")
-            and path.endswith("/download-archive")
-        )
+        return path.startswith("/api/v2/torrents/") and path.endswith("/download-archive")
