@@ -17,54 +17,32 @@ jobs:
         with:
           ref: fix/ux-2.1-login-polish-v2
           fetch-depth: 0
-      - name: Preserve unknown health state
+
+      - name: Apply pending health state
         shell: bash
         run: |
           set -Eeuo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
+          perl -0pi -e 's/useState<"healthy" \| "unavailable">\("healthy"\)/useState<"pending" | "healthy" | "unavailable">("pending")/' frontend/src/App.tsx
+          perl -0pi -e 's/const message = health === "healthy" \? t\("health\.healthy"\) : t\("health\.unavailable"\);/const message = health === "pending" ? t("health.checking") : health === "healthy" ? t("health.healthy") : t("health.unavailable");/' frontend/src/App.tsx
+          grep -q 'useState<"pending" | "healthy" | "unavailable">("pending")' frontend/src/App.tsx
+          grep -q 'health === "pending" ? t("health.checking")' frontend/src/App.tsx
+          cat >> frontend/src/wos-2-1.css <<'CSS'
 
-          app_path = Path('frontend/src/App.tsx')
-          app = app_path.read_text()
-          old = 'const [health, setHealth] = useState<"healthy" | "unavailable">("healthy");'
-          new = 'const [health, setHealth] = useState<"pending" | "healthy" | "unavailable">("pending");'
-          assert old in app
-          app = app.replace(old, new, 1)
-          old = 'const message = health === "healthy" ? t("health.healthy") : t("health.unavailable");'
-          new = '''const message =
-              health === "pending"
-                ? t("health.checking")
-                : health === "healthy"
-                  ? t("health.healthy")
-                  : t("health.unavailable");'''
-          assert old in app
-          app = app.replace(old, new, 1)
-          app_path.write_text(app)
+/* Health remains neutral until the first health response arrives. */
+.service-health-indicator.pending .service-health-dot {
+  background: #91aa9e;
+  box-shadow: 0 0 0 5px rgba(145, 170, 158, 0.08), 0 0 14px rgba(145, 170, 158, 0.26);
+}
+CSS
 
-          css_path = Path('frontend/src/wos-2-1.css')
-          css = css_path.read_text()
-          anchor = '''.service-health-indicator.unavailable .service-health-dot {
-            background: #ff6868;
-            box-shadow: 0 0 0 5px rgba(255, 104, 104, 0.09), 0 0 18px rgba(255, 86, 86, 0.58);
-          }
-'''
-          addition = anchor + '''
-          .service-health-indicator.pending .service-health-dot {
-            background: #91aa9e;
-            box-shadow: 0 0 0 5px rgba(145, 170, 158, 0.08), 0 0 14px rgba(145, 170, 158, 0.26);
-          }
-'''
-          assert anchor in css
-          css = css.replace(anchor, addition, 1)
-          css_path.write_text(css)
-          PY
       - name: Validate frontend
         working-directory: frontend
         run: |
           npm ci
           npm test
           npm run build
-      - name: Commit fix
+
+      - name: Commit review fix
         shell: bash
         run: |
           set -Eeuo pipefail
