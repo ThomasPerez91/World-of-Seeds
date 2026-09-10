@@ -52,18 +52,14 @@ function BrandMark() {
 function ServiceHealth() {
   const { t } = useI18n();
   const [health, setHealth] = useState<"healthy" | "unavailable">("healthy");
-  const [checking, setChecking] = useState(false);
   const mounted = useRef(true);
 
   const check = useCallback(async () => {
-    setChecking(true);
     try {
       const status = await api.health();
       if (mounted.current) setHealth(status.status === "ok" ? "healthy" : "unavailable");
     } catch {
       if (mounted.current) setHealth("unavailable");
-    } finally {
-      if (mounted.current) setChecking(false);
     }
   }, []);
 
@@ -77,23 +73,22 @@ function ServiceHealth() {
     };
   }, [check]);
 
+  const message = health === "healthy" ? t("health.healthy") : t("health.unavailable");
+
   return (
-    <Button
-      type="button"
-      className={`service-health ${health}`}
-      onClick={() => void check()}
-      disabled={checking}
-      aria-label={t("health.check")}
+    <div
+      className={`service-health-indicator ${health}`}
+      role="status"
+      aria-live="polite"
+      aria-label={message}
+      aria-describedby="service-health-tooltip"
+      tabIndex={0}
     >
       <span className="service-health-dot" aria-hidden="true" />
-      <span aria-live="polite">
-        {checking
-          ? t("health.checking")
-          : health === "healthy"
-            ? t("health.healthy")
-            : t("health.unavailable")}
+      <span id="service-health-tooltip" className="service-health-tooltip" role="tooltip">
+        {message}
       </span>
-    </Button>
+    </div>
   );
 }
 
@@ -134,21 +129,22 @@ function LoginScreen({
   return (
     <main className="login-page">
       <header className="login-header" aria-label="World of Seeds">
-        <img src="/title.webp?rev=a9c84cc" alt="World of Seeds" />
-      </header>
+      <img src="/title.webp?rev=a9c84cc" alt="World of Seeds" />
+      <ServiceHealth />
+    </header>
       <p className="login-slogan" aria-hidden="true">
         VOS FICHIERS.<br />VOTRE LIBERTÉ.<br />PARTOUT.
       </p>
 
       <section className="login-card" aria-labelledby="login-title">
+      <div className="login-brand-row">
         <img className="login-title-image" src="/title.webp?rev=a9c84cc" alt="" aria-hidden="true" />
-        <h1 className="visually-hidden">World of Seeds</h1>
-        <p className="brand-copy">{t("login.tagline")}</p>
-        <ServiceHealth />
-        <div className="login-divider" />
-        <LanguageSelector />
-        <div className="login-divider" />
-        <Card className="form-card">
+        <LanguageSelector variant="flag-toggle" />
+      </div>
+      <h1 className="visually-hidden">World of Seeds</h1>
+      <p className="brand-copy">{t("login.tagline")}</p>
+      <div className="login-divider" />
+      <Card className="form-card">
           <p className="eyebrow">{t("login.title")}</p>
           <h2 id="login-title">{t("login.welcome")}</h2>
           <p className="form-intro">{t("login.instructions")}</p>
