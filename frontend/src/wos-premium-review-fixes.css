@@ -1,0 +1,70 @@
+/* Targeted post-review safeguards for PR #167. Loaded last so these rules
+ * override the visual layer without reopening the historical CSS recovery file. */
+
+/* The dashboard hero keeps a forced-dark image treatment in every theme. */
+:root[data-theme="light"] .user-dashboard-header h1 {
+  color: #f1f6f3 !important;
+}
+
+/* Semantic badge foregrounds need dark-theme and light-theme contrast profiles. */
+:root[data-theme="light"] .ui-badge-success {
+  color: #116b3d !important;
+  border-color: rgba(17, 107, 61, 0.26) !important;
+  background: rgba(29, 155, 91, 0.12) !important;
+}
+
+:root[data-theme="light"] .ui-badge-danger {
+  color: #9b2832 !important;
+  border-color: rgba(155, 40, 50, 0.24) !important;
+  background: rgba(184, 49, 58, 0.10) !important;
+}
+
+:root[data-theme="light"] .ui-badge-warning {
+  color: #715000 !important;
+  border-color: rgba(113, 80, 0, 0.24) !important;
+  background: rgba(171, 122, 24, 0.12) !important;
+}
+
+/* Keep the compact/mobile torrent composition until there is enough width for
+ * the four data tracks plus the action column. */
+@media (min-width: 821px) and (max-width: 915px) {
+  .torrent-accordion-list {
+    padding-top: 0 !important;
+  }
+
+  .torrent-accordion-list::before {
+    display: none !important;
+    content: none !important;
+  }
+
+  .torrent-accordion-card {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .torrent-accordion-summary {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .torrent-details-cue {
+    display: none !important;
+  }
+
+  .torrent-card-actions {
+    width: 100% !important;
+    min-width: 0 !important;
+    justify-content: flex-start !important;
+    flex-wrap: wrap !important;
+  }
+}
+
+/* The active locale is mirrored to <html lang>; use it for the decorative
+ * desktop column guide so the English UI never contains French-only labels. */
+@media (min-width: 916px) {
+  html[lang="fr"] .torrent-accordion-list::before {
+    content: "Nom / taille        Statut        Progression        Détails" !important;
+  }
+
+  html[lang="en"] .torrent-accordion-list::before {
+    content: "Name / size        Status        Progress        Details" !important;
+  }
+}

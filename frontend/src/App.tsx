@@ -13,7 +13,7 @@ import { AdminServicesPage } from "./features/admin/AdminServicesPage";
 import { AdminSettingsPage } from "./features/admin/AdminSettingsPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
-import { AccountMenuIcon, BackIcon, BrandIcon } from "./components/icons";
+import { AccountMenuIcon, BackIcon, HomeIcon, SettingsIcon } from "./components/icons";
 import { LanguageSelector } from "./components/LanguageSelector";
 import {
   LegalLinks,
@@ -23,7 +23,7 @@ import {
 import { ThemeProvider } from "./theme";
 import { ThemeSelector } from "./components/ThemeSelector";
 import { Button, Card, Badge, StateMessage } from "./components/ui";
-import { APP_VERSION } from "./version";
+import { UI_VERSION } from "./uiVersion";
 import { FeedbackProvider } from "./components/Feedback";
 import { useFeedback } from "./components/Feedback";
 import { I18nProvider, useI18n, type Locale } from "./i18n";
@@ -43,7 +43,7 @@ function clearLegacyFilePathFromUrl() {
 function BrandMark() {
   return (
     <div className="brand-mark" aria-hidden="true">
-      <BrandIcon />
+      <img src="/brand-mark.svg" alt="" />
     </div>
   );
 }
@@ -605,7 +605,7 @@ function Dashboard({
   onSessionExpired: () => void;
   hidden?: boolean;
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const [view, setView] = useState<"dashboard" | "settings" | AdminView>("dashboard");
 
   useEffect(() => {
@@ -631,7 +631,7 @@ function Dashboard({
         >
           <BrandMark />
           <span>World of Seeds</span>
-          <Badge className="version-badge">v{APP_VERSION}</Badge>
+          <Badge className="version-badge">v{UI_VERSION}</Badge>
         </Button>
         <nav className="user-navigation" aria-label={t("dashboard.navigation")}>
           <Button
@@ -639,7 +639,16 @@ function Dashboard({
             aria-current={view === "dashboard" ? "page" : undefined}
             onClick={openDashboard}
           >
-            {t("dashboard.title")}
+            <HomeIcon />
+            <span>{t("dashboard.title")}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            aria-current={view === "settings" ? "page" : undefined}
+            onClick={() => setView("settings")}
+          >
+            <SettingsIcon />
+            <span>{locale === "fr" ? "Paramètres" : "Settings"}</span>
           </Button>
         </nav>
         <div className="header-actions">
@@ -691,7 +700,7 @@ function Dashboard({
         ) : null}
       </div>
       <footer className="app-footer">
-        <span>World of Seeds · v{APP_VERSION}</span>
+        <span>World of Seeds · v{UI_VERSION}</span>
         <LegalLinks onOpen={onOpenLegal} />
       </footer>
     </main>
