@@ -33,7 +33,7 @@ def test_torrent_metrics_can_read_private_sources_with_least_privilege() -> None
     )
 
     assert "torrent-metrics:" in overlay
-    assert "user: \"0:0\"" in overlay
+    assert 'user: "0:0"' in overlay
     assert "cap_add: [DAC_READ_SEARCH]" in overlay
     assert "DAC_OVERRIDE" not in overlay
     assert "wos_torrent_metrics_qb_scrape_success 1" in overlay
