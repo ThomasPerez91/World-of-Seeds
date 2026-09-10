@@ -8,6 +8,8 @@ import { I18nProvider, type Locale } from "../../i18n";
 import {
   MAX_TORRENT_BATCH_FILES,
   TORRENT_UPLOAD_CONCURRENCY,
+  torrentQueueLabel,
+  torrentRowStatus,
   UserDownloadsPage,
 } from "./UserDownloadsPage";
 
@@ -84,6 +86,71 @@ class MockWebSocket {
 }
 
 describe("UserDownloadsPage", () => {
+  it("mappe les états métier vers les quatre statuts UX et conserve uniquement une vraie position de file", () => {
+    const request = (overrides: Record<string, unknown>) =>
+      torrent(overrides) as Parameters<typeof torrentRowStatus>[0];
+
+    expect(torrentRowStatus(request({ state: "active", queue_status: "downloading" }))).toBe("downloading");
+    expect(torrentRowStatus(request({ state: "active", queue_status: "stalled" }))).toBe("downloading");
+    expect(torrentRowStatus(request({ state: "ready" }))).toBe("ready");
+    expect(torrentRowStatus(request({ state: "requested", queue_status: "waiting" }))).toBe("waiting");
+    expect(torrentRowStatus(request({ state: "active", queue_status: "cooldown" }))).toBe("waiting");
+    expect(torrentRowStatus(request({ state: "error" }))).toBe("blocked");
+    expect(torrentRowStatus(request({ state: "expired" }))).toBe("blocked");
+
+    expect(torrentQueueLabel(request({ state: "requested", queue_position_estimate: 3 }))).toBe("#3");
+    expect(torrentQueueLabel(request({ state: "ready", queue_position_estimate: 3 }))).toBe("-");
+    expect(torrentQueueLabel(request({ state: "active", queue_position_estimate: null }))).toBe("-");
+  });
+
+  it("rend les six colonnes et les actions principales sous forme d’icônes accessibles", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("download-manifest")) {
+        return response({
+          snapshot_id: "1".repeat(64),
+          manifest_version: 1,
+          file_count: 1,
+          total_size: 5,
+          archive_available: true,
+          retention_expires_at: null,
+          offset: 0,
+          limit: 50,
+          items: [{ id: "file", file_index: 0, relative_path: "Film.mkv", size: 5 }],
+        });
+      }
+      return response({
+        items: [torrent({ state: "ready", progress: 0.42, queue_position_estimate: 4 })],
+        offset: 0,
+        limit: 10,
+        total: 1,
+      });
+    }));
+    const view = renderPage();
+
+    const article = await screen.findByRole("article", { name: "Film.mkv" });
+    const heading = view.container.querySelector(".torrent-list-heading") as HTMLElement;
+    expect(Array.from(heading.children).map((cell) => cell.textContent)).toEqual([
+      "Nom", "État", "File", "Progression", "Taille", "",
+    ]);
+    expect(within(article).getByText("Prêt").classList).toContain("ready");
+    expect(within(article).getByText("-").classList).toContain("torrent-summary-queue");
+    expect(article.querySelector(".torrent-summary-heading")?.textContent).toBe("Film.mkv");
+    expect(article.querySelector(".torrent-summary-size")?.textContent).not.toBe("");
+    expect(article.querySelector(".torrent-summary-progress")?.classList).toContain("ready");
+    expect(within(article).getByRole("progressbar").getAttribute("value")).toBe("100");
+
+    const detailsButton = within(article).getByRole("button", { name: "Détails de Film.mkv" });
+    const downloadButton = within(article).getByRole("button", { name: "Télécharger" });
+    const deleteButton = within(article).getByRole("button", { name: "Supprimer « Film.mkv »" });
+    expect(detailsButton.textContent).toBe("");
+    expect(downloadButton.textContent).toBe("");
+    expect(deleteButton.textContent).toBe("");
+    expect((article.querySelector("details") as HTMLDetailsElement).open).toBe(false);
+    await user.click(detailsButton);
+    expect((article.querySelector("details") as HTMLDetailsElement).open).toBe(true);
+  });
+
   it("remplace le polling par les invalidations WebSocket et resynchronise après reconnexion", async () => {
     MockWebSocket.instances = [];
     const fetchMock = vi.fn(async () => response({
@@ -93,7 +160,7 @@ describe("UserDownloadsPage", () => {
     vi.stubGlobal("WebSocket", MockWebSocket);
     const view = renderPage();
 
-    await screen.findByText("En cours");
+    await screen.findByText("Téléchargement", { selector: ".torrent-primary-state" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(MockWebSocket.instances).toHaveLength(1);
     expect(MockWebSocket.instances[0].url).toContain("/api/v2/torrents/events");
@@ -201,7 +268,7 @@ describe("UserDownloadsPage", () => {
     const view = renderPage();
 
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    expect(screen.getByText("En cours")).toBeTruthy();
+    expect(screen.getByText("Téléchargement", { selector: ".torrent-primary-state" })).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
     expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
     vi.useRealTimers();
@@ -226,17 +293,17 @@ describe("UserDownloadsPage", () => {
     })));
     const view = renderPage();
 
-    expect(await screen.findByText("Prochainement")).toBeTruthy();
-    expect(screen.getByText("Position estimée : ~9")).toBeTruthy();
-    expect(screen.getByText("Position estimée : ~158")).toBeTruthy();
-    expect(screen.getByText("Position estimée : ~1005")).toBeTruthy();
-    expect(screen.getByText("Téléchargement en cours")).toBeTruthy();
-    expect(screen.getByText("En attente de sources")).toBeTruthy();
-    expect(screen.getByText("Nouvelle tentative en attente")).toBeTruthy();
+    expect(within(await screen.findByRole("article", { name: "Premier" })).getByText("#1")).toBeTruthy();
+    expect(within(screen.getByRole("article", { name: "Neuvième" })).getByText("#9")).toBeTruthy();
+    expect(within(screen.getByRole("article", { name: "Lointain" })).getByText("#158")).toBeTruthy();
+    expect(within(screen.getByRole("article", { name: "Très lointain" })).getByText("#1005")).toBeTruthy();
+    expect(within(screen.getByRole("article", { name: "Sélectionné" })).getByText("Téléchargement")).toBeTruthy();
+    expect(within(screen.getByRole("article", { name: "Sans sources" })).getByText("Téléchargement")).toBeTruthy();
+    expect(within(screen.getByRole("article", { name: "Nouvelle tentative" })).getByText("En attente")).toBeTruthy();
     expect(screen.getByText("1005 torrents en attente")).toBeTruthy();
     expect(screen.getByText("La position peut évoluer selon l’équité, la taille et la disponibilité.")).toBeTruthy();
     const readyCard = screen.getByRole("article", { name: "Prêt" });
-    expect(within(readyCard).queryByText(/Position|Prochainement/)).toBeNull();
+    expect(within(readyCard).getByText("-")).toBeTruthy();
     expect(view.container.querySelector("table")).toBeNull();
     expect(screen.getAllByRole("article")).toHaveLength(rows.length);
     expect(screen.queryByRole("button", { name: "Annuler la demande Archive annulée" })).toBeNull();
@@ -286,14 +353,14 @@ describe("UserDownloadsPage", () => {
     }));
     const view = renderPage();
 
-    expect(await screen.findByText("Position estimée : ~9")).toBeTruthy();
+    expect(await screen.findByText("#9")).toBeTruthy();
     MockWebSocket.instances[0].message({
       type: "torrent.queue_changed",
       occurred_at: "2026-09-01T12:00:00Z",
     });
 
-    expect(await screen.findByText("Téléchargement en cours")).toBeTruthy();
-    expect(screen.queryByText("Position estimée : ~9")).toBeNull();
+    expect(await screen.findByText("Téléchargement", { selector: ".torrent-primary-state" })).toBeTruthy();
+    expect(screen.queryByText("#9")).toBeNull();
     expect(requests).toBe(2);
     view.unmount();
   });
@@ -316,7 +383,7 @@ describe("UserDownloadsPage", () => {
     }));
     const view = renderPage();
 
-    await screen.findByText("En cours");
+    await screen.findByText("Téléchargement", { selector: ".torrent-primary-state" });
     const event = {
       type: "torrent.queue_changed",
       occurred_at: "2026-09-01T12:00:00Z",
@@ -347,7 +414,7 @@ describe("UserDownloadsPage", () => {
     })));
     const view = renderPage("en");
 
-    expect(await screen.findByText("Estimated position: ~9")).toBeTruthy();
+    expect(await screen.findByText("#9")).toBeTruthy();
     expect(screen.getByText("12 torrents waiting")).toBeTruthy();
     expect(screen.getByText("The position may change with fairness, size, and availability.")).toBeTruthy();
     expect(screen.getByText(/WOS downloads the complete torrent/)).toBeTruthy();
@@ -496,7 +563,7 @@ describe("UserDownloadsPage", () => {
     })));
     renderPage();
 
-    expect(await screen.findByText("Expiré")).toBeTruthy();
+    expect(await screen.findByText("Bloqué")).toBeTruthy();
     expect(screen.queryByTestId("retention-warning")).toBeNull();
   });
 
@@ -531,7 +598,7 @@ describe("UserDownloadsPage", () => {
 
       expect(await screen.findByTitle(longName)).toBeTruthy();
       expect(screen.getByTestId("retention-warning").classList.contains("compact")).toBe(true);
-      expect(screen.getByText("Position estimée : ~1005")).toBeTruthy();
+      expect(screen.getByText("#1005")).toBeTruthy();
       expect(screen.getByText(/Expiration le/, { selector: ".sr-only" })).toBeTruthy();
       expect(view.container.querySelector("[style]")).toBeNull();
       expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
@@ -1208,9 +1275,11 @@ describe("UserDownloadsPage", () => {
       new File(["torrent"], "film.torrent", { type: "application/x-bittorrent" }),
     );
 
-    expect(await screen.findByText("Lot terminé")).toBeTruthy();
-    expect(screen.getByText("1 ajoutés · 0 déjà présents · 0 invalides · 0 en erreur")).toBeTruthy();
-    expect(await screen.findByText("En cours")).toBeTruthy();
+    expect(await screen.findByText("Torrent ajouté")).toBeTruthy();
+    expect(screen.getByText("film.torrent")).toBeTruthy();
+    expect(screen.queryByText("Lot terminé")).toBeNull();
+    expect(view.container.querySelector(".torrent-upload-batch")).toBeNull();
+    expect(await screen.findByText("Téléchargement", { selector: ".torrent-primary-state" })).toBeTruthy();
     expect(screen.getByRole("progressbar", { name: "Progression de Film.mkv" }).getAttribute("value")).toBe("50");
     expect(view.container.querySelector("table")).toBeNull();
     expect(screen.getByRole("article", { name: "Film.mkv" })).toBeTruthy();
@@ -1250,7 +1319,7 @@ describe("UserDownloadsPage", () => {
     await user.click(screen.getByRole("button", { name: "Suivant" }));
 
     expect(await screen.findByText("Deuxième page.mkv")).toBeTruthy();
-    expect(screen.getByText("Disponible")).toBeTruthy();
+    expect(screen.getByText("Prêt")).toBeTruthy();
     expect(calls.some((url) => url.includes("offset=0") && url.includes("limit=100"))).toBe(true);
   });
 
@@ -1310,8 +1379,8 @@ describe("UserDownloadsPage", () => {
     });
 
     await waitFor(() => expect(screen.getByText("film.torrent")).toBeTruthy());
-    expect(screen.getByText("Déjà présent")).toBeTruthy();
-    expect(await screen.findByText("Erreur")).toBeTruthy();
+    expect(screen.getByText("Torrent déjà présent")).toBeTruthy();
+    expect(await screen.findByText("Bloqué")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("intervention");
   });
 
@@ -1347,7 +1416,7 @@ describe("UserDownloadsPage", () => {
     expect(await screen.findByText("La demande « Film.mkv » a été annulée.")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(await auditAccessibility(document.body)).toMatchObject({ violations: [] });
-    expect(await screen.findByText("Annulé")).toBeTruthy();
+    expect(await screen.findByText("Bloqué")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Annuler la demande Film.mkv" })).toBeNull();
     expect(calls).toContainEqual({
       method: "DELETE",
@@ -1420,9 +1489,8 @@ describe("UserDownloadsPage", () => {
 
       fireEvent.change(input, { target: { files } });
 
-      await screen.findByText(
-        `${count} ajoutés · 0 déjà présents · 0 invalides · 0 en erreur`,
-      );
+      await waitFor(() => expect(screen.getAllByText("Torrent ajouté")).toHaveLength(count));
+      expect(view.container.querySelector(".torrent-upload-batch")).toBeNull();
       expect(postCount).toBe(count);
       expect(maximumActive).toBe(Math.min(count, TORRENT_UPLOAD_CONCURRENCY));
       expect(maximumActive).toBeLessThanOrEqual(TORRENT_UPLOAD_CONCURRENCY);
@@ -1461,11 +1529,10 @@ describe("UserDownloadsPage", () => {
 
     fireEvent.change(input, { target: { files } });
 
-    await screen.findByText("2 ajoutés · 1 déjà présents · 2 invalides · 1 en erreur");
-    expect(screen.getAllByText("Ajouté")).toHaveLength(2);
-    expect(screen.getByText("Déjà présent")).toBeTruthy();
-    expect(screen.getAllByText("Invalide")).toHaveLength(2);
-    expect(screen.getByText("Erreur", { selector: ".batch-result" })).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByText("Torrent ajouté")).toHaveLength(2));
+    expect(screen.getByText("Torrent déjà présent")).toBeTruthy();
+    expect(screen.getAllByText("Échec de l’ajout")).toHaveLength(3);
+    expect(view.container.querySelector(".torrent-upload-batch")).toBeNull();
     const postCalls = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
     expect(postCalls).toHaveLength(3);
   });
@@ -1513,10 +1580,9 @@ describe("UserDownloadsPage", () => {
 
     fireEvent.change(input, { target: { files } });
 
-    await screen.findByText("2 ajoutés · 0 déjà présents · 2 invalides · 4 en erreur");
+    await waitFor(() => expect(screen.getAllByText("Torrent ajouté")).toHaveLength(2));
     expect(successful).toEqual(["ok-before.torrent", "ok-after.torrent"]);
-    expect(screen.getAllByText("Invalide")).toHaveLength(2);
-    expect(screen.getAllByText("Erreur", { selector: ".batch-result" })).toHaveLength(4);
+    expect(screen.getAllByText("Échec de l’ajout")).toHaveLength(6);
   });
 
   it("désactive les entrées pendant un envoi lent et réutilise picker puis drop", async () => {
@@ -1552,7 +1618,7 @@ describe("UserDownloadsPage", () => {
     expect(uploaded).toEqual(["first.torrent"]);
 
     releaseFirst();
-    await screen.findByText("1 ajoutés · 0 déjà présents · 0 invalides · 0 en erreur");
+    await screen.findByText("Torrent ajouté");
     expect(input.disabled).toBe(false);
     expect(input.value).toBe("");
 
