@@ -462,6 +462,7 @@ input::placeholder {
 }
 
 .app-header {
+  position: relative;
   z-index: 70;
   display: grid !important;
   min-height: 72px;

@@ -427,6 +427,7 @@ button:disabled {
 }
 
 .app-header {
+  position: relative;
   z-index: 10;
   display: flex;
   min-height: 4rem;
