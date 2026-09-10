@@ -138,6 +138,16 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         unit="bytes",
     ),
     _integer(
+        "WOS_FOLDER_ARCHIVE_MAX_CONCURRENT_GLOBAL",
+        "Archives dossier simultanées",
+        "Nombre maximal d’archives ZIP de dossier produites simultanément par processus API.",
+        4,
+        "downloads",
+        minimum=1,
+        maximum=16,
+        unit="count",
+    ),
+    _integer(
         "WOS_TORRENT_MAX_ACTIVE_PER_USER",
         "Torrents actifs par utilisateur",
         "Nombre maximal de demandes actives pour un même compte.",

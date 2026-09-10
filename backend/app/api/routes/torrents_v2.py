@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import Annotated, Literal, Never, cast
 
 from fastapi import (
@@ -57,6 +58,8 @@ from app.scheduler.queue_visibility import (
     torrent_queue_status,
 )
 from app.schemas.torrents_v2 import (
+    TorrentDownloadDirectoriesResponse,
+    TorrentDownloadDirectoryResponse,
     TorrentDownloadFileResponse,
     TorrentDownloadManifestResponse,
     TorrentRequestV2CreateResponse,
@@ -120,6 +123,30 @@ def _required_utc_datetime(value: datetime) -> datetime:
     normalized = _utc_datetime(value)
     assert normalized is not None
     return normalized
+
+
+def _directory_parts(path: str | None, *, allow_root: bool) -> tuple[str, ...]:
+    if path is None and allow_root:
+        return ()
+    value = "" if path is None else path
+    parsed = PurePosixPath(value)
+    if (
+        not value
+        or len(value) > 4096
+        or value.startswith("/")
+        or "\\" in value
+        or "\x00" in value
+        or parsed.is_absolute()
+        or parsed.as_posix() != value
+        or any(part in {"", ".", ".."} for part in parsed.parts)
+    ):
+        _fail(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "download_directory_path_invalid",
+            "Le chemin du dossier est invalide.",
+            "path",
+        )
+    return parsed.parts
 
 
 def _download_rate_limiter(request: Request) -> DownloadRateLimiter:
@@ -340,6 +367,312 @@ async def get_torrent_download_manifest(
 
 
 @router.get(
+    "/{torrent_request_id}/download-directories",
+    response_model=TorrentDownloadDirectoriesResponse,
+)
+async def get_torrent_download_directories(
+    db: DbSession,
+    context: Annotated[AuthContext, Depends(require_current_credentials)],
+    torrent_request_id: uuid.UUID,
+    parent: Annotated[str | None, Query(max_length=4096)] = None,
+) -> TorrentDownloadDirectoriesResponse:
+    parent_parts = _directory_parts(parent, allow_root=True)
+    now = datetime.now(UTC)
+    row = (
+        await db.execute(
+            select(TorrentRequest, ManagedTorrent)
+            .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
+            .where(
+                TorrentRequest.id == torrent_request_id,
+                TorrentRequest.user_id == context.user.id,
+                TorrentRequest.state == TorrentRequestState.READY,
+                TorrentRequest.unsubscribe_at.is_not(None),
+                TorrentRequest.unsubscribe_at > now,
+                ManagedTorrent.state == ManagedTorrentState.READY,
+            )
+        )
+    ).one_or_none()
+    if row is None:
+        await db.rollback()
+        _fail(
+            status.HTTP_404_NOT_FOUND,
+            "download_directories_not_found",
+            "Ce contenu est indisponible.",
+        )
+    torrent_request, managed_torrent = row
+    checksum = managed_torrent.manifest_checksum
+    if managed_torrent.manifest_version < 1 or checksum is None:
+        await db.rollback()
+        _fail(
+            status.HTTP_409_CONFLICT,
+            "torrent_manifest_unavailable",
+            "Le manifeste du téléchargement est indisponible.",
+        )
+    try:
+        options = await PostgresOptionsRegistry().snapshot(db)
+        archive_max_bytes = _integer_option(options, "WOS_FOLDER_ARCHIVE_MAX_BYTES")
+    except (DatabaseOptionsDriftError, ValueError):
+        await db.rollback()
+        _fail(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "download_options_unavailable",
+            "Le téléchargement est momentanément indisponible.",
+        )
+    files = tuple(
+        (
+            await db.scalars(
+                select(TorrentFile)
+                .where(TorrentFile.managed_torrent_id == managed_torrent.id)
+                .order_by(TorrentFile.file_index)
+            )
+        ).all()
+    )
+    if len(files) != managed_torrent.manifest_file_count:
+        await db.rollback()
+        _fail(
+            status.HTTP_409_CONFLICT,
+            "download_snapshot_changed",
+            "Le contenu a changé. Relance le téléchargement.",
+        )
+    directories: dict[str, tuple[int, int]] = {}
+    parent_exists = not parent_parts
+    for item in files:
+        parts = PurePosixPath(item.relative_path).parts
+        if len(parts) <= len(parent_parts) or parts[: len(parent_parts)] != parent_parts:
+            continue
+        parent_exists = True
+        if len(parts) == len(parent_parts) + 1:
+            continue
+        child_parts = parts[: len(parent_parts) + 1]
+        relative_path = "/".join(child_parts)
+        file_count, total_size = directories.get(relative_path, (0, 0))
+        directories[relative_path] = (file_count + 1, total_size + item.size)
+    if not parent_exists:
+        await db.rollback()
+        _fail(
+            status.HTTP_404_NOT_FOUND,
+            "download_directory_not_found",
+            "Ce dossier est introuvable.",
+            "parent",
+        )
+    response = TorrentDownloadDirectoriesResponse(
+        snapshot_id=download_snapshot_id(
+            torrent_request.id,
+            checksum,
+            managed_torrent.manifest_version,
+        ),
+        path="/".join(parent_parts),
+        directories=[
+            TorrentDownloadDirectoryResponse(
+                name=relative_path.rsplit("/", 1)[-1],
+                relative_path=relative_path,
+                file_count=file_count,
+                total_size=total_size,
+                archive_available=(
+                    total_size <= archive_max_bytes and file_count <= MAX_MANAGED_ARCHIVE_ENTRIES
+                ),
+            )
+            for relative_path, (file_count, total_size) in sorted(directories.items())
+        ],
+    )
+    await db.rollback()
+    return response
+
+
+@router.get(
+    "/{torrent_request_id}/download-folder-archive",
+    response_model=None,
+    operation_id="download_v2_torrent_folder_archive",
+)
+async def download_torrent_folder_archive(
+    request: Request,
+    db: DbSession,
+    settings: Annotated[Settings, Depends(get_settings)],
+    context: Annotated[AuthContext, Depends(require_current_credentials)],
+    torrent_request_id: uuid.UUID,
+    path: Annotated[str, Query(min_length=1, max_length=4096)],
+    snapshot: Annotated[str, Query(min_length=64, max_length=64)],
+) -> Response:
+    path_parts = _directory_parts(path, allow_root=False)
+    owner_id = context.user.id
+    now = datetime.now(UTC)
+    row = (
+        await db.execute(
+            select(TorrentRequest, ManagedTorrent)
+            .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
+            .where(
+                TorrentRequest.id == torrent_request_id,
+                TorrentRequest.user_id == owner_id,
+                TorrentRequest.state == TorrentRequestState.READY,
+                TorrentRequest.unsubscribe_at.is_not(None),
+                TorrentRequest.unsubscribe_at > now,
+                ManagedTorrent.state == ManagedTorrentState.READY,
+            )
+            .with_for_update()
+        )
+    ).one_or_none()
+    if row is None:
+        await db.rollback()
+        _fail(
+            status.HTTP_404_NOT_FOUND,
+            "folder_archive_not_found",
+            "Ce dossier est indisponible.",
+        )
+    torrent_request, managed_torrent = row
+    checksum = managed_torrent.manifest_checksum
+    if managed_torrent.manifest_version < 1 or checksum is None:
+        await db.rollback()
+        _fail(
+            status.HTTP_409_CONFLICT,
+            "torrent_manifest_unavailable",
+            "Le manifeste du téléchargement est indisponible.",
+        )
+    if snapshot != download_snapshot_id(
+        torrent_request.id,
+        checksum,
+        managed_torrent.manifest_version,
+    ):
+        await db.rollback()
+        _fail(
+            status.HTTP_409_CONFLICT,
+            "download_snapshot_changed",
+            "Le contenu a changé. Relance le téléchargement.",
+        )
+    try:
+        options = await PostgresOptionsRegistry().snapshot(db)
+        archive_max_bytes = _integer_option(options, "WOS_FOLDER_ARCHIVE_MAX_BYTES")
+        archive_concurrency = _integer_option(
+            options,
+            "WOS_FOLDER_ARCHIVE_MAX_CONCURRENT_GLOBAL",
+        )
+        chunk_size = _integer_option(options, "WOS_HTTP_STREAM_CHUNK_BYTES")
+        lease_seconds = _integer_option(options, "WOS_DOWNLOAD_LEASE_SECONDS")
+        max_concurrent = _integer_option(options, "WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER")
+        per_user_rate = _integer_option(
+            options,
+            "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
+        )
+        global_rate = _integer_option(options, "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL")
+    except (DatabaseOptionsDriftError, ValueError):
+        await db.rollback()
+        _fail(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "download_options_unavailable",
+            "Le téléchargement est momentanément indisponible.",
+        )
+    all_files = tuple(
+        (
+            await db.scalars(
+                select(TorrentFile)
+                .where(TorrentFile.managed_torrent_id == managed_torrent.id)
+                .order_by(TorrentFile.file_index)
+            )
+        ).all()
+    )
+    if len(all_files) != managed_torrent.manifest_file_count:
+        await db.rollback()
+        _fail(
+            status.HTTP_409_CONFLICT,
+            "download_snapshot_changed",
+            "Le contenu a changé. Relance le téléchargement.",
+        )
+    files = tuple(
+        item
+        for item in all_files
+        if (parts := PurePosixPath(item.relative_path).parts)[: len(path_parts)] == path_parts
+        and len(parts) > len(path_parts)
+    )
+    if not files:
+        await db.rollback()
+        _fail(
+            status.HTTP_404_NOT_FOUND,
+            "download_directory_not_found",
+            "Ce dossier est introuvable ou vide.",
+            "path",
+        )
+    total_size = sum(item.size for item in files)
+    if len(files) > MAX_MANAGED_ARCHIVE_ENTRIES:
+        await db.rollback()
+        _fail(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            "folder_archive_too_many_entries",
+            "Ce dossier contient trop de fichiers pour être archivé.",
+        )
+    if total_size > archive_max_bytes:
+        await db.rollback()
+        _fail(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            "folder_archive_too_large",
+            "Ce dossier est trop volumineux pour être archivé.",
+        )
+    managed_torrent_id = managed_torrent.id
+    storage_key = managed_torrent.storage_key
+    manifest_version = managed_torrent.manifest_version
+    root_name = path_parts[-1]
+    entries = tuple(
+        ManagedArchiveEntry(
+            item.relative_path,
+            item.size,
+            item.file_index,
+            "/".join((root_name, *PurePosixPath(item.relative_path).parts[len(path_parts) :])),
+        )
+        for item in files
+    )
+    first_file_id = files[0].id
+    await db.rollback()
+
+    leases = DownloadLeaseManager(db, lease_seconds=lease_seconds)
+    try:
+        lease = await leases.acquire(
+            user_id=owner_id,
+            managed_torrent_id=managed_torrent_id,
+            torrent_request_id=torrent_request_id,
+            torrent_file_id=first_file_id,
+            max_concurrent=max_concurrent,
+        )
+    except DownloadConcurrencyError:
+        _fail(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "download_concurrency_reached",
+            "Trop de téléchargements sont déjà actifs.",
+        )
+    except ManagedDownloadError:
+        _fail(
+            status.HTTP_404_NOT_FOUND,
+            "folder_archive_not_found",
+            "Ce dossier est indisponible.",
+        )
+    archiver = ManagedFolderArchiver(
+        ManagedFileDownloader(SharedContentStore(settings.data_root)),
+        storage_key=storage_key,
+        entries=entries,
+        manifest_checksum=checksum,
+        manifest_version=manifest_version,
+        download_name=f"{root_name}.zip",
+        max_concurrent_global=archive_concurrency,
+    )
+    try:
+        archiver.acquire()
+    except ManagedArchiveBusyError:
+        await leases.release(lease.id)
+        _fail(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "folder_archive_busy",
+            "Trop d’archives ZIP sont déjà en cours.",
+        )
+    return ManagedArchiveStreamingResponse(
+        archiver,
+        chunk_size=chunk_size,
+        user_id=owner_id,
+        lease=lease,
+        leases=leases,
+        limiter=_download_rate_limiter(request),
+        per_user_bytes_per_second=per_user_rate,
+        global_bytes_per_second=global_rate,
+    )
+
+
+@router.get(
     "/{torrent_request_id}/download-archive",
     response_model=None,
     operation_id="download_v2_torrent_archive",
@@ -397,6 +730,10 @@ async def download_torrent_archive(
     try:
         options = await PostgresOptionsRegistry().snapshot(db)
         archive_max_bytes = _integer_option(options, "WOS_FOLDER_ARCHIVE_MAX_BYTES")
+        archive_concurrency = _integer_option(
+            options,
+            "WOS_FOLDER_ARCHIVE_MAX_CONCURRENT_GLOBAL",
+        )
         chunk_size = _integer_option(options, "WOS_HTTP_STREAM_CHUNK_BYTES")
         lease_seconds = _integer_option(options, "WOS_DOWNLOAD_LEASE_SECONDS")
         max_concurrent = _integer_option(options, "WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER")
@@ -476,6 +813,7 @@ async def download_torrent_archive(
         manifest_checksum=checksum,
         manifest_version=manifest_version,
         download_name=download_name,
+        max_concurrent_global=archive_concurrency,
     )
     try:
         archiver.acquire()
