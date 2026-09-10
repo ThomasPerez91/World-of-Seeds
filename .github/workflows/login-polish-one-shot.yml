@@ -74,7 +74,6 @@ jobs:
           }
 
           function LoginScreen'''
-
           app, count = re.subn(
               r'function ServiceHealth\(\) \{.*?\n\}\n\nfunction LoginScreen',
               service,
@@ -84,21 +83,23 @@ jobs:
           )
           assert count == 1, 'ServiceHealth replacement failed'
 
-          old_header = '''      <header className="login-header" aria-label="World of Seeds">
-                <img src="/title.webp?rev=a9c84cc" alt="World of Seeds" />
-              </header>'''
-          new_header = '''      <header className="login-header" aria-label="World of Seeds">
+          header_pattern = re.compile(
+              r'<header className="login-header" aria-label="World of Seeds">\s*'
+              r'<img src="/title\.webp\?rev=a9c84cc" alt="World of Seeds"\s*/>\s*'
+              r'</header>'
+          )
+          header_replacement = '''<header className="login-header" aria-label="World of Seeds">
                 <img src="/title.webp?rev=a9c84cc" alt="World of Seeds" />
                 <ServiceHealth />
               </header>'''
-          assert old_header in app, 'Login header block not found'
-          app = app.replace(old_header, new_header, 1)
+          app, count = header_pattern.subn(header_replacement, app, count=1)
+          assert count == 1, 'Login header block not found'
 
           start_pattern = re.compile(
-              r'      <section className="login-card" aria-labelledby="login-title">\n.*?        <Card className="form-card">',
+              r'<section className="login-card" aria-labelledby="login-title">.*?<Card className="form-card">',
               re.S,
           )
-          new_start = '''      <section className="login-card" aria-labelledby="login-title">
+          new_start = '''<section className="login-card" aria-labelledby="login-title">
                 <div className="login-brand-row">
                   <img className="login-title-image" src="/title.webp?rev=a9c84cc" alt="" aria-hidden="true" />
                   <LanguageSelector variant="flag-toggle" />
@@ -111,8 +112,7 @@ jobs:
           assert count == 1, 'Login card header replacement failed'
           app_path.write_text(app)
 
-          language_path = Path('frontend/src/components/LanguageSelector.tsx')
-          language_path.write_text('''import { useI18n, type Locale } from "../i18n";
+          Path('frontend/src/components/LanguageSelector.tsx').write_text('''import { useI18n, type Locale } from "../i18n";
 
           export function LanguageSelector({
             disabled = false,
@@ -174,32 +174,27 @@ jobs:
 
           test_path = Path('frontend/src/App.test.tsx')
           tests = test_path.read_text()
-          old = '''    expect(screen.getByRole("combobox", { name: "Langue" })).toHaveProperty("value", "fr");'''
-          new = '''    expect(screen.getByRole("button", { name: "Langue : Français" })).toBeDefined();'''
-          assert old in tests
-          tests = tests.replace(old, new, 1)
-          old = '''    await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
-              expect(screen.getByRole("button", { name: "Hide password" })).toBeDefined();'''
-          new = '''    await user.click(screen.getByRole("button", { name: "Langue : Français" }));
-              expect(screen.getByRole("button", { name: "Language : English" })).toBeDefined();
-              expect(screen.getByRole("button", { name: "Hide password" })).toBeDefined();'''
-          assert old in tests
-          tests = tests.replace(old, new, 1)
-          old = '''    await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
-              await user.type(screen.getByLabelText("Username"), "thomas");'''
-          new = '''    await user.click(screen.getByRole("button", { name: "Langue : Français" }));
-              await user.type(screen.getByLabelText("Username"), "thomas");'''
-          assert old in tests
-          tests = tests.replace(old, new, 1)
-          old = '''    expect(screen.getByText("Tous les services fonctionnent normalement.")).toBeDefined();
-              await user.click(screen.getByRole("button", { name: "Vérifier l’état du service" }));
-              await screen.findByText("Le service est momentanément interrompu.");'''
-          new = '''    expect(
-                screen.getByRole("status", { name: "Tous les services fonctionnent normalement." }),
-              ).toBeDefined();
-              expect(screen.queryByRole("button", { name: "Vérifier l’état du service" })).toBeNull();'''
-          assert old in tests
-          tests = tests.replace(old, new, 1)
+          replacements = [
+              (
+                  'expect(screen.getByRole("combobox", { name: "Langue" })).toHaveProperty("value", "fr");',
+                  'expect(screen.getByRole("button", { name: "Langue : Français" })).toBeDefined();',
+              ),
+              (
+                  'await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");\n    expect(screen.getByRole("button", { name: "Hide password" })).toBeDefined();',
+                  'await user.click(screen.getByRole("button", { name: "Langue : Français" }));\n    expect(screen.getByRole("button", { name: "Language : English" })).toBeDefined();\n    expect(screen.getByRole("button", { name: "Hide password" })).toBeDefined();',
+              ),
+              (
+                  'await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");\n    await user.type(screen.getByLabelText("Username"), "thomas");',
+                  'await user.click(screen.getByRole("button", { name: "Langue : Français" }));\n    await user.type(screen.getByLabelText("Username"), "thomas");',
+              ),
+              (
+                  'expect(screen.getByText("Tous les services fonctionnent normalement.")).toBeDefined();\n    await user.click(screen.getByRole("button", { name: "Vérifier l’état du service" }));\n    await screen.findByText("Le service est momentanément interrompu.");',
+                  'expect(\n      screen.getByRole("status", { name: "Tous les services fonctionnent normalement." }),\n    ).toBeDefined();\n    expect(screen.queryByRole("button", { name: "Vérifier l’état du service" })).toBeNull();',
+              ),
+          ]
+          for old, new in replacements:
+              assert old in tests, f'Test replacement not found: {old[:60]}'
+              tests = tests.replace(old, new, 1)
           test_path.write_text(tests)
 
           css_path = Path('frontend/src/wos-2-1.css')
@@ -232,17 +227,13 @@ jobs:
             height: 10px;
             border-radius: 999px;
             background: #6ef0a9;
-            box-shadow:
-              0 0 0 5px rgba(110, 240, 169, 0.09),
-              0 0 18px rgba(74, 236, 151, 0.62);
+            box-shadow: 0 0 0 5px rgba(110, 240, 169, 0.09), 0 0 18px rgba(74, 236, 151, 0.62);
             animation: wos-health-pulse 1.8s ease-in-out infinite;
           }
 
           .service-health-indicator.unavailable .service-health-dot {
             background: #ff6868;
-            box-shadow:
-              0 0 0 5px rgba(255, 104, 104, 0.09),
-              0 0 18px rgba(255, 86, 86, 0.58);
+            box-shadow: 0 0 0 5px rgba(255, 104, 104, 0.09), 0 0 18px rgba(255, 86, 86, 0.58);
           }
 
           .service-health-indicator:focus-visible {
@@ -281,23 +272,13 @@ jobs:
           }
 
           @keyframes wos-health-pulse {
-            0%, 100% {
-              opacity: 0.72;
-              transform: scale(0.92);
-            }
-            50% {
-              opacity: 1;
-              transform: scale(1.12);
-            }
+            0%, 100% { opacity: 0.72; transform: scale(0.92); }
+            50% { opacity: 1; transform: scale(1.12); }
           }
 
           .login-card {
-            background:
-              linear-gradient(145deg, rgba(105, 241, 166, 0.045), transparent 48%),
-              rgba(3, 28, 19, 0.58) !important;
-            box-shadow:
-              0 28px 80px rgba(0, 0, 0, 0.36),
-              0 0 42px rgba(53, 223, 135, 0.055) !important;
+            background: linear-gradient(145deg, rgba(105, 241, 166, 0.045), transparent 48%), rgba(3, 28, 19, 0.58) !important;
+            box-shadow: 0 28px 80px rgba(0, 0, 0, 0.36), 0 0 42px rgba(53, 223, 135, 0.055) !important;
             backdrop-filter: blur(30px) saturate(128%) !important;
             -webkit-backdrop-filter: blur(30px) saturate(128%) !important;
           }
@@ -331,9 +312,7 @@ jobs:
             color: #edf7f1;
             border: 1px solid rgba(137, 219, 174, 0.26);
             border-radius: 11px;
-            background:
-              linear-gradient(145deg, rgba(94, 232, 156, 0.06), transparent),
-              rgba(3, 25, 17, 0.56);
+            background: linear-gradient(145deg, rgba(94, 232, 156, 0.06), transparent), rgba(3, 25, 17, 0.56);
             box-shadow: inset 0 1px rgba(255, 255, 255, 0.03);
             cursor: pointer;
             transition: border-color 150ms ease, background 150ms ease, transform 150ms ease, box-shadow 150ms ease;
@@ -358,10 +337,7 @@ jobs:
             box-shadow: 0 0 0 3px rgba(72, 232, 145, 0.13);
           }
 
-          .language-flag-toggle:disabled {
-            cursor: default;
-            opacity: 0.55;
-          }
+          .language-flag-toggle:disabled { cursor: default; opacity: 0.55; }
 
           .login-card > .brand-copy {
             max-width: none;
@@ -372,9 +348,7 @@ jobs:
             text-align: left;
           }
 
-          .login-card > .login-divider {
-            margin: 0 0 0.72rem;
-          }
+          .login-card > .login-divider { margin: 0 0 0.72rem; }
 
           .login-card form .login-input input:-webkit-autofill,
           .login-card form .login-input input:-webkit-autofill:hover,
@@ -393,27 +367,10 @@ jobs:
           }
 
           @media (max-width: 680px) {
-            .login-brand-row {
-              gap: 0.8rem;
-            }
-
-            .login-brand-row .login-title-image {
-              width: min(76%, 244px);
-            }
-
-            .language-flag-toggle {
-              width: 42px;
-              height: 38px;
-              min-width: 42px;
-              min-height: 38px;
-              flex-basis: 42px;
-            }
-
-            .login-header .service-health-indicator {
-              width: 32px;
-              height: 32px;
-              flex-basis: 32px;
-            }
+            .login-brand-row { gap: 0.8rem; }
+            .login-brand-row .login-title-image { width: min(76%, 244px); }
+            .language-flag-toggle { width: 42px; height: 38px; min-width: 42px; min-height: 38px; flex-basis: 42px; }
+            .login-header .service-health-indicator { width: 32px; height: 32px; flex-basis: 32px; }
           }
           '''
           css_path.write_text(css)
