@@ -27,6 +27,7 @@ import { UI_VERSION } from "./uiVersion";
 import { FeedbackProvider } from "./components/Feedback";
 import { useFeedback } from "./components/Feedback";
 import { I18nProvider, useI18n, type Locale } from "./i18n";
+import { Eye, EyeOff, LockKeyhole, UserRound } from "lucide-react";
 
 type AuthState =
   | { status: "loading" }
@@ -106,6 +107,7 @@ function LoginScreen({
   const { apiError, locale, t } = useI18n();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -131,18 +133,21 @@ function LoginScreen({
 
   return (
     <main className="login-page">
-      <section className="brand-panel" aria-labelledby="brand-title">
-        <BrandMark />
-        <p className="eyebrow">{t("login.private")}</p>
-        <h1 id="brand-title">World of Seeds</h1>
-        <p className="brand-copy">
-          {t("login.tagline")}
-        </p>
-        <ServiceHealth />
-      </section>
+      <header className="login-header" aria-label="World of Seeds">
+        <img src="/title.webp" alt="World of Seeds" />
+      </header>
+      <p className="login-slogan" aria-hidden="true">
+        VOS FICHIERS.<br />VOTRE LIBERTÉ.<br />PARTOUT.
+      </p>
 
-      <section className="form-panel" aria-labelledby="login-title">
+      <section className="login-card" aria-labelledby="login-title">
+        <img className="login-title-image" src="/title.webp" alt="" aria-hidden="true" />
+        <h1 className="visually-hidden">World of Seeds</h1>
+        <p className="brand-copy">{t("login.tagline")}</p>
+        <ServiceHealth />
+        <div className="login-divider" />
         <LanguageSelector />
+        <div className="login-divider" />
         <Card className="form-card">
           <p className="eyebrow">{t("login.title")}</p>
           <h2 id="login-title">{t("login.welcome")}</h2>
@@ -150,25 +155,40 @@ function LoginScreen({
 
           <form onSubmit={handleSubmit}>
             <label htmlFor="username">{t("login.username")}</label>
-            <input
-              id="username"
-              name="username"
-              autoComplete="username"
-              aria-describedby="login-error"
-              aria-invalid={error !== ""}
-              required
-            />
+            <div className="login-input">
+              <UserRound aria-hidden="true" />
+              <input
+                id="username"
+                name="username"
+                autoComplete="username"
+                aria-describedby="login-error"
+                aria-invalid={error !== ""}
+                required
+              />
+            </div>
 
             <label htmlFor="password">{t("login.password")}</label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              aria-describedby="login-error"
-              aria-invalid={error !== ""}
-              required
-            />
+            <div className="login-input login-password-input">
+              <LockKeyhole aria-hidden="true" />
+              <input
+                id="password"
+                name="password"
+                type={passwordVisible ? "text" : "password"}
+                autoComplete="current-password"
+                aria-describedby="login-error"
+                aria-invalid={error !== ""}
+                required
+              />
+              <button
+                type="button"
+                className="password-visibility"
+                aria-label={passwordVisible ? t("login.hidePassword") : t("login.showPassword")}
+                aria-pressed={passwordVisible}
+                onClick={() => setPasswordVisible((visible) => !visible)}
+              >
+                {passwordVisible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+              </button>
+            </div>
 
             <Button type="submit" disabled={submitting}>
               {submitting ? t("login.submitting") : t("login.submit")}

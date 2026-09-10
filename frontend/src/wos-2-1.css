@@ -149,49 +149,15 @@ body {
   overflow-y: auto !important;
   padding: 94px 1.25rem 2.25rem !important;
   color: var(--wos21-text) !important;
-  background:
-    linear-gradient(90deg, rgba(1, 16, 11, 0.58), rgba(2, 21, 14, 0.06) 49%, rgba(1, 15, 10, 0.45)),
-    linear-gradient(180deg, rgba(2, 18, 12, 0.12), rgba(2, 15, 10, 0.48)),
-    url("/background.webp") center / cover fixed no-repeat !important;
+  background: transparent !important;
 }
 
-/* The login has no top-right language control: only the in-card selector stays. */
 .login-page::before {
-  content: "" !important;
-  position: fixed !important;
-  z-index: 8 !important;
-  top: 0 !important;
-  right: 0 !important;
-  bottom: auto !important;
-  left: 0 !important;
-  width: auto !important;
-  height: 70px !important;
-  pointer-events: none !important;
-  border-bottom: 1px solid rgba(145, 224, 180, 0.18) !important;
-  background:
-    url("/title.webp") 28px center / 210px auto no-repeat,
-    linear-gradient(90deg, rgba(2, 24, 16, 0.9), rgba(5, 37, 25, 0.63), rgba(2, 23, 16, 0.82)) !important;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.17) !important;
-  backdrop-filter: blur(18px) saturate(126%) !important;
-  opacity: 1 !important;
+  content: none !important;
 }
 
 .login-page::after {
-  content: "VOS FICHIERS.\A VOTRE LIBERTÉ.\A PARTOUT." !important;
-  position: fixed !important;
-  z-index: 0 !important;
-  top: 26% !important;
-  right: auto !important;
-  bottom: auto !important;
-  left: clamp(2rem, 6vw, 6.4rem) !important;
-  max-width: 16rem !important;
-  color: rgba(211, 239, 223, 0.42) !important;
-  font-size: 0.7rem !important;
-  font-weight: 660 !important;
-  line-height: 2.15 !important;
-  letter-spacing: 0.36em !important;
-  text-align: left !important;
-  white-space: pre !important;
+  content: none !important;
 }
 
 .login-page .brand-panel,
@@ -436,6 +402,288 @@ body {
   justify-content: center !important;
 }
 
+/* The 2.1 login is a single, explicit component. Historical split-panel rules
+ * above remain scoped to the credential-change screen and do not style it. */
+.login-header {
+  position: fixed;
+  z-index: 8;
+  inset: 0 0 auto;
+  display: flex;
+  height: 68px;
+  align-items: center;
+  padding: 0 28px;
+  border-bottom: 1px solid rgba(145, 224, 180, 0.16);
+  background: rgba(2, 23, 15, 0.72);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(18px) saturate(126%);
+}
+
+.login-header img {
+  display: block;
+  width: 205px;
+  height: auto;
+}
+
+.login-slogan {
+  position: fixed;
+  z-index: 0;
+  top: 27%;
+  left: clamp(2rem, 6vw, 6.4rem);
+  margin: 0;
+  color: rgba(211, 239, 223, 0.36);
+  font-size: 0.7rem;
+  font-weight: 660;
+  line-height: 2.15;
+  letter-spacing: 0.36em;
+}
+
+.login-card {
+  position: relative;
+  z-index: 2;
+  box-sizing: border-box;
+  display: flex;
+  width: min(100%, 500px);
+  flex-direction: column;
+  align-items: stretch;
+  padding: 1.45rem 2.25rem 1.35rem;
+  color: var(--wos21-text);
+  border: 1px solid var(--wos21-line-strong);
+  border-radius: 22px;
+  background:
+    linear-gradient(145deg, rgba(103, 239, 162, 0.055), transparent 48%),
+    var(--wos21-glass-strong);
+  box-shadow: var(--wos21-shadow), 0 0 42px rgba(53, 223, 135, 0.07);
+  backdrop-filter: blur(27px) saturate(132%);
+}
+
+.login-title-image {
+  display: block;
+  width: clamp(230px, 64%, 300px);
+  height: auto;
+  margin: 0 auto 0.35rem;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 22px rgba(0, 0, 0, 0.18));
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+}
+
+.login-card > .brand-copy {
+  max-width: 25rem;
+  margin: 0 auto 0.7rem !important;
+  color: #c7d6ce !important;
+  font-size: 0.9rem !important;
+  line-height: 1.45 !important;
+  text-align: center;
+}
+
+.login-card > .service-health {
+  align-self: center;
+  min-height: 32px !important;
+  margin: 0 !important;
+  padding: 0.32rem 0.72rem !important;
+  color: #91f0b9 !important;
+  border: 1px solid rgba(76, 223, 139, 0.22) !important;
+  border-radius: 999px !important;
+  background: rgba(19, 108, 61, 0.2) !important;
+  font-size: 0.74rem !important;
+}
+
+.login-divider {
+  height: 1px;
+  margin: 0.8rem 0;
+  background: linear-gradient(90deg, transparent, rgba(147, 226, 183, 0.24), transparent);
+}
+
+.login-card > .language-selector {
+  position: relative;
+  width: min(100%, 220px);
+  margin: 0 auto !important;
+}
+
+.login-card > .language-selector > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.login-card > .language-selector select {
+  width: 100% !important;
+  min-height: 40px !important;
+  padding: 0.42rem 2.2rem 0.42rem 0.85rem !important;
+  color: #edf7f1 !important;
+  border: 1px solid rgba(137, 219, 174, 0.24) !important;
+  border-radius: 10px !important;
+  background-color: rgba(3, 25, 17, 0.64) !important;
+  cursor: pointer;
+}
+
+.login-card > .language-selector select:focus-visible {
+  outline: none;
+  border-color: rgba(104, 244, 167, 0.64) !important;
+  box-shadow: 0 0 0 3px rgba(72, 232, 145, 0.095);
+}
+
+.login-card .form-card {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+.login-card .form-card .eyebrow {
+  margin: 0 0 0.65rem !important;
+  color: #bcd4c7 !important;
+  font-size: 0.7rem !important;
+  letter-spacing: 0.3em !important;
+  text-align: center;
+}
+
+.login-card .form-card h2,
+.login-card .form-card .form-intro {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+}
+
+.login-card form {
+  display: grid !important;
+  gap: 0.5rem !important;
+}
+
+.login-card form > label {
+  margin: 0.08rem 0 -0.18rem !important;
+  color: #c9d8d0 !important;
+  font-size: 0.78rem !important;
+  font-weight: 650 !important;
+}
+
+.login-input {
+  display: grid;
+  min-height: 46px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  border: 1px solid rgba(130, 211, 165, 0.24);
+  border-radius: 10px;
+  background: rgba(3, 25, 17, 0.47);
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.login-input:focus-within {
+  border-color: rgba(104, 244, 167, 0.64);
+  background: rgba(4, 31, 21, 0.7);
+  box-shadow: 0 0 0 3px rgba(72, 232, 145, 0.095);
+}
+
+.login-input > svg {
+  width: 17px;
+  height: 17px;
+  justify-self: center;
+  color: #75b993;
+}
+
+.login-card form .login-input input {
+  min-width: 0 !important;
+  min-height: 44px !important;
+  padding: 0 0.7rem 0 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.login-password-input {
+  grid-template-columns: 38px minmax(0, 1fr) 42px;
+}
+
+.password-visibility {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  place-items: center;
+  color: #9db9aa;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.password-visibility:hover,
+.password-visibility:focus-visible {
+  color: #70eda7;
+  background: rgba(89, 225, 149, 0.08);
+}
+
+.password-visibility svg {
+  width: 17px;
+  height: 17px;
+}
+
+@media (forced-colors: active) {
+  .login-input:focus-within {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  .login-card form .login-input input:focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: -4px !important;
+  }
+}
+
+.login-card form .ui-button[type="submit"] {
+  width: 100% !important;
+  min-height: 47px !important;
+  margin-top: 0.42rem !important;
+  color: #042316 !important;
+  border: 1px solid rgba(152, 255, 199, 0.58) !important;
+  border-radius: 10px !important;
+  background: linear-gradient(135deg, #73f2aa, #52e896 54%, #66f3a6) !important;
+  box-shadow: 0 10px 26px rgba(49, 224, 132, 0.2) !important;
+  font-size: 0.93rem !important;
+  font-weight: 800 !important;
+}
+
+.login-card form .ui-button[type="submit"]:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: linear-gradient(135deg, #8af8ba, #62eea1) !important;
+  box-shadow: 0 13px 32px rgba(49, 224, 132, 0.27) !important;
+}
+
+.login-card .form-message {
+  min-height: 0.9rem !important;
+  margin: 0 !important;
+  font-size: 0.76rem !important;
+  text-align: center;
+}
+
+.login-card > .legal-links {
+  justify-content: center !important;
+  margin-top: 0.25rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(143, 221, 178, 0.12);
+  color: #9fb3a8 !important;
+  font-size: 0.72rem !important;
+}
+
 /* ---------- Light/system theme still keeps the scenic identity ---------- */
 
 :root[data-theme="light"] #root::before {
@@ -449,10 +697,7 @@ body {
 
 :root[data-theme="light"] .login-page {
   color: #f7fbf8 !important;
-  background:
-    linear-gradient(90deg, rgba(1, 16, 11, 0.58), rgba(2, 21, 14, 0.06) 49%, rgba(1, 15, 10, 0.45)),
-    linear-gradient(180deg, rgba(2, 18, 12, 0.12), rgba(2, 15, 10, 0.48)),
-    url("/background.webp") center / cover fixed no-repeat !important;
+  background: transparent !important;
 }
 
 :root[data-theme="light"] .login-page .brand-panel,
@@ -473,6 +718,10 @@ body {
 
   .login-page::after {
     display: none !important;
+  }
+
+  .login-slogan {
+    display: none;
   }
 }
 
@@ -496,10 +745,26 @@ body {
   }
 
   .login-page::before {
-    height: 62px !important;
-    background:
-      url("/title.webp") 14px center / 170px auto no-repeat,
-      rgba(2, 24, 16, 0.9) !important;
+    content: none !important;
+  }
+
+  .login-header {
+    height: 62px;
+    padding: 0 14px;
+  }
+
+  .login-header img {
+    width: 166px;
+  }
+
+  .login-card {
+    width: min(100%, 500px);
+    padding: 1.2rem 1.05rem 1rem;
+    border-radius: 18px;
+  }
+
+  .login-title-image {
+    width: min(72%, 250px);
   }
 
   .login-page .brand-panel,
