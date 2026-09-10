@@ -330,10 +330,10 @@ class DownloadLeaseManager:
                     TorrentRequest.user_id == user_id,
                     TorrentRequest.managed_torrent_id == managed_torrent_id,
                     TorrentRequest.state == TorrentRequestState.READY,
+                    TorrentRequest.unsubscribe_at.is_not(None),
+                    TorrentRequest.unsubscribe_at > now,
                     ManagedTorrent.id == managed_torrent_id,
                     ManagedTorrent.state == ManagedTorrentState.READY,
-                    ManagedTorrent.retention_expires_at.is_not(None),
-                    ManagedTorrent.retention_expires_at > now,
                     TorrentFile.id == torrent_file_id,
                 )
                 .with_for_update()
@@ -400,7 +400,11 @@ class DownloadLeaseManager:
             )
             finishing_expired_download = (
                 managed is not None
-                and managed.state is ManagedTorrentState.PURGE_PENDING
+                and managed.state
+                in {
+                    ManagedTorrentState.READY,
+                    ManagedTorrentState.PURGE_PENDING,
+                }
                 and request is not None
                 and request.state is TorrentRequestState.EXPIRED
             )

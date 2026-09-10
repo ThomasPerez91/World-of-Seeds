@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
@@ -19,6 +19,7 @@ from app.models import (
     TorrentRequest,
     TorrentRequestState,
     User,
+    UserStorageUsage,
 )
 from app.models.base import utc_now
 from app.scheduler.queue_visibility import is_ranked_queue_member
@@ -28,7 +29,6 @@ from app.storage.accounting import (
     apply_storage_accounting,
     prepare_storage_accounting,
 )
-from app.torrents.lifecycle import extend_ready_torrent_retention
 
 _INFO_HASH_RE = re.compile(r"^[0-9a-f]{40}$")
 _ACTIVE_REQUEST_STATES = (
@@ -81,6 +81,7 @@ async def create_or_get_torrent_request(
     now: datetime | None = None,
     storage_policy: StorageAdmissionPolicy | None = None,
     disk_snapshot: StorageDiskSnapshot | None = None,
+    auto_unsubscribe_hours: int = 48,
 ) -> ManagedTorrentRequestResult:
     """Converge one canonical torrent and one active right without committing the transaction."""
 
@@ -88,6 +89,8 @@ async def create_or_get_torrent_request(
     timestamp = now or utc_now()
     if timestamp.utcoffset() is None:
         raise TorrentDeduplicationError("now must be timezone-aware")
+    if not 1 <= auto_unsubscribe_hours <= 2160:
+        raise TorrentDeduplicationError("torrent auto unsubscribe duration is invalid")
 
     owner = await session.scalar(select(User).where(User.id == user_id).with_for_update())
     if owner is None or not owner.is_active or owner.deleted_at is not None:
@@ -115,16 +118,6 @@ async def create_or_get_torrent_request(
     if managed_torrent.state is ManagedTorrentState.PURGING:
         raise TorrentPurgeInProgressError("managed torrent purge is in progress")
     was_ranked = await is_ranked_queue_member(session, managed_torrent, now=timestamp)
-    if (
-        managed_torrent.state
-        in {
-            ManagedTorrentState.READY,
-            ManagedTorrentState.PURGE_PENDING,
-        }
-        and managed_torrent.retention_expires_at is not None
-        and _as_utc(timestamp) >= _as_utc(managed_torrent.retention_expires_at)
-    ):
-        raise TorrentPurgeInProgressError("managed torrent retention has expired")
     reactivated = managed_torrent.state is ManagedTorrentState.PURGED
     if reactivated:
         managed_torrent.state = ManagedTorrentState.PENDING
@@ -169,6 +162,30 @@ async def create_or_get_torrent_request(
                 job.state = TorrentJobState.CANCELLED
                 job.finished_at = timestamp
 
+    existing_request = await session.scalar(
+        select(TorrentRequest)
+        .where(
+            TorrentRequest.user_id == user_id,
+            TorrentRequest.managed_torrent_id == managed_torrent.id,
+            TorrentRequest.state.in_(_ACTIVE_REQUEST_STATES),
+        )
+        .with_for_update()
+    )
+    if (
+        existing_request is not None
+        and existing_request.state is TorrentRequestState.READY
+        and existing_request.unsubscribe_at is not None
+        and _as_utc(timestamp) >= _as_utc(existing_request.unsubscribe_at)
+    ):
+        existing_request.state = TorrentRequestState.EXPIRED
+        existing_request.expires_at = timestamp
+        existing_request.updated_at = timestamp
+        usage = await session.get(UserStorageUsage, user_id, with_for_update=True)
+        if usage is not None:
+            usage.logical_bytes = max(0, usage.logical_bytes - managed_torrent.total_size)
+            usage.updated_at = timestamp
+        await session.flush()
+
     accounting = await prepare_storage_accounting(
         session,
         user_id=user_id,
@@ -203,24 +220,13 @@ async def create_or_get_torrent_request(
         if managed_torrent.state is ManagedTorrentState.READY:
             request.state = TorrentRequestState.READY
             request.ready_at = timestamp
+            request.unsubscribe_at = timestamp + timedelta(hours=auto_unsubscribe_hours)
         elif managed_torrent.state not in {
             ManagedTorrentState.PENDING,
             ManagedTorrentState.ADDING,
         }:
             request.state = TorrentRequestState.ACTIVE
         await session.flush()
-
-    previous_retention_expires_at = (
-        None
-        if managed_torrent.retention_expires_at is None
-        else _as_utc(managed_torrent.retention_expires_at)
-    )
-    if managed_torrent.state is ManagedTorrentState.READY:
-        await extend_ready_torrent_retention(session, managed_torrent, now=timestamp)
-    retention_extended = managed_torrent.retention_expires_at is not None and (
-        previous_retention_expires_at is None
-        or _as_utc(managed_torrent.retention_expires_at) > previous_retention_expires_at
-    )
 
     apply_storage_accounting(
         accounting,
@@ -242,7 +248,7 @@ async def create_or_get_torrent_request(
         managed_torrent_created=inserted_managed_id is not None,
         request_created=inserted_request_id is not None,
         managed_torrent_reactivated=reactivated,
-        retention_extended=retention_extended,
+        retention_extended=False,
         storage_pressure=accounting.pressure,
         queue_membership_changed=queue_membership_changed,
     )

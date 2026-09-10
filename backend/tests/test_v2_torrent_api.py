@@ -274,7 +274,7 @@ async def test_v2_listing_exposes_only_bounded_error_code(
 
 
 @pytest.mark.asyncio
-async def test_ready_shared_deadline_is_authoritative_secret_free_and_realtime_extended(
+async def test_ready_deadline_is_per_subscription_and_secret_free(
     client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
@@ -293,22 +293,20 @@ async def test_ready_shared_deadline_is_authoritative_secret_free_and_realtime_e
     first_request = await db_session.scalar(select(TorrentRequest))
     assert managed is not None and first_request is not None
     ready_at = datetime.now(UTC)
-    initial_deadline = ready_at + timedelta(days=5)
+    initial_deadline = ready_at + timedelta(hours=12)
     managed.state = ManagedTorrentState.READY
     managed.progress = 1
     managed.ready_at = ready_at
-    managed.retention_expires_at = initial_deadline
     first_request.state = TorrentRequestState.READY
     first_request.ready_at = ready_at
+    first_request.unsubscribe_at = initial_deadline
     second_owner = User(
         username="alice",
         password_hash=hash_password("correct-horse-battery"),
     )
     db_session.add(second_owner)
     await db_session.flush()
-    owner_id = owner.id
     owner_username = owner.username
-    second_owner_id = second_owner.id
     await db_session.commit()
     redis.events.clear()
 
@@ -319,33 +317,25 @@ async def test_ready_shared_deadline_is_authoritative_secret_free_and_realtime_e
         headers=second_headers,
     )
     assert second.status_code == 201, second.text
-    extended_deadline = ready_at + timedelta(days=6)
-    assert datetime.fromisoformat(second.json()["retention_expires_at"]) == extended_deadline
-
-    retention_events = [
-        (user_id, event.request_id)
-        for user_id, event in redis.events
-        if event.event_type is TorrentEventType.RETENTION_EXTENDED
-    ]
-    assert {user_id for user_id, _ in retention_events} == {owner_id, second_owner_id}
-    assert len(retention_events) == 2
+    second_deadline = datetime.fromisoformat(second.json()["unsubscribe_at"])
+    assert second_deadline > ready_at + timedelta(hours=47)
+    assert second.json()["retention_expires_at"] == second.json()["unsubscribe_at"]
     assert all(
-        set(event.payload()) == {"type", "request_id", "occurred_at"}
-        for _, event in redis.events
-        if event.event_type is TorrentEventType.RETENTION_EXTENDED
+        event.event_type is not TorrentEventType.RETENTION_EXTENDED for _, event in redis.events
     )
 
     db_session.expire_all()
     second_listing = await client.get("/api/v2/torrents")
     assert second_listing.status_code == 200
     second_item = second_listing.json()["items"][0]
-    assert datetime.fromisoformat(second_item["retention_expires_at"]) == extended_deadline
+    assert datetime.fromisoformat(second_item["unsubscribe_at"]) == second_deadline
 
     await login(client, owner_username)
     first_listing = await client.get("/api/v2/torrents")
     assert first_listing.status_code == 200
     first_item = first_listing.json()["items"][0]
-    assert first_item["retention_expires_at"] == second_item["retention_expires_at"]
+    assert datetime.fromisoformat(first_item["unsubscribe_at"]) == initial_deadline
+    assert first_item["unsubscribe_at"] != second_item["unsubscribe_at"]
     forbidden = {
         "info_hash",
         "storage_key",
@@ -385,8 +375,8 @@ async def test_expired_request_never_exposes_a_stale_countdown(
     response = await client.get("/api/v2/torrents")
 
     assert response.status_code == 200
-    assert response.json()["items"][0]["state"] == "expired"
-    assert response.json()["items"][0]["retention_expires_at"] is None
+    assert response.json()["items"] == []
+    assert response.json()["total"] == 0
 
 
 @pytest.mark.asyncio

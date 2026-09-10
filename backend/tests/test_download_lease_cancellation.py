@@ -39,6 +39,7 @@ async def test_engaged_download_can_finish_after_unsubscribe_but_no_new_lease_st
         user=owner,
         managed_torrent=torrent,
         state=TorrentRequestState.READY,
+        unsubscribe_at=now + timedelta(days=2),
     )
     torrent_file = TorrentFile(
         managed_torrent=torrent,
@@ -122,6 +123,7 @@ async def test_admin_deletion_revokes_an_already_engaged_download(
         user=owner,
         managed_torrent=torrent,
         state=TorrentRequestState.READY,
+        unsubscribe_at=now + timedelta(days=2),
     )
     torrent_file = TorrentFile(
         managed_torrent=torrent,

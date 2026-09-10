@@ -116,6 +116,12 @@ def _utc_datetime(value: datetime | None) -> datetime | None:
     return value.astimezone(UTC)
 
 
+def _required_utc_datetime(value: datetime) -> datetime:
+    normalized = _utc_datetime(value)
+    assert normalized is not None
+    return normalized
+
+
 def _download_rate_limiter(request: Request) -> DownloadRateLimiter:
     limiter = request.app.state.download_rate_limiter
     if not isinstance(limiter, DownloadRateLimiter):
@@ -181,18 +187,18 @@ def _response(
         state=state,
         progress=torrent.progress,
         error_code=(error_code or "torrent_failed") if state == "error" else None,
-        retention_expires_at=(
-            _utc_datetime(torrent.retention_expires_at)
-            if state == "ready" and torrent.state is ManagedTorrentState.READY
-            else None
-        ),
+        unsubscribe_at=(_utc_datetime(request.unsubscribe_at) if state == "ready" else None),
+        retention_expires_at=(_utc_datetime(request.unsubscribe_at) if state == "ready" else None),
         queue_position_estimate=(
             visible_queue.position_estimate if visible_queue is not None else None
         ),
         queue_total_estimate=(visible_queue.total_estimate if visible_queue is not None else None),
         queue_status=visible_queue.status if visible_queue is not None else None,
         created_at=request.created_at,
-        updated_at=max(request.updated_at, torrent.updated_at),
+        updated_at=max(
+            _required_utc_datetime(request.updated_at),
+            _required_utc_datetime(torrent.updated_at),
+        ),
     )
 
 
@@ -236,6 +242,7 @@ async def get_torrent_download_manifest(
     limit: Annotated[int, Query(ge=1, le=MAX_MANIFEST_PAGE_SIZE)] = MAX_MANIFEST_PAGE_SIZE,
     snapshot: Annotated[str | None, Query(min_length=64, max_length=64)] = None,
 ) -> TorrentDownloadManifestResponse:
+    now = datetime.now(UTC)
     row = (
         await db.execute(
             select(TorrentRequest, ManagedTorrent)
@@ -244,6 +251,8 @@ async def get_torrent_download_manifest(
                 TorrentRequest.id == torrent_request_id,
                 TorrentRequest.user_id == context.user.id,
                 TorrentRequest.state == TorrentRequestState.READY,
+                TorrentRequest.unsubscribe_at.is_not(None),
+                TorrentRequest.unsubscribe_at > now,
                 ManagedTorrent.state == ManagedTorrentState.READY,
             )
             .with_for_update()
@@ -313,7 +322,7 @@ async def get_torrent_download_manifest(
             managed_torrent.manifest_total_size <= archive_max_bytes
             and managed_torrent.manifest_file_count <= MAX_MANAGED_ARCHIVE_ENTRIES
         ),
-        retention_expires_at=_utc_datetime(managed_torrent.retention_expires_at),
+        retention_expires_at=_utc_datetime(torrent_request.unsubscribe_at),
         offset=offset,
         limit=limit,
         items=[
@@ -344,6 +353,7 @@ async def download_torrent_archive(
     snapshot: Annotated[str, Query(min_length=64, max_length=64)],
 ) -> Response:
     owner_id = context.user.id
+    now = datetime.now(UTC)
     row = (
         await db.execute(
             select(TorrentRequest, ManagedTorrent)
@@ -352,6 +362,8 @@ async def download_torrent_archive(
                 TorrentRequest.id == torrent_request_id,
                 TorrentRequest.user_id == owner_id,
                 TorrentRequest.state == TorrentRequestState.READY,
+                TorrentRequest.unsubscribe_at.is_not(None),
+                TorrentRequest.unsubscribe_at > now,
                 ManagedTorrent.state == ManagedTorrentState.READY,
             )
             .with_for_update()
@@ -507,6 +519,7 @@ async def download_torrent_file(
     snapshot: Annotated[str | None, Query(min_length=64, max_length=64)] = None,
 ) -> Response:
     owner_id = context.user.id
+    now = datetime.now(UTC)
     row = (
         await db.execute(
             select(TorrentRequest, ManagedTorrent, TorrentFile)
@@ -516,6 +529,8 @@ async def download_torrent_file(
                 TorrentRequest.id == torrent_request_id,
                 TorrentRequest.user_id == owner_id,
                 TorrentRequest.state == TorrentRequestState.READY,
+                TorrentRequest.unsubscribe_at.is_not(None),
+                TorrentRequest.unsubscribe_at > now,
                 ManagedTorrent.state == ManagedTorrentState.READY,
                 TorrentFile.id == torrent_file_id,
             )
@@ -701,6 +716,10 @@ async def create_torrent_request(
         max_upload = _integer_option(values, "WOS_TORRENT_UPLOAD_MAX_FILE_BYTES")
         max_total = _integer_option(values, "WOS_TORRENT_MAX_SIZE_BYTES")
         max_active = _integer_option(values, "WOS_TORRENT_MAX_ACTIVE_PER_USER")
+        auto_unsubscribe_hours = _integer_option(
+            values,
+            "WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS",
+        )
         policy = StorageAdmissionPolicy.from_options(values)
     except (DatabaseOptionsDriftError, ValueError):
         await db.rollback()
@@ -750,6 +769,7 @@ async def create_torrent_request(
                 total_size=parsed.total_size,
                 storage_policy=policy,
                 disk_snapshot=StorageDiskSnapshot(total_bytes, free_bytes),
+                auto_unsubscribe_hours=auto_unsubscribe_hours,
             )
             if result.request_created:
                 active_count = await db.scalar(
@@ -889,16 +909,21 @@ async def list_torrent_requests(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 25,
 ) -> TorrentRequestV2ListingResponse:
+    now = datetime.now(UTC)
+    visible_request = TorrentRequest.state.in_(ACTIVE_REQUEST_STATES) & (
+        (TorrentRequest.state != TorrentRequestState.READY)
+        | (TorrentRequest.unsubscribe_at.is_not(None) & (TorrentRequest.unsubscribe_at > now))
+    )
     total = await db.scalar(
         select(func.count())
         .select_from(TorrentRequest)
-        .where(TorrentRequest.user_id == context.user.id)
+        .where(TorrentRequest.user_id == context.user.id, visible_request)
     )
     rows = (
         await db.execute(
             select(TorrentRequest, ManagedTorrent)
             .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
-            .where(TorrentRequest.user_id == context.user.id)
+            .where(TorrentRequest.user_id == context.user.id, visible_request)
             .order_by(TorrentRequest.created_at.desc(), TorrentRequest.id.desc())
             .offset(offset)
             .limit(limit)
@@ -907,7 +932,7 @@ async def list_torrent_requests(
     queue_visibility = await load_torrent_queue_visibility(
         db,
         tuple(managed for _, managed in rows),
-        now=datetime.now(UTC),
+        now=now,
     )
     return TorrentRequestV2ListingResponse(
         items=[
