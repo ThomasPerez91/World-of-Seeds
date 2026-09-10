@@ -1119,6 +1119,7 @@ body {
   box-shadow: 0 0 12px rgba(80, 240, 148, 0.42);
   font-weight: 820;
 }
+:root[data-theme="light"] .torrent-filter.active .torrent-filter-count { color: #fff; }
 
 @media (max-width: 1024px) {
   .app-header { grid-template-columns: 1fr auto !important; }
