@@ -102,7 +102,7 @@ describe("UserDashboardPage", () => {
     expect(within(activity).getAllByText("1", { selector: "dd" })).toHaveLength(3);
     expect(screen.getByText("Aucune récupération locale en cours")).toBeTruthy();
     expect(screen.getByText("File locale à ce navigateur uniquement.")).toBeTruthy();
-    expect(await screen.findByText("1 Ko disponibles")).toBeTruthy();
+    expect((await screen.findAllByText("1 Ko disponibles")).length).toBeGreaterThan(0);
     expect(screen.getByText("2 Ko au total")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Mes téléchargements" })).toBeTruthy();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
@@ -138,7 +138,16 @@ describe("UserDashboardPage", () => {
         { id: "d", relativePath: "done", status: "completed", position: null },
       ],
     });
-    expect(local).toEqual({ active: 1, maximum: 2, status: "running", waiting: 2 });
+    expect(local).toEqual({
+      active: 1,
+      maximum: 2,
+      status: "running",
+      waiting: 2,
+      name: null,
+      downloadedBytes: 128,
+      totalBytes: 0,
+      percent: 0,
+    });
 
     const view = render(
       <I18nProvider><LocalDownloadCard local={local} /></I18nProvider>,

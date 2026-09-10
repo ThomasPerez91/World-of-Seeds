@@ -989,3 +989,125 @@ body {
   background: #91aa9e;
   box-shadow: 0 0 0 5px rgba(145, 170, 158, 0.08), 0 0 14px rgba(145, 170, 158, 0.26);
 }
+
+/* ---------- Authenticated Dashboard 2.1 ---------- */
+
+.app-header {
+  display: grid !important;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr) !important;
+  align-items: center !important;
+  gap: 1rem !important;
+  padding: 0.65rem clamp(1rem, 3vw, 2.5rem) !important;
+  background: rgba(3, 22, 15, 0.7) !important;
+  backdrop-filter: blur(18px) saturate(120%) !important;
+}
+
+.app-header .wordmark { justify-self: start; padding: 0 !important; background: transparent !important; }
+.app-header .wordmark::before { content: none !important; }
+.authenticated-brand { display: block; width: clamp(168px, 14vw, 218px); height: auto; object-fit: contain; }
+.wordmark .version-badge { margin-left: 0.55rem !important; font-size: 0.65rem !important; }
+
+.user-navigation {
+  grid-column: 2 !important;
+  display: flex !important;
+  justify-self: center;
+  padding: 0.28rem !important;
+  border: 1px solid rgba(134, 231, 176, 0.17);
+  border-radius: 15px !important;
+  background: rgba(3, 25, 17, 0.46);
+  backdrop-filter: blur(14px);
+}
+.user-navigation .ui-button { min-height: 42px; border-radius: 11px !important; }
+.user-navigation .ui-button[aria-current="page"] {
+  color: #a5f7c4 !important;
+  background: rgba(69, 204, 124, 0.14) !important;
+}
+
+.header-actions { grid-column: 3 !important; display: flex !important; justify-self: end; align-items: center; gap: 0.8rem; }
+.header-actions-separator { width: 1px; height: 30px; background: rgba(145, 221, 178, 0.2); }
+.header-actions .service-health-indicator { position: relative; width: 28px; height: 28px; }
+.account-trigger { border-radius: 14px !important; background: rgba(4, 28, 19, 0.38) !important; }
+.account-trigger strong { display: block !important; }
+.account-dropdown {
+  width: 220px !important;
+  padding: 0.45rem !important;
+  border-color: rgba(134, 231, 176, 0.2) !important;
+  background: rgba(3, 24, 16, 0.92) !important;
+  backdrop-filter: blur(20px);
+  animation: dashboard-menu-in 140ms ease-out;
+}
+.account-name { margin: 0; padding: 0.55rem 0.7rem; color: var(--wos21-muted); font-size: 0.75rem; }
+.account-dropdown-item.logout-item { display: flex; align-items: center; gap: 0.55rem; border-radius: 9px !important; }
+.account-dropdown-item.logout-item svg { width: 16px; height: 16px; }
+.account-dropdown-item.logout-item:hover { color: #ffaaaa !important; background: rgba(190, 50, 58, 0.14) !important; }
+@keyframes dashboard-menu-in { from { opacity: 0; transform: translateY(-5px); } }
+
+.user-dashboard-header {
+  min-height: 150px !important;
+  display: flex !important;
+  align-items: end !important;
+  padding: clamp(1.4rem, 4vw, 2.5rem) !important;
+  border: 0 !important;
+  border-radius: 24px !important;
+  background: linear-gradient(90deg, rgba(2, 22, 15, 0.62), rgba(3, 28, 19, 0.05) 70%) !important;
+  box-shadow: none !important;
+}
+.user-dashboard-header::after { content: none !important; }
+.user-dashboard-header h1 { margin: 0 !important; font-size: clamp(2.85rem, 4.5vw, 3.6rem) !important; }
+
+.dashboard-summary-grid { margin-top: -1.4rem !important; position: relative; z-index: 2; gap: 1rem !important; }
+.dashboard-summary-card {
+  position: relative;
+  min-height: 230px;
+  padding: 1.2rem !important;
+  border-radius: 20px !important;
+  background: rgba(5, 30, 21, 0.72) !important;
+}
+.dashboard-summary-title .summary-icon { border-radius: 999px !important; }
+.summary-link { position: absolute; top: 1.38rem; right: 1.2rem; display: inline-flex; align-items: center; gap: 0.25rem; color: #a7dabc; font-size: 0.74rem; text-decoration: none; }
+.summary-link svg { width: 14px; height: 14px; }
+.summary-link:hover { color: var(--wos21-green); }
+.summary-link-static { cursor: default; }
+
+.activity-metrics { grid-template-columns: repeat(3, 1fr) !important; gap: 0.65rem !important; }
+.activity-metrics > div { display: grid !important; justify-items: start !important; gap: 0.35rem !important; padding: 0.8rem !important; border-radius: 14px !important; }
+.activity-metrics > div > svg { width: 26px; height: 26px; padding: 6px; border-radius: 999px; color: #79edaa; background: rgba(64, 205, 124, 0.14); }
+.activity-metrics > .ready > svg { color: #73d9d0; background: rgba(58, 178, 170, 0.13); }
+.activity-metrics > .waiting > svg { color: #f2c66d; background: rgba(203, 148, 41, 0.13); }
+.activity-metrics dd { display: flex; align-items: center; gap: 0.36rem; }
+.activity-metrics dd > span { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+
+.local-download-progress { display: grid; gap: 0.65rem; margin-top: 1.2rem; }
+.local-download-progress strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.local-download-progress span { color: var(--wos21-muted); font-size: 0.78rem; }
+.storage-summary-line, .storage-legend { display: flex; align-items: center; justify-content: space-between; gap: 0.7rem; }
+.storage-summary-line p { margin: 0; }
+.storage-summary-line strong { color: #b7dec6; font-size: 0.78rem; }
+.storage-legend { margin-top: 0.75rem; color: var(--wos21-muted); font-size: 0.72rem; }
+.storage-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.storage-legend svg { width: 12px; height: 12px; }
+.storage-legend .used { color: #8be9b0; }
+
+.user-downloads-header { padding-bottom: 0.75rem !important; }
+.torrent-drop-zone { cursor: pointer; }
+.torrent-toolbar { grid-template-columns: minmax(240px, 1fr) auto !important; padding-top: 1rem !important; }
+.torrent-filters svg { width: 14px; height: 14px; }
+
+@media (max-width: 1024px) {
+  .app-header { grid-template-columns: 1fr auto !important; }
+  .user-navigation { grid-column: 1 / -1 !important; grid-row: 2; width: 100%; }
+  .user-navigation .ui-button { flex: 1; }
+  .header-actions { grid-column: 2 !important; }
+  .dashboard-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+
+@media (max-width: 680px) {
+  .app-header { padding: 0.65rem 0.8rem !important; }
+  .authenticated-brand { width: 142px; }
+  .wordmark .version-badge { display: none; }
+  .account-trigger strong { display: none !important; }
+  .dashboard-summary-grid { grid-template-columns: minmax(0, 1fr) !important; margin-top: -0.6rem !important; }
+  .activity-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .torrent-toolbar { grid-template-columns: minmax(0, 1fr) !important; }
+  .torrent-filters { flex-wrap: nowrap !important; overflow-x: auto; padding-bottom: 0.2rem; }
+}

@@ -11,6 +11,7 @@ import {
   LocalDownloadIcon,
   StorageIcon,
 } from "../../components/icons";
+import { ArrowRight, Check, Clock3, Download, HardDrive } from "lucide-react";
 import { Button, Card, Progress, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
 import {
@@ -81,14 +82,23 @@ function SummaryHeading({
 }
 
 export function LocalDownloadCard({ local }: { local: LocalDownloadSummary }) {
-  const { t } = useI18n();
+  const { formatBytes, t } = useI18n();
   const content = local.status === "idle" || local.status === "completed" || local.status === "cancelled"
     ? <p className="dashboard-summary-empty">{t("dashboard.localIdle")}</p>
     : local.status === "paused"
       ? <p className="dashboard-summary-value">{t("downloads.localPaused")}</p>
       : local.status === "error"
         ? <StateMessage tone="error">{t("downloads.localError")}</StateMessage>
-        : (
+        : local.name !== null ? (
+          <div className="local-download-progress">
+            <strong title={local.name}>{local.name}</strong>
+            <Progress
+              label={t("downloads.localProgress", { value: local.percent.toFixed(0) })}
+              value={local.percent}
+            />
+            <span>{formatBytes(local.downloadedBytes)} / {formatBytes(local.totalBytes)}</span>
+          </div>
+        ) : (
           <>
             <p className="dashboard-summary-value">
               {t("dashboard.localActive", { active: local.active, maximum: local.maximum })}
@@ -103,6 +113,7 @@ export function LocalDownloadCard({ local }: { local: LocalDownloadSummary }) {
         title={t("dashboard.local")}
         titleId="local-card-title"
       />
+      <a className="summary-link" href="#user-downloads-title">{t("dashboard.open")} <ArrowRight aria-hidden="true" /></a>
       {content}
       <p className="dashboard-summary-note">{t("dashboard.localNote")}</p>
     </Card>
@@ -114,6 +125,10 @@ const idleLocalSummary: LocalDownloadSummary = {
   maximum: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
   status: "idle",
   waiting: 0,
+  name: null,
+  downloadedBytes: 0,
+  totalBytes: 0,
+  percent: 0,
 };
 
 export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () => void }) {
@@ -198,9 +213,7 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
   return (
     <section className="user-dashboard" aria-labelledby="user-dashboard-title">
       <header className="user-dashboard-header">
-        <p className="eyebrow">World of Seeds</p>
         <h1 id="user-dashboard-title">{t("dashboard.title")}</h1>
-        <p>{t("dashboard.intro")}</p>
       </header>
 
       <div className="dashboard-summary-grid">
@@ -210,6 +223,7 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
             title={t("dashboard.activity")}
             titleId="activity-card-title"
           />
+          <a className="summary-link" href="#user-downloads-title">{t("dashboard.viewAll")} <ArrowRight aria-hidden="true" /></a>
           {activityError !== "" ? (
             <StateMessage tone="error">
               <span>{activityError}</span>
@@ -219,9 +233,9 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
             <StateMessage tone="loading">{t("dashboard.activityLoading")}</StateMessage>
           ) : (
             <dl className="activity-metrics">
-              <div><dt>{t("dashboard.active")}</dt><dd>{activity.active}</dd></div>
-              <div><dt>{t("dashboard.ready")}</dt><dd>{activity.ready}</dd></div>
-              <div><dt>{t("dashboard.waiting")}</dt><dd>{activity.waiting}</dd></div>
+              <div className="active"><Download aria-hidden="true" /><dt>{t("dashboard.active")}</dt><dd>{activity.active}<span aria-hidden="true" /></dd></div>
+              <div className="ready"><Check aria-hidden="true" /><dt>{t("dashboard.ready")}</dt><dd>{activity.ready}<span aria-hidden="true" /></dd></div>
+              <div className="waiting"><Clock3 aria-hidden="true" /><dt>{t("dashboard.waiting")}</dt><dd>{activity.waiting}<span aria-hidden="true" /></dd></div>
             </dl>
           )}
         </Card>
@@ -234,6 +248,7 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
             title={t("dashboard.storage")}
             titleId="storage-card-title"
           />
+          <span className="summary-link summary-link-static">{t("dashboard.viewDetails")} <ArrowRight aria-hidden="true" /></span>
           {storageError !== "" ? (
             <StateMessage tone="error">
               <span>{storageError}</span>
@@ -246,11 +261,18 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
               <p className="dashboard-summary-value">
                 {t("dashboard.storageAvailable", { value: formatBytes(storage.available_bytes) })}
               </p>
-              <p>{t("dashboard.storageTotal", { value: formatBytes(storage.total_bytes) })}</p>
+              <div className="storage-summary-line">
+                <p>{t("dashboard.storageTotal", { value: formatBytes(storage.total_bytes) })}</p>
+                <strong>{usedPercent.toFixed(0)} % {t("dashboard.used")}</strong>
+              </div>
               <Progress
                 label={t("dashboard.storageProgress", { value: usedPercent.toFixed(0) })}
                 value={usedPercent}
               />
+              <div className="storage-legend">
+                <span className="used"><HardDrive aria-hidden="true" />{formatBytes(storage.used_bytes)} {t("dashboard.used")}</span>
+                <span>{formatBytes(storage.available_bytes)} {t("dashboard.available")}</span>
+              </div>
             </>
           )}
         </Card>
