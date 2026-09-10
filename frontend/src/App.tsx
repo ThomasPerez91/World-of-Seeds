@@ -23,7 +23,7 @@ import {
 import { ThemeProvider } from "./theme";
 import { ThemeSelector } from "./components/ThemeSelector";
 import { Button, Card, Badge, StateMessage } from "./components/ui";
-import { APP_VERSION } from "./version";
+import { UI_VERSION } from "./uiVersion";
 import { FeedbackProvider } from "./components/Feedback";
 import { useFeedback } from "./components/Feedback";
 import { I18nProvider, useI18n, type Locale } from "./i18n";
@@ -631,7 +631,7 @@ function Dashboard({
         >
           <BrandMark />
           <span>World of Seeds</span>
-          <Badge className="version-badge">v{APP_VERSION}</Badge>
+          <Badge className="version-badge">v{UI_VERSION}</Badge>
         </Button>
         <nav className="user-navigation" aria-label={t("dashboard.navigation")}>
           <Button
@@ -700,7 +700,7 @@ function Dashboard({
         ) : null}
       </div>
       <footer className="app-footer">
-        <span>World of Seeds · v{APP_VERSION}</span>
+        <span>World of Seeds · v{UI_VERSION}</span>
         <LegalLinks onOpen={onOpenLegal} />
       </footer>
     </main>

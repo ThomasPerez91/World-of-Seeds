@@ -6,6 +6,7 @@ import productionHotfixUrl from "./production-hotfix.css?url";
 import premiumStylesheetUrl from "./wos-premium.css?url";
 import premiumTorrentStylesheetUrl from "./wos-premium-torrents.css?url";
 import premiumReviewFixesStylesheetUrl from "./wos-premium-review-fixes.css?url";
+import wos21StylesheetUrl from "./wos-2-1.css?url";
 import "./styles.css";
 import "./features/admin/admin.css";
 
@@ -21,6 +22,7 @@ appendStylesheet(productionHotfixUrl, "desktop-ux-recovery");
 appendStylesheet(premiumStylesheetUrl, "premium-seedbox-ui");
 appendStylesheet(premiumTorrentStylesheetUrl, "premium-torrent-layout");
 appendStylesheet(premiumReviewFixesStylesheetUrl, "premium-review-fixes");
+appendStylesheet(wos21StylesheetUrl, "wos-2-1-branding");
 
 const root = document.getElementById("root");
 

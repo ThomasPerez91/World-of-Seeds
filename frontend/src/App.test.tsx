@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import { auditAccessibility } from "./test/accessibility";
-import { APP_VERSION } from "./version";
+import { UI_VERSION } from "./uiVersion";
 
 function response(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -211,7 +211,7 @@ describe("App", () => {
     expect(skipLink.getAttribute("href")).toBe("#dashboard-content");
     expect(document.querySelector("#dashboard-content")?.getAttribute("tabindex")).toBe("-1");
     expect(document.querySelector(".account-avatar")?.textContent).toBe("T");
-    expect(screen.getAllByText(`v${APP_VERSION}`).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(`v${UI_VERSION}`).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Mes fichiers" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Corbeille" })).toBeNull();
     expect(new URL(window.location.href).searchParams.has("path")).toBe(false);

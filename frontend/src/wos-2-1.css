@@ -1,0 +1,549 @@
+/* World of Seeds 2.1 — final branding and login refinement.
+ * Loaded last as an independent stylesheet so it is insulated from the
+ * historical legacy media-query damage.
+ */
+
+:root {
+  --wos21-glass: rgba(5, 29, 20, 0.72);
+  --wos21-glass-strong: rgba(4, 27, 18, 0.86);
+  --wos21-line: rgba(134, 231, 176, 0.24);
+  --wos21-line-strong: rgba(134, 231, 176, 0.39);
+  --wos21-text: #f5faf7;
+  --wos21-muted: #b7c7bf;
+  --wos21-green: #69f1a6;
+  --wos21-green-strong: #35df87;
+  --wos21-shadow: 0 28px 80px rgba(0, 0, 0, 0.38);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  background: #03120d !important;
+}
+
+#root {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+}
+
+#root::before {
+  content: "";
+  position: fixed;
+  z-index: -2;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(2, 18, 12, 0.24), rgba(2, 15, 10, 0.73)),
+    linear-gradient(90deg, rgba(1, 16, 11, 0.54), rgba(2, 20, 13, 0.12) 48%, rgba(1, 15, 10, 0.42)),
+    url("/background.webp") center / cover no-repeat;
+  transform: translateZ(0);
+}
+
+#root::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 8%, rgba(85, 232, 150, 0.08), transparent 36rem),
+    linear-gradient(180deg, transparent 55%, rgba(1, 12, 8, 0.23));
+}
+
+.app-shell,
+.centered-page,
+.legal-page,
+.admin-shell,
+.admin-page,
+.user-dashboard-page,
+.settings-page,
+.account-settings-page {
+  background: transparent !important;
+}
+
+/* ---------- Navbar / branded title ---------- */
+
+.app-header {
+  min-height: 72px !important;
+  border-bottom: 1px solid rgba(150, 227, 184, 0.19) !important;
+  background: rgba(3, 24, 16, 0.77) !important;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.16) !important;
+  backdrop-filter: blur(22px) saturate(126%) !important;
+}
+
+.wordmark {
+  gap: 0.7rem !important;
+}
+
+.wordmark > .brand-mark,
+.wordmark > span:not(.ui-badge) {
+  display: none !important;
+}
+
+.wordmark::before {
+  content: "";
+  display: block;
+  width: clamp(176px, 15vw, 228px);
+  height: 48px;
+  flex: 0 0 auto;
+  background: url("/title.webp") center / contain no-repeat;
+  filter: drop-shadow(0 0 12px rgba(57, 224, 135, 0.13));
+}
+
+.wordmark .version-badge {
+  margin-left: -0.2rem;
+  color: #b8c9c0 !important;
+  border-color: rgba(151, 224, 183, 0.19) !important;
+  background: rgba(4, 30, 20, 0.64) !important;
+}
+
+.user-navigation .ui-button,
+.account-trigger {
+  backdrop-filter: blur(12px);
+}
+
+/* ---------- Shared forest/glass surfaces ---------- */
+
+.dashboard-summary-card,
+.user-downloads,
+.settings-card,
+.preferences-card,
+.account-settings-card,
+.ui-card,
+.torrent-upload-batch,
+.recursive-transfer,
+.torrent-queue-summary {
+  border-color: var(--wos21-line) !important;
+  background:
+    linear-gradient(145deg, rgba(111, 242, 168, 0.045), transparent 45%),
+    rgba(8, 34, 24, 0.78) !important;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.2) !important;
+  backdrop-filter: blur(20px) saturate(122%) !important;
+}
+
+.user-dashboard-header {
+  border-color: rgba(142, 226, 180, 0.2) !important;
+  background:
+    linear-gradient(90deg, rgba(2, 22, 15, 0.78), rgba(3, 28, 19, 0.18) 56%, rgba(3, 22, 16, 0.52)),
+    url("/background.webp") center 42% / cover no-repeat !important;
+  box-shadow: 0 22px 64px rgba(0, 0, 0, 0.24) !important;
+}
+
+/* ---------- Login: one coherent premium card ---------- */
+
+.login-page {
+  position: relative !important;
+  isolation: isolate !important;
+  display: flex !important;
+  min-height: 100dvh !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  padding: 94px 1.25rem 2.25rem !important;
+  color: var(--wos21-text) !important;
+  background:
+    linear-gradient(90deg, rgba(1, 16, 11, 0.58), rgba(2, 21, 14, 0.06) 49%, rgba(1, 15, 10, 0.45)),
+    linear-gradient(180deg, rgba(2, 18, 12, 0.12), rgba(2, 15, 10, 0.48)),
+    url("/background.webp") center / cover fixed no-repeat !important;
+}
+
+/* The login has no top-right language control: only the in-card selector stays. */
+.login-page::before {
+  content: "" !important;
+  position: fixed !important;
+  z-index: 8 !important;
+  top: 0 !important;
+  right: 0 !important;
+  bottom: auto !important;
+  left: 0 !important;
+  width: auto !important;
+  height: 70px !important;
+  pointer-events: none !important;
+  border-bottom: 1px solid rgba(145, 224, 180, 0.18) !important;
+  background:
+    url("/title.webp") 28px center / 210px auto no-repeat,
+    linear-gradient(90deg, rgba(2, 24, 16, 0.9), rgba(5, 37, 25, 0.63), rgba(2, 23, 16, 0.82)) !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.17) !important;
+  backdrop-filter: blur(18px) saturate(126%) !important;
+  opacity: 1 !important;
+}
+
+.login-page::after {
+  content: "VOS FICHIERS.\A VOTRE LIBERTÉ.\A PARTOUT." !important;
+  position: fixed !important;
+  z-index: 0 !important;
+  top: 26% !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: clamp(2rem, 6vw, 6.4rem) !important;
+  max-width: 16rem !important;
+  color: rgba(211, 239, 223, 0.42) !important;
+  font-size: 0.7rem !important;
+  font-weight: 660 !important;
+  line-height: 2.15 !important;
+  letter-spacing: 0.36em !important;
+  text-align: left !important;
+  white-space: pre !important;
+}
+
+.login-page .brand-panel,
+.login-page .form-panel {
+  position: relative !important;
+  z-index: 2 !important;
+  box-sizing: border-box !important;
+  width: min(100%, 590px) !important;
+  margin: 0 !important;
+  color: var(--wos21-text) !important;
+  background:
+    linear-gradient(145deg, rgba(103, 239, 162, 0.055), transparent 48%),
+    var(--wos21-glass) !important;
+  backdrop-filter: blur(27px) saturate(132%) !important;
+}
+
+.login-page .brand-panel {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  padding: 1.85rem 2.35rem 1.15rem !important;
+  border: 1px solid var(--wos21-line-strong) !important;
+  border-bottom: 0 !important;
+  border-radius: 24px 24px 0 0 !important;
+  box-shadow: 0 -14px 52px rgba(0, 0, 0, 0.12) !important;
+  text-align: center !important;
+}
+
+.login-page .brand-panel::after {
+  content: "v2.1.0";
+  position: absolute;
+  top: 1.25rem;
+  right: 1.35rem;
+  padding: 0.28rem 0.52rem;
+  color: #a9bbb2;
+  border: 1px solid rgba(144, 223, 179, 0.18);
+  border-radius: 999px;
+  background: rgba(2, 22, 15, 0.48);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.login-page .brand-panel .brand-mark {
+  width: 68px !important;
+  height: 68px !important;
+  flex: 0 0 68px !important;
+  margin: 0 0 0.95rem !important;
+  border: 1px solid rgba(109, 244, 168, 0.36) !important;
+  border-radius: 18px !important;
+  background:
+    url("/favicon.ico") center / 78% 78% no-repeat,
+    linear-gradient(145deg, rgba(71, 224, 139, 0.16), rgba(5, 34, 23, 0.86)) !important;
+  box-shadow:
+    0 0 0 1px rgba(72, 236, 145, 0.08),
+    0 0 28px rgba(44, 227, 130, 0.18) !important;
+}
+
+.login-page .brand-panel .brand-mark img,
+.login-page .brand-panel .brand-mark svg {
+  opacity: 0 !important;
+}
+
+.login-page .brand-panel .eyebrow {
+  order: 2;
+  margin: 0 0 0.6rem !important;
+  color: #b8d6c6 !important;
+  font-size: 0.7rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.34em !important;
+  text-transform: uppercase !important;
+}
+
+.login-page .brand-panel h1 {
+  order: 3;
+  margin: 0 !important;
+  color: #f7fbf8 !important;
+  font-size: clamp(2.25rem, 4vw, 3.2rem) !important;
+  font-weight: 820 !important;
+  line-height: 1.04 !important;
+  letter-spacing: -0.052em !important;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.22) !important;
+}
+
+.login-page .brand-copy {
+  order: 4;
+  max-width: 29rem !important;
+  margin: 0.8rem auto 1rem !important;
+  color: #c7d6ce !important;
+  font-size: 0.96rem !important;
+  line-height: 1.5 !important;
+}
+
+.login-page .service-health {
+  order: 5;
+  min-height: 34px !important;
+  margin: 0 !important;
+  padding: 0.38rem 0.78rem !important;
+  color: #91f0b9 !important;
+  border: 1px solid rgba(76, 223, 139, 0.25) !important;
+  border-radius: 999px !important;
+  background: rgba(19, 108, 61, 0.22) !important;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025) !important;
+  font-size: 0.78rem !important;
+}
+
+.login-page .form-panel {
+  display: grid !important;
+  gap: 0.7rem !important;
+  padding: 0 2.35rem 1.45rem !important;
+  border: 1px solid var(--wos21-line-strong) !important;
+  border-top: 0 !important;
+  border-radius: 0 0 24px 24px !important;
+  box-shadow: var(--wos21-shadow) !important;
+}
+
+.login-page .form-panel::before {
+  content: "";
+  display: block;
+  height: 1px;
+  margin: 0 0 0.05rem;
+  background: linear-gradient(90deg, transparent, rgba(147, 226, 183, 0.25), transparent);
+}
+
+.login-page .form-panel > .language-selector {
+  width: fit-content !important;
+  margin: 0.05rem auto 0.15rem !important;
+  padding: 0 !important;
+}
+
+.login-page .language-selector label {
+  color: #aebfb6 !important;
+  font-size: 0.76rem !important;
+}
+
+.login-page .language-selector select {
+  min-height: 37px !important;
+  padding: 0.42rem 2.2rem 0.42rem 0.8rem !important;
+  color: #edf7f1 !important;
+  border-color: rgba(137, 219, 174, 0.2) !important;
+  background: rgba(3, 25, 17, 0.6) !important;
+}
+
+.login-page .form-card {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+.login-page .form-card .eyebrow {
+  margin: 0.25rem 0 0.65rem !important;
+  color: #accabc !important;
+  font-size: 0.69rem !important;
+  letter-spacing: 0.35em !important;
+}
+
+/* Keep the existing accessible heading/instructions for screen readers while
+ * matching the reference visual, where the form starts directly after label. */
+.login-page .form-card h2,
+.login-page .form-card .form-intro {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+}
+
+.login-page form {
+  display: grid !important;
+  gap: 0.55rem !important;
+}
+
+.login-page form label {
+  margin: 0.15rem 0 -0.22rem !important;
+  color: #c3d2ca !important;
+  font-size: 0.78rem !important;
+  font-weight: 650 !important;
+}
+
+.login-page form input {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-height: 46px !important;
+  padding: 0.72rem 0.9rem !important;
+  color: #f3f8f5 !important;
+  border: 1px solid rgba(130, 211, 165, 0.24) !important;
+  border-radius: 9px !important;
+  background: rgba(3, 25, 17, 0.47) !important;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.018) !important;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease !important;
+}
+
+.login-page form input:hover {
+  border-color: rgba(132, 230, 176, 0.34) !important;
+}
+
+.login-page form input:focus-visible {
+  outline: none !important;
+  border-color: rgba(104, 244, 167, 0.64) !important;
+  background: rgba(4, 31, 21, 0.7) !important;
+  box-shadow: 0 0 0 3px rgba(72, 232, 145, 0.095) !important;
+}
+
+.login-page form .ui-button[type="submit"] {
+  width: 100% !important;
+  min-height: 48px !important;
+  margin-top: 0.45rem !important;
+  color: #042316 !important;
+  border: 1px solid rgba(152, 255, 199, 0.58) !important;
+  border-radius: 9px !important;
+  background: linear-gradient(135deg, #73f2aa 0%, #52e896 54%, #66f3a6 100%) !important;
+  box-shadow:
+    0 10px 26px rgba(49, 224, 132, 0.23),
+    inset 0 1px rgba(255, 255, 255, 0.32) !important;
+  font-size: 0.95rem !important;
+  font-weight: 800 !important;
+}
+
+.login-page form .ui-button[type="submit"]:hover:not(:disabled) {
+  transform: translateY(-1px) !important;
+  background: linear-gradient(135deg, #8af8ba, #62eea1) !important;
+  box-shadow: 0 13px 32px rgba(49, 224, 132, 0.3) !important;
+}
+
+.login-page .form-message {
+  min-height: 1rem !important;
+  margin: 0.05rem 0 0 !important;
+  font-size: 0.78rem !important;
+  text-align: center !important;
+}
+
+.login-page .form-panel > .legal-links {
+  margin-top: 0.1rem !important;
+  padding-top: 0.8rem !important;
+  border-top: 1px solid rgba(143, 221, 178, 0.13) !important;
+  color: #9fb3a8 !important;
+  font-size: 0.74rem !important;
+  justify-content: center !important;
+}
+
+/* ---------- Light/system theme still keeps the scenic identity ---------- */
+
+:root[data-theme="light"] #root::before {
+  filter: brightness(1.08) saturate(0.86);
+}
+
+:root[data-theme="light"] .app-shell,
+:root[data-theme="light"] .centered-page {
+  background: rgba(238, 247, 241, 0.78) !important;
+}
+
+:root[data-theme="light"] .login-page {
+  color: #f7fbf8 !important;
+  background:
+    linear-gradient(90deg, rgba(1, 16, 11, 0.58), rgba(2, 21, 14, 0.06) 49%, rgba(1, 15, 10, 0.45)),
+    linear-gradient(180deg, rgba(2, 18, 12, 0.12), rgba(2, 15, 10, 0.48)),
+    url("/background.webp") center / cover fixed no-repeat !important;
+}
+
+:root[data-theme="light"] .login-page .brand-panel,
+:root[data-theme="light"] .login-page .form-panel {
+  color: var(--wos21-text) !important;
+  background:
+    linear-gradient(145deg, rgba(103, 239, 162, 0.055), transparent 48%),
+    var(--wos21-glass) !important;
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 900px) {
+  .wordmark::before {
+    width: 172px;
+    height: 42px;
+  }
+
+  .login-page::after {
+    display: none !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .app-header {
+    min-height: 64px !important;
+  }
+
+  .wordmark::before {
+    width: 142px;
+    height: 38px;
+  }
+
+  .wordmark .version-badge {
+    display: none !important;
+  }
+
+  .login-page {
+    justify-content: flex-start !important;
+    padding: 82px 0.8rem 1.1rem !important;
+  }
+
+  .login-page::before {
+    height: 62px !important;
+    background:
+      url("/title.webp") 14px center / 170px auto no-repeat,
+      rgba(2, 24, 16, 0.9) !important;
+  }
+
+  .login-page .brand-panel,
+  .login-page .form-panel {
+    width: min(100%, 520px) !important;
+  }
+
+  .login-page .brand-panel {
+    padding: 1.35rem 1.15rem 0.9rem !important;
+    border-radius: 20px 20px 0 0 !important;
+  }
+
+  .login-page .brand-panel::after {
+    top: 0.85rem;
+    right: 0.9rem;
+  }
+
+  .login-page .brand-panel .brand-mark {
+    width: 58px !important;
+    height: 58px !important;
+    flex-basis: 58px !important;
+  }
+
+  .login-page .brand-panel h1 {
+    font-size: clamp(2rem, 10vw, 2.6rem) !important;
+  }
+
+  .login-page .brand-copy {
+    font-size: 0.9rem !important;
+  }
+
+  .login-page .form-panel {
+    padding: 0 1.15rem 1.05rem !important;
+    border-radius: 0 0 20px 20px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
