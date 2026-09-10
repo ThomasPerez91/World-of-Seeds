@@ -1022,20 +1022,24 @@ body {
   background: rgba(69, 204, 124, 0.14) !important;
 }
 
-.header-actions { grid-column: 3 !important; display: flex !important; justify-self: end; align-items: center; gap: 0.8rem; }
+.header-actions { grid-column: 3 !important; display: flex !important; justify-self: end; align-items: center; gap: 1.8rem; }
 .header-actions-separator { width: 1px; height: 30px; background: rgba(145, 221, 178, 0.2); }
-.header-actions .service-health-indicator { position: relative; width: 28px; height: 28px; }
+.header-actions .service-health-indicator { position: relative; width: 28px; }
 .account-trigger {
-  border-color: transparent !important;
-  border-radius: 14px !important;
-  background: transparent !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  appearance: none;
+  background: none !important;
   box-shadow: none !important;
   transition: filter 150ms ease, transform 150ms ease !important;
 }
 .account-trigger:hover,
 .account-trigger[aria-expanded="true"] {
-  border-color: transparent !important;
-  background: transparent !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
   filter: brightness(1.08);
   transform: scale(1.025);
 }
@@ -1082,11 +1086,23 @@ body {
 .summary-link-static { cursor: default; }
 
 .activity-metrics { grid-template-columns: repeat(3, 1fr) !important; gap: 0.55rem !important; }
-.activity-metrics > div { display: grid !important; min-height: 0; justify-items: start !important; gap: 0.28rem !important; padding: 0.65rem !important; border-radius: 14px !important; }
+.activity-metrics > div {
+  display: grid !important;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  justify-items: center !important;
+  column-gap: 0.55rem !important;
+  row-gap: 0.45rem !important;
+  padding: 0.65rem !important;
+  border-radius: 14px !important;
+}
 .activity-metrics > div > svg { width: 26px; height: 26px; padding: 6px; border-radius: 999px; color: var(--wos-blue); background: rgba(75, 164, 255, 0.13); }
 .activity-metrics > .ready > svg { color: var(--wos-accent-strong); background: rgba(64, 205, 124, 0.14); }
 .activity-metrics > .waiting > svg { color: #f2c66d; background: rgba(203, 148, 41, 0.13); }
-.activity-metrics dd { display: flex; align-items: center; gap: 0.36rem; }
+.activity-metrics dd { display: flex; grid-column: 1 / -1; align-items: center; justify-self: center; gap: 0.36rem; }
 .activity-metrics dd::after { content: none !important; }
 .activity-metrics dd > span { width: 6px; height: 6px; border-radius: 999px; }
 .activity-metrics > .active dd > span { background: var(--wos-blue); }
