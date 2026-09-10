@@ -1,0 +1,76 @@
+/* World of Seeds 2.1 — final login micro-polish.
+ * Kept intentionally small and loaded after the 2.1 stylesheet.
+ */
+
+:root {
+  --wos21-login-input-bg: #06271b;
+  --wos21-login-input-focus-bg: #083324;
+}
+
+/* Let the original artwork breathe a little more without filtering the image. */
+#root::before {
+  background:
+    linear-gradient(180deg, rgba(2, 18, 12, 0.14), rgba(2, 15, 10, 0.54)),
+    linear-gradient(90deg, rgba(1, 16, 11, 0.38), rgba(2, 20, 13, 0.06) 48%, rgba(1, 15, 10, 0.28)),
+    url("/background.webp?rev=a9c84cc") center / cover no-repeat !important;
+}
+
+#root::after {
+  background:
+    radial-gradient(circle at 50% 8%, rgba(100, 238, 163, 0.1), transparent 36rem),
+    linear-gradient(180deg, transparent 62%, rgba(1, 12, 8, 0.12)) !important;
+}
+
+/* The tagline is intentionally removed from the visible and accessible login UI. */
+.login-card > .brand-copy {
+  display: none !important;
+}
+
+.login-card > .login-divider {
+  margin-top: 0.55rem !important;
+}
+
+/* Use one exact surface for manual entry and browser autofill. */
+.login-input {
+  overflow: hidden;
+  background: var(--wos21-login-input-bg) !important;
+}
+
+.login-input:focus-within {
+  background: var(--wos21-login-input-focus-bg) !important;
+}
+
+.login-card form .login-input input {
+  width: calc(100% - 1px) !important;
+  max-width: calc(100% - 1px) !important;
+  justify-self: start;
+  background: transparent !important;
+  background-clip: padding-box !important;
+  -webkit-background-clip: padding-box !important;
+}
+
+.login-card form .login-input input:-webkit-autofill,
+.login-card form .login-input input:-webkit-autofill:hover,
+.login-card form .login-input input:-webkit-autofill:active {
+  -webkit-text-fill-color: #f3f8f5 !important;
+  caret-color: #f3f8f5 !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--wos21-login-input-bg) inset !important;
+  box-shadow: 0 0 0 1000px var(--wos21-login-input-bg) inset !important;
+  border-radius: 0 !important;
+  transition: background-color 9999s ease-out 0s !important;
+}
+
+.login-card form .login-input input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--wos21-login-input-focus-bg) inset !important;
+  box-shadow: 0 0 0 1000px var(--wos21-login-input-focus-bg) inset !important;
+}
+
+.login-card form .login-input input:autofill {
+  color: #f3f8f5 !important;
+  box-shadow: 0 0 0 1000px var(--wos21-login-input-bg) inset !important;
+  border-radius: 0 !important;
+}
+
+.login-card form .login-input input:autofill:focus {
+  box-shadow: 0 0 0 1000px var(--wos21-login-input-focus-bg) inset !important;
+}
