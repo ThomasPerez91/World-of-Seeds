@@ -18,12 +18,13 @@ export function LanguageSelector({
     <label className="language-selector">
       <span>{t("language.label")}</span>
       <select
+        aria-label={t("language.label")}
         value={locale}
         disabled={disabled}
         onChange={(event) => change(event.target.value as Locale)}
       >
-        <option value="fr">{t("language.fr")}</option>
-        <option value="en">{t("language.en")}</option>
+        <option value="fr">🇫🇷  {t("language.fr")}</option>
+        <option value="en">🇬🇧  {t("language.en")}</option>
       </select>
     </label>
   );

@@ -33,6 +33,37 @@ function emptyTorrentListing(url: string): Response | null {
 }
 
 describe("App", () => {
+  it("affiche le login 2.1 compact avec langue et visibilité du mot de passe", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/v1/auth/me") return response({ detail: "Not authenticated" }, 401);
+        if (url === "/api/v1/health/status") {
+          return response({ status: "ok", checked_at: "2026-09-10T08:00:00Z" }, 200);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Bienvenue" });
+
+    expect(screen.queryByText("Espace privé")).toBeNull();
+    expect(screen.getAllByRole("img", { name: "World of Seeds" })).toHaveLength(1);
+    expect(screen.getByRole("combobox", { name: "Langue" })).toHaveProperty("value", "fr");
+
+    const password = screen.getByLabelText("Mot de passe");
+    expect(password).toHaveProperty("type", "password");
+    await user.click(screen.getByRole("button", { name: "Afficher le mot de passe" }));
+    expect(password).toHaveProperty("type", "text");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
+    expect(screen.getByRole("button", { name: "Hide password" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeDefined();
+  });
+
   it("conserve la connexion si la préférence de langue ne peut pas être enregistrée", async () => {
     const signedInUser = {
       id: "bc68aa7c-d753-4db7-8698-acf8d09045a3",
