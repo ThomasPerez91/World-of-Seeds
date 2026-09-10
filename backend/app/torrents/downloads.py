@@ -13,7 +13,7 @@ from collections.abc import AsyncGenerator, Callable, Generator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from threading import BoundedSemaphore
+from threading import Lock
 from typing import IO, cast
 from urllib.parse import quote
 
@@ -37,7 +37,30 @@ from app.storage import SharedContentStore
 
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_NONBLOCK", 0)
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0)
-_managed_archive_slot = BoundedSemaphore(value=1)
+
+
+class _ManagedArchiveConcurrency:
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._active = 0
+
+    def acquire(self, limit: int) -> bool:
+        if not 1 <= limit <= 16:
+            raise ValueError("managed archive concurrency is invalid")
+        with self._lock:
+            if self._active >= limit:
+                return False
+            self._active += 1
+            return True
+
+    def release(self) -> None:
+        with self._lock:
+            if self._active <= 0:
+                raise RuntimeError("managed archive concurrency underflow")
+            self._active -= 1
+
+
+_managed_archive_concurrency = _ManagedArchiveConcurrency()
 
 
 class ManagedDownloadError(RuntimeError):
@@ -57,6 +80,7 @@ class ManagedArchiveEntry:
     relative_path: str
     size: int
     file_index: int
+    archive_path: str | None = None
 
 
 class _StreamingZipBuffer:
@@ -203,6 +227,7 @@ class ManagedFolderArchiver:
         manifest_checksum: str,
         manifest_version: int,
         download_name: str,
+        max_concurrent_global: int = 1,
     ) -> None:
         self._downloader = downloader
         self._storage_key = storage_key
@@ -210,18 +235,21 @@ class ManagedFolderArchiver:
         self._manifest_checksum = manifest_checksum
         self._manifest_version = manifest_version
         self._download_name = download_name
+        self._max_concurrent_global = max_concurrent_global
         self._acquired = False
 
     def acquire(self) -> None:
-        if not _managed_archive_slot.acquire(blocking=False):
-            raise ManagedArchiveBusyError("another managed archive is already running")
+        if self._acquired:
+            return
+        if not _managed_archive_concurrency.acquire(self._max_concurrent_global):
+            raise ManagedArchiveBusyError("managed archive concurrency limit reached")
         self._acquired = True
 
     def release(self) -> None:
         if not self._acquired:
             return
         self._acquired = False
-        _managed_archive_slot.release()
+        _managed_archive_concurrency.release()
 
     @property
     def content_disposition(self) -> str:
@@ -261,7 +289,7 @@ class ManagedFolderArchiver:
                     )
                     try:
                         info = zipfile.ZipInfo(
-                            entry.relative_path,
+                            entry.archive_path or entry.relative_path,
                             opened.modified_at.timetuple()[:6],
                         )
                         info.compress_type = zipfile.ZIP_STORED
