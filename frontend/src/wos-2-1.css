@@ -1033,6 +1033,8 @@ body {
   appearance: none;
   background: none !important;
   box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   transition: filter 150ms ease, transform 150ms ease !important;
 }
 .account-trigger:hover,
