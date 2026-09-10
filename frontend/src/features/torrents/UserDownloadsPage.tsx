@@ -1062,7 +1062,7 @@ export function UserDownloadsPage({
             <button
               key={filter}
               type="button"
-              className={`torrent-filter${statusFilter === filter ? " active" : ""}`}
+              className={`torrent-filter torrent-filter-${filter}${statusFilter === filter ? " active" : ""}`}
               aria-pressed={statusFilter === filter}
               onClick={() => { setStatusFilter(filter); setOffset(0); }}
             >

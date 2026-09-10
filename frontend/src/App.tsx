@@ -612,15 +612,10 @@ function Dashboard({
         {t("dashboard.skip")}
       </a>
       <header className="app-header">
-        <Button
-          type="button"
-          className="wordmark"
-          onClick={openDashboard}
-          aria-label={t("dashboard.openDashboard")}
-        >
+        <div className="navbar-brand">
           <img className="authenticated-brand" src="/title.webp?rev=a9c84cc" alt="World of Seeds" draggable={false} />
           <Badge className="version-badge">v{UI_VERSION}</Badge>
-        </Button>
+        </div>
         <nav className="user-navigation" aria-label={t("dashboard.navigation")}>
           <Button
             variant="ghost"
@@ -640,13 +635,13 @@ function Dashboard({
           </Button>
         </nav>
         <div className="header-actions">
-          <ServiceHealth />
           <span className="header-actions-separator" aria-hidden="true" />
           <AccountMenu
             user={user}
             onLogout={onLogout}
             onSessionExpired={onSessionExpired}
           />
+          <ServiceHealth />
         </div>
       </header>
       <div id="dashboard-content" className="dashboard-content" tabIndex={-1}>
