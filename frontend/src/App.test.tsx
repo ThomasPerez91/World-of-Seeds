@@ -52,14 +52,15 @@ describe("App", () => {
 
     expect(screen.queryByText("Espace privé")).toBeNull();
     expect(screen.getAllByRole("img", { name: "World of Seeds" })).toHaveLength(1);
-    expect(screen.getByRole("combobox", { name: "Langue" })).toHaveProperty("value", "fr");
+    expect(screen.getByRole("button", { name: "Langue : Français" })).toBeDefined();
 
     const password = screen.getByLabelText("Mot de passe");
     expect(password).toHaveProperty("type", "password");
     await user.click(screen.getByRole("button", { name: "Afficher le mot de passe" }));
     expect(password).toHaveProperty("type", "text");
 
-    await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
+    await user.click(screen.getByRole("button", { name: "Langue : Français" }));
+    expect(screen.getByRole("button", { name: "Language : English" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Hide password" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Sign in" })).toBeDefined();
   });
@@ -95,7 +96,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByRole("heading", { name: "Bienvenue" });
-    await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
+    await user.click(screen.getByRole("button", { name: "Langue : Français" }));
     await user.type(screen.getByLabelText("Username"), "thomas");
     await user.type(screen.getByLabelText("Password"), "correct-password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
@@ -207,9 +208,10 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "Réessayer" }));
     await screen.findByRole("heading", { name: "Bienvenue" });
-    expect(screen.getByText("Tous les services fonctionnent normalement.")).toBeDefined();
-    await user.click(screen.getByRole("button", { name: "Vérifier l’état du service" }));
-    await screen.findByText("Le service est momentanément interrompu.");
+    expect(
+      screen.getByRole("status", { name: "Tous les services fonctionnent normalement." }),
+    ).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Vérifier l’état du service" })).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 

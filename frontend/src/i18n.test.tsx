@@ -20,6 +20,10 @@ function Probe() {
   );
 }
 
+function FlagProbe() {
+  return <LanguageSelector variant="flag-toggle" />;
+}
+
 describe("I18nProvider", () => {
   it("bascule toute l’interface et les formats Intl en anglais puis persiste le choix", async () => {
     const user = userEvent.setup();
@@ -38,6 +42,25 @@ describe("I18nProvider", () => {
     expect(screen.getByText("1.5 KB")).toBeTruthy();
     expect(screen.getByText("1,234.5")).toBeTruthy();
     expect(screen.getByText("The maximum number of active downloads has been reached.")).toBeTruthy();
+    expect(document.documentElement.lang).toBe("en");
+    expect(window.localStorage.getItem("wos.preferred-locale")).toBe("en");
+  });
+
+  it("bascule le login avec le bouton drapeau compact", async () => {
+    window.localStorage.setItem("wos.preferred-locale", "fr");
+    const user = userEvent.setup();
+    render(
+      <I18nProvider>
+        <FlagProbe />
+      </I18nProvider>,
+    );
+
+    const frenchButton = screen.getByRole("button", { name: "Langue : Français" });
+    expect(frenchButton.textContent).toContain("🇫🇷");
+    await user.click(frenchButton);
+
+    const englishButton = screen.getByRole("button", { name: "Language : English" });
+    expect(englishButton.textContent).toContain("🇬🇧");
     expect(document.documentElement.lang).toBe("en");
     expect(window.localStorage.getItem("wos.preferred-locale")).toBe("en");
   });
