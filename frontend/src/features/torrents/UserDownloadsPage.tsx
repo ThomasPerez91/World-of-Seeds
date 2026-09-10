@@ -4,6 +4,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -25,6 +26,7 @@ import {
   QueueIcon,
   RefreshIcon,
 } from "../../components/icons";
+import { Check, Clock3, Download, Search } from "lucide-react";
 import { Accordion, Badge, Button, Progress, StateMessage } from "../../components/ui";
 import { useI18n, type MessageKey } from "../../i18n";
 import {
@@ -47,6 +49,8 @@ import {
 import { RetentionWarning } from "./RetentionWarning";
 
 const PAGE_SIZE = 10;
+const FETCH_PAGE_SIZE = 100;
+const AUTO_REFRESH_MS = 4_000;
 const FALLBACK_PAGE_SIZE = 50;
 export const MAX_TORRENT_BATCH_FILES = 50;
 export const TORRENT_UPLOAD_CONCURRENCY = 3;
@@ -56,6 +60,10 @@ export interface LocalDownloadSummary {
   maximum: number;
   status: "idle" | RecursiveTransferProgress["status"];
   waiting: number;
+  name: string | null;
+  downloadedBytes: number;
+  totalBytes: number;
+  percent: number;
 }
 
 interface UserDownloadsPageProps {
@@ -72,6 +80,10 @@ export function summarizeLocalTransfer(
     maximum: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
     status: transfer?.status ?? "idle",
     waiting: transfer?.queue.filter((item) => item.status === "waiting").length ?? 0,
+    name: null,
+    downloadedBytes: transfer?.downloadedBytes ?? 0,
+    totalBytes: 0,
+    percent: 0,
   };
 }
 
@@ -97,11 +109,19 @@ export function summarizeDownloadManager(
           : jobs.length > 0 && jobs.every((job) => job.status === "cancelled")
             ? "cancelled"
             : "idle";
+  const current = jobs.find((job) => job.status === "running" || job.status === "paused" || job.status === "queued") ?? null;
+  const percent = current === null || current.totalBytes <= 0
+    ? 0
+    : Math.min(100, Math.max(0, (current.downloadedBytes / current.totalBytes) * 100));
   return {
     active: manager.activeStreams,
     maximum: manager.maxConcurrentStreams,
     status,
     waiting,
+    name: current?.name ?? null,
+    downloadedBytes: current?.downloadedBytes ?? 0,
+    totalBytes: current?.totalBytes ?? 0,
+    percent,
   };
 }
 
@@ -136,6 +156,15 @@ const EMPTY_MANAGER_SNAPSHOT: BrowserDownloadManagerSnapshot = {
   waitingJobs: 0,
   jobs: [],
 };
+
+type TorrentStatusFilter = "all" | "active" | "ready" | "waiting";
+
+export function matchesTorrentFilter(torrent: TorrentRequestV2, filter: TorrentStatusFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "ready") return torrent.state === "ready";
+  if (filter === "waiting") return torrent.state === "requested" || torrent.queue_status === "waiting";
+  return torrent.state === "active" && torrent.queue_status !== "waiting";
+}
 
 const stateLabels: Record<TorrentRequestV2State, MessageKey> = {
   requested: "downloads.requested",
@@ -520,7 +549,6 @@ export function UserDownloadsPage({
   const { apiError, t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const [torrents, setTorrents] = useState<TorrentRequestV2[]>([]);
-  const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -529,6 +557,8 @@ export function UserDownloadsPage({
   const [uploadBatch, setUploadBatch] = useState<UploadBatchState | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [pageError, setPageError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<TorrentStatusFilter>("all");
   const [managerSnapshot, setManagerSnapshot] = useState<BrowserDownloadManagerSnapshot>(EMPTY_MANAGER_SNAPSHOT);
   const loadGenerationRef = useRef(0);
   const managerRef = useRef<BrowserDownloadManager | null>(null);
@@ -568,14 +598,22 @@ export function UserDownloadsPage({
       });
   }, [onSessionExpired]);
 
-  const load = useCallback(async (requestedOffset: number, signal?: AbortSignal) => {
+  const load = useCallback(async (_requestedOffset: number, signal?: AbortSignal) => {
     const generation = ++loadGenerationRef.current;
     setRefreshing(true);
     try {
-      const result = await api.listTorrentRequestsV2(requestedOffset, PAGE_SIZE, signal);
+      const items: TorrentRequestV2[] = [];
+      let apiOffset = 0;
+      let expectedTotal: number | null = null;
+      while (expectedTotal === null || apiOffset < expectedTotal) {
+        const result = await api.listTorrentRequestsV2(apiOffset, FETCH_PAGE_SIZE, signal);
+        if (expectedTotal === null) expectedTotal = result.total;
+        items.push(...result.items);
+        if (result.items.length < FETCH_PAGE_SIZE) break;
+        apiOffset += result.items.length;
+      }
       if (generation !== loadGenerationRef.current) return;
-      setTorrents(result.items);
-      setTotal(result.total);
+      setTorrents(items);
       setPageError("");
       onActivityChanged?.();
     } catch (caught) {
@@ -663,6 +701,7 @@ export function UserDownloadsPage({
     let active = true;
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
+    let pollingTimer: number | null = null;
     let hasConnected = false;
     let refreshPending = false;
     let refreshQueued = false;
@@ -725,12 +764,18 @@ export function UserDownloadsPage({
       };
     };
 
+    const poll = () => {
+      if (document.visibilityState === "visible") refreshFromEvent();
+    };
+
     runRefresh(controller.signal);
     connect();
+    pollingTimer = window.setInterval(poll, AUTO_REFRESH_MS);
     return () => {
       active = false;
       controller.abort();
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (pollingTimer !== null) window.clearInterval(pollingTimer);
       socket?.close();
     };
   }, [load, loadReadyManifest, offset]);
@@ -931,8 +976,20 @@ export function UserDownloadsPage({
     }
   }
 
+  const normalizedSearch = searchQuery.trim().toLocaleLowerCase();
+  const counts = useMemo(() => ({
+    all: torrents.length,
+    active: torrents.filter((torrent) => matchesTorrentFilter(torrent, "active")).length,
+    ready: torrents.filter((torrent) => matchesTorrentFilter(torrent, "ready")).length,
+    waiting: torrents.filter((torrent) => matchesTorrentFilter(torrent, "waiting")).length,
+  }), [torrents]);
+  const filteredTorrents = useMemo(() => torrents.filter((torrent) => (
+    matchesTorrentFilter(torrent, statusFilter)
+    && (normalizedSearch === "" || torrent.name.toLocaleLowerCase().includes(normalizedSearch))
+  )), [normalizedSearch, statusFilter, torrents]);
+  const visibleTorrents = filteredTorrents.slice(offset, offset + PAGE_SIZE);
   const page = Math.floor(offset / PAGE_SIZE) + 1;
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(filteredTorrents.length / PAGE_SIZE));
   const queueTotal = torrents.find((torrent) => torrent.queue_total_estimate !== null)?.queue_total_estimate ?? null;
   const localDownloadSummary = summarizeDownloadManager(managerSnapshot);
 
@@ -940,19 +997,8 @@ export function UserDownloadsPage({
     <section className="user-downloads" aria-labelledby="user-downloads-title">
       <header className="user-downloads-header">
         <div>
-          <p className="eyebrow">{t("downloads.workspace")}</p>
           <h2 id="user-downloads-title">{t("downloads.title")}</h2>
           <p>{t("downloads.intro")}</p>
-        </div>
-        <div className="torrent-page-actions">
-          <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()}>
-            <DownloadIcon />
-            <span>{uploading ? t("downloads.adding") : t("downloads.upload")}</span>
-          </button>
-          <button type="button" className="secondary-button" disabled={refreshing} onClick={() => void load(offset)}>
-            <RefreshIcon className={refreshing ? "rotating" : undefined} />
-            <span>{refreshing ? t("downloads.refreshing") : t("common.refresh")}</span>
-          </button>
         </div>
       </header>
 
@@ -970,7 +1016,17 @@ export function UserDownloadsPage({
       <div
         className={`torrent-drop-zone${dragging ? " dragging" : ""}${uploading ? " disabled" : ""}`}
         data-testid="torrent-drop-zone"
+        aria-label={t("downloads.upload")}
         aria-disabled={uploading}
+        role="button"
+        tabIndex={uploading ? -1 : 0}
+        onClick={() => inputRef.current?.click()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
         onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
         onDragOver={(event) => event.preventDefault()}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
@@ -979,14 +1035,42 @@ export function UserDownloadsPage({
         <DownloadIcon />
         <strong>{t("downloads.dropTitle")}</strong>
         <span>{t("downloads.dropHint")}</span>
-        <button type="button" className="secondary-button compact-button" disabled={uploading} onClick={() => inputRef.current?.click()}>
-          {t("downloads.upload")}
-        </button>
       </div>
       <p className="torrent-atomic-note">
         <InfoIcon />
         <span>{t("downloads.atomicTorrentHint")}</span>
       </p>
+
+      <div className="torrent-toolbar">
+        <label className="torrent-search">
+          <span className="sr-only">{t("downloads.search")}</span>
+          <Search aria-hidden="true" />
+          <input
+            type="search"
+            value={searchQuery}
+            placeholder={t("downloads.searchPlaceholder")}
+            onChange={(event) => { setSearchQuery(event.target.value); setOffset(0); }}
+          />
+        </label>
+        <div className="torrent-filters" aria-label={t("downloads.filters")}>
+          {([
+            ["all", t("downloads.filterAll"), null],
+            ["active", t("downloads.filterActive"), <Download aria-hidden="true" />],
+            ["ready", t("downloads.filterReady"), <Check aria-hidden="true" />],
+            ["waiting", t("downloads.filterWaiting"), <Clock3 aria-hidden="true" />],
+          ] as const).map(([filter, label, icon]) => (
+            <button
+              key={filter}
+              type="button"
+              className={`torrent-filter${statusFilter === filter ? " active" : ""}`}
+              aria-pressed={statusFilter === filter}
+              onClick={() => { setStatusFilter(filter); setOffset(0); }}
+            >
+              {icon}{label}<span className="torrent-filter-count">{counts[filter]}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
       {uploadBatch !== null && (
         <section className="torrent-upload-batch" aria-labelledby="torrent-batch-title" aria-busy={!uploadBatch.done}>
@@ -1040,7 +1124,7 @@ export function UserDownloadsPage({
 
       {loading ? (
         <StateMessage tone="loading" className="torrent-list-state">{t("downloads.reading")}</StateMessage>
-      ) : torrents.length === 0 ? (
+      ) : filteredTorrents.length === 0 ? (
         <StateMessage tone="empty" className="torrent-list-state">{t("downloads.empty")}</StateMessage>
       ) : (
         <>
@@ -1054,7 +1138,7 @@ export function UserDownloadsPage({
             </aside>
           )}
           <ul className="torrent-accordion-list" aria-label={t("downloads.requests")} aria-busy={refreshing}>
-            {torrents.map((torrent) => {
+            {visibleTorrents.map((torrent) => {
               const manifest = readyManifests[torrent.id];
               const transfers = managerSnapshot.jobs.filter((job) => job.torrentId === torrent.id);
               return (
@@ -1106,11 +1190,11 @@ export function UserDownloadsPage({
             >
               {t("common.previous")}
             </button>
-            <span aria-live="polite">{t(total === 1 ? "downloads.pageOne" : "downloads.pageMany", { page, pages: pageCount, total })}</span>
+            <span aria-live="polite">{t(filteredTorrents.length === 1 ? "downloads.pageOne" : "downloads.pageMany", { page, pages: pageCount, total: filteredTorrents.length })}</span>
             <button
               type="button"
               className="secondary-button"
-              disabled={offset + PAGE_SIZE >= total || refreshing}
+              disabled={offset + PAGE_SIZE >= filteredTorrents.length || refreshing}
               onClick={() => setOffset(offset + PAGE_SIZE)}
             >
               {t("common.next")}

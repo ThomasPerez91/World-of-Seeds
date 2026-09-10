@@ -597,7 +597,7 @@ input::placeholder {
 }
 
 .user-dashboard-header::after {
-  content: "Plus de liberté\A pour vos téléchargements.";
+  content: none;
   position: absolute;
   z-index: -1;
   right: 2.25rem;

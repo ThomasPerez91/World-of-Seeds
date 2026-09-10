@@ -15,19 +15,19 @@ import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
 import { AccountMenuIcon, BackIcon, HomeIcon, SettingsIcon } from "./components/icons";
 import { LanguageSelector } from "./components/LanguageSelector";
+import { ThemeSelector } from "./components/ThemeSelector";
 import {
   LegalLinks,
   LegalPage,
   type LegalDocument,
 } from "./components/LegalPage";
 import { ThemeProvider } from "./theme";
-import { ThemeSelector } from "./components/ThemeSelector";
 import { Button, Card, Badge, StateMessage } from "./components/ui";
 import { UI_VERSION } from "./uiVersion";
 import { FeedbackProvider } from "./components/Feedback";
 import { useFeedback } from "./components/Feedback";
 import { I18nProvider, useI18n, type Locale } from "./i18n";
-import { Eye, EyeOff, LockKeyhole, UserRound } from "lucide-react";
+import { Eye, EyeOff, LockKeyhole, LogOut, UserRound } from "lucide-react";
 
 type AuthState =
   | { status: "loading" }
@@ -321,14 +321,10 @@ function CredentialChangeScreen({
 
 function AccountMenu({
   user,
-  onOpenAdmin,
-  onOpenSettings,
   onLogout,
   onSessionExpired,
 }: {
   user: User;
-  onOpenAdmin: () => void;
-  onOpenSettings: () => void;
   onLogout: () => Promise<void>;
   onSessionExpired: () => void;
 }) {
@@ -398,30 +394,6 @@ function AccountMenu({
       {open && (
         <div id="account-dropdown" className="account-dropdown">
           <p className="account-name">{user.username}</p>
-          {user.is_admin && (
-            <Button
-              type="button"
-              className="account-dropdown-item"
-              onClick={() => {
-                setOpen(false);
-                onOpenAdmin();
-              }}
-            >
-              {t("dashboard.admin")}
-            </Button>
-          )}
-          <Button
-            type="button"
-            className="account-dropdown-item"
-            onClick={() => {
-              setOpen(false);
-              onOpenSettings();
-            }}
-          >
-            {t("dashboard.account")}
-          </Button>
-          <div className="account-dropdown-separator" />
-          <ThemeSelector />
           <div className="account-dropdown-separator" />
           <Button
             type="button"
@@ -429,6 +401,7 @@ function AccountMenu({
             onClick={() => void handleLogout()}
             disabled={loggingOut}
           >
+            <LogOut aria-hidden="true" />
             {loggingOut ? t("dashboard.loggingOut") : t("dashboard.logout")}
           </Button>
         </div>
@@ -645,8 +618,7 @@ function Dashboard({
           onClick={openDashboard}
           aria-label={t("dashboard.openDashboard")}
         >
-          <BrandMark />
-          <span>World of Seeds</span>
+          <img className="authenticated-brand" src="/title.webp?rev=a9c84cc" alt="World of Seeds" draggable={false} />
           <Badge className="version-badge">v{UI_VERSION}</Badge>
         </Button>
         <nav className="user-navigation" aria-label={t("dashboard.navigation")}>
@@ -668,10 +640,10 @@ function Dashboard({
           </Button>
         </nav>
         <div className="header-actions">
+          <ServiceHealth />
+          <span className="header-actions-separator" aria-hidden="true" />
           <AccountMenu
             user={user}
-            onOpenAdmin={() => setView("admin-users")}
-            onOpenSettings={() => setView("settings")}
             onLogout={onLogout}
             onSessionExpired={onSessionExpired}
           />

@@ -130,8 +130,7 @@ describe("UserDownloadsPage", () => {
   it("ignore une invalidation WebSocket obsolète après le rafraîchissement autoritatif d’un upload", async () => {
     MockWebSocket.instances = [];
     const user = userEvent.setup();
-    let offsetZeroRequests = 0;
-    let offsetTenRequests = 0;
+    let listRequests = 0;
     let releaseUpload!: () => void;
     let markUploadStarted!: () => void;
     let releaseStalePage!: () => void;
@@ -155,36 +154,22 @@ describe("UserDownloadsPage", () => {
             storage_pressure: "normal",
           }, 201);
         }
-        if (url.includes("offset=10")) {
-          offsetTenRequests += 1;
-          if (offsetTenRequests > 1) {
-            markStalePageStarted();
-            await stalePagePending;
-          }
-          return response({
-            items: [torrent({
-              id: "c8c69f91-8e73-48b3-a14f-35199ce7c101",
-              name: offsetTenRequests > 1 ? "Page obsolète.mkv" : "Deuxième page.mkv",
-            })],
-            offset: 10,
-            limit: 10,
-            total: 11,
-          });
+        listRequests += 1;
+        if (listRequests === 2) {
+          markStalePageStarted();
+          await stalePagePending;
         }
-        offsetZeroRequests += 1;
         return response({
-          items: [torrent({ name: offsetZeroRequests === 1 ? "Page initiale.mkv" : "Page fraîche.mkv" })],
+          items: [torrent({ name: listRequests === 1 ? "Page initiale.mkv" : listRequests === 2 ? "Page obsolète.mkv" : "Page fraîche.mkv" })],
           offset: 0,
-          limit: 10,
-          total: 11,
+          limit: 100,
+          total: 1,
         });
       }),
     );
     const view = renderPage();
 
     await screen.findByText("Page initiale.mkv");
-    await user.click(screen.getByRole("button", { name: "Suivant" }));
-    await screen.findByText("Deuxième page.mkv");
     const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File(["torrent"], "nouveau.torrent")] } });
     await uploadStarted;
@@ -205,8 +190,9 @@ describe("UserDownloadsPage", () => {
     view.unmount();
   });
 
-  it("ne recharge plus automatiquement la liste toutes les dix secondes", async () => {
+  it("actualise automatiquement les torrents sans recharger la page", async () => {
     MockWebSocket.instances = [];
+    vi.useFakeTimers();
     const fetchMock = vi.fn(async () => response({
       items: [torrent()], offset: 0, limit: 10, total: 1,
     }));
@@ -214,10 +200,10 @@ describe("UserDownloadsPage", () => {
     vi.stubGlobal("WebSocket", MockWebSocket);
     const view = renderPage();
 
-    await screen.findByText("En cours");
-    vi.useFakeTimers();
-    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText("En cours")).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
     vi.useRealTimers();
     view.unmount();
   });
@@ -274,6 +260,10 @@ describe("UserDownloadsPage", () => {
       maximum: 2,
       status: "idle",
       waiting: 0,
+      name: null,
+      downloadedBytes: 0,
+      totalBytes: 0,
+      percent: 0,
     });
   });
 
@@ -1229,7 +1219,7 @@ describe("UserDownloadsPage", () => {
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
-  it("pagine côté serveur et conserve les noms longs dans le résumé accessible", async () => {
+  it("pagine côté client et conserve les noms longs dans le résumé accessible", async () => {
     const user = userEvent.setup();
     const longName =
       "Film.Name.2026.MULTi.TRUEFRENCH.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.DTS-HD.MA.7.1-GROUP.mkv";
@@ -1239,18 +1229,15 @@ describe("UserDownloadsPage", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         calls.push(url);
-        const secondPage = url.includes("offset=10");
         return response({
-          items: [torrent({
-            id: secondPage
-              ? "c8c69f91-8e73-48b3-a14f-35199ce7c101"
-              : "d86528f5-bc01-4a8b-86a1-74fe3404864b",
-            name: secondPage ? "Deuxième page.mkv" : longName,
-            state: secondPage ? "ready" : "requested",
-            progress: secondPage ? 1 : 0,
-          })],
-          offset: secondPage ? 10 : 0,
-          limit: 10,
+          items: Array.from({ length: 11 }, (_, index) => torrent({
+            id: `d86528f5-bc01-4a8b-86a1-${String(index).padStart(12, "0")}`,
+            name: index === 0 ? longName : index === 10 ? "Deuxième page.mkv" : `Film ${index}.mkv`,
+            state: index === 10 ? "ready" : "requested",
+            progress: index === 10 ? 1 : 0,
+          })),
+          offset: 0,
+          limit: 100,
           total: 11,
         });
       }),
@@ -1264,7 +1251,31 @@ describe("UserDownloadsPage", () => {
 
     expect(await screen.findByText("Deuxième page.mkv")).toBeTruthy();
     expect(screen.getByText("Disponible")).toBeTruthy();
-    expect(calls.some((url) => url.includes("offset=10") && url.includes("limit=10"))).toBe(true);
+    expect(calls.some((url) => url.includes("offset=0") && url.includes("limit=100"))).toBe(true);
+  });
+
+  it("combine recherche partielle insensible à la casse et filtre de statut", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({
+      items: [
+        torrent({ id: "d86528f5-bc01-4a8b-86a1-74fe3404864b", name: "ubuntu-24.04.iso", state: "ready", progress: 1 }),
+        torrent({ id: "c8c69f91-8e73-48b3-a14f-35199ce7c101", name: "BUN-source.iso", state: "active" }),
+        torrent({ id: "6a6cbfc8-11d0-4cf2-82f8-3533924c83de", name: "archive.iso", state: "requested", queue_status: "waiting" }),
+      ],
+      offset: 0,
+      limit: 100,
+      total: 3,
+    })));
+    renderPage();
+
+    const search = await screen.findByRole("searchbox", { name: "Rechercher un torrent" });
+    await userEvent.type(search, "BUN");
+    expect(screen.getByRole("article", { name: "ubuntu-24.04.iso" })).toBeTruthy();
+    expect(screen.getByRole("article", { name: "BUN-source.iso" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: /Prêts/ }));
+    expect(screen.getByRole("article", { name: "ubuntu-24.04.iso" })).toBeTruthy();
+    expect(screen.queryByRole("article", { name: "BUN-source.iso" })).toBeNull();
+    expect(screen.getByRole("button", { name: /Tous3/ })).toBeTruthy();
   });
 
   it("supporte le drop, le sélecteur clavier et les erreurs métier bornées", async () => {
@@ -1287,7 +1298,7 @@ describe("UserDownloadsPage", () => {
     );
     const view = renderPage();
     const zone = screen.getByTestId("torrent-drop-zone");
-    const selectButton = screen.getAllByRole("button", { name: "Ajouter des torrents" })[1];
+    const selectButton = screen.getByRole("button", { name: "Ajouter des torrents" });
     const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
     const inputClick = vi.spyOn(input, "click");
     selectButton.focus();
@@ -1536,7 +1547,7 @@ describe("UserDownloadsPage", () => {
     fireEvent.change(input, { target: { files: [new File(["one"], "first.torrent")] } });
     await waitFor(() => expect(uploaded).toEqual(["first.torrent"]));
     expect(input.disabled).toBe(true);
-    expect(uploadButtons.every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+    expect(uploadButtons.every((button) => button.getAttribute("aria-disabled") === "true")).toBe(true);
     fireEvent.change(input, { target: { files: [new File(["ignored"], "ignored.torrent")] } });
     expect(uploaded).toEqual(["first.torrent"]);
 
