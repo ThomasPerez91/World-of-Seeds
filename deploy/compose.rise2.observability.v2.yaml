@@ -91,6 +91,7 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m
     cap_drop: [ALL]
+    cap_add: [DAC_READ_SEARCH]
     security_opt: [no-new-privileges:true]
     pids_limit: 64
     healthcheck:
@@ -98,7 +99,7 @@ services:
         - CMD
         - python
         - -c
-        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/health', timeout=2)
+        - import urllib.request; body=urllib.request.urlopen('http://127.0.0.1:9101/metrics', timeout=2).read().decode(); assert 'wos_torrent_metrics_qb_scrape_success 1' in body and 'wos_torrent_metrics_newgreedy_scrape_success 1' in body
       interval: 30s
       timeout: 5s
       retries: 5

@@ -27,6 +27,19 @@ def test_rise2_observability_overlay_keeps_exporters_internal_and_pinned() -> No
     assert "security_opt: [no-new-privileges:true]" in overlay
 
 
+def test_torrent_metrics_can_read_private_sources_with_least_privilege() -> None:
+    overlay = (_repository() / "deploy" / "compose.rise2.observability.v2.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "torrent-metrics:" in overlay
+    assert 'user: "0:0"' in overlay
+    assert "cap_add: [DAC_READ_SEARCH]" in overlay
+    assert "DAC_OVERRIDE" not in overlay
+    assert "wos_torrent_metrics_qb_scrape_success 1" in overlay
+    assert "wos_torrent_metrics_newgreedy_scrape_success 1" in overlay
+
+
 def test_rise2_smart_metrics_use_node_exporter_textfile_without_privileged_container() -> None:
     overlay = (_repository() / "deploy" / "compose.rise2.observability.v2.yaml").read_text(
         encoding="utf-8"
