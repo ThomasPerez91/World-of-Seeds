@@ -378,6 +378,7 @@ function AccountMenu({
     }}>
       <Button
         type="button"
+        variant="ghost"
         ref={triggerRef}
         className="account-trigger"
         aria-label={t("dashboard.accountMenu")}

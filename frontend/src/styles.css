@@ -427,9 +427,8 @@ button:disabled {
 }
 
 .app-header {
-  position: sticky;
+  position: relative;
   z-index: 10;
-  top: 0;
   display: flex;
   min-height: 4rem;
   align-items: center;

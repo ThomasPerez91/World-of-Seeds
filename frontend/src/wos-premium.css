@@ -462,9 +462,8 @@ input::placeholder {
 }
 
 .app-header {
-  position: sticky;
+  position: relative;
   z-index: 70;
-  top: 0;
   display: grid !important;
   min-height: 72px;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -524,11 +523,6 @@ input::placeholder {
   padding: 0.35rem 0.55rem 0.35rem 0.35rem !important;
   border: 1px solid transparent !important;
   background: transparent !important;
-}
-
-.account-trigger:hover:not(:disabled) {
-  border-color: var(--wos-line) !important;
-  background: rgba(255, 255, 255, 0.025) !important;
 }
 
 .account-avatar {
