@@ -90,7 +90,7 @@ describe("theme", () => {
     }
   });
 
-  it("restores /auth/me and persists through account menu, Preferences and reconnection", async () => {
+  it("restores /auth/me and persists through Preferences and reconnection", async () => {
     systemMedia(); localStorage.setItem("wos.preferred-theme", "light");
     let current = { ...account };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -108,20 +108,14 @@ describe("theme", () => {
     await screen.findByRole("heading", { name: "Dashboard" });
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(screen.queryByRole("combobox", { name: "Langue" })).toBeNull();
-    const trigger = screen.getByRole("button", { name: "Ouvrir le menu du compte" });
-    await user.click(trigger);
+    await user.click(screen.getByRole("button", { name: "Paramètres" }));
+    await screen.findByRole("heading", { name: "Préférences" });
     const light = screen.getByRole("button", { name: "Clair" });
     light.focus(); await user.keyboard("{Enter}");
     await waitFor(() => expect(current.preferred_theme).toBe("light"));
     expect(light.getAttribute("aria-pressed")).toBe("true");
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
-    await user.keyboard("{Escape}");
-    expect(document.activeElement).toBe(trigger);
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    await user.click(trigger);
-    await user.click(screen.getByRole("button", { name: "Paramètres du compte" }));
-    await screen.findByRole("heading", { name: "Préférences" });
     await user.click(screen.getByRole("button", { name: "Système" }));
     await waitFor(() => expect(current.preferred_theme).toBe("system"));
     await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
