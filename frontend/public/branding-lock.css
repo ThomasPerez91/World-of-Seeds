@@ -1,0 +1,7 @@
+/* Prevent native browser dragging/selection of the decorative WOS title artwork. */
+.login-header > img,
+.login-title-image {
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+}
