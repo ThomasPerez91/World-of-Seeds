@@ -40,7 +40,7 @@ body {
   background:
     linear-gradient(180deg, rgba(2, 18, 12, 0.24), rgba(2, 15, 10, 0.73)),
     linear-gradient(90deg, rgba(1, 16, 11, 0.54), rgba(2, 20, 13, 0.12) 48%, rgba(1, 15, 10, 0.42)),
-    url("/background.webp") center / cover no-repeat;
+    url("/background.webp?rev=a9c84cc") center / cover no-repeat;
   transform: translateZ(0);
 }
 
@@ -91,7 +91,7 @@ body {
   width: clamp(176px, 15vw, 228px);
   height: 48px;
   flex: 0 0 auto;
-  background: url("/title.webp") center / contain no-repeat;
+  background: url("/title.webp?rev=a9c84cc") center / contain no-repeat;
   filter: drop-shadow(0 0 12px rgba(57, 224, 135, 0.13));
 }
 
@@ -130,7 +130,7 @@ body {
   border-color: rgba(142, 226, 180, 0.2) !important;
   background:
     linear-gradient(90deg, rgba(2, 22, 15, 0.78), rgba(3, 28, 19, 0.18) 56%, rgba(3, 22, 16, 0.52)),
-    url("/background.webp") center 42% / cover no-repeat !important;
+    url("/background.webp?rev=a9c84cc") center 42% / cover no-repeat !important;
   box-shadow: 0 22px 64px rgba(0, 0, 0, 0.24) !important;
 }
 
