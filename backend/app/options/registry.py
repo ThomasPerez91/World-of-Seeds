@@ -289,6 +289,16 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         restart_required=True,
     ),
     _integer(
+        "WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS",
+        "Désabonnement automatique",
+        "Durée pendant laquelle un utilisateur reste abonné à un torrent après sa disponibilité.",
+        48,
+        "retention",
+        minimum=1,
+        maximum=2160,
+        unit="hours",
+    ),
+    _integer(
         "WOS_TORRENT_RETENTION_HOURS",
         "Rétention des contenus prêts",
         "Durée minimale avant qu’un contenu sans référence devienne purgeable.",

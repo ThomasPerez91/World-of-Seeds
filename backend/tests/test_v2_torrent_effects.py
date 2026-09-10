@@ -776,9 +776,10 @@ async def test_sync_handler_marks_completed_torrent_and_request_ready(
         assert torrent.desired_priority is None
         assert torrent.desired_download_limit == 0
         assert torrent.ready_at == NOW.replace(tzinfo=None)
-        assert torrent.retention_expires_at == (NOW + timedelta(days=5)).replace(tzinfo=None)
+        assert torrent.retention_expires_at is None
         assert request is not None and request.state is TorrentRequestState.READY
         assert request.ready_at is not None
+        assert request.unsubscribe_at == (NOW + timedelta(hours=48)).replace(tzinfo=None)
         assert redis.events == [
             (
                 request.user_id,
