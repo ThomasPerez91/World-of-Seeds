@@ -159,8 +159,7 @@ async def _seed() -> list[LoadIdentity]:
             request = TorrentRequest(
                 user_id=user.id,
                 managed_torrent_id=torrent.id,
-                state=TorrentRequestState.READY,
-                ready_at=datetime.now(UTC),
+                state=TorrentRequestState.REQUESTED,
             )
             session.add(request)
             await session.flush()

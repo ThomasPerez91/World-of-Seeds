@@ -273,7 +273,8 @@ def main() -> int:
         "UPDATE managed_torrents SET state = 'READY', progress = 1, ready_at = now(), "
         "retention_expires_at = now() + interval '5 days', updated_at = now() "
         f"WHERE info_hash = '{info_hash}'; "
-        "UPDATE torrent_requests SET state = 'READY', ready_at = now(), updated_at = now() "
+        "UPDATE torrent_requests SET state = 'READY', ready_at = now(), "
+        "unsubscribe_at = now() + interval '48 hours', updated_at = now() "
         f"WHERE id = '{request_id}'::uuid;"
     )
     snapshot = request_json(
