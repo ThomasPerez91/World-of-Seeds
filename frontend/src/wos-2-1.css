@@ -102,8 +102,7 @@ body {
   background: rgba(4, 30, 20, 0.64) !important;
 }
 
-.user-navigation .ui-button,
-.account-trigger {
+.user-navigation .ui-button {
   backdrop-filter: blur(12px);
 }
 
