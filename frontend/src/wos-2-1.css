@@ -983,3 +983,9 @@ body {
   .language-flag-toggle { width: 42px; height: 38px; min-width: 42px; min-height: 38px; flex-basis: 42px; }
   .login-header .service-health-indicator { width: 32px; height: 32px; flex-basis: 32px; }
 }
+
+/* Health remains neutral until the first health response arrives. */
+.service-health-indicator.pending .service-health-dot {
+  background: #91aa9e;
+  box-shadow: 0 0 0 5px rgba(145, 170, 158, 0.08), 0 0 14px rgba(145, 170, 158, 0.26);
+}

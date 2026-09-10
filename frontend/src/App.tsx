@@ -51,7 +51,7 @@ function BrandMark() {
 
 function ServiceHealth() {
   const { t } = useI18n();
-  const [health, setHealth] = useState<"healthy" | "unavailable">("healthy");
+  const [health, setHealth] = useState<"pending" | "healthy" | "unavailable">("pending");
   const mounted = useRef(true);
 
   const check = useCallback(async () => {
@@ -73,7 +73,7 @@ function ServiceHealth() {
     };
   }, [check]);
 
-  const message = health === "healthy" ? t("health.healthy") : t("health.unavailable");
+  const message = health === "pending" ? t("health.checking") : health === "healthy" ? t("health.healthy") : t("health.unavailable");
 
   return (
     <div
