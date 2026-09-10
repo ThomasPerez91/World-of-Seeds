@@ -615,6 +615,8 @@ body {
   display: grid;
   width: 36px;
   height: 36px;
+  min-height: 0;
+  margin: 0;
   padding: 0;
   place-items: center;
   color: #9db9aa;
@@ -633,6 +635,18 @@ body {
 .password-visibility svg {
   width: 17px;
   height: 17px;
+}
+
+@media (forced-colors: active) {
+  .login-input:focus-within {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  .login-card form .login-input input:focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: -4px !important;
+  }
 }
 
 .login-card form .ui-button[type="submit"] {
