@@ -1,61 +1,258 @@
-/* Current V2 torrent API exposes state/progress/size/queue metadata but not
- * qBittorrent speed/ratio/peer metrics. Keep the reference design's dense table
- * language without inventing values that the API does not provide. */
+/* Torrent-list polish: use only data already exposed by the V2 API. */
 
-@media (min-width: 821px) {
+.torrent-list-state.ui-state-empty {
+  min-height: 5.5rem;
+  margin: 1rem;
+  border: 1px solid rgba(102, 234, 157, 0.18);
+  color: var(--wos-muted);
+  background: rgba(3, 29, 19, 0.58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.feedback-toast-region {
+  top: 5.5rem;
+  right: clamp(1rem, 2.5vw, 2rem);
+  gap: 0.6rem;
+}
+
+.feedback-toast-item {
+  animation: wos-toast-enter 180ms ease-out both;
+}
+
+.feedback-toast-region .operation-notice {
+  overflow: hidden;
+  border-radius: 13px;
+  color: #dff8e9;
+  background: rgba(4, 38, 25, 0.88);
+  box-shadow: 0 16px 44px rgba(0, 8, 5, 0.28);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+.feedback-toast-region .operation-notice.success {
+  border-color: rgba(77, 224, 139, 0.36);
+  color: #68eaa0;
+  background: rgba(4, 43, 27, 0.9);
+}
+
+.feedback-toast-region .operation-notice.error {
+  border-color: rgba(244, 95, 106, 0.34);
+  color: #ff858e;
+  background: rgba(54, 13, 18, 0.9);
+}
+
+.feedback-toast-region .notice-copy span {
+  color: #e4eee8;
+  white-space: pre-line;
+}
+
+@keyframes wos-toast-enter {
+  from { opacity: 0; transform: translateY(-7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feedback-toast-item { animation: none; }
+}
+
+@media (min-width: 916px) {
+  .torrent-accordion-summary {
+    grid-template-columns:
+      minmax(260px, 3fr)
+      minmax(112px, 0.9fr)
+      minmax(64px, 0.45fr)
+      minmax(190px, 1.6fr)
+      minmax(84px, 0.65fr) !important;
+    column-gap: 0.7rem;
+  }
+
+  .torrent-list-heading {
+    display: grid;
+    grid-template-columns:
+      minmax(260px, 3fr)
+      minmax(112px, 0.9fr)
+      minmax(64px, 0.45fr)
+      minmax(190px, 1.6fr)
+      minmax(84px, 0.65fr)
+      132px;
+    column-gap: 0.7rem;
+    align-items: center;
+    margin: 0.1rem 1rem 0;
+    padding: 0.58rem 0.8rem;
+    text-align: left;
+  }
+
+  .torrent-list-heading > span {
+    min-width: 0;
+    text-align: left;
+  }
+
   .torrent-accordion-list {
-    position: relative;
-    padding-top: 38px !important;
+    position: static;
+    padding-top: 0 !important;
   }
 
   .torrent-accordion-list::before {
-    content: "Nom / taille        Statut        Progression        Détails";
-    position: absolute;
-    top: 0;
-    right: 0;
-    left: 0;
-    height: 38px;
-    display: flex;
-    align-items: center;
-    padding: 0 0.85rem;
-    color: var(--wos-muted-2);
-    border-bottom: 1px solid rgba(157, 220, 184, 0.08);
-    background: rgba(255, 255, 255, 0.018);
-    font-size: 0.64rem;
-    font-weight: 760;
-    letter-spacing: 0.055em;
-    text-transform: uppercase;
-    white-space: pre;
+    display: none !important;
+    content: none !important;
   }
 
   .torrent-accordion-card {
-    grid-template-columns: minmax(0, 1fr) auto !important;
+    grid-template-columns: minmax(0, 1fr) 132px !important;
+    gap: 0.7rem;
   }
 
   .torrent-accordion-summary {
-    grid-template-columns: minmax(260px, 2.2fr) minmax(155px, 0.95fr) minmax(170px, 1.05fr) minmax(84px, 0.55fr) !important;
-  }
-
-  .torrent-details-cue {
-    display: inline-flex !important;
+    align-items: center;
+    min-height: 62px;
   }
 
   .torrent-card-actions {
-    min-width: 214px;
+    width: 132px;
+    min-width: 132px;
     justify-content: flex-end;
+    flex-wrap: nowrap;
+    padding: 0.5rem 0.2rem 0.5rem 0 !important;
   }
 }
 
-@media (max-width: 1180px) and (min-width: 821px) {
-  .torrent-accordion-list::before {
-    content: "Nom / taille        Statut        Progression        Détails";
-  }
+.torrent-summary-heading {
+  display: block !important;
+}
+
+.torrent-summary-heading > strong {
+  display: block !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.torrent-summary-status {
+  display: flex !important;
+  align-items: center;
+}
+
+.torrent-primary-state {
+  justify-content: center;
+  min-height: 27px;
+  padding: 0.27rem 0.58rem;
+  border-radius: 999px;
+  font-size: 0.69rem;
+}
+
+.torrent-primary-state.downloading {
+  color: #83cfff !important;
+  border-color: rgba(79, 175, 237, 0.3) !important;
+  background: rgba(45, 128, 190, 0.16) !important;
+}
+
+.torrent-primary-state.waiting {
+  color: #ffd16d !important;
+  border-color: rgba(246, 189, 70, 0.28) !important;
+  background: rgba(170, 122, 26, 0.15) !important;
+}
+
+.torrent-primary-state.blocked {
+  color: #ff8992 !important;
+  border-color: rgba(239, 80, 92, 0.28) !important;
+  background: rgba(171, 42, 53, 0.15) !important;
+}
+
+.torrent-summary-queue,
+.torrent-summary-size {
+  overflow: hidden;
+  color: var(--wos-muted);
+  font-size: 0.75rem;
+  font-weight: 680;
+  line-height: 1;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.torrent-summary-progress {
+  grid-template-columns: minmax(75px, 1fr) auto !important;
+}
+
+.torrent-summary-progress .torrent-row-progress {
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.torrent-summary-progress .torrent-row-progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.torrent-summary-progress.downloading .torrent-row-progress::-webkit-progress-value { background: #4eaee9; }
+.torrent-summary-progress.ready .torrent-row-progress::-webkit-progress-value { background: #43d581; }
+.torrent-summary-progress.waiting .torrent-row-progress::-webkit-progress-value { background: #efb943; }
+.torrent-summary-progress.blocked .torrent-row-progress::-webkit-progress-value { background: #e85b67; }
+.torrent-summary-progress.downloading .torrent-row-progress::-moz-progress-bar { background: #4eaee9; }
+.torrent-summary-progress.ready .torrent-row-progress::-moz-progress-bar { background: #43d581; }
+.torrent-summary-progress.waiting .torrent-row-progress::-moz-progress-bar { background: #efb943; }
+.torrent-summary-progress.blocked .torrent-row-progress::-moz-progress-bar { background: #e85b67; }
+.torrent-summary-progress.waiting .torrent-row-progress { border-color: rgba(239, 185, 67, 0.2); }
+.torrent-summary-progress.blocked .torrent-row-progress { border-color: rgba(232, 91, 103, 0.2); }
+
+.torrent-card-actions .ui-button {
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  min-height: 38px !important;
+  flex: 0 0 38px !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0 !important;
+  border-radius: 10px !important;
+  transition: border-color 150ms ease, filter 150ms ease, transform 150ms ease;
+}
+
+.torrent-card-actions .torrent-action-download {
+  color: #bff6d3 !important;
+  border-color: rgba(67, 213, 129, 0.28) !important;
+  background: rgba(43, 163, 95, 0.16) !important;
+}
+
+.torrent-card-actions .ui-button-danger {
+  color: #ff8992 !important;
+  border-color: rgba(239, 80, 92, 0.24) !important;
+  background: rgba(171, 42, 53, 0.13) !important;
+}
+
+.torrent-card-actions .ui-button:hover:not(:disabled) {
+  filter: brightness(1.15);
+  transform: scale(1.035);
+}
+
+.torrent-accordion-card > .retention-warning {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 915px) {
+  .feedback-toast-region { top: 5.25rem; }
+
+  .torrent-list-heading { display: none; }
 
   .torrent-accordion-summary {
-    grid-template-columns: minmax(220px, 1.9fr) minmax(140px, 0.9fr) minmax(145px, 1fr) minmax(78px, 0.55fr) !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
   }
 
-  .torrent-card-actions {
-    min-width: 190px;
+  .torrent-summary-heading { grid-column: 1 / -1; }
+  .torrent-summary-status { grid-column: 1; }
+  .torrent-summary-queue { grid-column: 2; grid-row: 2; text-align: right; }
+  .torrent-summary-progress { grid-column: 1 / -1; }
+  .torrent-summary-size { grid-column: 1 / -1; }
+
+  .torrent-card-actions .ui-button { flex: 0 0 38px !important; }
+}
+
+@media (max-width: 680px) {
+  .feedback-toast-region {
+    top: 5.25rem;
+    right: 0.8rem;
+    width: calc(100% - 1.6rem);
   }
 }

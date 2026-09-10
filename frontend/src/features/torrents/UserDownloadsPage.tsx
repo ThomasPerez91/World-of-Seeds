@@ -26,7 +26,7 @@ import {
   QueueIcon,
   RefreshIcon,
 } from "../../components/icons";
-import { Check, Clock3, Download, Search } from "lucide-react";
+import { Check, Clock3, Download, ListTree, Search } from "lucide-react";
 import { Accordion, Badge, Button, Progress, StateMessage } from "../../components/ui";
 import { useI18n, type MessageKey } from "../../i18n";
 import {
@@ -128,18 +128,10 @@ export function summarizeDownloadManager(
 type UploadResultStatus = "queued" | "uploading" | "added" | "duplicate" | "invalid" | "failed";
 
 interface UploadFileResult {
+  error?: string;
   file: File;
   name: string;
   status: UploadResultStatus;
-}
-
-interface UploadBatchState {
-  active: number;
-  completed: number;
-  done: boolean;
-  errors: number;
-  results: UploadFileResult[];
-  total: number;
 }
 
 interface ReadyManifestState {
@@ -162,26 +154,34 @@ type TorrentStatusFilter = "all" | "active" | "ready" | "waiting";
 export function matchesTorrentFilter(torrent: TorrentRequestV2, filter: TorrentStatusFilter): boolean {
   if (filter === "all") return true;
   if (filter === "ready") return torrent.state === "ready";
-  if (filter === "waiting") return torrent.state === "requested" || torrent.queue_status === "waiting";
-  return torrent.state === "active" && torrent.queue_status !== "waiting";
+  if (filter === "waiting") return torrentRowStatus(torrent) === "waiting";
+  return torrentRowStatus(torrent) === "downloading";
 }
 
-const stateLabels: Record<TorrentRequestV2State, MessageKey> = {
-  requested: "downloads.requested",
-  active: "downloads.active",
-  ready: "downloads.ready",
-  cancelled: "downloads.cancelled",
-  expired: "downloads.expired",
-  error: "downloads.error",
-};
+export type TorrentRowStatus = "downloading" | "ready" | "waiting" | "blocked";
 
-const uploadStatusLabels: Record<UploadResultStatus, MessageKey> = {
-  queued: "downloads.batchQueued",
-  uploading: "downloads.batchUploading",
-  added: "downloads.batchAdded",
-  duplicate: "downloads.batchDuplicate",
-  invalid: "downloads.batchInvalid",
-  failed: "downloads.batchFailed",
+export function torrentRowStatus(torrent: TorrentRequestV2): TorrentRowStatus {
+  if (torrent.state === "ready") return "ready";
+  if (["error", "cancelled", "expired"].includes(torrent.state)) return "blocked";
+  if (
+    torrent.state === "requested"
+    || torrent.queue_status === "waiting"
+    || torrent.queue_status === "cooldown"
+  ) return "waiting";
+  return "downloading";
+}
+
+export function torrentQueueLabel(torrent: TorrentRequestV2): string {
+  const status = torrentRowStatus(torrent);
+  if (status === "ready" || status === "blocked" || torrent.queue_position_estimate === null) return "-";
+  return `#${torrent.queue_position_estimate}`;
+}
+
+const rowStatusLabels: Record<TorrentRowStatus, MessageKey> = {
+  downloading: "downloads.statusDownloading",
+  ready: "downloads.statusReady",
+  waiting: "downloads.statusWaiting",
+  blocked: "downloads.statusBlocked",
 };
 
 const transferErrorKeys: Record<RecursiveTransferErrorCode, MessageKey> = {
@@ -197,25 +197,6 @@ const transferErrorKeys: Record<RecursiveTransferErrorCode, MessageKey> = {
   download_interrupted: "downloads.interrupted",
   local_transfer_failed: "downloads.failed",
 };
-
-function TorrentQueueVisibility({ torrent }: { torrent: TorrentRequestV2 }) {
-  const { t } = useI18n();
-  if (torrent.queue_status === null) return null;
-  let label: string;
-  if (torrent.queue_status === "downloading") label = t("downloads.queueDownloading");
-  else if (torrent.queue_status === "stalled") label = t("downloads.queueStalled");
-  else if (torrent.queue_status === "cooldown") label = t("downloads.queueCooldown");
-  else if (torrent.queue_position_estimate === 1) label = t("downloads.queueSoon");
-  else if (torrent.queue_position_estimate !== null) {
-    label = t("downloads.queuePosition", { position: torrent.queue_position_estimate });
-  } else label = t("downloads.queueEstimating");
-  return (
-    <span className={`torrent-queue-status ${torrent.queue_status}`}>
-      <QueueIcon />
-      <span>{label}</span>
-    </span>
-  );
-}
 
 function LocalQueueLabel({ item }: { item: LocalTransferQueueItem }) {
   const { t } = useI18n();
@@ -463,7 +444,8 @@ function TorrentItem({
 }) {
   const { formatBytes, formatDate, t } = useI18n();
   const detailsRef = useRef<HTMLDetailsElement>(null);
-  const percent = Math.round(torrent.progress * 100);
+  const rowStatus = torrentRowStatus(torrent);
+  const percent = rowStatus === "ready" ? 100 : Math.round(torrent.progress * 100);
   const error = torrent.error_code === null
     ? null
     : t(torrent.error_code === "torrent_failed" ? "downloads.needsAttention" : "downloads.stateError");
@@ -479,22 +461,21 @@ function TorrentItem({
             <span className="torrent-accordion-summary">
               <span className="torrent-summary-heading">
                 <strong title={torrent.name}>{torrent.name}</strong>
-                <span>{formatBytes(torrent.total_size)}</span>
               </span>
               <span className="torrent-summary-status">
                 <Badge
-                  tone={torrent.state === "ready" ? "success" : torrent.state === "error" ? "danger" : "neutral"}
-                  className={`torrent-primary-state ${torrent.state}`}
+                  tone={rowStatus === "ready" ? "success" : rowStatus === "blocked" ? "danger" : rowStatus === "waiting" ? "warning" : "neutral"}
+                  className={`torrent-primary-state ${rowStatus}`}
                 >
-                  {t(stateLabels[torrent.state])}
+                  {t(rowStatusLabels[rowStatus])}
                 </Badge>
-                <TorrentQueueVisibility torrent={torrent} />
               </span>
-              <span className="torrent-summary-progress">
-                <Progress label={t("downloads.progressFor", { name: torrent.name })} value={percent} />
+              <span className="torrent-summary-queue">{torrentQueueLabel(torrent)}</span>
+              <span className={`torrent-summary-progress ${rowStatus}`}>
+                <Progress className="torrent-row-progress" label={t("downloads.progressFor", { name: torrent.name })} value={percent} />
                 <strong>{percent} %</strong>
               </span>
-              <span className="torrent-details-cue" aria-hidden="true">{t("downloads.details")}</span>
+              <span className="torrent-summary-size">{formatBytes(torrent.total_size)}</span>
             </span>
           )}
           contentClassName="torrent-accordion-content"
@@ -506,20 +487,34 @@ function TorrentItem({
           {error !== null && <p className="torrent-detail-error" role="alert">{error}</p>}
           {details}
         </Accordion>
-        {torrent.state === "ready" && <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />}
         <div className="torrent-card-actions">
+          <Button
+            type="button"
+            variant="secondary"
+            className="torrent-action-details"
+            aria-label={t("downloads.detailsNamed", { name: torrent.name })}
+            onClick={() => {
+              if (detailsRef.current !== null) detailsRef.current.open = !detailsRef.current.open;
+            }}
+          >
+            <ListTree aria-hidden="true" />
+          </Button>
           {torrent.state === "ready" ? (
-            <Button type="button" disabled={downloadBusy} onClick={() => {
+            <Button
+              type="button"
+              className="torrent-action-download"
+              aria-label={t("common.download")}
+              disabled={downloadBusy}
+              onClick={() => {
               if (detailsRef.current !== null) detailsRef.current.open = true;
               onDownload();
-            }}>
+              }}
+            >
               <DownloadIcon />
-              <span>{t("common.download")}</span>
             </Button>
           ) : (
-            <Button type="button" variant="secondary" onClick={onRefresh}>
+            <Button type="button" variant="secondary" aria-label={t("downloads.refreshNamed", { name: torrent.name })} onClick={onRefresh}>
               <RefreshIcon />
-              <span>{t("common.refresh")}</span>
             </Button>
           )}
           {!(["cancelled", "expired"] as TorrentRequestV2State[]).includes(torrent.state) && (
@@ -531,10 +526,10 @@ function TorrentItem({
               aria-label={t(torrent.state === "ready" ? "downloads.deleteNamed" : "downloads.cancelNamed", { name: torrent.name })}
             >
               <DeleteIcon />
-              <span>{cancelBusy ? t("downloads.cancelling") : t(torrent.state === "ready" ? "common.delete" : "common.cancel")}</span>
             </Button>
           )}
         </div>
+        {torrent.state === "ready" && <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />}
       </article>
     </li>
   );
@@ -554,7 +549,6 @@ export function UserDownloadsPage({
   const [refreshing, setRefreshing] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadBatch, setUploadBatch] = useState<UploadBatchState | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [pageError, setPageError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -793,38 +787,50 @@ export function UserDownloadsPage({
     const seen = new Set<string>();
     const results: UploadFileResult[] = files.map((file) => {
       const fingerprint = `${file.name.toLocaleLowerCase()}\u0000${file.size}\u0000${file.lastModified}`;
-      const invalid = file.size === 0 || !file.name.toLowerCase().endsWith(".torrent");
-      if (invalid) return { file, name: file.name, status: "invalid" };
+      if (!file.name.toLowerCase().endsWith(".torrent")) {
+        return { file, name: file.name, status: "invalid", error: t("downloads.invalidFile") };
+      }
+      if (file.size === 0) {
+        return { file, name: file.name, status: "invalid", error: t("downloads.emptyTorrent") };
+      }
       if (seen.has(fingerprint)) return { file, name: file.name, status: "duplicate" };
       seen.add(fingerprint);
       return { file, name: file.name, status: "queued" };
     });
     const queuedIndexes = results.flatMap((result, index) => result.status === "queued" ? [index] : []);
-    const initiallyCompleted = results.length - queuedIndexes.length;
     let nextIndex = 0;
-    let pressureWarning = false;
     let sessionExpired = false;
 
     setUploading(true);
-    setUploadBatch({
-      active: 0,
-      completed: initiallyCompleted,
-      done: queuedIndexes.length === 0,
-      errors: results.filter((result) => result.status === "invalid").length,
-      results: [...results],
-      total: results.length,
-    });
     if (inputRef.current !== null) inputRef.current.value = "";
 
-    const updateResult = (index: number, status: UploadResultStatus) => {
-      results[index] = { ...results[index], status };
-      setUploadBatch((current) => current === null ? null : {
-        ...current,
-        active: current.active - (status === "uploading" ? -1 : 1),
-        completed: current.completed + (status === "uploading" ? 0 : 1),
-        errors: current.errors + (status === "invalid" || status === "failed" ? 1 : 0),
-        results: [...results],
-      });
+    const notifyResult = (result: UploadFileResult) => {
+      if (result.status === "added") {
+        feedback.toast({ tone: "success", title: t("downloads.uploadSuccessTitle"), message: result.name });
+      } else if (result.status === "duplicate") {
+        feedback.toast({ tone: "warning", title: t("downloads.uploadDuplicateTitle"), message: result.name });
+      } else if (result.status === "invalid") {
+        feedback.toast({
+          tone: "error",
+          title: t("downloads.uploadErrorTitle"),
+          message: `${result.name}\n${result.error ?? t("downloads.invalidFile")}`,
+        });
+      } else if (result.status === "failed") {
+        feedback.toast({
+          tone: "error",
+          title: t("downloads.uploadErrorTitle"),
+          message: `${result.name}\n${result.error ?? t("downloads.uploadRetry")}`,
+        });
+      }
+    };
+
+    for (const result of results) {
+      if (result.status === "invalid" || result.status === "duplicate") notifyResult(result);
+    }
+
+    const updateResult = (index: number, status: UploadResultStatus, error?: string) => {
+      results[index] = { ...results[index], status, error };
+      if (status !== "uploading") notifyResult(results[index]);
     };
 
     const worker = async () => {
@@ -837,18 +843,25 @@ export function UserDownloadsPage({
         updateResult(resultIndex, "uploading");
         try {
           const created = await api.createTorrentRequestV2(file);
-          if (created.storage_pressure !== "normal") pressureWarning = true;
           updateResult(resultIndex, created.created ? "added" : "duplicate");
+          if (created.storage_pressure !== "normal") {
+            feedback.toast({
+              tone: "warning",
+              title: t("downloads.storagePressureTitle"),
+              message: `${file.name}\n${t("downloads.storagePressureWarning")}`,
+            });
+          }
         } catch (caught) {
           if (caught instanceof ApiError && caught.status === 401) {
             sessionExpired = true;
-            updateResult(resultIndex, "failed");
+            updateResult(resultIndex, "failed", apiError(caught, "downloads.uploadFailed"));
             onSessionExpired();
             return;
           }
           updateResult(
             resultIndex,
             caught instanceof ApiError && (caught.status === 413 || caught.status === 422) ? "invalid" : "failed",
+            apiError(caught, "downloads.uploadFailed"),
           );
         }
       }
@@ -859,20 +872,7 @@ export function UserDownloadsPage({
       () => worker(),
     ));
     setUploading(false);
-    setUploadBatch((current) => current === null ? null : { ...current, active: 0, done: true });
-
-    const counts = {
-      added: results.filter((result) => result.status === "added").length,
-      duplicate: results.filter((result) => result.status === "duplicate").length,
-      invalid: results.filter((result) => result.status === "invalid").length,
-      failed: results.filter((result) => result.status === "failed").length,
-    };
     if (!sessionExpired) {
-      feedback.toast({
-        tone: counts.failed > 0 || counts.invalid > 0 || pressureWarning ? "warning" : "success",
-        title: t("downloads.batchComplete"),
-        message: t("downloads.batchSummary", counts),
-      });
       setOffset(0);
       await load(0);
     }
@@ -1072,38 +1072,6 @@ export function UserDownloadsPage({
         </div>
       </div>
 
-      {uploadBatch !== null && (
-        <section className="torrent-upload-batch" aria-labelledby="torrent-batch-title" aria-busy={!uploadBatch.done}>
-          <header>
-            <div>
-              <strong id="torrent-batch-title">{t("downloads.batchTitle")}</strong>
-              <span aria-live="polite">
-                {t("downloads.batchProgress", {
-                  active: uploadBatch.active,
-                  completed: uploadBatch.completed,
-                  errors: uploadBatch.errors,
-                  total: uploadBatch.total,
-                })}
-              </span>
-            </div>
-            {uploadBatch.done && (
-              <button type="button" className="secondary-button compact-button" onClick={() => setUploadBatch(null)}>
-                {t("common.close")}
-              </button>
-            )}
-          </header>
-          <progress value={uploadBatch.completed} max={uploadBatch.total} aria-label={t("downloads.batchTitle")} />
-          <ul>
-            {uploadBatch.results.map((result, index) => (
-              <li key={`${result.name}-${result.file.lastModified}-${index}`}>
-                <span title={result.name}>{result.name}</span>
-                <strong className={`batch-result ${result.status}`}>{t(uploadStatusLabels[result.status])}</strong>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       {managerSnapshot.jobs.length > 0 && (
         <aside className="torrent-queue-summary local-download-manager-summary" aria-live="polite">
           <QueueIcon />
@@ -1137,6 +1105,14 @@ export function UserDownloadsPage({
               </div>
             </aside>
           )}
+          <div className="torrent-list-heading" aria-hidden="true">
+            <span>{t("downloads.name")}</span>
+            <span>{t("downloads.status")}</span>
+            <span>{t("downloads.queue")}</span>
+            <span>{t("downloads.progress")}</span>
+            <span>{t("downloads.size")}</span>
+            <span />
+          </div>
           <ul className="torrent-accordion-list" aria-label={t("downloads.requests")} aria-busy={refreshing}>
             {visibleTorrents.map((torrent) => {
               const manifest = readyManifests[torrent.id];

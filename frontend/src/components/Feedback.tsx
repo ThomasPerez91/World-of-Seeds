@@ -30,7 +30,7 @@ interface FeedbackApi {
 const FeedbackContext = createContext<FeedbackApi | null>(null);
 
 function ToastItem({ item, onDismiss }: { item: Toast; onDismiss: () => void }) {
-  const duration = item.tone === "error" ? 12_000 : item.tone === "progress" ? 15_000 : 7_000;
+  const duration = item.tone === "progress" ? 15_000 : item.tone === "error" ? 6_000 : 5_000;
   const remaining = useRef(duration);
   const startedAt = useRef(0);
   const dismissRef = useRef(onDismiss);
@@ -80,7 +80,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
 
   const toast = useCallback((options: ToastOptions) => {
     const id = ++sequence.current;
-    setToasts((current) => [...current.slice(-4), { ...options, id }]);
+    setToasts((current) => [...current, { ...options, id }]);
   }, []);
 
   const api = useMemo(() => ({ toast }), [toast]);
