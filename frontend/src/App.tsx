@@ -134,14 +134,14 @@ function LoginScreen({
   return (
     <main className="login-page">
       <header className="login-header" aria-label="World of Seeds">
-        <img src="/title.webp" alt="World of Seeds" />
+        <img src="/title.webp?rev=a9c84cc" alt="World of Seeds" />
       </header>
       <p className="login-slogan" aria-hidden="true">
         VOS FICHIERS.<br />VOTRE LIBERTÉ.<br />PARTOUT.
       </p>
 
       <section className="login-card" aria-labelledby="login-title">
-        <img className="login-title-image" src="/title.webp" alt="" aria-hidden="true" />
+        <img className="login-title-image" src="/title.webp?rev=a9c84cc" alt="" aria-hidden="true" />
         <h1 className="visually-hidden">World of Seeds</h1>
         <p className="brand-copy">{t("login.tagline")}</p>
         <ServiceHealth />
