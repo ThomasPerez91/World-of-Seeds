@@ -8,6 +8,7 @@ import { I18nProvider, type Locale } from "../../i18n";
 import {
   MAX_TORRENT_BATCH_FILES,
   TORRENT_UPLOAD_CONCURRENCY,
+  matchesTorrentFilter,
   torrentQueueLabel,
   torrentRowStatus,
   UserDownloadsPage,
@@ -101,6 +102,8 @@ describe("UserDownloadsPage", () => {
     expect(torrentQueueLabel(request({ state: "requested", queue_position_estimate: 3 }))).toBe("#3");
     expect(torrentQueueLabel(request({ state: "ready", queue_position_estimate: 3 }))).toBe("-");
     expect(torrentQueueLabel(request({ state: "active", queue_position_estimate: null }))).toBe("-");
+    expect(matchesTorrentFilter(request({ state: "active", queue_status: "cooldown" }), "waiting")).toBe(true);
+    expect(matchesTorrentFilter(request({ state: "active", queue_status: "cooldown" }), "active")).toBe(false);
   });
 
   it("rend les six colonnes et les actions principales sous forme d’icônes accessibles", async () => {
@@ -1532,6 +1535,7 @@ describe("UserDownloadsPage", () => {
     await waitFor(() => expect(screen.getAllByText("Torrent ajouté")).toHaveLength(2));
     expect(screen.getByText("Torrent déjà présent")).toBeTruthy();
     expect(screen.getAllByText("Échec de l’ajout")).toHaveLength(3);
+    expect(screen.getByText(/empty\.torrent.*Le fichier \.torrent est vide\./s)).toBeTruthy();
     expect(view.container.querySelector(".torrent-upload-batch")).toBeNull();
     const postCalls = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
     expect(postCalls).toHaveLength(3);
@@ -1583,6 +1587,7 @@ describe("UserDownloadsPage", () => {
     await waitFor(() => expect(screen.getAllByText("Torrent ajouté")).toHaveLength(2));
     expect(successful).toEqual(["ok-before.torrent", "ok-after.torrent"]);
     expect(screen.getAllByText("Échec de l’ajout")).toHaveLength(6);
+    expect(screen.getByText("Stockage sous pression")).toBeTruthy();
   });
 
   it("désactive les entrées pendant un envoi lent et réutilise picker puis drop", async () => {

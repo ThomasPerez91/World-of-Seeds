@@ -154,8 +154,8 @@ type TorrentStatusFilter = "all" | "active" | "ready" | "waiting";
 export function matchesTorrentFilter(torrent: TorrentRequestV2, filter: TorrentStatusFilter): boolean {
   if (filter === "all") return true;
   if (filter === "ready") return torrent.state === "ready";
-  if (filter === "waiting") return torrent.state === "requested" || torrent.queue_status === "waiting";
-  return torrent.state === "active" && torrent.queue_status !== "waiting";
+  if (filter === "waiting") return torrentRowStatus(torrent) === "waiting";
+  return torrentRowStatus(torrent) === "downloading";
 }
 
 export type TorrentRowStatus = "downloading" | "ready" | "waiting" | "blocked";
@@ -787,8 +787,12 @@ export function UserDownloadsPage({
     const seen = new Set<string>();
     const results: UploadFileResult[] = files.map((file) => {
       const fingerprint = `${file.name.toLocaleLowerCase()}\u0000${file.size}\u0000${file.lastModified}`;
-      const invalid = file.size === 0 || !file.name.toLowerCase().endsWith(".torrent");
-      if (invalid) return { file, name: file.name, status: "invalid" };
+      if (!file.name.toLowerCase().endsWith(".torrent")) {
+        return { file, name: file.name, status: "invalid", error: t("downloads.invalidFile") };
+      }
+      if (file.size === 0) {
+        return { file, name: file.name, status: "invalid", error: t("downloads.emptyTorrent") };
+      }
       if (seen.has(fingerprint)) return { file, name: file.name, status: "duplicate" };
       seen.add(fingerprint);
       return { file, name: file.name, status: "queued" };
@@ -840,6 +844,13 @@ export function UserDownloadsPage({
         try {
           const created = await api.createTorrentRequestV2(file);
           updateResult(resultIndex, created.created ? "added" : "duplicate");
+          if (created.storage_pressure !== "normal") {
+            feedback.toast({
+              tone: "warning",
+              title: t("downloads.storagePressureTitle"),
+              message: `${file.name}\n${t("downloads.storagePressureWarning")}`,
+            });
+          }
         } catch (caught) {
           if (caught instanceof ApiError && caught.status === 401) {
             sessionExpired = true;
