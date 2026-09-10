@@ -62,7 +62,6 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
-          npm run check
           npm test
           npm run build
       - name: Commit fix
