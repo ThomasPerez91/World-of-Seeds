@@ -28,6 +28,7 @@ from app.core.database import engine, session_factory
 from app.integrations.account_routing import (
     DeploymentAccountSpec,
     build_deployment_account_router,
+    c411_tracker_account_ref,
     parse_deployment_account_specs,
 )
 from app.integrations.qbittorrent_v2 import QBittorrentV2Gateway, QBittorrentV2ManagedIdentity
@@ -288,11 +289,9 @@ async def _insert_campaign(
         request_count = 0
         for fixture in fixtures:
             spec = specs[fixture.route_index]
-            state = (
-                ManagedTorrentState.READY
-                if fixture.kind == "ready"
-                else ManagedTorrentState.PAUSED
-            )
+            state = ManagedTorrentState.PAUSED
+            if fixture.kind == "ready":
+                state = ManagedTorrentState.READY
             torrent = ManagedTorrent(
                 info_hash=fixture.info_hash,
                 storage_key=fixture.storage_key,
@@ -301,7 +300,7 @@ async def _insert_campaign(
                 state=state,
                 qb_state="pausedDL",
                 progress=1.0 if fixture.kind == "ready" else 0.0,
-                tracker_account_ref=spec.tracker_account_ref,
+                tracker_account_ref=c411_tracker_account_ref(1),
                 qbittorrent_account_ref=spec.qbittorrent_account_ref,
                 scheduler_retry_at=(
                     now + timedelta(hours=2) if fixture.kind == "cooldown" else None

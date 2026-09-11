@@ -290,7 +290,7 @@ export interface OptionField {
   key: string;
   label: string;
   description: string;
-  input_type: "boolean" | "integer" | "select";
+  input_type: "boolean" | "integer" | "select" | "text" | "secret";
   value: OptionValue;
   default: OptionValue;
   unit: string | null;

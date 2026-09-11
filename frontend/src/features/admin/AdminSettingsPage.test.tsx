@@ -72,7 +72,7 @@ function response(body: unknown, status = 200): Response {
 
 describe("AdminSettingsPage", () => {
   it("possède une traduction anglaise stable pour chaque option V2", () => {
-    expect(translatedOptionKeys.size).toBe(36);
+    expect(translatedOptionKeys.size).toBe(68);
     expect(translatedOptionKeys.has("WOS_ADMIN_REFRESH_INTERVAL_SECONDS")).toBe(true);
     expect(translatedNewGreedyFieldIds.size).toBe(44);
     expect(translatedNewGreedyFieldIds.has("advanced.inject_hours")).toBe(true);
@@ -123,6 +123,80 @@ describe("AdminSettingsPage", () => {
     expect(await screen.findAllByText("Cette limite est incompatible avec la capacité globale.")).toHaveLength(2);
     expect(input.getAttribute("aria-invalid")).toBe("true");
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
+  it("affiche et modifie une passkey C411 comme un champ secret", async () => {
+    const c411Options = {
+      ...options,
+      sections: [
+        {
+          id: "c411_accounts",
+          label: "Comptes C411",
+          fields: [
+            {
+              ...options.sections[0].fields[0],
+              key: "WOS_C411_ACCOUNT_01_NUMBER",
+              label: "Compte C411 1 — numéro",
+              description: "Numéro du compte C411.",
+              input_type: "text",
+              value: "1001",
+              default: "",
+              unit: null,
+              minimum: null,
+              maximum: null,
+            },
+            {
+              ...options.sections[0].fields[0],
+              key: "WOS_C411_ACCOUNT_01_PASSKEY",
+              label: "Compte C411 1 — passkey",
+              description: "Passkey C411.",
+              input_type: "secret",
+              value: "initial-passkey-123",
+              default: "",
+              unit: null,
+              minimum: null,
+              maximum: null,
+            },
+          ],
+        },
+      ],
+    } as const;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        if (String(input) === "/api/v2/admin/overview") return response(c411Options);
+        if (String(input) === "/api/v2/admin/options" && init?.method === "PATCH") {
+          return response(c411Options);
+        }
+        throw new Error(`Requête inattendue : ${init?.method ?? "GET"} ${String(input)}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(
+      <FeedbackProvider>
+        <AdminSettingsPage
+          onBack={vi.fn()}
+          onNavigate={vi.fn()}
+          onSessionExpired={vi.fn()}
+        />
+      </FeedbackProvider>,
+    );
+
+    const passkey = await screen.findByLabelText("Compte C411 1 — passkey");
+    expect(passkey.getAttribute("type")).toBe("password");
+    await user.clear(passkey);
+    await user.type(passkey, "replacement-passkey-456");
+    await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v2/admin/options",
+      expect.objectContaining({
+        body: JSON.stringify({
+          changes: { WOS_C411_ACCOUNT_01_PASSKEY: "replacement-passkey-456" },
+        }),
+        method: "PATCH",
+      }),
+    );
   });
 
   it("confirme le redémarrage puis attend le retour du service", async () => {

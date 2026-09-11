@@ -413,7 +413,7 @@ export function AdminSettingsPage({
                                     <option value={choice} key={choice}>{choice}</option>
                                   ))}
                                 </select>
-                              ) : (
+                              ) : field.input_type === "integer" ? (
                                 <div className="option-number-control">
                                   <input
                                     id={inputId}
@@ -431,6 +431,19 @@ export function AdminSettingsPage({
                                     <span>{unitLabels[field.unit] === undefined ? field.unit : t(unitLabels[field.unit])}</span>
                                   )}
                                 </div>
+                              ) : (
+                                <input
+                                  id={inputId}
+                                  type={field.input_type === "secret" ? "password" : "text"}
+                                  value={String(draft[field.key])}
+                                  maxLength={field.input_type === "secret" ? 256 : 64}
+                                  inputMode={field.input_type === "text" ? "numeric" : undefined}
+                                  autoComplete="off"
+                                  disabled={!field.editable || saving}
+                                  aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
+                                  aria-invalid={error !== undefined}
+                                  onChange={(event) => updateDraft(field.key, event.target.value)}
+                                />
                               )}
                               {error !== undefined && (
                                 <p id={errorId} className="option-error">{error}</p>

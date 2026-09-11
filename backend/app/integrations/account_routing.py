@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.integrations.c411_v2 import C411NewGreedyV2Gateway, NewGreedyV2Gateway
 from app.integrations.qbittorrent_v2 import (
     MAX_CONTROL_TORRENTS,
+    QBittorrentV2AddResult,
     QBittorrentV2ControlResult,
     QBittorrentV2DesiredControl,
     QBittorrentV2Gateway,
@@ -25,16 +27,25 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2TorrentSnapshot,
 )
 from app.models import ManagedTorrent
+from app.options import PostgresOptionsRegistry
+from app.options.registry import MAX_C411_ACCOUNTS
 from app.torrents import assign_managed_torrent_account_refs
 
 MAX_DEPLOYMENT_ACCOUNT_ROUTES = 16
 MAX_DEPLOYMENT_ACCOUNT_JSON_BYTES = 64 * 1024
 _QBITTORRENT_SERVICE = re.compile(r"^qbittorrent(?:-[a-z0-9]+)*$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
+_C411_ACCOUNT_NAMESPACE = uuid.UUID("f62d1a24-95dc-47bb-b585-9abfa93e3654")
 
 
 class AccountRoutingError(RuntimeError):
     """A secret-safe deployment account routing failure."""
+
+
+def c411_tracker_account_ref(slot: int) -> uuid.UUID:
+    if not 1 <= slot <= MAX_C411_ACCOUNTS:
+        raise ValueError("C411 account slot is invalid")
+    return uuid.uuid5(_C411_ACCOUNT_NAMESPACE, f"slot:{slot}")
 
 
 class _TorrentAdder(Protocol):
@@ -61,12 +72,24 @@ class _TorrentInspector(Protocol):
     ) -> QBittorrentV2ControlResult: ...
 
 
+class _SharedQBittorrent(_TorrentInspector, Protocol):
+    async def add_managed_torrent(
+        self,
+        content: bytes,
+        *,
+        expected_info_hash: str,
+        storage_key: uuid.UUID,
+    ) -> QBittorrentV2AddResult: ...
+
+
+class _NewGreedyReadiness(Protocol):
+    async def require_ready(self) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class DeploymentAccountSpec:
-    tracker_account_ref: uuid.UUID
     qbittorrent_account_ref: uuid.UUID
     newgreedy_url: str
-    c411_passkey: SecretStr
     qbittorrent_url: str
     qbittorrent_username: str
     qbittorrent_password: SecretStr
@@ -80,14 +103,28 @@ class TorrentEffectRoute:
     inspector: _TorrentInspector
 
 
+@dataclass(frozen=True, slots=True)
+class SharedIntegrationRoute:
+    qbittorrent_account_ref: uuid.UUID
+    qbittorrent: _SharedQBittorrent
+    newgreedy: _NewGreedyReadiness
+    allowed_tracker_hosts: tuple[str, ...]
+    max_total_size: int
+
+
 class DeploymentAccountRouter:
     """Resolve immutable SQL references to deployment-only integration clients."""
 
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
-        routes: Sequence[TorrentEffectRoute],
+        routes: Sequence[TorrentEffectRoute] = (),
+        *,
+        shared_integration: SharedIntegrationRoute | None = None,
+        random_index: Callable[[int], int] = secrets.randbelow,
     ) -> None:
+        if bool(routes) == (shared_integration is not None):
+            raise AccountRoutingError("deployment_account_route_count_invalid")
         ordered = tuple(
             sorted(
                 routes,
@@ -97,7 +134,7 @@ class DeploymentAccountRouter:
                 ),
             )
         )
-        if not 1 <= len(ordered) <= MAX_DEPLOYMENT_ACCOUNT_ROUTES:
+        if shared_integration is None and not 1 <= len(ordered) <= MAX_DEPLOYMENT_ACCOUNT_ROUTES:
             raise AccountRoutingError("deployment_account_route_count_invalid")
         tracker_refs = [route.tracker_account_ref for route in ordered]
         qb_refs = [route.qbittorrent_account_ref for route in ordered]
@@ -109,6 +146,15 @@ class DeploymentAccountRouter:
             raise AccountRoutingError("deployment_account_reference_invalid")
         self._session_factory = session_factory
         self._ordered = ordered
+        self._shared = shared_integration
+        self._random_index = random_index
+        self._qb_by_ref: dict[uuid.UUID, _TorrentInspector]
+        if shared_integration is not None:
+            self._qb_by_ref = {
+                shared_integration.qbittorrent_account_ref: shared_integration.qbittorrent
+            }
+            self._by_pair: dict[tuple[uuid.UUID, uuid.UUID], TorrentEffectRoute] = {}
+            return
         self._by_pair = {
             (route.tracker_account_ref, route.qbittorrent_account_ref): route for route in ordered
         }
@@ -129,12 +175,15 @@ class DeploymentAccountRouter:
             )
             if torrent is None or torrent.info_hash != info_hash:
                 raise AccountRoutingError("managed_torrent_route_invalid")
+            routes = await self._routes_for_session(session)
             tracker_ref = torrent.tracker_account_ref
             qb_ref = torrent.qbittorrent_account_ref
             if (tracker_ref is None) != (qb_ref is None):
                 raise AccountRoutingError("managed_torrent_route_incomplete")
             if tracker_ref is None or qb_ref is None:
-                route = self._ordered[int(info_hash, 16) % len(self._ordered)]
+                if not routes:
+                    raise AccountRoutingError("c411_account_unconfigured")
+                route = routes[self._random_index(len(routes))]
                 await assign_managed_torrent_account_refs(
                     session,
                     torrent.id,
@@ -142,10 +191,41 @@ class DeploymentAccountRouter:
                     qbittorrent_account_ref=route.qbittorrent_account_ref,
                 )
                 return route
-            assigned_route = self._by_pair.get((tracker_ref, qb_ref))
+            assigned_route = {
+                (route.tracker_account_ref, route.qbittorrent_account_ref): route
+                for route in routes
+            }.get((tracker_ref, qb_ref))
             if assigned_route is None:
                 raise AccountRoutingError("managed_torrent_route_unavailable")
             return assigned_route
+
+    async def _routes_for_session(self, session: AsyncSession) -> tuple[TorrentEffectRoute, ...]:
+        if self._shared is None:
+            return self._ordered
+        values = await PostgresOptionsRegistry().snapshot(session)
+        routes: list[TorrentEffectRoute] = []
+        for slot in range(1, MAX_C411_ACCOUNTS + 1):
+            number = values[f"WOS_C411_ACCOUNT_{slot:02d}_NUMBER"]
+            passkey = values[f"WOS_C411_ACCOUNT_{slot:02d}_PASSKEY"]
+            if not isinstance(number, str) or not isinstance(passkey, str):
+                raise AccountRoutingError("c411_account_config_invalid")
+            if not number:
+                continue
+            routes.append(
+                TorrentEffectRoute(
+                    tracker_account_ref=c411_tracker_account_ref(slot),
+                    qbittorrent_account_ref=self._shared.qbittorrent_account_ref,
+                    adder=C411NewGreedyV2Gateway(
+                        self._shared.qbittorrent,
+                        self._shared.newgreedy,
+                        passkey=SecretStr(passkey),
+                        allowed_tracker_hosts=self._shared.allowed_tracker_hosts,
+                        max_total_size=self._shared.max_total_size,
+                    ),
+                    inspector=self._shared.qbittorrent,
+                )
+            )
+        return tuple(routes)
 
     async def apply_managed_controls(
         self,
@@ -213,19 +293,20 @@ def parse_deployment_account_specs(secret: SecretStr) -> tuple[DeploymentAccount
 
     specs: list[DeploymentAccountSpec] = []
     expected_keys = {
-        "tracker_account_ref",
         "qbittorrent_account_ref",
         "newgreedy_url",
-        "c411_passkey",
         "qbittorrent_url",
         "qbittorrent_username",
         "qbittorrent_password",
     }
+    legacy_keys = {*expected_keys, "tracker_account_ref", "c411_passkey"}
     try:
         for value in routes:
-            if not isinstance(value, dict) or set(value) != expected_keys:
+            if not isinstance(value, dict) or frozenset(value) not in {
+                frozenset(expected_keys),
+                frozenset(legacy_keys),
+            }:
                 raise ValueError
-            tracker_ref = uuid.UUID(_required_string(value, "tracker_account_ref", 36))
             qb_ref = uuid.UUID(_required_string(value, "qbittorrent_account_ref", 36))
             newgreedy_url = _internal_origin(
                 _required_string(value, "newgreedy_url", 512),
@@ -235,17 +316,14 @@ def parse_deployment_account_specs(secret: SecretStr) -> tuple[DeploymentAccount
                 _required_string(value, "qbittorrent_url", 512),
                 service="qbittorrent",
             )
-            passkey = _required_string(value, "c411_passkey", 256)
             username = _required_string(value, "qbittorrent_username", 128)
             password = _required_string(value, "qbittorrent_password", 1024)
-            if tracker_ref.int == 0 or qb_ref.int == 0 or not 8 <= len(passkey) <= 256:
+            if qb_ref.int == 0:
                 raise ValueError
             specs.append(
                 DeploymentAccountSpec(
-                    tracker_ref,
                     qb_ref,
                     newgreedy_url,
-                    SecretStr(passkey),
                     qbittorrent_url,
                     username,
                     SecretStr(password),
@@ -265,30 +343,27 @@ def build_deployment_account_router(
     data_root: Path,
     max_total_size: int,
 ) -> DeploymentAccountRouter:
-    routes: list[TorrentEffectRoute] = []
-    for spec in parse_deployment_account_specs(secret):
-        qbittorrent = QBittorrentV2Gateway(
-            client,
-            spec.qbittorrent_url,
-            spec.qbittorrent_username,
-            spec.qbittorrent_password.get_secret_value(),
-            data_root=data_root,
-        )
-        routes.append(
-            TorrentEffectRoute(
-                tracker_account_ref=spec.tracker_account_ref,
-                qbittorrent_account_ref=spec.qbittorrent_account_ref,
-                adder=C411NewGreedyV2Gateway(
-                    qbittorrent,
-                    NewGreedyV2Gateway(client, spec.newgreedy_url),
-                    passkey=spec.c411_passkey,
-                    allowed_tracker_hosts=allowed_tracker_hosts,
-                    max_total_size=max_total_size,
-                ),
-                inspector=qbittorrent,
-            )
-        )
-    return DeploymentAccountRouter(session_factory, routes)
+    specs = parse_deployment_account_specs(secret)
+    if len(specs) != 1:
+        raise AccountRoutingError("deployment_shared_integration_required")
+    primary = specs[0]
+    qbittorrent = QBittorrentV2Gateway(
+        client,
+        primary.qbittorrent_url,
+        primary.qbittorrent_username,
+        primary.qbittorrent_password.get_secret_value(),
+        data_root=data_root,
+    )
+    return DeploymentAccountRouter(
+        session_factory,
+        shared_integration=SharedIntegrationRoute(
+            qbittorrent_account_ref=primary.qbittorrent_account_ref,
+            qbittorrent=qbittorrent,
+            newgreedy=NewGreedyV2Gateway(client, primary.newgreedy_url),
+            allowed_tracker_hosts=tuple(allowed_tracker_hosts),
+            max_total_size=max_total_size,
+        ),
+    )
 
 
 def _required_string(value: dict[object, object], key: str, maximum: int) -> str:

@@ -41,7 +41,7 @@ Checks requis :
 | Phase | Statut | Résultat |
 | --- | --- | --- |
 | V2-00 à V2-06 | TERMINE | Architecture, CI/versioning, Compose local, schéma partagé, jobs durables, Redis tolérant aux pannes et options PostgreSQL. |
-| V2-07 à V2-13C | TERMINE | Déduplication, workers, gateway qB, C411/NewGreedy, activité tracker, scheduler équitable, contrôles qB et routage multi-comptes. |
+| V2-07 à V2-13C | TERMINE | Déduplication, workers, gateway qB unique, C411/NewGreedy, activité tracker, scheduler équitable, contrôles qB et sélection multi-passkeys administrable. |
 | V2-14 à V2-18A | TERMINE | Stockage partagé, quotas, manifestes, API torrent, UI téléchargements et smoke local reproductible. |
 | V2-19 à V2-28 | TERMINE | HTTP Range, transferts récursifs, fallback ZIP, lifecycle, UX responsive, admin, réconciliation, métriques et observabilité. |
 | V2-28A à V2-28H | TERMINE | Autorité scheduler, anti-stall, backlog partagé, WebSocket, transferts scalables, optimisation SQL/métriques, hardening runtime et portabilité monitoring. |
