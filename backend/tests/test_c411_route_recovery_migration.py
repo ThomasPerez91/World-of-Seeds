@@ -16,6 +16,7 @@ ADD_RECOVERED = UUID("10000000-0000-0000-0000-000000000001")
 SYNC_RECOVERED = UUID("10000000-0000-0000-0000-000000000002")
 STALE_FAILURE = UUID("10000000-0000-0000-0000-000000000003")
 ACTIVE_EXISTS = UUID("10000000-0000-0000-0000-000000000004")
+PURGE_RECOVERED = UUID("10000000-0000-0000-0000-000000000005")
 
 
 def migrate(connection: Connection) -> None:
@@ -65,13 +66,15 @@ async def test_route_recovery_requeues_only_current_routing_failures() -> None:
                         "(:add, 'ERROR', now(), now()), "
                         "(:sync, 'ERROR', now(), now()), "
                         "(:stale, 'ERROR', now(), now()), "
-                        "(:active, 'ERROR', now(), now())"
+                        "(:active, 'ERROR', now(), now()), "
+                        "(:purge, 'PURGING', now(), now())"
                     ),
                     {
                         "add": ADD_RECOVERED,
                         "sync": SYNC_RECOVERED,
                         "stale": STALE_FAILURE,
                         "active": ACTIVE_EXISTS,
+                        "purge": PURGE_RECOVERED,
                     },
                 )
 
@@ -83,6 +86,7 @@ async def test_route_recovery_requeues_only_current_routing_failures() -> None:
                     (uuid4(), STALE_FAILURE, "ADD_TORRENT", "FAILED", "payload_invalid", 2),
                     (uuid4(), ACTIVE_EXISTS, "SYNC_TORRENT", "FAILED", route_error, 1),
                     (uuid4(), ACTIVE_EXISTS, "SYNC_TORRENT", "QUEUED", None, 2),
+                    (uuid4(), PURGE_RECOVERED, "PURGE_TORRENT", "FAILED", route_error, 1),
                 ]
                 for job_id, torrent_id, job_type, state, error_code, minute in jobs:
                     await connection.execute(
@@ -119,6 +123,7 @@ async def test_route_recovery_requeues_only_current_routing_failures() -> None:
                     SYNC_RECOVERED: "ERROR",
                     STALE_FAILURE: "ERROR",
                     ACTIVE_EXISTS: "ERROR",
+                    PURGE_RECOVERED: "PURGING",
                 }
                 recovered_jobs = set(
                     await connection.execute(
@@ -132,6 +137,7 @@ async def test_route_recovery_requeues_only_current_routing_failures() -> None:
                 assert {tuple(row) for row in recovered_jobs} == {
                     (ADD_RECOVERED, "ADD_TORRENT"),
                     (SYNC_RECOVERED, "SYNC_TORRENT"),
+                    (PURGE_RECOVERED, "PURGE_TORRENT"),
                 }
                 assert (
                     await connection.scalar(

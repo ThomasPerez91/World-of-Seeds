@@ -45,7 +45,8 @@ def upgrade() -> None:
     )
 
     # Requeue only the newest failed job of each type. This avoids violating the partial unique
-    # index for active SYNC jobs if several historical failures exist for one torrent.
+    # index for active SYNC jobs if several historical failures exist for one torrent. PURGE jobs
+    # are replay-safe from PURGING and must resume so they do not strand qB/content data.
     op.execute(
         sa.text(
             "WITH ranked AS ("
@@ -56,8 +57,9 @@ def upgrade() -> None:
             ") AS position "
             "FROM torrent_jobs AS job "
             "JOIN managed_torrents AS torrent ON torrent.id = job.managed_torrent_id "
-            "WHERE torrent.state IN ('PENDING', 'ERROR') "
-            "AND job.job_type IN ('ADD_TORRENT', 'SYNC_TORRENT') "
+            "WHERE ((torrent.state IN ('PENDING', 'ERROR') "
+            "AND job.job_type IN ('ADD_TORRENT', 'SYNC_TORRENT')) "
+            "OR (torrent.state = 'PURGING' AND job.job_type = 'PURGE_TORRENT')) "
             "AND job.state = 'FAILED'"
             "), recoverable AS ("
             "SELECT ranked.id FROM ranked "
