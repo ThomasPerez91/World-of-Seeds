@@ -26,8 +26,8 @@ import {
   QueueIcon,
   RefreshIcon,
 } from "../../components/icons";
-import { Check, Clock3, Download, ListTree, Search } from "lucide-react";
-import { Accordion, Badge, Button, Progress, StateMessage } from "../../components/ui";
+import { Archive, Check, Clock3, Download, ListTree, Search } from "lucide-react";
+import { Badge, Button, Progress, StateMessage, Tooltip } from "../../components/ui";
 import { useI18n, type MessageKey } from "../../i18n";
 import {
   BrowserDownloadManager,
@@ -48,8 +48,7 @@ import {
 } from "./recursiveDownload";
 import { RetentionWarning } from "./RetentionWarning";
 
-const PAGE_SIZE = 10;
-const FETCH_PAGE_SIZE = 100;
+export const PAGE_SIZE = 25;
 const AUTO_REFRESH_MS = 4_000;
 const FALLBACK_PAGE_SIZE = 50;
 export const MAX_TORRENT_BATCH_FILES = 50;
@@ -359,7 +358,7 @@ function ReadyTorrentContent({
                 href={api.torrentArchiveDownloadUrlV2(torrent.id, snapshot.snapshot_id)}
                 download={`${torrent.name}.zip`}
               >
-                <DownloadIcon /> {t("downloads.archive")}
+                <Archive aria-hidden="true" /> {t("downloads.archive")}
               </a>
             )}
           </header>
@@ -375,25 +374,32 @@ function ReadyTorrentContent({
           <ul className="ready-file-list">
             {snapshot.items.map((file) => (
               <li key={file.id}>
-                <span title={file.relative_path}>{file.relative_path}</span>
+                <Tooltip content={file.relative_path} overflowOnly className="ready-file-path">
+                  <span>{file.relative_path}</span>
+                </Tooltip>
                 <span>{formatBytes(file.size)}</span>
                 {managedFiles ? (
-                  <button
-                    type="button"
-                    className="ready-file-download-button"
-                    aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
-                    onClick={() => onDownloadFile(file, snapshot)}
-                  >
-                    {t("common.download")}
-                  </button>
+                  <Tooltip content={t("common.download")}>
+                    <button
+                      type="button"
+                      className="ready-file-download-button"
+                      aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
+                      onClick={() => onDownloadFile(file, snapshot)}
+                    >
+                      <Download aria-hidden="true" />
+                    </button>
+                  </Tooltip>
                 ) : (
-                  <a
-                    href={api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id)}
-                    download={file.relative_path.split("/").at(-1)}
-                    aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
-                  >
-                    {t("common.download")}
-                  </a>
+                  <Tooltip content={t("common.download")}>
+                    <a
+                      className="ready-file-download-button"
+                      href={api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id)}
+                      download={file.relative_path.split("/").at(-1)}
+                      aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
+                    >
+                      <Download aria-hidden="true" />
+                    </a>
+                  </Tooltip>
                 )}
               </li>
             ))}
@@ -432,6 +438,8 @@ function TorrentItem({
   downloadBusy,
   details,
   onOpen,
+  expanded,
+  onToggleDetails,
 }: {
   torrent: TorrentRequestV2;
   onRefresh: () => void;
@@ -441,10 +449,12 @@ function TorrentItem({
   downloadBusy: boolean;
   details?: ReactNode;
   onOpen?: () => void;
+  expanded: boolean;
+  onToggleDetails: () => void;
 }) {
   const { formatBytes, formatDate, t } = useI18n();
-  const detailsRef = useRef<HTMLDetailsElement>(null);
   const rowStatus = torrentRowStatus(torrent);
+  const detailsId = `torrent-details-${torrent.id}`;
   const percent = rowStatus === "ready" ? 100 : Math.round(torrent.progress * 100);
   const error = torrent.error_code === null
     ? null
@@ -452,53 +462,41 @@ function TorrentItem({
   return (
     <li className="torrent-accordion-item">
       <article className="torrent-accordion-card" aria-label={torrent.name}>
-        <Accordion
-          ref={detailsRef}
-          className="torrent-accordion"
-          summaryClassName="torrent-accordion-toggle"
-          onToggle={(event) => { if (event.currentTarget.open) onOpen?.(); }}
-          title={(
-            <span className="torrent-accordion-summary">
-              <span className="torrent-summary-heading">
-                <strong title={torrent.name}>{torrent.name}</strong>
-              </span>
-              <span className="torrent-summary-status">
-                <Badge
-                  tone={rowStatus === "ready" ? "success" : rowStatus === "blocked" ? "danger" : rowStatus === "waiting" ? "warning" : "neutral"}
-                  className={`torrent-primary-state ${rowStatus}`}
-                >
-                  {t(rowStatusLabels[rowStatus])}
-                </Badge>
-              </span>
-              <span className="torrent-summary-queue">{torrentQueueLabel(torrent)}</span>
-              <span className={`torrent-summary-progress ${rowStatus}`}>
-                <Progress className="torrent-row-progress" label={t("downloads.progressFor", { name: torrent.name })} value={percent} />
-                <strong>{percent} %</strong>
-              </span>
-              <span className="torrent-summary-size">{formatBytes(torrent.total_size)}</span>
-            </span>
-          )}
-          contentClassName="torrent-accordion-content"
-        >
-          <dl className="torrent-detail-grid">
-            <div><dt>{t("downloads.created")}</dt><dd>{formatDate(torrent.created_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
-            <div><dt>{t("downloads.updated")}</dt><dd>{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
-          </dl>
-          {error !== null && <p className="torrent-detail-error" role="alert">{error}</p>}
-          {details}
-        </Accordion>
-        <div className="torrent-card-actions">
-          <Button
-            type="button"
-            variant="secondary"
-            className="torrent-action-details"
-            aria-label={t("downloads.detailsNamed", { name: torrent.name })}
-            onClick={() => {
-              if (detailsRef.current !== null) detailsRef.current.open = !detailsRef.current.open;
-            }}
-          >
-            <ListTree aria-hidden="true" />
-          </Button>
+        <div className={`torrent-row-grid${expanded ? " is-expanded" : ""}`}>
+          <Tooltip content={torrent.name} overflowOnly className="torrent-summary-heading">
+            <strong>{torrent.name}</strong>
+          </Tooltip>
+          <span className="torrent-summary-status">
+            <Badge
+              tone={rowStatus === "ready" ? "success" : rowStatus === "blocked" ? "danger" : rowStatus === "waiting" ? "warning" : "neutral"}
+              className={`torrent-primary-state ${rowStatus}`}
+            >
+              {t(rowStatusLabels[rowStatus])}
+            </Badge>
+          </span>
+          <span className="torrent-summary-queue">{torrentQueueLabel(torrent)}</span>
+          <span className={`torrent-summary-progress ${rowStatus}`}>
+            <Progress className="torrent-row-progress" label={t("downloads.progressFor", { name: torrent.name })} value={percent} />
+            <strong>{percent} %</strong>
+          </span>
+          <span className="torrent-summary-size">{formatBytes(torrent.total_size)}</span>
+          <div className="torrent-card-actions">
+          <Tooltip content={t("downloads.details")}>
+            <Button
+              type="button"
+              variant="secondary"
+              className="torrent-action-details"
+              aria-label={t(expanded ? "downloads.hideDetailsNamed" : "downloads.showDetailsNamed", { name: torrent.name })}
+              aria-expanded={expanded}
+              aria-controls={detailsId}
+              onClick={() => {
+                if (!expanded) onOpen?.();
+                onToggleDetails();
+              }}
+            >
+              <ListTree aria-hidden="true" />
+            </Button>
+          </Tooltip>
           {torrent.state === "ready" ? (
             <Button
               type="button"
@@ -506,8 +504,8 @@ function TorrentItem({
               aria-label={t("common.download")}
               disabled={downloadBusy}
               onClick={() => {
-              if (detailsRef.current !== null) detailsRef.current.open = true;
-              onDownload();
+                if (!expanded) onToggleDetails();
+                onDownload();
               }}
             >
               <DownloadIcon />
@@ -528,6 +526,15 @@ function TorrentItem({
               <DeleteIcon />
             </Button>
           )}
+          </div>
+        </div>
+        <div id={detailsId} className="torrent-accordion-content" hidden={!expanded}>
+            <dl className="torrent-detail-grid">
+              <div><dt>{t("downloads.created")}</dt><dd>{formatDate(torrent.created_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
+              <div><dt>{t("downloads.updated")}</dt><dd>{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
+            </dl>
+            {error !== null && <p className="torrent-detail-error" role="alert">{error}</p>}
+            {details}
         </div>
         {torrent.state === "ready" && <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />}
       </article>
@@ -553,6 +560,7 @@ export function UserDownloadsPage({
   const [pageError, setPageError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TorrentStatusFilter>("all");
+  const [openTorrentIds, setOpenTorrentIds] = useState<Set<string>>(() => new Set());
   const [managerSnapshot, setManagerSnapshot] = useState<BrowserDownloadManagerSnapshot>(EMPTY_MANAGER_SNAPSHOT);
   const loadGenerationRef = useRef(0);
   const managerRef = useRef<BrowserDownloadManager | null>(null);
@@ -600,10 +608,10 @@ export function UserDownloadsPage({
       let apiOffset = 0;
       let expectedTotal: number | null = null;
       while (expectedTotal === null || apiOffset < expectedTotal) {
-        const result = await api.listTorrentRequestsV2(apiOffset, FETCH_PAGE_SIZE, signal);
+        const result = await api.listTorrentRequestsV2(apiOffset, PAGE_SIZE, signal);
         if (expectedTotal === null) expectedTotal = result.total;
         items.push(...result.items);
-        if (result.items.length < FETCH_PAGE_SIZE) break;
+        if (result.items.length < PAGE_SIZE) break;
         apiOffset += result.items.length;
       }
       if (generation !== loadGenerationRef.current) return;
@@ -993,6 +1001,19 @@ export function UserDownloadsPage({
   const queueTotal = torrents.find((torrent) => torrent.queue_total_estimate !== null)?.queue_total_estimate ?? null;
   const localDownloadSummary = summarizeDownloadManager(managerSnapshot);
 
+  useEffect(() => {
+    const torrentIds = new Set(torrents.map((torrent) => torrent.id));
+    setOpenTorrentIds((current) => {
+      const next = new Set([...current].filter((id) => torrentIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [torrents]);
+
+  useEffect(() => {
+    if (offset < filteredTorrents.length || offset === 0) return;
+    setOffset(Math.max(0, Math.floor((filteredTorrents.length - 1) / PAGE_SIZE) * PAGE_SIZE));
+  }, [filteredTorrents.length, offset]);
+
   return (
     <section className="user-downloads" aria-labelledby="user-downloads-title">
       <header className="user-downloads-header">
@@ -1121,6 +1142,13 @@ export function UserDownloadsPage({
                 <TorrentItem
                   key={torrent.id}
                   torrent={torrent}
+                  expanded={openTorrentIds.has(torrent.id)}
+                  onToggleDetails={() => setOpenTorrentIds((current) => {
+                    const next = new Set(current);
+                    if (next.has(torrent.id)) next.delete(torrent.id);
+                    else next.add(torrent.id);
+                    return next;
+                  })}
                   onRefresh={() => void load(offset)}
                   onOpen={torrent.state === "ready" && manifest === undefined ? () => void openReadyTorrent(torrent) : undefined}
                   onDownload={() => void openReadyTorrent(torrent, true)}
