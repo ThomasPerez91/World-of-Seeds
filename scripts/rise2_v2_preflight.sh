@@ -84,6 +84,21 @@ esac
 
 # Derive the private bootstrap from the same registry used by WOS. Never source
 # the environment as shell code or print its JSON/credentials.
+env_value WOS_V2_INTEGRATION_ACCOUNTS_JSON | python3 -c '
+import json
+import sys
+
+try:
+    raw = sys.stdin.read().strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] == chr(39):
+        raw = raw[1:-1]
+    data = json.loads(raw)
+    routes = data["routes"]
+    valid = isinstance(data, dict) and isinstance(routes, list) and len(routes) == 1
+except (KeyError, TypeError, ValueError):
+    valid = False
+raise SystemExit(0 if valid else 1)
+' || fail "integration registry must contain exactly one route"
 python3 "$repository/scripts/rise2_v2_qb_bootstrap.py" "$environment"
 python3 "$repository/scripts/rise2_v2_qb_bootstrap.py" "$environment" --check
 [ -f "$qbittorrent_config" ] || fail "qBittorrent bootstrap config not found"

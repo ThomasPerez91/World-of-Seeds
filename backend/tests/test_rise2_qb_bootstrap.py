@@ -11,6 +11,7 @@ import pytest
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 BOOTSTRAP = REPOSITORY / "scripts/rise2_v2_qb_bootstrap.py"
+PREFLIGHT = REPOSITORY / "scripts/rise2_v2_preflight.sh"
 
 
 def module() -> dict[str, Any]:
@@ -89,6 +90,14 @@ def test_multiple_distinct_qb_credentials_fail_closed() -> None:
     )
     with pytest.raises(ns["BootstrapError"]):
         ns["credentials"](json.dumps(payload))
+
+
+def test_preflight_rejects_multiple_routes_before_qb_bootstrap() -> None:
+    preflight = PREFLIGHT.read_text()
+    single_route_check = "isinstance(routes, list) and len(routes) == 1"
+    bootstrap = 'python3 "$repository/scripts/rise2_v2_qb_bootstrap.py" "$environment"'
+    assert single_route_check in preflight
+    assert preflight.index(single_route_check) < preflight.index(bootstrap)
 
 
 def test_private_environment_quoting_and_no_interpolation(tmp_path: Path) -> None:
