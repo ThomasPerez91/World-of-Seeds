@@ -92,7 +92,7 @@ def credentials(registry: str) -> tuple[str, str]:
     try:
         data = json.loads(registry)
         routes = data["routes"]
-        if not isinstance(routes, list) or len(routes) != 1:
+        if not isinstance(routes, list) or not 1 <= len(routes) <= 100:
             raise ValueError
         pairs = set()
         for route in routes:
