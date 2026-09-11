@@ -133,6 +133,7 @@ describe("UserDownloadsPage", () => {
 
     const article = await screen.findByRole("article", { name: "Film.mkv" });
     const heading = view.container.querySelector(".torrent-list-heading") as HTMLElement;
+    expect(view.container.querySelector(".torrent-list-heading + .torrent-accordion-list")).toBeTruthy();
     expect(Array.from(heading.children).map((cell) => cell.textContent)).toEqual([
       "Nom", "État", "File", "Progression", "Taille", "",
     ]);
@@ -150,7 +151,19 @@ describe("UserDownloadsPage", () => {
     expect(downloadButton.textContent).toBe("");
     expect(deleteButton.textContent).toBe("");
     expect(detailsButton.getAttribute("aria-expanded")).toBe("false");
+    expect(article.querySelector(".torrent-row-grid")?.getAttribute("role")).toBeNull();
     expect(article.querySelector("details")).toBeNull();
+
+    await user.click(article.querySelector(".torrent-summary-size") as HTMLElement);
+    expect(within(article).getByRole("button", { name: "Masquer les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("true");
+    await user.click(article.querySelector(".torrent-summary-size") as HTMLElement);
+    expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
+
+    await user.click(downloadButton);
+    expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
+    await user.click(deleteButton);
+    expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
+
     await user.click(detailsButton);
     expect(within(article).getByRole("button", { name: "Masquer les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("true");
   });
@@ -651,7 +664,7 @@ describe("UserDownloadsPage", () => {
     }));
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Télécharger" }));
+    await user.click(await screen.findByRole("button", { name: `Afficher les détails de ${torrent().name}` }));
     const content = await screen.findByRole("region", { name: `Contenu de ${torrent().name}` });
     expect(screen.getAllByTestId("retention-warning")).toHaveLength(1);
     expect(screen.getByText("Suppression imminente dans 45 min")).toBeTruthy();
@@ -767,7 +780,7 @@ describe("UserDownloadsPage", () => {
 
     const article = await screen.findByRole("article", { name: "Film.mkv" });
     await user.click(within(article).getByRole("button", { name: "Télécharger" }));
-    const link = await within(article).findByRole("link", { name: "Télécharger « Folder/Film final.mkv »" });
+    const link = within(article).getByRole("link", { name: "Télécharger « Folder/Film final.mkv »", hidden: true });
     expect(link.getAttribute("href")).toContain(`/files/single-id/download?snapshot=${"3".repeat(64)}`);
     expect(link.getAttribute("download")).toBe("Film final.mkv");
     expect(nativeClick).toHaveBeenCalledOnce();
@@ -809,7 +822,7 @@ describe("UserDownloadsPage", () => {
     renderPage();
 
     const article = await screen.findByRole("article", { name: "Film.mkv" });
-    await user.click(within(article).getByRole("button", { name: "Télécharger" }));
+    await user.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
     const content = await screen.findByRole("region", { name: "Contenu de Film.mkv" });
     expect(await within(content).findByText("Folder/0.bin")).toBeTruthy();
     expect(within(content).queryByRole("link", { name: /ZIP/ })).toBeNull();
@@ -879,7 +892,7 @@ describe("UserDownloadsPage", () => {
     renderPage();
 
     const article = await screen.findByRole("article", { name: "Film.mkv" });
-    await user.click(within(article).getByRole("button", { name: "Télécharger" }));
+    await user.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
     const content = await screen.findByRole("region", { name: "Contenu de Film.mkv" });
     await user.click(await within(content).findByRole("button", { name: "Suivant" }));
     expect(await within(content).findByText("cached-50.bin")).toBeTruthy();
@@ -947,7 +960,7 @@ describe("UserDownloadsPage", () => {
     );
     const view = renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Télécharger" }));
+    await user.click(await screen.findByRole("button", { name: "Afficher les détails de Film.mkv" }));
     await user.click(await screen.findByRole("button", { name: "Tout télécharger" }));
 
     expect(await screen.findByText("« Film.mkv » a été téléchargé.")).toBeTruthy();
@@ -1019,7 +1032,7 @@ describe("UserDownloadsPage", () => {
     const view = renderPage();
 
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Télécharger" }));
+    await user.click(await screen.findByRole("button", { name: "Afficher les détails de Film.mkv" }));
     await user.click(await screen.findByRole("button", { name: "Tout télécharger" }));
     await started;
     expect(await screen.findByText("En attente — 1er")).toBeTruthy();
@@ -1081,7 +1094,7 @@ describe("UserDownloadsPage", () => {
     const view = renderPage("en");
 
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Download" }));
+    await user.click(await screen.findByRole("button", { name: "Show details for Film.mkv" }));
     await user.click(await screen.findByRole("button", { name: "Download all" }));
 
     const notice = await screen.findByText("The transfer queue belongs to this tab. Closing it or refreshing the page may interrupt the queue; downloads can be started again.");
@@ -1151,7 +1164,7 @@ describe("UserDownloadsPage", () => {
     renderPage();
 
     const article = await screen.findByRole("article", { name: "Film.mkv" });
-    await user.click(within(article).getByRole("button", { name: "Télécharger" }));
+    await user.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
     await user.click(await within(article).findByRole("button", { name: "Tout télécharger" }));
     expect(within(article).queryByRole("link", { name: "Télécharger le contenu en ZIP" })).toBeNull();
     const otherArticle = screen.getByRole("article", { name: "Autre READY" });
@@ -1204,7 +1217,7 @@ describe("UserDownloadsPage", () => {
     const view = renderPage();
 
     const article = await screen.findByRole("article", { name: "Film.mkv" });
-    await user.click(within(article).getByRole("button", { name: "Télécharger" }));
+    await user.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
     await user.click(await within(article).findByRole("button", { name: "Tout télécharger" }));
     const alert = await within(article).findByRole("alert");
     expect(alert.textContent).toContain("Le contenu a changé. Relance le téléchargement.");
@@ -1244,7 +1257,7 @@ describe("UserDownloadsPage", () => {
     );
     const view = renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Télécharger" }));
+    await user.click(await screen.findByRole("button", { name: "Afficher les détails de Film.mkv" }));
 
     const archive = await screen.findByRole("link", {
       name: "Télécharger le contenu en ZIP",
