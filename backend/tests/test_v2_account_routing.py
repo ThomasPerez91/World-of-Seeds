@@ -142,6 +142,13 @@ def test_deployment_registry_parses_opaque_routes_without_exposing_secrets() -> 
     specs = parse_deployment_account_specs(secret)
 
     assert [spec.qbittorrent_account_ref for spec in specs] == [QB_A, QB_B]
+    assert [spec.legacy_tracker_account_ref for spec in specs] == [TRACKER_A, TRACKER_B]
+    legacy_passkeys = [spec.legacy_c411_passkey for spec in specs]
+    assert all(passkey is not None for passkey in legacy_passkeys)
+    assert [passkey.get_secret_value() for passkey in legacy_passkeys if passkey is not None] == [
+        "tracker-secret-123",
+        "tracker-secret-789",
+    ]
     assert "tracker-secret" not in repr(specs)
     assert "qb-secret" not in repr(specs)
     assert "tracker-secret" not in repr(Settings(integration_accounts_json=secret))
@@ -168,6 +175,161 @@ def test_single_qb_registry_no_longer_requires_a_c411_passkey() -> None:
 
     assert len(specs) == 1
     assert specs[0].qbittorrent_account_ref == QB_A
+    assert specs[0].legacy_tracker_account_ref is None
+    assert specs[0].legacy_c411_passkey is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_passkey_remains_available_until_admin_accounts_are_configured(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    registry = PostgresOptionsRegistry()
+    async with sessions() as session, session.begin():
+        await registry.initialize(session)
+        torrent = ManagedTorrent(info_hash="d" * 40, name="legacy-fallback", total_size=1)
+        session.add(torrent)
+        await session.flush()
+        torrent_id = torrent.id
+
+    qbittorrent = FakeQBittorrent()
+    router = DeploymentAccountRouter(
+        sessions,
+        shared_integration=SharedIntegrationRoute(
+            qbittorrent_account_ref=QB_A,
+            qbittorrent=qbittorrent,
+            newgreedy=FakeNewGreedy(),
+            allowed_tracker_hosts=("c411.org",),
+            max_total_size=1024,
+            legacy_tracker_account_ref=TRACKER_A,
+            legacy_c411_passkey=SecretStr("legacy-passkey-123"),
+        ),
+    )
+
+    selected = await router.resolve(torrent_id, "d" * 40)
+
+    assert selected.tracker_account_ref == TRACKER_A
+    assert selected.qbittorrent_account_ref == QB_A
+    async with sessions() as session:
+        stored = await session.get(ManagedTorrent, torrent_id)
+        assert stored is not None
+        assert stored.tracker_account_ref == TRACKER_A
+        assert stored.qbittorrent_account_ref == QB_A
+
+
+@pytest.mark.asyncio
+async def test_legacy_assignment_moves_to_matching_admin_passkey_slot(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    registry = PostgresOptionsRegistry()
+    async with sessions() as session, session.begin():
+        admin = User(
+            username="legacy-routing-admin",
+            password_hash="test-password-hash",
+            is_admin=True,
+            is_active=True,
+        )
+        session.add(admin)
+        await session.flush()
+        await registry.initialize(session)
+        await registry.update(
+            session,
+            {
+                "WOS_C411_ACCOUNT_01_NUMBER": "1001",
+                "WOS_C411_ACCOUNT_01_PASSKEY": "another-passkey-456",
+                "WOS_C411_ACCOUNT_02_NUMBER": "1002",
+                "WOS_C411_ACCOUNT_02_PASSKEY": "legacy-passkey-123",
+            },
+            actor_user_id=admin.id,
+        )
+        torrent = ManagedTorrent(
+            info_hash="f" * 40,
+            name="legacy-assignment",
+            total_size=1,
+            tracker_account_ref=TRACKER_A,
+            qbittorrent_account_ref=QB_A,
+        )
+        session.add(torrent)
+        await session.flush()
+        torrent_id = torrent.id
+
+    qbittorrent = FakeQBittorrent()
+    router = DeploymentAccountRouter(
+        sessions,
+        shared_integration=SharedIntegrationRoute(
+            qbittorrent_account_ref=QB_A,
+            qbittorrent=qbittorrent,
+            newgreedy=FakeNewGreedy(),
+            allowed_tracker_hosts=("c411.org",),
+            max_total_size=1024,
+            legacy_tracker_account_ref=TRACKER_A,
+            legacy_c411_passkey=SecretStr("legacy-passkey-123"),
+        ),
+        random_index=lambda _count: 0,
+    )
+
+    selected = await router.resolve(torrent_id, "f" * 40)
+
+    assert selected.tracker_account_ref == c411_tracker_account_ref(2)
+    async with sessions() as session:
+        stored = await session.get(ManagedTorrent, torrent_id)
+        assert stored is not None
+        assert stored.tracker_account_ref == c411_tracker_account_ref(2)
+        assert stored.qbittorrent_account_ref == QB_A
+
+
+@pytest.mark.asyncio
+async def test_opaque_legacy_assignment_recovers_without_legacy_deployment_secret(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    registry = PostgresOptionsRegistry()
+    async with sessions() as session, session.begin():
+        admin = User(
+            username="modern-routing-admin",
+            password_hash="test-password-hash",
+            is_admin=True,
+            is_active=True,
+        )
+        session.add(admin)
+        await session.flush()
+        await registry.initialize(session)
+        await registry.update(
+            session,
+            {
+                "WOS_C411_ACCOUNT_03_NUMBER": "1003",
+                "WOS_C411_ACCOUNT_03_PASSKEY": "configured-passkey-789",
+            },
+            actor_user_id=admin.id,
+        )
+        torrent = ManagedTorrent(
+            info_hash="9" * 40,
+            name="opaque-legacy-assignment",
+            total_size=1,
+            tracker_account_ref=TRACKER_A,
+            qbittorrent_account_ref=QB_A,
+        )
+        session.add(torrent)
+        await session.flush()
+        torrent_id = torrent.id
+
+    router = DeploymentAccountRouter(
+        sessions,
+        shared_integration=SharedIntegrationRoute(
+            qbittorrent_account_ref=QB_A,
+            qbittorrent=FakeQBittorrent(),
+            newgreedy=FakeNewGreedy(),
+            allowed_tracker_hosts=("c411.org",),
+            max_total_size=1024,
+        ),
+    )
+
+    selected = await router.resolve(torrent_id, "9" * 40)
+
+    assert selected.tracker_account_ref == c411_tracker_account_ref(3)
+    async with sessions() as session:
+        stored = await session.get(ManagedTorrent, torrent_id)
+        assert stored is not None
+        assert stored.tracker_account_ref == c411_tracker_account_ref(3)
+        assert stored.qbittorrent_account_ref == QB_A
 
 
 class FakeNewGreedy:
