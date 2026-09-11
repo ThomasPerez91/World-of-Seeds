@@ -61,8 +61,9 @@ def test_application_version_rejects_a_mismatched_release_tag() -> None:
     assert "does not match VERSION" in result.stderr
 
 
-def test_stable_channel_accepts_the_v2_stable_release() -> None:
+def test_stable_channel_accepts_the_current_v2_release() -> None:
     repository = _repository()
+    version = (repository / "VERSION").read_text(encoding="utf-8").strip()
 
     result = subprocess.run(
         [
@@ -72,9 +73,9 @@ def test_stable_channel_accepts_the_v2_stable_release() -> None:
             str(repository),
             "check",
             "--expected-version",
-            "2.0.0",
+            version,
             "--expected-tag",
-            "v2.0.0",
+            f"v{version}",
             "--print-version",
         ],
         check=True,
@@ -82,7 +83,7 @@ def test_stable_channel_accepts_the_v2_stable_release() -> None:
         text=True,
     )
 
-    assert result.stdout.strip() == "2.0.0"
+    assert result.stdout.strip() == version
 
 
 @pytest.mark.parametrize(

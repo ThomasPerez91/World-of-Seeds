@@ -123,8 +123,8 @@ def _validate_version(root: Path, manifest: dict[str, Any]) -> None:
         version = (root / "VERSION").read_text(encoding="utf-8").strip()
     except OSError as exc:
         raise StableReleaseError("VERSION is unavailable") from exc
-    if version != EXPECTED_VERSION or manifest.get("version") != EXPECTED_VERSION:
-        raise StableReleaseError("V2-35 must be exactly version 2.0.0")
+    if manifest.get("version") != EXPECTED_VERSION:
+        raise StableReleaseError("V2-35 stable evidence must remain version 2.0.0")
 
     for channel in ("v2", "stable"):
         _run(
@@ -135,9 +135,9 @@ def _validate_version(root: Path, manifest: dict[str, Any]) -> None:
             "--channel",
             channel,
             "--expected-version",
-            EXPECTED_VERSION,
+            version,
             "--expected-tag",
-            "v2.0.0",
+            f"v{version}",
         )
 
 

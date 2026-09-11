@@ -17,6 +17,7 @@
 - `frontend/src/wos-premium-torrents.css`
 - `frontend/src/wos-premium.css`
 - version mirrors managed by `scripts/versioning.py`, plus the frontend UI version mirrors
+- `scripts/validate_v2_stable_release.py` and `backend/tests/test_versioning.py` (CI compatibility for post-2.0 versions only)
 
 ## Torrent list contract
 
@@ -45,6 +46,8 @@ The compatibility ZIP action is rendered only when `archive_available` is true a
 This branch changes no backend contract and has no dependency on the parallel backend branch. Folder-level ZIP endpoints were not invented or consumed. If the backend synthesis introduces stable folder archive metadata/routes, the styled ZIP control can be reused during integration.
 
 The only files under `backend/` changed by this task are authoritative version mirrors updated by `python scripts/versioning.py set --channel v2 2.1.2`; no backend behavior or contract changed.
+
+The first CI run exposed two release-policy tests that assumed the live repository must remain at 2.0.0 forever. The validator now keeps the immutable V2-35 manifest evidence pinned to 2.0.0 while validating the current repository mirrors against their actual version. The corresponding test follows the current canonical version. This is limited to release validation/tests and does not alter runtime backend behavior.
 
 ## Account settings 2.1.2
 
