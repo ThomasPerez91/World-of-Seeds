@@ -212,7 +212,7 @@ a:focus-visible {
 
 .ui-button-secondary:hover:not(:disabled),
 .secondary-button:hover:not(:disabled),
-.ui-button-ghost:hover:not(:disabled) {
+.ui-button-ghost:not(.account-trigger):hover:not(:disabled) {
   border-color: var(--wos-line-strong) !important;
   background: rgba(120, 241, 173, 0.075) !important;
 }
