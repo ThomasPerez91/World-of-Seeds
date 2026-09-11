@@ -186,7 +186,7 @@ body {
 }
 
 .login-page .brand-panel::after {
-  content: "v2.1.0";
+  content: "v2.1.2";
   position: absolute;
   top: 1.25rem;
   right: 1.35rem;
