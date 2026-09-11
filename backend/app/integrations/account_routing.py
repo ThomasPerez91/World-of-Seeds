@@ -48,6 +48,11 @@ def c411_tracker_account_ref(slot: int) -> uuid.UUID:
     return uuid.uuid5(_C411_ACCOUNT_NAMESPACE, f"slot:{slot}")
 
 
+_C411_TRACKER_ACCOUNT_REFS = frozenset(
+    c411_tracker_account_ref(slot) for slot in range(1, MAX_C411_ACCOUNTS + 1)
+)
+
+
 class _TorrentAdder(Protocol):
     async def add_torrent(
         self,
@@ -93,6 +98,8 @@ class DeploymentAccountSpec:
     qbittorrent_url: str
     qbittorrent_username: str
     qbittorrent_password: SecretStr
+    legacy_tracker_account_ref: uuid.UUID | None = None
+    legacy_c411_passkey: SecretStr | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +117,14 @@ class SharedIntegrationRoute:
     newgreedy: _NewGreedyReadiness
     allowed_tracker_hosts: tuple[str, ...]
     max_total_size: int
+    legacy_tracker_account_ref: uuid.UUID | None = None
+    legacy_c411_passkey: SecretStr | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _SessionRoutes:
+    selectable: tuple[TorrentEffectRoute, ...]
+    legacy_replacement: TorrentEffectRoute | None
 
 
 class DeploymentAccountRouter:
@@ -148,8 +163,17 @@ class DeploymentAccountRouter:
         self._ordered = ordered
         self._shared = shared_integration
         self._random_index = random_index
+        self._legacy_route: TorrentEffectRoute | None = None
         self._qb_by_ref: dict[uuid.UUID, _TorrentInspector]
         if shared_integration is not None:
+            legacy_ref = shared_integration.legacy_tracker_account_ref
+            legacy_passkey = shared_integration.legacy_c411_passkey
+            if (legacy_ref is None) != (legacy_passkey is None) or (
+                legacy_ref is not None and legacy_ref.int == 0
+            ):
+                raise AccountRoutingError("deployment_legacy_account_route_invalid")
+            if legacy_ref is not None and legacy_passkey is not None:
+                self._legacy_route = self._shared_route(legacy_ref, legacy_passkey)
             self._qb_by_ref = {
                 shared_integration.qbittorrent_account_ref: shared_integration.qbittorrent
             }
@@ -175,7 +199,8 @@ class DeploymentAccountRouter:
             )
             if torrent is None or torrent.info_hash != info_hash:
                 raise AccountRoutingError("managed_torrent_route_invalid")
-            routes = await self._routes_for_session(session)
+            session_routes = await self._routes_for_session(session)
+            routes = session_routes.selectable
             tracker_ref = torrent.tracker_account_ref
             qb_ref = torrent.qbittorrent_account_ref
             if (tracker_ref is None) != (qb_ref is None):
@@ -195,15 +220,45 @@ class DeploymentAccountRouter:
                 (route.tracker_account_ref, route.qbittorrent_account_ref): route
                 for route in routes
             }.get((tracker_ref, qb_ref))
+            if (
+                assigned_route is None
+                and self._legacy_route is not None
+                and (tracker_ref, qb_ref)
+                == (
+                    self._legacy_route.tracker_account_ref,
+                    self._legacy_route.qbittorrent_account_ref,
+                )
+            ):
+                replacement = session_routes.legacy_replacement
+                if replacement is None:
+                    return self._legacy_route
+                torrent.tracker_account_ref = replacement.tracker_account_ref
+                torrent.qbittorrent_account_ref = replacement.qbittorrent_account_ref
+                await session.flush()
+                return replacement
+            if (
+                assigned_route is None
+                and self._shared is not None
+                and qb_ref == self._shared.qbittorrent_account_ref
+                and tracker_ref not in _C411_TRACKER_ACCOUNT_REFS
+                and routes
+            ):
+                replacement = routes[self._random_index(len(routes))]
+                torrent.tracker_account_ref = replacement.tracker_account_ref
+                torrent.qbittorrent_account_ref = replacement.qbittorrent_account_ref
+                await session.flush()
+                return replacement
             if assigned_route is None:
                 raise AccountRoutingError("managed_torrent_route_unavailable")
             return assigned_route
 
-    async def _routes_for_session(self, session: AsyncSession) -> tuple[TorrentEffectRoute, ...]:
+    async def _routes_for_session(self, session: AsyncSession) -> _SessionRoutes:
         if self._shared is None:
-            return self._ordered
+            return _SessionRoutes(self._ordered, None)
         values = await PostgresOptionsRegistry().snapshot(session)
         routes: list[TorrentEffectRoute] = []
+        legacy_replacement: TorrentEffectRoute | None = None
+        legacy_passkey = self._shared.legacy_c411_passkey
         for slot in range(1, MAX_C411_ACCOUNTS + 1):
             number = values[f"WOS_C411_ACCOUNT_{slot:02d}_NUMBER"]
             passkey = values[f"WOS_C411_ACCOUNT_{slot:02d}_PASSKEY"]
@@ -211,21 +266,36 @@ class DeploymentAccountRouter:
                 raise AccountRoutingError("c411_account_config_invalid")
             if not number:
                 continue
-            routes.append(
-                TorrentEffectRoute(
-                    tracker_account_ref=c411_tracker_account_ref(slot),
-                    qbittorrent_account_ref=self._shared.qbittorrent_account_ref,
-                    adder=C411NewGreedyV2Gateway(
-                        self._shared.qbittorrent,
-                        self._shared.newgreedy,
-                        passkey=SecretStr(passkey),
-                        allowed_tracker_hosts=self._shared.allowed_tracker_hosts,
-                        max_total_size=self._shared.max_total_size,
-                    ),
-                    inspector=self._shared.qbittorrent,
-                )
-            )
-        return tuple(routes)
+            route = self._shared_route(c411_tracker_account_ref(slot), SecretStr(passkey))
+            routes.append(route)
+            if legacy_passkey is not None and secrets.compare_digest(
+                passkey,
+                legacy_passkey.get_secret_value(),
+            ):
+                legacy_replacement = route
+        if not routes and self._legacy_route is not None:
+            routes.append(self._legacy_route)
+        return _SessionRoutes(tuple(routes), legacy_replacement)
+
+    def _shared_route(
+        self,
+        tracker_account_ref: uuid.UUID,
+        passkey: SecretStr,
+    ) -> TorrentEffectRoute:
+        if self._shared is None:
+            raise AccountRoutingError("deployment_shared_integration_required")
+        return TorrentEffectRoute(
+            tracker_account_ref=tracker_account_ref,
+            qbittorrent_account_ref=self._shared.qbittorrent_account_ref,
+            adder=C411NewGreedyV2Gateway(
+                self._shared.qbittorrent,
+                self._shared.newgreedy,
+                passkey=passkey,
+                allowed_tracker_hosts=self._shared.allowed_tracker_hosts,
+                max_total_size=self._shared.max_total_size,
+            ),
+            inspector=self._shared.qbittorrent,
+        )
 
     async def apply_managed_controls(
         self,
@@ -318,6 +388,14 @@ def parse_deployment_account_specs(secret: SecretStr) -> tuple[DeploymentAccount
             )
             username = _required_string(value, "qbittorrent_username", 128)
             password = _required_string(value, "qbittorrent_password", 1024)
+            legacy_tracker_ref: uuid.UUID | None = None
+            legacy_passkey: SecretStr | None = None
+            if frozenset(value) == frozenset(legacy_keys):
+                legacy_tracker_ref = uuid.UUID(_required_string(value, "tracker_account_ref", 36))
+                legacy_passkey_value = _required_string(value, "c411_passkey", 256)
+                if legacy_tracker_ref.int == 0 or not 8 <= len(legacy_passkey_value) <= 256:
+                    raise ValueError
+                legacy_passkey = SecretStr(legacy_passkey_value)
             if qb_ref.int == 0:
                 raise ValueError
             specs.append(
@@ -327,6 +405,8 @@ def parse_deployment_account_specs(secret: SecretStr) -> tuple[DeploymentAccount
                     qbittorrent_url,
                     username,
                     SecretStr(password),
+                    legacy_tracker_ref,
+                    legacy_passkey,
                 )
             )
     except (TypeError, ValueError) as exc:
@@ -362,6 +442,8 @@ def build_deployment_account_router(
             newgreedy=NewGreedyV2Gateway(client, primary.newgreedy_url),
             allowed_tracker_hosts=tuple(allowed_tracker_hosts),
             max_total_size=max_total_size,
+            legacy_tracker_account_ref=primary.legacy_tracker_account_ref,
+            legacy_c411_passkey=primary.legacy_c411_passkey,
         ),
     )
 
