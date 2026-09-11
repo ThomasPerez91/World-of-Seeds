@@ -74,6 +74,10 @@
   padding-inline: 0.8rem;
 }
 
+.user-downloads .torrent-accordion-summary {
+  display: contents !important;
+}
+
 .user-downloads .torrent-list-heading {
   margin: 0.1rem 1rem 0;
   padding-block: 0.58rem;

@@ -27,7 +27,7 @@ import {
   RefreshIcon,
 } from "../../components/icons";
 import { Archive, Check, Clock3, Download, ListTree, Search } from "lucide-react";
-import { Badge, Button, Progress, StateMessage, Tooltip } from "../../components/ui";
+import { Accordion, Badge, Button, Progress, StateMessage, Tooltip } from "../../components/ui";
 import { useI18n, type MessageKey } from "../../i18n";
 import {
   BrowserDownloadManager,
@@ -462,80 +462,89 @@ function TorrentItem({
   return (
     <li className="torrent-accordion-item">
       <article className="torrent-accordion-card" aria-label={torrent.name}>
-        <div className={`torrent-row-grid${expanded ? " is-expanded" : ""}`}>
-          <Tooltip content={torrent.name} overflowOnly className="torrent-summary-heading">
-            <strong>{torrent.name}</strong>
-          </Tooltip>
-          <span className="torrent-summary-status">
-            <Badge
-              tone={rowStatus === "ready" ? "success" : rowStatus === "blocked" ? "danger" : rowStatus === "waiting" ? "warning" : "neutral"}
-              className={`torrent-primary-state ${rowStatus}`}
-            >
-              {t(rowStatusLabels[rowStatus])}
-            </Badge>
-          </span>
-          <span className="torrent-summary-queue">{torrentQueueLabel(torrent)}</span>
-          <span className={`torrent-summary-progress ${rowStatus}`}>
-            <Progress className="torrent-row-progress" label={t("downloads.progressFor", { name: torrent.name })} value={percent} />
-            <strong>{percent} %</strong>
-          </span>
-          <span className="torrent-summary-size">{formatBytes(torrent.total_size)}</span>
-          <div className="torrent-card-actions">
-          <Tooltip content={t("downloads.details")}>
-            <Button
-              type="button"
-              variant="secondary"
-              className="torrent-action-details"
-              aria-label={t(expanded ? "downloads.hideDetailsNamed" : "downloads.showDetailsNamed", { name: torrent.name })}
-              aria-expanded={expanded}
-              aria-controls={detailsId}
-              onClick={() => {
-                if (!expanded) onOpen?.();
-                onToggleDetails();
-              }}
-            >
-              <ListTree aria-hidden="true" />
-            </Button>
-          </Tooltip>
-          {torrent.state === "ready" ? (
-            <Button
-              type="button"
-              className="torrent-action-download"
-              aria-label={t("common.download")}
-              disabled={downloadBusy}
-              onClick={() => {
-                if (!expanded) onToggleDetails();
-                onDownload();
-              }}
-            >
-              <DownloadIcon />
-            </Button>
-          ) : (
-            <Button type="button" variant="secondary" aria-label={t("downloads.refreshNamed", { name: torrent.name })} onClick={onRefresh}>
-              <RefreshIcon />
-            </Button>
+        <Accordion
+          externalTrigger
+          open={expanded}
+          contentId={detailsId}
+          contentClassName="torrent-accordion-content"
+          title={(
+            <div className="torrent-accordion-summary">
+              <div className={`torrent-row-grid${expanded ? " is-expanded" : ""}`}>
+                <Tooltip content={torrent.name} overflowOnly className="torrent-summary-heading">
+                  <strong>{torrent.name}</strong>
+                </Tooltip>
+                <span className="torrent-summary-status">
+                  <Badge
+                    tone={rowStatus === "ready" ? "success" : rowStatus === "blocked" ? "danger" : rowStatus === "waiting" ? "warning" : "neutral"}
+                    className={`torrent-primary-state ${rowStatus}`}
+                  >
+                    {t(rowStatusLabels[rowStatus])}
+                  </Badge>
+                </span>
+                <span className="torrent-summary-queue">{torrentQueueLabel(torrent)}</span>
+                <span className={`torrent-summary-progress ${rowStatus}`}>
+                  <Progress className="torrent-row-progress" label={t("downloads.progressFor", { name: torrent.name })} value={percent} />
+                  <strong>{percent} %</strong>
+                </span>
+                <span className="torrent-summary-size">{formatBytes(torrent.total_size)}</span>
+                <div className="torrent-card-actions">
+                  <Tooltip content={t("downloads.details")}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="torrent-action-details"
+                      aria-label={t(expanded ? "downloads.hideDetailsNamed" : "downloads.showDetailsNamed", { name: torrent.name })}
+                      aria-expanded={expanded}
+                      aria-controls={detailsId}
+                      onClick={() => {
+                        if (!expanded) onOpen?.();
+                        onToggleDetails();
+                      }}
+                    >
+                      <ListTree aria-hidden="true" />
+                    </Button>
+                  </Tooltip>
+                  {torrent.state === "ready" ? (
+                    <Button
+                      type="button"
+                      className="torrent-action-download"
+                      aria-label={t("common.download")}
+                      disabled={downloadBusy}
+                      onClick={() => {
+                        if (!expanded) onToggleDetails();
+                        onDownload();
+                      }}
+                    >
+                      <DownloadIcon />
+                    </Button>
+                  ) : (
+                    <Button type="button" variant="secondary" aria-label={t("downloads.refreshNamed", { name: torrent.name })} onClick={onRefresh}>
+                      <RefreshIcon />
+                    </Button>
+                  )}
+                  {!(["cancelled", "expired"] as TorrentRequestV2State[]).includes(torrent.state) && (
+                    <Button
+                      type="button"
+                      variant="danger"
+                      disabled={cancelBusy}
+                      onClick={onCancel}
+                      aria-label={t(torrent.state === "ready" ? "downloads.deleteNamed" : "downloads.cancelNamed", { name: torrent.name })}
+                    >
+                      <DeleteIcon />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
-          {!(["cancelled", "expired"] as TorrentRequestV2State[]).includes(torrent.state) && (
-            <Button
-              type="button"
-              variant="danger"
-              disabled={cancelBusy}
-              onClick={onCancel}
-              aria-label={t(torrent.state === "ready" ? "downloads.deleteNamed" : "downloads.cancelNamed", { name: torrent.name })}
-            >
-              <DeleteIcon />
-            </Button>
-          )}
-          </div>
-        </div>
-        <div id={detailsId} className="torrent-accordion-content" hidden={!expanded}>
-            <dl className="torrent-detail-grid">
-              <div><dt>{t("downloads.created")}</dt><dd>{formatDate(torrent.created_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
-              <div><dt>{t("downloads.updated")}</dt><dd>{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
-            </dl>
-            {error !== null && <p className="torrent-detail-error" role="alert">{error}</p>}
-            {details}
-        </div>
+        >
+          <dl className="torrent-detail-grid">
+            <div><dt>{t("downloads.created")}</dt><dd>{formatDate(torrent.created_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
+            <div><dt>{t("downloads.updated")}</dt><dd>{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
+          </dl>
+          {error !== null && <p className="torrent-detail-error" role="alert">{error}</p>}
+          {details}
+        </Accordion>
         {torrent.state === "ready" && <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />}
       </article>
     </li>

@@ -83,7 +83,9 @@ export function Tooltip({
 
 type AccordionProps = Omit<ComponentPropsWithRef<"details">, "children" | "title"> & {
   children: ReactNode;
+  contentId?: string;
   contentClassName?: string;
+  externalTrigger?: boolean;
   summaryClassName?: string;
   summaryLabel?: string;
   title: ReactNode;
@@ -93,14 +95,26 @@ type AccordionProps = Omit<ComponentPropsWithRef<"details">, "children" | "title
 export function Accordion({
   children,
   className = "",
+  contentId,
   contentClassName = "",
+  externalTrigger = false,
+  open,
   summaryClassName = "",
   summaryLabel,
   title,
   ...props
 }: AccordionProps) {
+  if (externalTrigger) {
+    return (
+      <>
+        {title}
+        <div id={contentId} className={contentClassName} hidden={!open}>{children}</div>
+      </>
+    );
+  }
+
   return (
-    <details className={`ui-accordion ${className}`} {...props}>
+    <details className={`ui-accordion ${className}`} open={open} {...props}>
       <summary className={summaryClassName} aria-description={summaryLabel}>{title}</summary>
       <div className={contentClassName}>{children}</div>
     </details>
