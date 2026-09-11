@@ -319,6 +319,7 @@ async def test_ready_deadline_is_per_subscription_and_secret_free(
     assert second.status_code == 201, second.text
     second_deadline = datetime.fromisoformat(second.json()["unsubscribe_at"])
     assert second_deadline > ready_at + timedelta(hours=47)
+    assert datetime.fromisoformat(second.json()["ready_at"]) < second_deadline
     assert second.json()["retention_expires_at"] == second.json()["unsubscribe_at"]
     assert all(
         event.event_type is not TorrentEventType.RETENTION_EXTENDED for _, event in redis.events
@@ -329,11 +330,13 @@ async def test_ready_deadline_is_per_subscription_and_secret_free(
     assert second_listing.status_code == 200
     second_item = second_listing.json()["items"][0]
     assert datetime.fromisoformat(second_item["unsubscribe_at"]) == second_deadline
+    assert datetime.fromisoformat(second_item["ready_at"]) < second_deadline
 
     await login(client, owner_username)
     first_listing = await client.get("/api/v2/torrents")
     assert first_listing.status_code == 200
     first_item = first_listing.json()["items"][0]
+    assert datetime.fromisoformat(first_item["ready_at"]) == ready_at
     assert datetime.fromisoformat(first_item["unsubscribe_at"]) == initial_deadline
     assert first_item["unsubscribe_at"] != second_item["unsubscribe_at"]
     forbidden = {
@@ -348,13 +351,13 @@ async def test_ready_deadline_is_per_subscription_and_secret_free(
 
 
 @pytest.mark.asyncio
-async def test_expired_request_never_exposes_a_stale_countdown(
+async def test_listing_excludes_terminal_and_overdue_subscriptions_from_items_and_total(
     client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
     owner = await prepare_user(db_session)
     expired_at = datetime.now(UTC) - timedelta(minutes=1)
-    managed = ManagedTorrent(
+    expired_managed = ManagedTorrent(
         info_hash="9" * 40,
         name="Expired",
         total_size=100,
@@ -363,20 +366,66 @@ async def test_expired_request_never_exposes_a_stale_countdown(
         ready_at=expired_at - timedelta(days=5),
         retention_expires_at=expired_at,
     )
-    request = TorrentRequest(
+    expired_request = TorrentRequest(
         user_id=owner.id,
-        managed_torrent=managed,
+        managed_torrent=expired_managed,
         state=TorrentRequestState.EXPIRED,
     )
-    db_session.add(request)
+    cancelled_managed = ManagedTorrent(
+        info_hash="8" * 40,
+        name="Cancelled",
+        total_size=100,
+        state=ManagedTorrentState.READY,
+        progress=1,
+    )
+    overdue_managed = ManagedTorrent(
+        info_hash="7" * 40,
+        name="Overdue",
+        total_size=100,
+        state=ManagedTorrentState.READY,
+        progress=1,
+    )
+    visible_managed = ManagedTorrent(
+        info_hash="6" * 40,
+        name="Visible",
+        total_size=100,
+        state=ManagedTorrentState.READY,
+        progress=1,
+    )
+    visible_ready_at = expired_at - timedelta(hours=1)
+    db_session.add_all(
+        [
+            expired_request,
+            TorrentRequest(
+                user_id=owner.id,
+                managed_torrent=cancelled_managed,
+                state=TorrentRequestState.CANCELLED,
+            ),
+            TorrentRequest(
+                user_id=owner.id,
+                managed_torrent=overdue_managed,
+                state=TorrentRequestState.READY,
+                ready_at=expired_at - timedelta(hours=2),
+                unsubscribe_at=expired_at,
+            ),
+            TorrentRequest(
+                user_id=owner.id,
+                managed_torrent=visible_managed,
+                state=TorrentRequestState.READY,
+                ready_at=visible_ready_at,
+                unsubscribe_at=expired_at + timedelta(days=1),
+            ),
+        ]
+    )
     await db_session.commit()
     await login(client)
 
     response = await client.get("/api/v2/torrents")
 
     assert response.status_code == 200
-    assert response.json()["items"] == []
-    assert response.json()["total"] == 0
+    assert [item["name"] for item in response.json()["items"]] == ["Visible"]
+    assert response.json()["total"] == 1
+    assert datetime.fromisoformat(response.json()["items"][0]["ready_at"]) == visible_ready_at
 
 
 @pytest.mark.asyncio

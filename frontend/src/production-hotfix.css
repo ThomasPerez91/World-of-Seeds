@@ -492,10 +492,6 @@ select { min-height: 2.75rem; }
   overflow-wrap: anywhere;
 }
 
-.torrent-accordion-card > .retention-warning {
-  margin: 0 0.9rem 0.75rem;
-}
-
 .torrent-card-actions {
   display: flex;
   min-width: 0;

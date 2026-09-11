@@ -46,7 +46,7 @@ import {
   type RecursiveTransferProgress,
   supportsRecursiveDirectoryDownload,
 } from "./recursiveDownload";
-import { RetentionWarning } from "./RetentionWarning";
+import { SubscriptionExpiryIndicator } from "./SubscriptionExpiryIndicator";
 
 export const PAGE_SIZE = 25;
 const AUTO_REFRESH_MS = 4_000;
@@ -151,17 +151,22 @@ const EMPTY_MANAGER_SNAPSHOT: BrowserDownloadManagerSnapshot = {
 type TorrentStatusFilter = "all" | "active" | "ready" | "waiting";
 
 export function matchesTorrentFilter(torrent: TorrentRequestV2, filter: TorrentStatusFilter): boolean {
+  if (!isVisibleTorrentRequest(torrent)) return false;
   if (filter === "all") return true;
   if (filter === "ready") return torrent.state === "ready";
   if (filter === "waiting") return torrentRowStatus(torrent) === "waiting";
   return torrentRowStatus(torrent) === "downloading";
 }
 
-export type TorrentRowStatus = "downloading" | "ready" | "waiting" | "blocked";
+export function isVisibleTorrentRequest(torrent: TorrentRequestV2): boolean {
+  return torrent.state !== "cancelled" && torrent.state !== "expired";
+}
+
+export type TorrentRowStatus = "downloading" | "ready" | "waiting" | "error";
 
 export function torrentRowStatus(torrent: TorrentRequestV2): TorrentRowStatus {
   if (torrent.state === "ready") return "ready";
-  if (["error", "cancelled", "expired"].includes(torrent.state)) return "blocked";
+  if (torrent.state === "error") return "error";
   if (
     torrent.state === "requested"
     || torrent.queue_status === "waiting"
@@ -172,7 +177,7 @@ export function torrentRowStatus(torrent: TorrentRequestV2): TorrentRowStatus {
 
 export function torrentQueueLabel(torrent: TorrentRequestV2): string {
   const status = torrentRowStatus(torrent);
-  if (status === "ready" || status === "blocked" || torrent.queue_position_estimate === null) return "-";
+  if (status === "ready" || status === "error" || torrent.queue_position_estimate === null) return "-";
   return `#${torrent.queue_position_estimate}`;
 }
 
@@ -180,7 +185,7 @@ const rowStatusLabels: Record<TorrentRowStatus, MessageKey> = {
   downloading: "downloads.statusDownloading",
   ready: "downloads.statusReady",
   waiting: "downloads.statusWaiting",
-  blocked: "downloads.statusBlocked",
+  error: "downloads.statusError",
 };
 
 const transferErrorKeys: Record<RecursiveTransferErrorCode, MessageKey> = {
@@ -486,11 +491,17 @@ function TorrentItem({
                 </Tooltip>
                 <span className="torrent-summary-status">
                   <Badge
-                    tone={rowStatus === "ready" ? "success" : rowStatus === "blocked" ? "danger" : rowStatus === "waiting" ? "warning" : "neutral"}
+                    tone={rowStatus === "ready" ? "success" : rowStatus === "error" ? "danger" : rowStatus === "waiting" ? "warning" : "neutral"}
                     className={`torrent-primary-state ${rowStatus}`}
                   >
                     {t(rowStatusLabels[rowStatus])}
                   </Badge>
+                  {torrent.state === "ready" && (
+                    <SubscriptionExpiryIndicator
+                      readyAt={torrent.ready_at}
+                      unsubscribeAt={torrent.unsubscribe_at}
+                    />
+                  )}
                 </span>
                 <span className="torrent-summary-queue">{torrentQueueLabel(torrent)}</span>
                 <span className={`torrent-summary-progress ${rowStatus}`}>
@@ -553,7 +564,6 @@ function TorrentItem({
           {error !== null && <p className="torrent-detail-error" role="alert">{error}</p>}
           {details}
         </Accordion>
-        {torrent.state === "ready" && <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />}
       </article>
     </li>
   );
@@ -627,7 +637,7 @@ export function UserDownloadsPage({
       while (expectedTotal === null || apiOffset < expectedTotal) {
         const result = await api.listTorrentRequestsV2(apiOffset, PAGE_SIZE, signal);
         if (expectedTotal === null) expectedTotal = result.total;
-        items.push(...result.items);
+        items.push(...result.items.filter(isVisibleTorrentRequest));
         if (result.items.length < PAGE_SIZE) break;
         apiOffset += result.items.length;
       }
@@ -773,6 +783,9 @@ export function UserDownloadsPage({
       socket.onmessage = (event) => {
         const message = parseTorrentRealtimeMessage(event.data);
         if (message === null || message.type === "heartbeat") return;
+        if (message.type === "torrent.cancelled" || message.type === "torrent.expired") {
+          setTorrents((current) => current.filter((torrent) => torrent.id !== message.request_id));
+        }
         refreshFromEvent();
         if (message.type === "torrent.retention_extended") refreshOpenManifest(message.request_id);
       };

@@ -22,6 +22,8 @@ function torrent(overrides: Partial<TorrentRequestV2> = {}): TorrentRequestV2 {
     state: "active",
     progress: 0.5,
     error_code: null,
+    ready_at: null,
+    unsubscribe_at: null,
     retention_expires_at: null,
     queue_position_estimate: null,
     queue_total_estimate: null,
