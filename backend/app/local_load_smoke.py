@@ -20,7 +20,10 @@ from sqlalchemy import delete, func, select, text
 from app.auth.service import issue_session
 from app.core.config import get_settings
 from app.core.database import engine, session_factory
-from app.integrations.account_routing import parse_deployment_account_specs
+from app.integrations.account_routing import (
+    c411_tracker_account_ref,
+    parse_deployment_account_specs,
+)
 from app.integrations.qbittorrent_v2 import (
     QBittorrentV2Gateway,
     QBittorrentV2ManagedIdentity,
@@ -107,7 +110,7 @@ async def _prepare_qbittorrent_fixture(
             except QBittorrentV2TransientError:
                 snapshots = ()
             if len(snapshots) == 1 and snapshots[0].progress >= 1:
-                return spec.tracker_account_ref, spec.qbittorrent_account_ref
+                return c411_tracker_account_ref(1), spec.qbittorrent_account_ref
             await asyncio.sleep(0.1)
     raise RuntimeError("qBittorrent did not verify the bounded load fixture")
 

@@ -74,9 +74,9 @@ async def test_admin_overview_exposes_options_scheduler_storage_and_bounded_audi
     assert body["storage"]["managed_bytes"] == 100
     assert body["storage"]["logical_bytes"] == 150
     assert 0 < len(body["audit"]) <= 50
-    assert all(
-        "PASSKEY" not in field["key"] for section in body["sections"] for field in section["fields"]
-    )
+    c411 = next(section for section in body["sections"] if section["id"] == "c411_accounts")
+    assert len(c411["fields"]) == 32
+    assert sum(field["input_type"] == "secret" for field in c411["fields"]) == 16
 
 
 @pytest.mark.asyncio
@@ -102,3 +102,31 @@ async def test_admin_option_update_requires_csrf_and_records_actor(
     )
     assert audit is not None
     assert audit.actor_user_id == admin.id
+
+
+@pytest.mark.asyncio
+async def test_admin_can_configure_c411_pair_without_exposing_passkey_in_audit(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await _admin(db_session)
+    headers = await _login(client)
+
+    response = await client.patch(
+        "/api/v2/admin/options",
+        json={
+            "changes": {
+                "WOS_C411_ACCOUNT_01_NUMBER": "1001",
+                "WOS_C411_ACCOUNT_01_PASSKEY": "admin-passkey-123",
+            }
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    c411 = next(section for section in body["sections"] if section["id"] == "c411_accounts")
+    fields = {field["key"]: field for field in c411["fields"]}
+    assert fields["WOS_C411_ACCOUNT_01_NUMBER"]["value"] == "1001"
+    assert fields["WOS_C411_ACCOUNT_01_PASSKEY"]["value"] == "admin-passkey-123"
+    assert all("admin-passkey-123" not in repr(event) for event in body["audit"])

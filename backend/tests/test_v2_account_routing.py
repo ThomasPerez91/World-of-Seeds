@@ -15,17 +15,22 @@ from app.core.config import Settings
 from app.integrations.account_routing import (
     AccountRoutingError,
     DeploymentAccountRouter,
+    SharedIntegrationRoute,
     TorrentEffectRoute,
+    c411_tracker_account_ref,
     parse_deployment_account_specs,
 )
 from app.integrations.qbittorrent_v2 import (
+    QBittorrentV2AddResult,
+    QBittorrentV2AddState,
     QBittorrentV2ControlResult,
     QBittorrentV2DesiredControl,
     QBittorrentV2ManagedIdentity,
     QBittorrentV2RunState,
     QBittorrentV2TorrentSnapshot,
 )
-from app.models import Base, ManagedTorrent
+from app.models import Base, ManagedTorrent, User
+from app.options import PostgresOptionsRegistry
 
 TRACKER_A = uuid.UUID("10000000-0000-0000-0000-000000000001")
 TRACKER_B = uuid.UUID("10000000-0000-0000-0000-000000000002")
@@ -57,6 +62,17 @@ class FakeAdder:
 class FakeQBittorrent:
     def __init__(self) -> None:
         self.control_calls: list[tuple[QBittorrentV2DesiredControl, ...]] = []
+        self.add_calls: list[bytes] = []
+
+    async def add_managed_torrent(
+        self,
+        content: bytes,
+        *,
+        expected_info_hash: str,
+        storage_key: uuid.UUID,
+    ) -> QBittorrentV2AddResult:
+        self.add_calls.append(content)
+        return QBittorrentV2AddResult(QBittorrentV2AddState.ADDED)
 
     async def remove_managed_torrent(self, _identity: QBittorrentV2ManagedIdentity) -> None:
         return None
@@ -125,13 +141,94 @@ def test_deployment_registry_parses_opaque_routes_without_exposing_secrets() -> 
     secret = _deployment_json()
     specs = parse_deployment_account_specs(secret)
 
-    assert [(spec.tracker_account_ref, spec.qbittorrent_account_ref) for spec in specs] == [
-        (TRACKER_A, QB_A),
-        (TRACKER_B, QB_B),
-    ]
+    assert [spec.qbittorrent_account_ref for spec in specs] == [QB_A, QB_B]
     assert "tracker-secret" not in repr(specs)
     assert "qb-secret" not in repr(specs)
     assert "tracker-secret" not in repr(Settings(integration_accounts_json=secret))
+
+
+def test_single_qb_registry_no_longer_requires_a_c411_passkey() -> None:
+    secret = SecretStr(
+        json.dumps(
+            {
+                "routes": [
+                    {
+                        "qbittorrent_account_ref": str(QB_A),
+                        "newgreedy_url": "http://newgreedy:8080",
+                        "qbittorrent_url": "http://qbittorrent:8080",
+                        "qbittorrent_username": "worker",
+                        "qbittorrent_password": "qb-secret-456",
+                    }
+                ]
+            }
+        )
+    )
+
+    specs = parse_deployment_account_specs(secret)
+
+    assert len(specs) == 1
+    assert specs[0].qbittorrent_account_ref == QB_A
+
+
+class FakeNewGreedy:
+    async def require_ready(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_shared_qb_uses_random_active_c411_slot_once_and_persists_it(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    registry = PostgresOptionsRegistry()
+    async with sessions() as session, session.begin():
+        admin = User(
+            username="routing-admin",
+            password_hash="test-password-hash",
+            is_admin=True,
+            is_active=True,
+        )
+        session.add(admin)
+        await session.flush()
+        await registry.initialize(session)
+        await registry.update(
+            session,
+            {
+                "WOS_C411_ACCOUNT_01_NUMBER": "1001",
+                "WOS_C411_ACCOUNT_01_PASSKEY": "first-passkey-123",
+                "WOS_C411_ACCOUNT_02_NUMBER": "1002",
+                "WOS_C411_ACCOUNT_02_PASSKEY": "second-passkey-456",
+            },
+            actor_user_id=admin.id,
+        )
+        torrent = ManagedTorrent(info_hash="c" * 40, name="random", total_size=1)
+        session.add(torrent)
+        await session.flush()
+        torrent_id = torrent.id
+
+    qbittorrent = FakeQBittorrent()
+    shared = SharedIntegrationRoute(
+        qbittorrent_account_ref=QB_A,
+        qbittorrent=qbittorrent,
+        newgreedy=FakeNewGreedy(),
+        allowed_tracker_hosts=("c411.org",),
+        max_total_size=1024,
+    )
+    router = DeploymentAccountRouter(
+        sessions,
+        shared_integration=shared,
+        random_index=lambda count: count - 1,
+    )
+
+    selected = await router.resolve(torrent_id, "c" * 40)
+    replay = await DeploymentAccountRouter(
+        sessions,
+        shared_integration=shared,
+        random_index=lambda _count: 0,
+    ).resolve(torrent_id, "c" * 40)
+
+    assert selected.tracker_account_ref == c411_tracker_account_ref(2)
+    assert replay.tracker_account_ref == selected.tracker_account_ref
+    assert selected.qbittorrent_account_ref == replay.qbittorrent_account_ref == QB_A
 
 
 @pytest.mark.parametrize(

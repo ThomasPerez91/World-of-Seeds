@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DatabaseOption, DatabaseOptionAudit, User
 from app.options import (
-    OPTION_SPECS,
+    DATABASE_OPTION_SPECS,
     DatabaseOptionsDriftError,
     OptionsValidationError,
     PostgresOptionsRegistry,
@@ -51,14 +51,54 @@ async def test_database_registry_bootstraps_typed_defaults_and_audit(
         "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
     )
 
-    assert values == {spec.key: spec.default for spec in OPTION_SPECS}
-    assert option_count == audit_count == len(OPTION_SPECS)
+    assert values == {spec.key: spec.default for spec in DATABASE_OPTION_SPECS}
+    assert option_count == audit_count == len(DATABASE_OPTION_SPECS)
     assert speed is not None
     assert speed.value_type == "integer"
     assert speed.minimum_value == 0
     assert speed.maximum_value == 1_000_000_000
     assert speed.version == 1
     assert speed.updated_by_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_c411_account_options_require_complete_unique_pairs_and_redact_audit(
+    db_session: AsyncSession,
+) -> None:
+    registry = PostgresOptionsRegistry()
+    admin = await create_user(db_session, "c411-admin", is_admin=True)
+    await registry.initialize(db_session, now=NOW)
+    await registry.update(
+        db_session,
+        {
+            "WOS_C411_ACCOUNT_01_NUMBER": "12345",
+            "WOS_C411_ACCOUNT_01_PASSKEY": "private-passkey-123",
+        },
+        actor_user_id=admin.id,
+        now=NOW,
+    )
+    await db_session.commit()
+
+    values = await registry.snapshot(db_session)
+    assert values["WOS_C411_ACCOUNT_01_NUMBER"] == "12345"
+    assert values["WOS_C411_ACCOUNT_01_PASSKEY"] == "private-passkey-123"
+    audits = list(
+        await db_session.scalars(
+            select(DatabaseOptionAudit).where(
+                DatabaseOptionAudit.option_key == "WOS_C411_ACCOUNT_01_PASSKEY"
+            )
+        )
+    )
+    assert audits[-1].new_value == "[secret updated]"
+    assert "private-passkey-123" not in repr(audits)
+
+    with pytest.raises(OptionsValidationError, match="renseignés ensemble"):
+        await registry.update(
+            db_session,
+            {"WOS_C411_ACCOUNT_02_NUMBER": "67890"},
+            actor_user_id=admin.id,
+            now=NOW,
+        )
 
 
 @pytest.mark.asyncio

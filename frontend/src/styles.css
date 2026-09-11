@@ -1943,6 +1943,7 @@ button:disabled {
 }
 
 .option-number-control input,
+.option-control > input,
 .option-control select {
   width: 100%;
   height: 2.55rem;

@@ -42,7 +42,7 @@ from app.models import (
 )
 from app.options import (
     CATEGORY_LABELS,
-    OPTION_SPECS,
+    DATABASE_OPTION_SPECS,
     DatabaseOptionsDriftError,
     OptionsValidationError,
     PostgresOptionsRegistry,
@@ -92,7 +92,7 @@ async def _overview(
     restart_required: bool = False,
 ) -> AdminV2Overview:
     rows = {row.key: row for row in (await db.scalars(select(DatabaseOption))).all()}
-    if len(rows) != len(OPTION_SPECS):
+    if len(rows) != len(DATABASE_OPTION_SPECS):
         raise DatabaseOptionsDriftError("database option registry is incomplete")
     sections: list[AdminV2OptionSection] = []
     for category, label in CATEGORY_LABELS.items():
@@ -112,7 +112,7 @@ async def _overview(
                 restart_required=spec.restart_required,
                 version=rows[spec.key].version,
             )
-            for spec in OPTION_SPECS
+            for spec in DATABASE_OPTION_SPECS
             if spec.category == category
         ]
         if fields:
