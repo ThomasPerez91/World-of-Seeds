@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -90,7 +90,7 @@ describe("theme", () => {
     }
   });
 
-  it("restores /auth/me and persists through Preferences and reconnection", async () => {
+  it("restores /auth/me without exposing theme controls in Preferences", async () => {
     systemMedia(); localStorage.setItem("wos.preferred-theme", "light");
     let current = { ...account };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -110,26 +110,20 @@ describe("theme", () => {
     expect(screen.queryByRole("combobox", { name: "Langue" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Paramètres" }));
     await screen.findByRole("heading", { name: "Préférences" });
-    const light = screen.getByRole("button", { name: "Clair" });
-    light.focus(); await user.keyboard("{Enter}");
-    await waitFor(() => expect(current.preferred_theme).toBe("light"));
-    expect(light.getAttribute("aria-pressed")).toBe("true");
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
-    await user.click(screen.getByRole("button", { name: "Système" }));
-    await waitFor(() => expect(current.preferred_theme).toBe("system"));
+    expect(screen.queryByRole("button", { name: "Clair" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sombre" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Système" })).toBeNull();
+    expect(document.documentElement.dataset.theme).toBe("dark");
     await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
     await screen.findByRole("heading", { name: "Preferences" });
     expect(current.preferred_locale).toBe("en");
-    expect(screen.getByRole("button", { name: "System" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByRole("button", { name: "System" })).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/auth/theme", expect.objectContaining({
-      method: "PATCH", body: JSON.stringify({ preferred_theme: "light" }), credentials: "same-origin",
-    }));
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/v1/auth/theme", expect.anything());
     view.unmount(); render(<App />);
     await screen.findByRole("heading", { name: "Dashboard" });
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(localStorage.getItem("wos.preferred-theme")).toBe("system");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem("wos.preferred-theme")).toBe("dark");
   });
 
   it("keeps the browser theme on loading and login, then restores the authenticated account", async () => {
