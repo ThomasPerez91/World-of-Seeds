@@ -91,7 +91,12 @@
 
 .user-downloads .torrent-accordion-list {
   position: static;
+  overflow: visible;
   padding-top: 0 !important;
+}
+
+.user-downloads .torrent-accordion-item {
+  overflow: visible;
 }
 
 .torrent-accordion-list::before {
@@ -464,6 +469,11 @@
   .torrent-summary-progress { grid-area: progress; }
   .torrent-summary-size { grid-area: size; }
   .torrent-card-actions { grid-area: actions; }
+
+  .ready-file-list li > .ui-tooltip-anchor:last-child {
+    grid-column: 3;
+    justify-self: end;
+  }
 
   .torrent-accordion-content {
     margin-inline: 0.6rem !important;
