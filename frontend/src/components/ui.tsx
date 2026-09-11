@@ -1,4 +1,13 @@
-import type { ComponentPropsWithRef, HTMLAttributes, ReactNode } from "react";
+import {
+  type ComponentPropsWithRef,
+  type HTMLAttributes,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 
 type ButtonProps = ComponentPropsWithRef<"button"> & {
   variant?: "primary" | "secondary" | "ghost" | "danger";
@@ -26,9 +35,57 @@ export function Progress({ label, value, className = "" }: { label: string; valu
     value={value === undefined ? undefined : Math.min(100, Math.max(0, value))} />;
 }
 
+export function Tooltip({
+  children,
+  className = "",
+  content,
+  overflowOnly = false,
+}: {
+  children: ReactNode;
+  className?: string;
+  content: string;
+  overflowOnly?: boolean;
+}) {
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const tooltipId = useId();
+  const [overflowing, setOverflowing] = useState(!overflowOnly);
+  const measure = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (anchor === null || !overflowOnly) return;
+    const measured = anchor.firstElementChild instanceof HTMLElement ? anchor.firstElementChild : anchor;
+    setOverflowing(measured.scrollWidth > measured.clientWidth || measured.scrollHeight > measured.clientHeight);
+  }, [overflowOnly]);
+
+  useEffect(() => {
+    measure();
+    const anchor = anchorRef.current;
+    if (anchor === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(anchor);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  return (
+    <span
+      ref={anchorRef}
+      className={`ui-tooltip-anchor ${overflowOnly ? "ui-tooltip-overflow" : ""} ${className}`}
+      aria-label={overflowOnly ? content : undefined}
+      aria-describedby={overflowing ? tooltipId : undefined}
+      tabIndex={overflowOnly && overflowing ? 0 : undefined}
+      onFocus={measure}
+      onMouseEnter={measure}
+    >
+      {children}
+      {overflowing && <span id={tooltipId} className="ui-tooltip-content" role="tooltip">{content}</span>}
+    </span>
+  );
+}
+
 type AccordionProps = Omit<ComponentPropsWithRef<"details">, "children" | "title"> & {
   children: ReactNode;
+  contentId?: string;
   contentClassName?: string;
+  externalTrigger?: boolean;
   summaryClassName?: string;
   summaryLabel?: string;
   title: ReactNode;
@@ -38,14 +95,26 @@ type AccordionProps = Omit<ComponentPropsWithRef<"details">, "children" | "title
 export function Accordion({
   children,
   className = "",
+  contentId,
   contentClassName = "",
+  externalTrigger = false,
+  open,
   summaryClassName = "",
   summaryLabel,
   title,
   ...props
 }: AccordionProps) {
+  if (externalTrigger) {
+    return (
+      <>
+        {title}
+        <div id={contentId} className={contentClassName} hidden={!open}>{children}</div>
+      </>
+    );
+  }
+
   return (
-    <details className={`ui-accordion ${className}`} {...props}>
+    <details className={`ui-accordion ${className}`} open={open} {...props}>
       <summary className={summaryClassName} aria-description={summaryLabel}>{title}</summary>
       <div className={contentClassName}>{children}</div>
     </details>
