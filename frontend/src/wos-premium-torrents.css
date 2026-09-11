@@ -436,6 +436,33 @@
   transform: translate(-50%, 0);
 }
 
+.torrent-summary-heading > .ui-tooltip-content,
+.ready-file-path > .ui-tooltip-content {
+  left: 0;
+  transform: translateY(4px);
+}
+
+.torrent-summary-heading:hover > .ui-tooltip-content,
+.torrent-summary-heading:focus > .ui-tooltip-content,
+.ready-file-path:hover > .ui-tooltip-content,
+.ready-file-path:focus > .ui-tooltip-content {
+  transform: translateY(0);
+}
+
+.torrent-card-actions .ui-tooltip-content,
+.ready-file-list li > .ui-tooltip-anchor:last-child .ui-tooltip-content {
+  right: 0;
+  left: auto;
+  transform: translateY(4px);
+}
+
+.torrent-card-actions .ui-tooltip-anchor:hover > .ui-tooltip-content,
+.torrent-card-actions .ui-tooltip-anchor:focus-within > .ui-tooltip-content,
+.ready-file-list li > .ui-tooltip-anchor:last-child:hover .ui-tooltip-content,
+.ready-file-list li > .ui-tooltip-anchor:last-child:focus-within .ui-tooltip-content {
+  transform: translateY(0);
+}
+
 @keyframes torrent-details-enter {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
