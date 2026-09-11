@@ -68,6 +68,7 @@ async def _ready_file(
         user=owner,
         managed_torrent=torrent,
         state=TorrentRequestState.READY,
+        unsubscribe_at=datetime(2030, 8, 1, tzinfo=UTC),
     )
     torrent_file = TorrentFile(
         managed_torrent=torrent,
@@ -287,8 +288,7 @@ async def test_expired_retention_refuses_new_lease_but_engaged_download_can_rene
     owner, torrent, request, torrent_file, _ = await _ready_file(db_session, data_root)
     expiry = datetime(2026, 8, 22, tzinfo=UTC)
     clock = [expiry - timedelta(seconds=1)]
-    torrent.ready_at = expiry - timedelta(days=5)
-    torrent.retention_expires_at = expiry
+    request.unsubscribe_at = expiry
     await db_session.commit()
     manager = DownloadLeaseManager(db_session, lease_seconds=60, clock=lambda: clock[0])
 

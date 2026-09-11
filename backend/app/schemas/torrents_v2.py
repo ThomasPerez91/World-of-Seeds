@@ -12,6 +12,7 @@ class TorrentRequestV2Response(BaseModel):
     state: Literal["requested", "active", "ready", "cancelled", "expired", "error"]
     progress: float = Field(ge=0, le=1)
     error_code: str | None
+    unsubscribe_at: datetime | None
     retention_expires_at: datetime | None
     queue_position_estimate: int | None = Field(default=None, ge=1)
     queue_total_estimate: int | None = Field(default=None, ge=1)
@@ -53,3 +54,17 @@ class TorrentDownloadManifestResponse(BaseModel):
     offset: int = Field(ge=0)
     limit: int = Field(ge=1, le=500)
     items: list[TorrentDownloadFileResponse]
+
+
+class TorrentDownloadDirectoryResponse(BaseModel):
+    name: str
+    relative_path: str
+    file_count: int = Field(ge=1)
+    total_size: int = Field(ge=0)
+    archive_available: bool
+
+
+class TorrentDownloadDirectoriesResponse(BaseModel):
+    snapshot_id: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    path: str
+    directories: list[TorrentDownloadDirectoryResponse]

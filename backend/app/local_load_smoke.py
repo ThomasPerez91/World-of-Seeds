@@ -37,7 +37,7 @@ from app.models import (
 )
 from app.options import PostgresOptionsRegistry
 from app.storage import SharedContentStore
-from app.torrents import extend_ready_torrent_retention
+from app.torrents import mark_ready_requests
 
 ACCOUNT_COUNT = 100
 SCALES = (1, 10, 25, 50, 100)
@@ -159,8 +159,7 @@ async def _seed() -> list[LoadIdentity]:
             request = TorrentRequest(
                 user_id=user.id,
                 managed_torrent_id=torrent.id,
-                state=TorrentRequestState.READY,
-                ready_at=datetime.now(UTC),
+                state=TorrentRequestState.REQUESTED,
             )
             session.add(request)
             await session.flush()
@@ -186,10 +185,11 @@ async def _seed() -> list[LoadIdentity]:
         verified_torrent.qbittorrent_account_ref = qbittorrent_ref
         verified_torrent.state = ManagedTorrentState.READY
         verified_torrent.progress = 1.0
-        await extend_ready_torrent_retention(
+        await mark_ready_requests(
             session,
             verified_torrent,
             now=datetime.now(UTC),
+            auto_unsubscribe_hours=48,
         )
     return identities
 

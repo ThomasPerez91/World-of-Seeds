@@ -162,15 +162,9 @@ class ManagedTorrent(Base):
         ),
         CheckConstraint(
             "lifecycle_generation >= 0 AND "
-            "((state IN ('PURGE_PENDING', 'PURGING') AND purge_after IS NOT NULL) "
-            "OR (state NOT IN ('PURGE_PENDING', 'PURGING') AND purge_after IS NULL))",
+            "(state NOT IN ('PURGE_PENDING', 'PURGING') OR purge_after IS NOT NULL) AND "
+            "(state <> 'PURGED' OR purge_after IS NULL)",
             name="ck_managed_torrents_lifecycle",
-        ),
-        CheckConstraint(
-            "(ready_at IS NULL AND retention_expires_at IS NULL) OR "
-            "(ready_at IS NOT NULL AND retention_expires_at IS NOT NULL "
-            "AND retention_expires_at >= ready_at)",
-            name="ck_managed_torrents_ready_retention",
         ),
         CheckConstraint(
             "manifest_version >= 0 AND manifest_file_count >= 0 AND manifest_total_size >= 0",
@@ -198,13 +192,6 @@ class ManagedTorrent(Base):
         Index("ix_managed_torrents_tracker_account", "tracker_account_ref"),
         Index("ix_managed_torrents_qb_account", "qbittorrent_account_ref"),
         Index("ix_managed_torrents_scheduler_retry", "state", "scheduler_retry_at"),
-        Index(
-            "ix_managed_torrents_retention_due",
-            "retention_expires_at",
-            "id",
-            postgresql_where=text("state = 'READY' AND retention_expires_at IS NOT NULL"),
-            sqlite_where=text("state = 'READY' AND retention_expires_at IS NOT NULL"),
-        ),
         Index(
             "ix_managed_torrents_purge_stop_pending",
             "updated_at",
@@ -355,6 +342,14 @@ class TorrentRequest(Base):
             postgresql_where=ACTIVE_REQUEST_PREDICATE,
             sqlite_where=ACTIVE_REQUEST_PREDICATE,
         ),
+        Index(
+            "ix_torrent_requests_unsubscribe_due",
+            "state",
+            "unsubscribe_at",
+            "id",
+            postgresql_where=text("state = 'READY' AND unsubscribe_at IS NOT NULL"),
+            sqlite_where=text("state = 'READY' AND unsubscribe_at IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -380,6 +375,7 @@ class TorrentRequest(Base):
         nullable=False,
     )
     ready_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    unsubscribe_at: Mapped[datetime | None] = mapped_column(nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
