@@ -65,8 +65,9 @@ from app.torrents import (
     PURGE_TORRENT_JOB,
     TorrentManifestError,
     TorrentValidationError,
+    backfill_ready_unsubscribe_deadlines_batch,
     expire_ready_torrents_batch,
-    extend_ready_torrent_retention,
+    mark_ready_requests,
     record_tracker_activity,
     replace_torrent_manifest,
 )
@@ -75,7 +76,7 @@ ADD_TORRENT_JOB = "ADD_TORRENT"
 SYNC_TORRENT_JOB = "SYNC_TORRENT"
 MAX_SYNC_BATCH = 200
 MAX_RETENTION_BATCH = 200
-RETENTION_REAPER_INTERVAL_SECONDS = 30
+RETENTION_REAPER_INTERVAL_SECONDS = 3600
 SYNC_INTERVAL_OPTION = "WOS_QB_SYNC_INTERVAL_SECONDS"
 STALL_TIMEOUT = timedelta(seconds=60)
 STALL_COOLDOWNS = (
@@ -365,6 +366,7 @@ class TorrentEffectHandlers:
     async def purge_torrent(self, snapshot: TorrentJobSnapshot) -> None:
         now = self._clock()
         database_now = _database_timestamp(now)
+        purge_activated = False
         async with self._session_factory() as session, session.begin():
             torrent = await session.get(
                 ManagedTorrent,
@@ -374,11 +376,6 @@ class TorrentEffectHandlers:
             if torrent is None:
                 raise PermanentTorrentJobError("managed_torrent_missing")
             if torrent.state is ManagedTorrentState.PURGED:
-                return
-            if torrent.state not in {
-                ManagedTorrentState.PURGE_PENDING,
-                ManagedTorrentState.PURGING,
-            }:
                 return
             active_requests = await session.scalar(
                 select(func.count())
@@ -395,34 +392,77 @@ class TorrentEffectHandlers:
                 )
             )
             if active_requests:
-                torrent.state = (
-                    ManagedTorrentState.READY
-                    if torrent.progress >= 1
-                    else ManagedTorrentState.DOWNLOADING
-                )
+                if torrent.state in {
+                    ManagedTorrentState.PURGE_PENDING,
+                    ManagedTorrentState.PURGING,
+                }:
+                    torrent.state = (
+                        ManagedTorrentState.READY
+                        if torrent.progress >= 1
+                        else ManagedTorrentState.DOWNLOADING
+                    )
                 torrent.purge_after = None
                 torrent.purge_stop_pending = False
                 torrent.updated_at = now
                 return
-            if torrent.purge_after is None or _as_utc(torrent.purge_after) > _as_utc(now):
+            if torrent.purge_after is None:
+                return
+            if _as_utc(torrent.purge_after) > _as_utc(now):
                 raise TransientTorrentJobError("torrent_retention_active")
-            if torrent.purge_stop_pending:
-                raise TransientTorrentJobError("torrent_scheduler_stop_pending")
-            active_leases = await session.scalar(
-                select(func.count())
-                .select_from(DownloadLease)
-                .where(
-                    DownloadLease.managed_torrent_id == torrent.id,
-                    DownloadLease.expires_at > database_now,
+            if torrent.state not in {
+                ManagedTorrentState.PURGE_PENDING,
+                ManagedTorrentState.PURGING,
+            }:
+                torrent.lifecycle_generation += 1
+                torrent.state = ManagedTorrentState.PURGE_PENDING
+                torrent.desired_active = False
+                torrent.desired_priority = None
+                torrent.desired_download_limit = 0
+                torrent.purge_stop_pending = True
+                torrent.updated_at = now
+                active_jobs = list(
+                    (
+                        await session.scalars(
+                            select(TorrentJob)
+                            .where(
+                                TorrentJob.managed_torrent_id == torrent.id,
+                                TorrentJob.id != snapshot.id,
+                                TorrentJob.state.in_(
+                                    (TorrentJobState.QUEUED, TorrentJobState.RUNNING)
+                                ),
+                            )
+                            .with_for_update()
+                        )
+                    ).all()
                 )
-            )
-            if active_leases:
-                raise TransientTorrentJobError("torrent_download_active")
-            torrent.state = ManagedTorrentState.PURGING
-            torrent.updated_at = now
-            identity = QBittorrentV2ManagedIdentity(torrent.info_hash, torrent.storage_key)
-            storage_key = torrent.storage_key
-            total_size = torrent.total_size
+                for job in active_jobs:
+                    job.cancel_requested_at = now
+                    job.updated_at = now
+                    if job.state is TorrentJobState.QUEUED:
+                        job.state = TorrentJobState.CANCELLED
+                        job.finished_at = now
+                purge_activated = True
+            elif torrent.purge_stop_pending:
+                raise TransientTorrentJobError("torrent_scheduler_stop_pending")
+            else:
+                active_leases = await session.scalar(
+                    select(func.count())
+                    .select_from(DownloadLease)
+                    .where(
+                        DownloadLease.managed_torrent_id == torrent.id,
+                        DownloadLease.expires_at > database_now,
+                    )
+                )
+                if active_leases:
+                    raise TransientTorrentJobError("torrent_download_active")
+                torrent.state = ManagedTorrentState.PURGING
+                torrent.updated_at = now
+                identity = QBittorrentV2ManagedIdentity(torrent.info_hash, torrent.storage_key)
+                storage_key = torrent.storage_key
+                total_size = torrent.total_size
+
+        if purge_activated:
+            raise TransientTorrentJobError("torrent_scheduler_stop_pending")
 
         try:
             route = await self._router.resolve(snapshot.managed_torrent_id, identity.info_hash)
@@ -578,33 +618,39 @@ class TorrentEffectHandlers:
                 torrent.desired_priority = None
                 torrent.desired_download_limit = 0
             torrent.updated_at = now
-            requests = list(
-                (
-                    await session.scalars(
-                        select(TorrentRequest)
-                        .where(
-                            TorrentRequest.managed_torrent_id == torrent.id,
-                            TorrentRequest.state.in_(
-                                (TorrentRequestState.REQUESTED, TorrentRequestState.ACTIVE)
-                            ),
-                        )
-                        .with_for_update()
+            if state is ManagedTorrentState.READY:
+                auto_unsubscribe_hours = await _integer_database_option(
+                    session,
+                    "WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS",
+                    default=48,
+                )
+                requests = list(
+                    await mark_ready_requests(
+                        session,
+                        torrent,
+                        now=now,
+                        auto_unsubscribe_hours=auto_unsubscribe_hours,
                     )
-                ).all()
-            )
-            for request in requests:
-                if state is ManagedTorrentState.READY:
-                    request.state = TorrentRequestState.READY
-                    request.ready_at = now
-                elif request.state is TorrentRequestState.REQUESTED:
-                    request.state = TorrentRequestState.ACTIVE
-                request.updated_at = now
-            if state is ManagedTorrentState.READY and (
-                previous_state is not ManagedTorrentState.READY
-                or torrent.ready_at is None
-                or torrent.retention_expires_at is None
-            ):
-                await extend_ready_torrent_retention(session, torrent, now=now)
+                )
+            else:
+                requests = list(
+                    (
+                        await session.scalars(
+                            select(TorrentRequest)
+                            .where(
+                                TorrentRequest.managed_torrent_id == torrent.id,
+                                TorrentRequest.state.in_(
+                                    (TorrentRequestState.REQUESTED, TorrentRequestState.ACTIVE)
+                                ),
+                            )
+                            .with_for_update()
+                        )
+                    ).all()
+                )
+                for request in requests:
+                    if request.state is TorrentRequestState.REQUESTED:
+                        request.state = TorrentRequestState.ACTIVE
+                    request.updated_at = now
             event_type = _snapshot_event_type(
                 previous_state=previous_state,
                 state=state,
@@ -779,9 +825,26 @@ class TorrentRetentionReaper:
 
     async def expire_once(self) -> int:
         async with self._session_factory() as session, session.begin():
+            auto_unsubscribe_hours = await _integer_database_option(
+                session,
+                "WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS",
+                default=48,
+            )
+            retention_hours = await _integer_database_option(
+                session,
+                "WOS_TORRENT_RETENTION_HOURS",
+                default=48,
+            )
+            await backfill_ready_unsubscribe_deadlines_batch(
+                session,
+                now=self._clock(),
+                auto_unsubscribe_hours=auto_unsubscribe_hours,
+                limit=MAX_RETENTION_BATCH,
+            )
             results = await expire_ready_torrents_batch(
                 session,
                 now=self._clock(),
+                retention_hours=retention_hours,
                 limit=MAX_RETENTION_BATCH,
             )
         if results:
@@ -797,6 +860,21 @@ class TorrentRetentionReaper:
                     ),
                 )
         return len(results)
+
+
+async def _integer_database_option(
+    session: AsyncSession,
+    key: str,
+    *,
+    default: int,
+) -> int:
+    value = await session.scalar(
+        select(DatabaseOption.integer_value).where(DatabaseOption.key == key)
+    )
+    resolved = default if value is None else value
+    if not 1 <= resolved <= 2160:
+        raise ValueError(f"database option {key} is invalid")
+    return resolved
 
 
 def _domain_state(

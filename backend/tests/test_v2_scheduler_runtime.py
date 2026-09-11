@@ -274,7 +274,7 @@ async def test_previously_admitted_torrent_without_active_request_is_stopped(
 
 
 @pytest.mark.asyncio
-async def test_purge_pending_download_is_durably_stopped_before_retention(
+async def test_purge_pending_download_is_durably_stopped_at_retention_deadline(
     tmp_path: Path,
 ) -> None:
     engine, sessions = await _database(tmp_path)
@@ -285,7 +285,7 @@ async def test_purge_pending_download_is_durably_stopped_before_retention(
             total_size=10,
             progress=0.4,
             state=ManagedTorrentState.PURGE_PENDING,
-            purge_after=NOW + timedelta(hours=48),
+            purge_after=NOW,
             desired_active=False,
             desired_priority=None,
             purge_stop_pending=True,
@@ -325,6 +325,43 @@ async def test_purge_pending_download_is_durably_stopped_before_retention(
         assert stopped is not None
         assert stopped.state is ManagedTorrentState.PURGE_PENDING
         assert stopped.purge_stop_pending is False
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_downloading_torrent_keeps_running_during_purge_grace(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    async with sessions() as session, session.begin():
+        torrent = ManagedTorrent(
+            info_hash="8" * 40,
+            name="grace-downloading",
+            total_size=10,
+            progress=0.4,
+            state=ManagedTorrentState.DOWNLOADING,
+            purge_after=NOW + timedelta(hours=48),
+            desired_active=True,
+            desired_priority=0,
+            desired_download_limit=1234,
+        )
+        session.add(torrent)
+    gateway = FakeGateway()
+
+    result = await SchedulerRuntime(
+        sessions, gateway, scheduler_id="scheduler-grace", clock=lambda: NOW
+    ).run_once()
+
+    assert result.selected_torrent_ids == ()
+    assert len(gateway.calls) == 1
+    assert len(gateway.calls[0]) == 1
+    assert gateway.calls[0][0].run_state == "running"
+    assert gateway.calls[0][0].download_limit_bytes_per_second == 1234
+    async with sessions() as session:
+        stored = await session.get(ManagedTorrent, torrent.id)
+    assert stored is not None
+    assert stored.state is ManagedTorrentState.DOWNLOADING
+    assert stored.desired_active is True
+    assert stored.desired_priority == 0
+    assert stored.purge_stop_pending is False
     await engine.dispose()
 
 

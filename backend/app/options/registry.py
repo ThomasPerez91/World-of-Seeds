@@ -138,6 +138,16 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         unit="bytes",
     ),
     _integer(
+        "WOS_FOLDER_ARCHIVE_MAX_CONCURRENT_GLOBAL",
+        "Archives dossier simultanées",
+        "Nombre maximal d’archives ZIP de dossier produites simultanément par processus API.",
+        4,
+        "downloads",
+        minimum=1,
+        maximum=16,
+        unit="count",
+    ),
+    _integer(
         "WOS_TORRENT_MAX_ACTIVE_PER_USER",
         "Torrents actifs par utilisateur",
         "Nombre maximal de demandes actives pour un même compte.",
@@ -287,6 +297,16 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         maximum=16,
         unit="count",
         restart_required=True,
+    ),
+    _integer(
+        "WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS",
+        "Désabonnement automatique",
+        "Durée pendant laquelle un utilisateur reste abonné à un torrent après sa disponibilité.",
+        48,
+        "retention",
+        minimum=1,
+        maximum=2160,
+        unit="hours",
     ),
     _integer(
         "WOS_TORRENT_RETENTION_HOURS",
