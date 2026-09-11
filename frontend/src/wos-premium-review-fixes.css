@@ -1,11 +1,6 @@
 /* Targeted post-review safeguards for PR #167. Loaded last so these rules
  * override the visual layer without reopening the historical CSS recovery file. */
 
-/* The dashboard hero keeps a forced-dark image treatment in every theme. */
-:root[data-theme="light"] .user-dashboard-header h1 {
-  color: #f1f6f3 !important;
-}
-
 /* Semantic badge foregrounds need dark-theme and light-theme contrast profiles. */
 :root[data-theme="light"] .ui-badge-success {
   color: #116b3d !important;

@@ -289,19 +289,17 @@ Les `TorrentRequest` représentent les droits utilisateurs.
 - Les opérations de purge sont idempotentes et attendent les leases de téléchargement.
 - Le stockage observé et le ledger applicatif sont des notions distinctes.
 
-## Rétention READY
+## Abonnements READY et rétention physique
 
-Chaque torrent physique READY possède une date de première disponibilité et une échéance durable.
+Chaque `TorrentRequest` READY est un abonnement utilisateur distinct. Son délai commence à
+`ready_at` et se termine à `unsubscribe_at`, selon `WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS`.
+À cette échéance, seul cet abonnement expire et disparaît du listing actif de son propriétaire.
 
-La rétention dépend de la popularité historique et peut être prolongée par de nouvelles demandes avant expiration, jamais raccourcie.
-
-A l'échéance :
-
-- les droits actifs sont expirés atomiquement ;
-- le torrent passe vers `PURGE_PENDING` ;
-- un stop scheduler durable est enregistré ;
-- une purge worker idempotente est créée ;
-- les leases existants peuvent terminer, mais aucun nouveau droit expiré n'est accordé.
+Le `ManagedTorrent` reste le contenu physique partagé. Tant qu'un autre abonnement actif existe,
+il reste disponible sans purge. Après le dernier désabonnement, la grâce physique configurée par
+`WOS_TORRENT_RETENTION_HOURS` commence : la purge est planifiée et idempotente, mais le contenu
+n'est pas supprimé immédiatement. Les leases déjà engagés peuvent terminer ; aucun nouveau droit
+expiré n'est accordé.
 
 ## Temps réel et transferts navigateur
 

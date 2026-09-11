@@ -45,6 +45,8 @@ export interface TorrentRequestV2 {
   state: TorrentRequestV2State;
   progress: number;
   error_code: string | null;
+  ready_at: string | null;
+  unsubscribe_at: string | null;
   retention_expires_at: string | null;
   queue_position_estimate: number | null;
   queue_total_estimate: number | null;

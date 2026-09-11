@@ -214,6 +214,7 @@ def _response(
         state=state,
         progress=torrent.progress,
         error_code=(error_code or "torrent_failed") if state == "error" else None,
+        ready_at=(_utc_datetime(request.ready_at) if state == "ready" else None),
         unsubscribe_at=(_utc_datetime(request.unsubscribe_at) if state == "ready" else None),
         retention_expires_at=(_utc_datetime(request.unsubscribe_at) if state == "ready" else None),
         queue_position_estimate=(

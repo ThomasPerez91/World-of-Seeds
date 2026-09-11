@@ -8,6 +8,7 @@ import { I18nProvider, type Locale } from "../../i18n";
 import {
   MAX_TORRENT_BATCH_FILES,
   TORRENT_UPLOAD_CONCURRENCY,
+  isVisibleTorrentRequest,
   matchesTorrentFilter,
   torrentQueueLabel,
   torrentRowStatus,
@@ -29,6 +30,8 @@ function torrent(overrides: Record<string, unknown> = {}) {
     progress: 0.5,
     state: "active",
     error_code: null,
+    ready_at: null,
+    unsubscribe_at: null,
     retention_expires_at: null,
     queue_position_estimate: null,
     queue_total_estimate: null,
@@ -87,7 +90,7 @@ class MockWebSocket {
 }
 
 describe("UserDownloadsPage", () => {
-  it("mappe les états métier vers les quatre statuts UX et conserve uniquement une vraie position de file", () => {
+  it("mappe les états actifs sans confondre une erreur avec un blocage", () => {
     const request = (overrides: Record<string, unknown>) =>
       torrent(overrides) as Parameters<typeof torrentRowStatus>[0];
 
@@ -96,8 +99,9 @@ describe("UserDownloadsPage", () => {
     expect(torrentRowStatus(request({ state: "ready" }))).toBe("ready");
     expect(torrentRowStatus(request({ state: "requested", queue_status: "waiting" }))).toBe("waiting");
     expect(torrentRowStatus(request({ state: "active", queue_status: "cooldown" }))).toBe("waiting");
-    expect(torrentRowStatus(request({ state: "error" }))).toBe("blocked");
-    expect(torrentRowStatus(request({ state: "expired" }))).toBe("blocked");
+    expect(torrentRowStatus(request({ state: "error" }))).toBe("error");
+    expect(isVisibleTorrentRequest(request({ state: "expired" }))).toBe(false);
+    expect(isVisibleTorrentRequest(request({ state: "cancelled" }))).toBe(false);
 
     expect(torrentQueueLabel(request({ state: "requested", queue_position_estimate: 3 }))).toBe("#3");
     expect(torrentQueueLabel(request({ state: "ready", queue_position_estimate: 3 }))).toBe("-");
@@ -303,7 +307,36 @@ describe("UserDownloadsPage", () => {
     view.unmount();
   });
 
+  it("retire immédiatement une demande après l’événement realtime d’expiration", async () => {
+    MockWebSocket.instances = [];
+    let requests = 0;
+    let releaseResync!: (value: Response) => void;
+    const resyncPending = new Promise<Response>((resolve) => { releaseResync = resolve; });
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      requests += 1;
+      if (requests === 1) {
+        return response({ items: [torrent()], offset: 0, limit: 25, total: 1 });
+      }
+      return resyncPending;
+    }));
+    const view = renderPage();
+
+    expect(await screen.findByRole("article", { name: "Film.mkv" })).toBeTruthy();
+    MockWebSocket.instances[0].message({
+      type: "torrent.expired",
+      request_id: torrent().id,
+      occurred_at: "2026-09-12T08:00:00Z",
+    });
+
+    await waitFor(() => expect(screen.queryByRole("article", { name: "Film.mkv" })).toBeNull());
+    releaseResync(response({ items: [], offset: 0, limit: 25, total: 0 }));
+    await waitFor(() => expect(requests).toBe(2));
+    view.unmount();
+  });
+
   it("affiche les rangs estimés, états qualitatifs et disclaimer sans inventer un FIFO", async () => {
+    const now = Date.now();
     const rows = [
       torrent({ id: crypto.randomUUID(), name: "Premier", queue_status: "waiting", queue_position_estimate: 1, queue_total_estimate: 1_005 }),
       torrent({ id: crypto.randomUUID(), name: "Neuvième", queue_status: "waiting", queue_position_estimate: 9, queue_total_estimate: 1_005 }),
@@ -312,7 +345,15 @@ describe("UserDownloadsPage", () => {
       torrent({ id: crypto.randomUUID(), name: "Sélectionné", queue_status: "downloading" }),
       torrent({ id: crypto.randomUUID(), name: "Sans sources", queue_status: "stalled" }),
       torrent({ id: crypto.randomUUID(), name: "Nouvelle tentative", queue_status: "cooldown" }),
-      torrent({ id: crypto.randomUUID(), name: "Prêt", state: "ready", progress: 1 }),
+      torrent({
+        id: crypto.randomUUID(),
+        name: "Prêt",
+        state: "ready",
+        progress: 1,
+        ready_at: new Date(now - 60 * 60 * 1_000).toISOString(),
+        unsubscribe_at: new Date(now + 2 * 60 * 60 * 1_000).toISOString(),
+      }),
+      torrent({ id: crypto.randomUUID(), name: "Échec réel", state: "error" }),
       torrent({ id: crypto.randomUUID(), name: "Archive annulée", state: "cancelled" }),
       torrent({ id: crypto.randomUUID(), name: "Archive expirée", state: "expired" }),
     ];
@@ -332,10 +373,15 @@ describe("UserDownloadsPage", () => {
     expect(screen.getByText("La position peut évoluer selon l’équité, la taille et la disponibilité.")).toBeTruthy();
     const readyCard = screen.getByRole("article", { name: "Prêt" });
     expect(within(readyCard).getByText("-")).toBeTruthy();
+    const status = within(readyCard).getByText("Prêt", { selector: ".torrent-primary-state" }).parentElement;
+    expect(status?.querySelector("[data-testid='subscription-expiry-indicator']")).toBeTruthy();
+    expect(readyCard.querySelector(".retention-warning")).toBeNull();
+    expect(within(screen.getByRole("article", { name: "Échec réel" })).getByText("Erreur")).toBeTruthy();
+    expect(screen.queryByText("Bloqué")).toBeNull();
+    expect(screen.queryByRole("article", { name: "Archive annulée" })).toBeNull();
+    expect(screen.queryByRole("article", { name: "Archive expirée" })).toBeNull();
     expect(view.container.querySelector("table")).toBeNull();
-    expect(screen.getAllByRole("article")).toHaveLength(rows.length);
-    expect(screen.queryByRole("button", { name: "Annuler la demande Archive annulée" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Annuler la demande Archive expirée" })).toBeNull();
+    expect(screen.getAllByRole("article")).toHaveLength(rows.length - 2);
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
@@ -449,8 +495,9 @@ describe("UserDownloadsPage", () => {
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
-  it("remplace la deadline partagée après un événement de prolongation et resync", async () => {
+  it("remplace l’échéance d’abonnement après un événement de prolongation et resync", async () => {
     MockWebSocket.instances = [];
+    const readyAt = new Date(Date.now() - 63 * 60 * 60 * 1_000).toISOString();
     const initialDeadline = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString();
     const extendedDeadline = new Date(Date.now() + 72 * 60 * 60 * 1_000).toISOString();
     let requests = 0;
@@ -461,7 +508,8 @@ describe("UserDownloadsPage", () => {
         items: [torrent({
           state: "ready",
           progress: 1,
-          retention_expires_at: requests === 1 ? initialDeadline : extendedDeadline,
+          ready_at: readyAt,
+          unsubscribe_at: requests === 1 ? initialDeadline : extendedDeadline,
         })],
         offset: 0,
         limit: 10,
@@ -470,7 +518,7 @@ describe("UserDownloadsPage", () => {
     }));
     const view = renderPage();
 
-    expect(await screen.findByTestId("retention-warning")).toBeTruthy();
+    expect((await screen.findByTestId("subscription-expiry-indicator")).classList.contains("danger")).toBe(true);
     MockWebSocket.instances[0].message({
       type: "torrent.retention_extended",
       request_id: torrent().id,
@@ -478,12 +526,13 @@ describe("UserDownloadsPage", () => {
     });
 
     await waitFor(() => expect(requests).toBe(2));
-    await waitFor(() => expect(screen.queryByTestId("retention-warning")).toBeNull());
+    await waitFor(() => expect(screen.getByTestId("subscription-expiry-indicator").classList.contains("warning")).toBe(true));
     view.unmount();
   });
 
   it("rejoue une invalidation reçue pendant une resynchronisation déjà en vol", async () => {
     MockWebSocket.instances = [];
+    const readyAt = new Date(Date.now() - 63 * 60 * 60 * 1_000).toISOString();
     const initialDeadline = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString();
     const extendedDeadline = new Date(Date.now() + 72 * 60 * 60 * 1_000).toISOString();
     let requests = 0;
@@ -502,7 +551,8 @@ describe("UserDownloadsPage", () => {
         items: [torrent({
           state: "ready",
           progress: 1,
-          retention_expires_at: requests < 3 ? initialDeadline : extendedDeadline,
+          ready_at: readyAt,
+          unsubscribe_at: requests < 3 ? initialDeadline : extendedDeadline,
         })],
         offset: 0,
         limit: 10,
@@ -511,7 +561,7 @@ describe("UserDownloadsPage", () => {
     }));
     const view = renderPage();
 
-    expect(await screen.findByTestId("retention-warning")).toBeTruthy();
+    expect((await screen.findByTestId("subscription-expiry-indicator")).classList.contains("danger")).toBe(true);
     MockWebSocket.instances[0].message({
       type: "torrent.ready",
       request_id: torrent().id,
@@ -526,13 +576,14 @@ describe("UserDownloadsPage", () => {
 
     releaseStale();
     await waitFor(() => expect(requests).toBe(3));
-    await waitFor(() => expect(screen.queryByTestId("retention-warning")).toBeNull());
+    await waitFor(() => expect(screen.getByTestId("subscription-expiry-indicator").classList.contains("warning")).toBe(true));
     view.unmount();
   });
 
   it("resynchronise la deadline d’un manifeste ouvert après une prolongation", async () => {
     MockWebSocket.instances = [];
     const user = userEvent.setup();
+    const readyAt = new Date(Date.now() - 71 * 60 * 60 * 1_000 - 15 * 60 * 1_000).toISOString();
     const initialDeadline = new Date(Date.now() + 45 * 60 * 1_000).toISOString();
     const extendedDeadline = new Date(Date.now() + 72 * 60 * 60 * 1_000).toISOString();
     let manifestRequests = 0;
@@ -556,7 +607,8 @@ describe("UserDownloadsPage", () => {
         items: [torrent({
           state: "ready",
           progress: 1,
-          retention_expires_at: manifestRequests === 0 ? initialDeadline : extendedDeadline,
+          ready_at: readyAt,
+          unsubscribe_at: manifestRequests === 0 ? initialDeadline : extendedDeadline,
         })],
         offset: 0,
         limit: 10,
@@ -566,7 +618,7 @@ describe("UserDownloadsPage", () => {
     const view = renderPage();
 
     await user.click(await screen.findByRole("button", { name: "Télécharger" }));
-    expect(screen.getByText("Suppression imminente dans 45 min")).toBeTruthy();
+    expect(screen.getByRole("img", { name: /Désabonnement automatique dans 45 min/ })).toBeTruthy();
     MockWebSocket.instances[0].message({
       type: "torrent.retention_extended",
       request_id: torrent().id,
@@ -574,11 +626,11 @@ describe("UserDownloadsPage", () => {
     });
 
     await waitFor(() => expect(manifestRequests).toBe(2));
-    await waitFor(() => expect(screen.queryByTestId("retention-warning")).toBeNull());
+    await waitFor(() => expect(screen.getByTestId("subscription-expiry-indicator").classList.contains("warning")).toBe(true));
     view.unmount();
   });
 
-  it("conserve l’état EXPIRED backend sans afficher de countdown négatif", async () => {
+  it("retire défensivement un état EXPIRED reçu dans une ancienne réponse", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({
       items: [torrent({
         state: "expired",
@@ -591,15 +643,17 @@ describe("UserDownloadsPage", () => {
     })));
     renderPage();
 
-    expect(await screen.findByText("Bloqué")).toBeTruthy();
-    expect(screen.queryByTestId("retention-warning")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("article", { name: "Film.mkv" })).toBeNull());
+    expect(screen.queryByText("Bloqué")).toBeNull();
+    expect(screen.queryByTestId("subscription-expiry-indicator")).toBeNull();
   });
 
   it.each([320, 360, 375, 390, 430, 768, 1280])(
-    "garde un warning compact accessible avec un nom de plus de 200 caractères à %d px",
+    "garde une pill d’échéance accessible avec un nom de plus de 200 caractères à %d px",
     async (width) => {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
       const longName = `${"Film.Name.2026.MULTi.TRUEFRENCH.2160p.UHD.BluRay.REMUX.DV.HDR.".repeat(4)}mkv`;
+      const readyAt = new Date(Date.now() - 63 * 60 * 60 * 1_000).toISOString();
       const expiresAt = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString();
       expect(longName.length).toBeGreaterThan(200);
       vi.stubGlobal("fetch", vi.fn(async () => response({
@@ -608,7 +662,8 @@ describe("UserDownloadsPage", () => {
             name: longName,
             state: "ready",
             progress: 1,
-            retention_expires_at: expiresAt,
+            ready_at: readyAt,
+            unsubscribe_at: expiresAt,
           }),
           torrent({
             id: crypto.randomUUID(),
@@ -626,9 +681,9 @@ describe("UserDownloadsPage", () => {
 
       const longArticle = await screen.findByRole("article", { name: longName });
       expect(longArticle.querySelector(".torrent-summary-heading")?.getAttribute("aria-label")).toBe(longName);
-      expect(screen.getByTestId("retention-warning").classList.contains("compact")).toBe(true);
+      expect(screen.getByTestId("subscription-expiry-indicator").classList.contains("danger")).toBe(true);
       expect(screen.getByText("#1005")).toBeTruthy();
-      expect(screen.getByText(/Expiration le/, { selector: ".sr-only" })).toBeTruthy();
+      expect(screen.getByRole("img", { name: /Désabonnement automatique dans \d+ h/ })).toBeTruthy();
       expect(view.container.querySelector("[style]")).toBeNull();
       expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
     },
@@ -636,6 +691,7 @@ describe("UserDownloadsPage", () => {
 
   it("affiche une seule échéance racine pour un manifeste multi-fichier", async () => {
     const user = userEvent.setup();
+    const readyAt = new Date(Date.now() - 71 * 60 * 60 * 1_000 - 15 * 60 * 1_000).toISOString();
     const expiresAt = new Date(Date.now() + 45 * 60 * 1_000).toISOString();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).includes("download-manifest")) {
@@ -656,7 +712,12 @@ describe("UserDownloadsPage", () => {
         });
       }
       return response({
-        items: [torrent({ state: "ready", progress: 1, retention_expires_at: expiresAt })],
+        items: [torrent({
+          state: "ready",
+          progress: 1,
+          ready_at: readyAt,
+          unsubscribe_at: expiresAt,
+        })],
         offset: 0,
         limit: 10,
         total: 1,
@@ -666,8 +727,8 @@ describe("UserDownloadsPage", () => {
 
     await user.click(await screen.findByRole("button", { name: `Afficher les détails de ${torrent().name}` }));
     const content = await screen.findByRole("region", { name: `Contenu de ${torrent().name}` });
-    expect(screen.getAllByTestId("retention-warning")).toHaveLength(1);
-    expect(screen.getByText("Suppression imminente dans 45 min")).toBeTruthy();
+    expect(screen.getAllByTestId("subscription-expiry-indicator")).toHaveLength(1);
+    expect(screen.getByRole("img", { name: /Désabonnement automatique dans 45 min/ })).toBeTruthy();
     expect(within(content).getByText("root.mkv")).toBeTruthy();
     expect(within(content).getByText("Folder/one.mkv")).toBeTruthy();
     expect(within(content).getByText("Folder/two.srt")).toBeTruthy();
@@ -1427,7 +1488,7 @@ describe("UserDownloadsPage", () => {
 
     await waitFor(() => expect(screen.getByText("film.torrent")).toBeTruthy());
     expect(screen.getByText("Torrent déjà présent")).toBeTruthy();
-    expect(await screen.findByText("Bloqué")).toBeTruthy();
+    expect(await screen.findByText("Erreur", { selector: ".torrent-primary-state" })).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Afficher les détails de Film.mkv" }));
     expect(screen.getByRole("alert").textContent).toContain("intervention");
   });
@@ -1462,7 +1523,8 @@ describe("UserDownloadsPage", () => {
     expect(await screen.findByText("La demande « Film.mkv » a été annulée.")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(await auditAccessibility(document.body)).toMatchObject({ violations: [] });
-    expect(await screen.findByText("Bloqué")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("article", { name: "Film.mkv" })).toBeNull());
+    expect(screen.queryByText("Bloqué")).toBeNull();
     expect(screen.queryByRole("button", { name: "Annuler la demande Film.mkv" })).toBeNull();
     expect(calls).toContainEqual({
       method: "DELETE",
