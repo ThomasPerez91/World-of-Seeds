@@ -12,6 +12,7 @@ class TorrentRequestV2Response(BaseModel):
     state: Literal["requested", "active", "ready", "cancelled", "expired", "error"]
     progress: float = Field(ge=0, le=1)
     error_code: str | None
+    ready_at: datetime | None
     unsubscribe_at: datetime | None
     retention_expires_at: datetime | None
     queue_position_estimate: int | None = Field(default=None, ge=1)

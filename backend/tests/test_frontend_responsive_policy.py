@@ -30,6 +30,21 @@ def test_torrent_manager_uses_native_accordions_without_duplicate_mobile_markup(
     assert "window.location.reload" not in page
 
 
+def test_dashboard_title_uses_normal_page_background_in_every_theme() -> None:
+    styles = (REPOSITORY / "frontend/src/wos-2-1.css").read_text()
+    review_fixes = (REPOSITORY / "frontend/src/wos-premium-review-fixes.css").read_text()
+    rule_start = styles.index(".user-dashboard-header {")
+    rule = styles[rule_start : styles.index("}", rule_start) + 1]
+
+    assert "min-height: 0 !important" in rule
+    assert "padding: 0 !important" in rule
+    assert "background: none !important" in rule
+    assert "url(" not in rule
+    assert "linear-gradient" not in rule
+    assert ".dashboard-summary-grid { margin-top: -" not in styles
+    assert ".user-dashboard-header" not in review_fixes
+
+
 def test_admin_finish_is_mobile_first_and_legacy_user_filesystem_ui_is_absent() -> None:
     admin_styles = (REPOSITORY / "frontend/src/features/admin/admin.css").read_text()
     shell = (REPOSITORY / "frontend/src/features/admin/AdminPageShell.tsx").read_text()
