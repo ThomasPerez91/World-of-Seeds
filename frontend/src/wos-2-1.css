@@ -928,10 +928,28 @@ body {
   transition: border-color 150ms ease, background 150ms ease, transform 150ms ease, box-shadow 150ms ease;
 }
 
-.language-flag-toggle > span {
-  font-size: 1.16rem;
-  line-height: 1;
-  filter: saturate(1.05);
+.language-flag {
+  display: inline-flex;
+  width: 21px;
+  height: 14px;
+  flex: 0 0 21px;
+  overflow: hidden;
+  align-items: center;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.language-flag svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.language-select-control {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
 }
 
 .language-flag-toggle:hover:not(:disabled) {
@@ -1113,6 +1131,7 @@ body {
 .local-download-progress { display: grid; gap: 0.5rem; margin-top: 0.85rem; }
 .local-download-progress strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .local-download-progress span { color: var(--wos21-muted); font-size: 0.78rem; }
+.local-download-started span:first-of-type { color: var(--wos21-text); font-weight: 700; }
 .storage-summary-line, .storage-legend { display: flex; align-items: center; justify-content: space-between; gap: 0.7rem; }
 .storage-summary-line p { margin: 0; }
 .storage-summary-line strong { color: #b7dec6; font-size: 0.78rem; }
@@ -1157,4 +1176,11 @@ body {
   .torrent-toolbar { grid-template-columns: minmax(0, 1fr) !important; }
   .torrent-search { width: 100%; }
   .torrent-filters { flex-wrap: nowrap !important; overflow-x: auto; padding-bottom: 0.2rem; }
+  .user-navigation .ui-button {
+    min-width: 0;
+    gap: 0.3rem !important;
+    padding-inline: 0.4rem !important;
+    font-size: 0.72rem;
+  }
+  .user-navigation .ui-button svg { width: 16px; height: 16px; }
 }

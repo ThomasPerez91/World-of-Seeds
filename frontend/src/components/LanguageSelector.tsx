@@ -1,4 +1,5 @@
 import { useI18n, type Locale } from "../i18n";
+import { LanguageFlag } from "./LanguageFlag";
 
 export function LanguageSelector({
   disabled = false,
@@ -27,7 +28,7 @@ export function LanguageSelector({
         disabled={disabled}
         onClick={() => change(nextLocale)}
       >
-        <span aria-hidden="true">{locale === "fr" ? "🇫🇷" : "🇬🇧"}</span>
+        <LanguageFlag locale={locale} />
       </button>
     );
   }
@@ -35,15 +36,18 @@ export function LanguageSelector({
   return (
     <label className="language-selector">
       <span>{t("language.label")}</span>
-      <select
-        aria-label={t("language.label")}
-        value={locale}
-        disabled={disabled}
-        onChange={(event) => change(event.target.value as Locale)}
-      >
-        <option value="fr">🇫🇷  {t("language.fr")}</option>
-        <option value="en">🇬🇧  {t("language.en")}</option>
-      </select>
+      <span className="language-select-control">
+        <LanguageFlag locale={locale} />
+        <select
+          aria-label={t("language.label")}
+          value={locale}
+          disabled={disabled}
+          onChange={(event) => change(event.target.value as Locale)}
+        >
+          <option value="fr">{t("language.fr")}</option>
+          <option value="en">{t("language.en")}</option>
+        </select>
+      </span>
     </label>
   );
 }

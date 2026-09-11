@@ -89,7 +89,18 @@ export function LocalDownloadCard({ local }: { local: LocalDownloadSummary }) {
       ? <p className="dashboard-summary-value">{t("downloads.localPaused")}</p>
       : local.status === "error"
         ? <StateMessage tone="error">{t("downloads.localError")}</StateMessage>
-        : local.name !== null ? (
+        : local.name !== null && local.status === "started" ? (
+          <div className="local-download-progress local-download-started">
+            <strong title={local.name}>{local.name}</strong>
+            <span>{t("downloads.localStatus.started")}</span>
+            {local.additionalCount > 0 && (
+              <span>{t(
+                local.additionalCount === 1 ? "downloads.localAdditionalOne" : "downloads.localAdditionalMany",
+                { count: local.additionalCount },
+              )}</span>
+            )}
+          </div>
+        ) : local.name !== null && local.totalBytes > 0 ? (
           <div className="local-download-progress">
             <strong title={local.name}>{local.name}</strong>
             <Progress
@@ -97,6 +108,12 @@ export function LocalDownloadCard({ local }: { local: LocalDownloadSummary }) {
               value={local.percent}
             />
             <span>{formatBytes(local.downloadedBytes)} / {formatBytes(local.totalBytes)}</span>
+            {local.additionalCount > 0 && (
+              <span>{t(
+                local.additionalCount === 1 ? "downloads.localAdditionalOne" : "downloads.localAdditionalMany",
+                { count: local.additionalCount },
+              )}</span>
+            )}
           </div>
         ) : (
           <>
@@ -122,6 +139,7 @@ export function LocalDownloadCard({ local }: { local: LocalDownloadSummary }) {
 
 const idleLocalSummary: LocalDownloadSummary = {
   active: 0,
+  additionalCount: 0,
   maximum: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
   status: "idle",
   waiting: 0,

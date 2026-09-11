@@ -101,7 +101,7 @@ describe("UserDashboardPage", () => {
     await waitFor(() => expect(within(activity).getAllByText("1", { selector: "dd" })).toHaveLength(3));
     expect(within(activity).getAllByText("1", { selector: "dd" })).toHaveLength(3);
     expect(screen.getByText("Aucune récupération locale en cours")).toBeTruthy();
-    expect(screen.getByText("File locale à ce navigateur uniquement.")).toBeTruthy();
+    expect(screen.getByText("Les téléchargements lancés depuis ce navigateur apparaissent ici.")).toBeTruthy();
     expect((await screen.findAllByText("1 Ko disponibles")).length).toBeGreaterThan(0);
     expect(screen.getByText("2 Ko au total")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Mes téléchargements" })).toBeTruthy();
@@ -140,6 +140,7 @@ describe("UserDashboardPage", () => {
     });
     expect(local).toEqual({
       active: 1,
+      additionalCount: 0,
       maximum: 2,
       status: "running",
       waiting: 2,
@@ -154,8 +155,52 @@ describe("UserDashboardPage", () => {
     );
     expect(screen.getByText("1 / 2 actifs")).toBeTruthy();
     expect(screen.getByText("2 fichiers en attente")).toBeTruthy();
-    expect(screen.getByText(/navigateur uniquement/)).toBeTruthy();
+    expect(screen.getByText(/lancés depuis ce navigateur/)).toBeTruthy();
     expect(view.container.textContent).not.toContain("globale");
+  });
+
+  it("affiche un téléchargement natif lancé sans inventer de progression", () => {
+    const view = render(
+      <I18nProvider>
+        <LocalDownloadCard local={{
+          active: 0,
+          additionalCount: 2,
+          maximum: 2,
+          status: "started",
+          waiting: 0,
+          name: "The.Cleaning.Lady.S02E01.mkv",
+          downloadedBytes: 0,
+          totalBytes: 0,
+          percent: 0,
+        }} />
+      </I18nProvider>,
+    );
+
+    expect(screen.getByText("The.Cleaning.Lady.S02E01.mkv")).toBeTruthy();
+    expect(screen.getByText("Téléchargement lancé dans le navigateur")).toBeTruthy();
+    expect(screen.getByText("+ 2 autres téléchargements")).toBeTruthy();
+    expect(view.container.querySelector("progress")).toBeNull();
+    expect(view.container.textContent).not.toContain("0 %");
+  });
+
+  it("reflète explicitement l’échec d’une récupération gérée", () => {
+    render(
+      <I18nProvider>
+        <LocalDownloadCard local={{
+          active: 0,
+          additionalCount: 0,
+          maximum: 2,
+          status: "error",
+          waiting: 0,
+          name: null,
+          downloadedBytes: 0,
+          totalBytes: 0,
+          percent: 0,
+        }} />
+      </I18nProvider>,
+    );
+
+    expect(screen.getByText("Erreur")).toBeTruthy();
   });
 
   it("annule l’agrégation au démontage", async () => {
