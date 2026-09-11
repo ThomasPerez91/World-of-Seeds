@@ -34,11 +34,13 @@ describe("I18nProvider", () => {
     );
 
     expect(screen.getByText("Connexion")).toBeTruthy();
+    expect(document.querySelector('[data-country-code="FR"] svg')).toBeTruthy();
     expect(screen.getByText("1,5 Ko")).toBeTruthy();
     expect(screen.getByText("Le nombre maximal de téléchargements actifs est atteint.")).toBeTruthy();
     await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
 
     expect(screen.getByText("Sign in")).toBeTruthy();
+    expect(document.querySelector('[data-country-code="GB"] svg')).toBeTruthy();
     expect(screen.getByText("1.5 KB")).toBeTruthy();
     expect(screen.getByText("1,234.5")).toBeTruthy();
     expect(screen.getByText("The maximum number of active downloads has been reached.")).toBeTruthy();
@@ -56,11 +58,13 @@ describe("I18nProvider", () => {
     );
 
     const frenchButton = screen.getByRole("button", { name: "Langue : Français" });
-    expect(frenchButton.textContent).toContain("🇫🇷");
+    expect(frenchButton.querySelector('[data-country-code="FR"] svg')).toBeTruthy();
+    expect(frenchButton.textContent).not.toMatch(/🇫🇷|🇬🇧/u);
     await user.click(frenchButton);
 
     const englishButton = screen.getByRole("button", { name: "Language : English" });
-    expect(englishButton.textContent).toContain("🇬🇧");
+    expect(englishButton.querySelector('[data-country-code="GB"] svg')).toBeTruthy();
+    expect(englishButton.textContent).not.toMatch(/🇫🇷|🇬🇧/u);
     expect(document.documentElement.lang).toBe("en");
     expect(window.localStorage.getItem("wos.preferred-locale")).toBe("en");
   });

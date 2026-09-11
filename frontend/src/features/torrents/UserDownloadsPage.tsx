@@ -53,16 +53,62 @@ const AUTO_REFRESH_MS = 4_000;
 const FALLBACK_PAGE_SIZE = 50;
 export const MAX_TORRENT_BATCH_FILES = 50;
 export const TORRENT_UPLOAD_CONCURRENCY = 3;
+export const NATIVE_DOWNLOAD_STORAGE_KEY = "wos.local-download-starts";
+export const NATIVE_DOWNLOAD_MAX_AGE_MS = 30 * 60 * 1_000;
+const MAX_NATIVE_DOWNLOAD_STARTS = 10;
+
+export interface NativeDownloadStart {
+  id: string;
+  kind: "archive" | "file";
+  name: string;
+  startedAt: number;
+  status: "started";
+}
 
 export interface LocalDownloadSummary {
   active: number;
+  additionalCount: number;
   maximum: number;
-  status: "idle" | RecursiveTransferProgress["status"];
+  status: "idle" | "started" | RecursiveTransferProgress["status"];
   waiting: number;
   name: string | null;
   downloadedBytes: number;
   totalBytes: number;
   percent: number;
+}
+
+export function pruneNativeDownloadStarts(
+  starts: readonly NativeDownloadStart[],
+  now = Date.now(),
+): NativeDownloadStart[] {
+  return starts
+    .filter((entry) => (
+      entry.status === "started"
+      && (entry.kind === "file" || entry.kind === "archive")
+      && typeof entry.id === "string"
+      && typeof entry.name === "string"
+      && entry.name.trim() !== ""
+      && Number.isFinite(entry.startedAt)
+      && now - entry.startedAt >= 0
+      && now - entry.startedAt < NATIVE_DOWNLOAD_MAX_AGE_MS
+    ))
+    .sort((left, right) => right.startedAt - left.startedAt)
+    .slice(0, MAX_NATIVE_DOWNLOAD_STARTS);
+}
+
+export function loadNativeDownloadStarts(
+  storage: Pick<Storage, "getItem" | "setItem"> = window.localStorage,
+) {
+  try {
+    const stored = storage.getItem(NATIVE_DOWNLOAD_STORAGE_KEY);
+    if (stored === null) return [];
+    const parsed = JSON.parse(stored) as unknown;
+    const current = Array.isArray(parsed) ? pruneNativeDownloadStarts(parsed as NativeDownloadStart[]) : [];
+    storage.setItem(NATIVE_DOWNLOAD_STORAGE_KEY, JSON.stringify(current));
+    return current;
+  } catch {
+    return [];
+  }
 }
 
 interface UserDownloadsPageProps {
@@ -76,6 +122,7 @@ export function summarizeLocalTransfer(
 ): LocalDownloadSummary {
   return {
     active: transfer?.queue.filter((item) => item.status === "active").length ?? 0,
+    additionalCount: 0,
     maximum: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
     status: transfer?.status ?? "idle",
     waiting: transfer?.queue.filter((item) => item.status === "waiting").length ?? 0,
@@ -88,6 +135,7 @@ export function summarizeLocalTransfer(
 
 export function summarizeDownloadManager(
   manager: BrowserDownloadManagerSnapshot,
+  nativeDownloads: readonly NativeDownloadStart[] = [],
 ): LocalDownloadSummary {
   const jobs = manager.jobs;
   const waitingStreams = jobs.reduce(
@@ -97,7 +145,7 @@ export function summarizeDownloadManager(
     0,
   );
   const waiting = Math.max(manager.waitingJobs, waitingStreams);
-  const status: LocalDownloadSummary["status"] = manager.activeStreams > 0 || waiting > 0
+  const managerStatus: LocalDownloadSummary["status"] = manager.activeStreams > 0 || waiting > 0
     ? "running"
     : jobs.some((job) => job.status === "error")
       ? "error"
@@ -109,15 +157,24 @@ export function summarizeDownloadManager(
             ? "cancelled"
             : "idle";
   const current = jobs.find((job) => job.status === "running" || job.status === "paused" || job.status === "queued") ?? null;
+  const recentNative = pruneNativeDownloadStarts(nativeDownloads);
+  const currentNative = recentNative[0] ?? null;
+  const status = current === null && currentNative !== null && ["idle", "completed", "cancelled"].includes(managerStatus)
+    ? "started"
+    : managerStatus;
+  const visibleManagedJobs = jobs.filter((job) => !["completed", "cancelled"].includes(job.status)).length;
+  const primaryName = current?.name ?? currentNative?.name ?? null;
+  const visibleCount = visibleManagedJobs + recentNative.length;
   const percent = current === null || current.totalBytes <= 0
     ? 0
     : Math.min(100, Math.max(0, (current.downloadedBytes / current.totalBytes) * 100));
   return {
     active: manager.activeStreams,
+    additionalCount: Math.max(0, visibleCount - (primaryName === null ? 0 : 1)),
     maximum: manager.maxConcurrentStreams,
     status,
     waiting,
-    name: current?.name ?? null,
+    name: primaryName,
     downloadedBytes: current?.downloadedBytes ?? 0,
     totalBytes: current?.totalBytes ?? 0,
     percent,
@@ -297,6 +354,7 @@ function ReadyTorrentContent({
   onDownloadAll,
   onDownloadFile,
   onLoadPage,
+  onNativeDownload,
   onPauseTransfer,
   onResumeTransfer,
   onRetry,
@@ -309,6 +367,7 @@ function ReadyTorrentContent({
   onDownloadAll: () => void;
   onDownloadFile: (file: TorrentDownloadFileV2, snapshot: TorrentDownloadManifestPageV2) => void;
   onLoadPage: (offset: number) => void;
+  onNativeDownload: (name: string, kind: NativeDownloadStart["kind"]) => void;
   onPauseTransfer: (jobId: string) => void;
   onResumeTransfer: (jobId: string) => void;
   onRetry: () => void;
@@ -357,6 +416,7 @@ function ReadyTorrentContent({
                 className="download-fallback-archive"
                 href={api.torrentArchiveDownloadUrlV2(torrent.id, snapshot.snapshot_id)}
                 download={`${torrent.name}.zip`}
+                onClick={() => onNativeDownload(`${torrent.name}.zip`, "archive")}
               >
                 <Archive aria-hidden="true" /> {t("downloads.archive")}
               </a>
@@ -396,6 +456,7 @@ function ReadyTorrentContent({
                       href={api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id)}
                       download={file.relative_path.split("/").at(-1)}
                       aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
+                      onClick={() => onNativeDownload(file.relative_path.split("/").at(-1) ?? file.relative_path, "file")}
                     >
                       <Download aria-hidden="true" />
                     </a>
@@ -579,6 +640,7 @@ export function UserDownloadsPage({
   const [statusFilter, setStatusFilter] = useState<TorrentStatusFilter>("all");
   const [openTorrentIds, setOpenTorrentIds] = useState<Set<string>>(() => new Set());
   const [managerSnapshot, setManagerSnapshot] = useState<BrowserDownloadManagerSnapshot>(EMPTY_MANAGER_SNAPSHOT);
+  const [nativeDownloads, setNativeDownloads] = useState<NativeDownloadStart[]>(loadNativeDownloadStarts);
   const loadGenerationRef = useRef(0);
   const managerRef = useRef<BrowserDownloadManager | null>(null);
   const completedDownloadNotificationsRef = useRef(new Set<string>());
@@ -596,8 +658,28 @@ export function UserDownloadsPage({
   useEffect(() => () => managerRef.current?.dispose(), []);
 
   useEffect(() => {
-    onLocalTransferChanged?.(summarizeDownloadManager(managerSnapshot));
-  }, [managerSnapshot, onLocalTransferChanged]);
+    onLocalTransferChanged?.(summarizeDownloadManager(managerSnapshot, nativeDownloads));
+  }, [managerSnapshot, nativeDownloads, onLocalTransferChanged]);
+
+  const recordNativeDownload = useCallback((name: string, kind: NativeDownloadStart["kind"]) => {
+    const startedAt = Date.now();
+    const entry: NativeDownloadStart = {
+      id: typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${startedAt}-${name}`,
+      kind,
+      name,
+      startedAt,
+      status: "started",
+    };
+    setNativeDownloads((current) => {
+      const next = pruneNativeDownloadStarts([entry, ...current], startedAt);
+      try {
+        window.localStorage.setItem(NATIVE_DOWNLOAD_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // The card can still react for this session when browser storage is unavailable.
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     for (const job of managerSnapshot.jobs) {
@@ -947,9 +1029,11 @@ export function UserDownloadsPage({
     file: TorrentDownloadFileV2,
   ) {
     if (!supportsManagedFileDownload()) {
+      const name = file.relative_path.split("/").at(-1) ?? file.relative_path;
+      recordNativeDownload(name, "file");
       const link = document.createElement("a");
       link.href = api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id);
-      link.download = file.relative_path.split("/").at(-1) ?? file.relative_path;
+      link.download = name;
       link.click();
       return;
     }
@@ -1016,7 +1100,7 @@ export function UserDownloadsPage({
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const pageCount = Math.max(1, Math.ceil(filteredTorrents.length / PAGE_SIZE));
   const queueTotal = torrents.find((torrent) => torrent.queue_total_estimate !== null)?.queue_total_estimate ?? null;
-  const localDownloadSummary = summarizeDownloadManager(managerSnapshot);
+  const localDownloadSummary = summarizeDownloadManager(managerSnapshot, nativeDownloads);
 
   useEffect(() => {
     const torrentIds = new Set(torrents.map((torrent) => torrent.id));
@@ -1182,6 +1266,7 @@ export function UserDownloadsPage({
                         requestedOffset,
                         manifest?.firstPage?.snapshot_id ?? manifest?.snapshot?.snapshot_id ?? null,
                       )}
+                      onNativeDownload={recordNativeDownload}
                       onRetry={() => void loadReadyManifest(
                         torrent.id,
                         manifest?.requestedOffset ?? 0,

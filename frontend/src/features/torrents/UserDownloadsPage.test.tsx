@@ -7,8 +7,12 @@ import { FeedbackProvider } from "../../components/Feedback";
 import { I18nProvider, type Locale } from "../../i18n";
 import {
   MAX_TORRENT_BATCH_FILES,
+  NATIVE_DOWNLOAD_MAX_AGE_MS,
+  NATIVE_DOWNLOAD_STORAGE_KEY,
   TORRENT_UPLOAD_CONCURRENCY,
+  loadNativeDownloadStarts,
   matchesTorrentFilter,
+  summarizeDownloadManager,
   torrentQueueLabel,
   torrentRowStatus,
   UserDownloadsPage,
@@ -352,6 +356,7 @@ describe("UserDownloadsPage", () => {
     expect(onActivityChanged).toHaveBeenCalled();
     expect(onLocalTransferChanged).toHaveBeenCalledWith({
       active: 0,
+      additionalCount: 0,
       maximum: 2,
       status: "idle",
       waiting: 0,
@@ -755,6 +760,7 @@ describe("UserDownloadsPage", () => {
 
   it("télécharge un READY mono-fichier avec un lien natif sans sélecteur de dossier", async () => {
     const user = userEvent.setup();
+    const onLocalTransferChanged = vi.fn();
     const picker = vi.fn();
     const nativeClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     vi.stubGlobal("showDirectoryPicker", picker);
@@ -776,7 +782,7 @@ describe("UserDownloadsPage", () => {
         items: [torrent({ state: "ready", progress: 1 })], offset: 0, limit: 10, total: 1,
       });
     }));
-    const view = renderPage();
+    const view = renderPage("fr", { onLocalTransferChanged });
 
     const article = await screen.findByRole("article", { name: "Film.mkv" });
     await user.click(within(article).getByRole("button", { name: "Télécharger" }));
@@ -785,7 +791,46 @@ describe("UserDownloadsPage", () => {
     expect(link.getAttribute("download")).toBe("Film final.mkv");
     expect(nativeClick).toHaveBeenCalledOnce();
     expect(picker).not.toHaveBeenCalled();
+    await waitFor(() => expect(onLocalTransferChanged).toHaveBeenLastCalledWith(expect.objectContaining({
+      additionalCount: 0,
+      downloadedBytes: 0,
+      name: "Film final.mkv",
+      percent: 0,
+      status: "started",
+      totalBytes: 0,
+    })));
+    expect(loadNativeDownloadStarts()).toEqual([
+      expect.objectContaining({ kind: "file", name: "Film final.mkv", status: "started" }),
+    ]);
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
+  it("restaure plusieurs lancements natifs récents et nettoie les entrées obsolètes", () => {
+    const now = Date.now();
+    window.localStorage.setItem(NATIVE_DOWNLOAD_STORAGE_KEY, JSON.stringify([
+      { id: "recent-1", kind: "file", name: "Episode.mkv", startedAt: now - 1_000, status: "started" },
+      { id: "recent-2", kind: "archive", name: "Saison.zip", startedAt: now - 2_000, status: "started" },
+      { id: "stale", kind: "file", name: "Ancien.mkv", startedAt: now - NATIVE_DOWNLOAD_MAX_AGE_MS, status: "started" },
+    ]));
+
+    const starts = loadNativeDownloadStarts();
+    expect(starts.map((entry) => entry.name)).toEqual(["Episode.mkv", "Saison.zip"]);
+    expect(summarizeDownloadManager({
+      activeStreams: 0,
+      maxConcurrentStreams: 2,
+      waitingJobs: 0,
+      jobs: [],
+    }, starts)).toEqual({
+      active: 0,
+      additionalCount: 1,
+      maximum: 2,
+      status: "started",
+      waiting: 0,
+      name: "Episode.mkv",
+      downloadedBytes: 0,
+      totalBytes: 0,
+      percent: 0,
+    });
   });
 
   it("pagine un manifeste multi-fichiers avec le même snapshot jusqu’à la dernière page", async () => {
@@ -1265,6 +1310,12 @@ describe("UserDownloadsPage", () => {
     const individual = screen.getByRole("link", { name: `Télécharger « ${longPath} »` });
     expect(archive.getAttribute("href")).toContain("download-archive?snapshot=");
     expect(individual.getAttribute("href")).toContain("/files/file-id/download?snapshot=");
+    await user.click(archive);
+    await user.click(individual);
+    expect(loadNativeDownloadStarts().map((entry) => entry.name)).toEqual([
+      longPath.split("/").at(-1),
+      "Film.mkv.zip",
+    ]);
     const filePath = screen.getByText(longPath).closest(".ready-file-path");
     expect(filePath?.getAttribute("aria-label")).toBe(longPath);
     expect(screen.getByText("1 / 1000")).toBeTruthy();

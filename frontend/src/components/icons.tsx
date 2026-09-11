@@ -25,6 +25,7 @@ import {
   Search,
   Server,
   Settings2,
+  ShieldCheck,
   Sprout,
   Trash2,
   TriangleAlert,
@@ -125,6 +126,10 @@ export function RefreshIcon(props: AppIconProps) {
 
 export function SettingsIcon(props: AppIconProps) {
   return <Settings2 {...decorative} {...props} />;
+}
+
+export function AdminIcon(props: AppIconProps) {
+  return <ShieldCheck {...decorative} {...props} />;
 }
 
 export function SaveIcon(props: AppIconProps) {
