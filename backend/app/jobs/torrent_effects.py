@@ -366,6 +366,7 @@ class TorrentEffectHandlers:
     async def purge_torrent(self, snapshot: TorrentJobSnapshot) -> None:
         now = self._clock()
         database_now = _database_timestamp(now)
+        purge_activated = False
         async with self._session_factory() as session, session.begin():
             torrent = await session.get(
                 ManagedTorrent,
@@ -375,11 +376,6 @@ class TorrentEffectHandlers:
             if torrent is None:
                 raise PermanentTorrentJobError("managed_torrent_missing")
             if torrent.state is ManagedTorrentState.PURGED:
-                return
-            if torrent.state not in {
-                ManagedTorrentState.PURGE_PENDING,
-                ManagedTorrentState.PURGING,
-            }:
                 return
             active_requests = await session.scalar(
                 select(func.count())
@@ -396,34 +392,77 @@ class TorrentEffectHandlers:
                 )
             )
             if active_requests:
-                torrent.state = (
-                    ManagedTorrentState.READY
-                    if torrent.progress >= 1
-                    else ManagedTorrentState.DOWNLOADING
-                )
+                if torrent.state in {
+                    ManagedTorrentState.PURGE_PENDING,
+                    ManagedTorrentState.PURGING,
+                }:
+                    torrent.state = (
+                        ManagedTorrentState.READY
+                        if torrent.progress >= 1
+                        else ManagedTorrentState.DOWNLOADING
+                    )
                 torrent.purge_after = None
                 torrent.purge_stop_pending = False
                 torrent.updated_at = now
                 return
-            if torrent.purge_after is None or _as_utc(torrent.purge_after) > _as_utc(now):
+            if torrent.purge_after is None:
+                return
+            if _as_utc(torrent.purge_after) > _as_utc(now):
                 raise TransientTorrentJobError("torrent_retention_active")
-            if torrent.purge_stop_pending:
-                raise TransientTorrentJobError("torrent_scheduler_stop_pending")
-            active_leases = await session.scalar(
-                select(func.count())
-                .select_from(DownloadLease)
-                .where(
-                    DownloadLease.managed_torrent_id == torrent.id,
-                    DownloadLease.expires_at > database_now,
+            if torrent.state not in {
+                ManagedTorrentState.PURGE_PENDING,
+                ManagedTorrentState.PURGING,
+            }:
+                torrent.lifecycle_generation += 1
+                torrent.state = ManagedTorrentState.PURGE_PENDING
+                torrent.desired_active = False
+                torrent.desired_priority = None
+                torrent.desired_download_limit = 0
+                torrent.purge_stop_pending = True
+                torrent.updated_at = now
+                active_jobs = list(
+                    (
+                        await session.scalars(
+                            select(TorrentJob)
+                            .where(
+                                TorrentJob.managed_torrent_id == torrent.id,
+                                TorrentJob.id != snapshot.id,
+                                TorrentJob.state.in_(
+                                    (TorrentJobState.QUEUED, TorrentJobState.RUNNING)
+                                ),
+                            )
+                            .with_for_update()
+                        )
+                    ).all()
                 )
-            )
-            if active_leases:
-                raise TransientTorrentJobError("torrent_download_active")
-            torrent.state = ManagedTorrentState.PURGING
-            torrent.updated_at = now
-            identity = QBittorrentV2ManagedIdentity(torrent.info_hash, torrent.storage_key)
-            storage_key = torrent.storage_key
-            total_size = torrent.total_size
+                for job in active_jobs:
+                    job.cancel_requested_at = now
+                    job.updated_at = now
+                    if job.state is TorrentJobState.QUEUED:
+                        job.state = TorrentJobState.CANCELLED
+                        job.finished_at = now
+                purge_activated = True
+            elif torrent.purge_stop_pending:
+                raise TransientTorrentJobError("torrent_scheduler_stop_pending")
+            else:
+                active_leases = await session.scalar(
+                    select(func.count())
+                    .select_from(DownloadLease)
+                    .where(
+                        DownloadLease.managed_torrent_id == torrent.id,
+                        DownloadLease.expires_at > database_now,
+                    )
+                )
+                if active_leases:
+                    raise TransientTorrentJobError("torrent_download_active")
+                torrent.state = ManagedTorrentState.PURGING
+                torrent.updated_at = now
+                identity = QBittorrentV2ManagedIdentity(torrent.info_hash, torrent.storage_key)
+                storage_key = torrent.storage_key
+                total_size = torrent.total_size
+
+        if purge_activated:
+            raise TransientTorrentJobError("torrent_scheduler_stop_pending")
 
         try:
             route = await self._router.resolve(snapshot.managed_torrent_id, identity.info_hash)

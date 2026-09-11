@@ -142,25 +142,14 @@ async def create_or_get_torrent_request(
         managed_torrent.purge_after = None
         managed_torrent.purge_stop_pending = False
         managed_torrent.updated_at = timestamp
-        purge_jobs = list(
-            (
-                await session.scalars(
-                    select(TorrentJob)
-                    .where(
-                        TorrentJob.managed_torrent_id == managed_torrent.id,
-                        TorrentJob.job_type == "PURGE_TORRENT",
-                        TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
-                    )
-                    .with_for_update()
-                )
-            ).all()
-        )
-        for job in purge_jobs:
-            job.cancel_requested_at = timestamp
-            job.updated_at = timestamp
-            if job.state is TorrentJobState.QUEUED:
-                job.state = TorrentJobState.CANCELLED
-                job.finished_at = timestamp
+        await _cancel_deferred_purge_jobs(session, managed_torrent.id, now=timestamp)
+    elif managed_torrent.purge_after is not None:
+        # The physical lifecycle is still authoritative throughout the grace period,
+        # even if the deadline has elapsed but the purge worker has not won the lock.
+        managed_torrent.lifecycle_generation += 1
+        managed_torrent.purge_after = None
+        managed_torrent.updated_at = timestamp
+        await _cancel_deferred_purge_jobs(session, managed_torrent.id, now=timestamp)
 
     existing_request = await session.scalar(
         select(TorrentRequest)
@@ -258,6 +247,33 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+async def _cancel_deferred_purge_jobs(
+    session: AsyncSession,
+    managed_torrent_id: uuid.UUID,
+    *,
+    now: datetime,
+) -> None:
+    purge_jobs = list(
+        (
+            await session.scalars(
+                select(TorrentJob)
+                .where(
+                    TorrentJob.managed_torrent_id == managed_torrent_id,
+                    TorrentJob.job_type == "PURGE_TORRENT",
+                    TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
+                )
+                .with_for_update()
+            )
+        ).all()
+    )
+    for job in purge_jobs:
+        job.cancel_requested_at = now
+        job.updated_at = now
+        if job.state is TorrentJobState.QUEUED:
+            job.state = TorrentJobState.CANCELLED
+            job.finished_at = now
 
 
 def _validate_metadata(*, info_hash: str, name: str, total_size: int) -> None:

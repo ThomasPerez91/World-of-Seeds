@@ -414,8 +414,9 @@ async def test_v2_cancellation_schedules_retained_purge_and_is_idempotent(
     await db_session.refresh(request)
     await db_session.refresh(managed)
     assert request.state is TorrentRequestState.CANCELLED
-    assert managed.state is ManagedTorrentState.PURGE_PENDING
+    assert managed.state is ManagedTorrentState.READY
     assert managed.purge_after is not None
+    assert managed.purge_stop_pending is False
     jobs = list(
         (
             await db_session.scalars(

@@ -162,8 +162,8 @@ class ManagedTorrent(Base):
         ),
         CheckConstraint(
             "lifecycle_generation >= 0 AND "
-            "((state IN ('PURGE_PENDING', 'PURGING') AND purge_after IS NOT NULL) "
-            "OR (state NOT IN ('PURGE_PENDING', 'PURGING') AND purge_after IS NULL))",
+            "(state NOT IN ('PURGE_PENDING', 'PURGING') OR purge_after IS NOT NULL) AND "
+            "(state <> 'PURGED' OR purge_after IS NULL)",
             name="ck_managed_torrents_lifecycle",
         ),
         CheckConstraint(

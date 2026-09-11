@@ -18,7 +18,6 @@ from app.models import (
     UserStorageUsage,
 )
 from app.torrents import (
-    TorrentPurgeInProgressError,
     backfill_ready_unsubscribe_deadlines_batch,
     cancel_owned_torrent_request,
     create_or_get_torrent_request,
@@ -121,6 +120,7 @@ async def test_joining_ready_content_gets_fresh_deadline_without_duplicate(
 @pytest.mark.asyncio
 async def test_unsubscribe_one_owner_keeps_shared_content_ready(db_session: AsyncSession) -> None:
     torrent, requests, owners = await _shared_ready(db_session, users=2)
+    torrent.qb_state = "uploading"
     result = await cancel_owned_torrent_request(
         db_session,
         user_id=requests[0].user_id,
@@ -131,6 +131,11 @@ async def test_unsubscribe_one_owner_keeps_shared_content_ready(db_session: Asyn
 
     assert result is not None and result.cancelled and not result.purge_scheduled
     assert torrent.state is ManagedTorrentState.READY
+    assert torrent.qb_state == "uploading"
+    assert torrent.desired_active is False
+    assert torrent.desired_priority is None
+    assert torrent.desired_download_limit == 0
+    assert torrent.purge_stop_pending is False
     assert torrent.purge_after is None
     assert requests[0].state is TorrentRequestState.CANCELLED
     assert requests[1].state is TorrentRequestState.READY
@@ -142,6 +147,7 @@ async def test_unsubscribe_one_owner_keeps_shared_content_ready(db_session: Asyn
 @pytest.mark.asyncio
 async def test_last_unsubscribe_schedules_physical_grace_once(db_session: AsyncSession) -> None:
     torrent, requests, owners = await _shared_ready(db_session)
+    torrent.qb_state = "stalledup"
     cancelled_at = NOW + timedelta(hours=2)
     first = await cancel_owned_torrent_request(
         db_session,
@@ -161,7 +167,12 @@ async def test_last_unsubscribe_schedules_physical_grace_once(db_session: AsyncS
     assert first is not None and first.purge_scheduled
     assert first.purge_after == cancelled_at + timedelta(hours=36)
     assert replay is not None and not replay.cancelled and not replay.purge_scheduled
-    assert torrent.state is ManagedTorrentState.PURGE_PENDING
+    assert torrent.state is ManagedTorrentState.READY
+    assert torrent.progress == 1
+    assert torrent.qb_state == "stalledup"
+    assert torrent.purge_stop_pending is False
+    assert torrent.desired_active is False
+    assert torrent.desired_priority is None
     jobs = tuple((await db_session.scalars(select(TorrentJob))).all())
     assert len(jobs) == 1 and jobs[0].state is TorrentJobState.QUEUED
 
@@ -192,6 +203,7 @@ async def test_reaper_last_due_owner_starts_grace_and_is_replay_safe(
     db_session: AsyncSession,
 ) -> None:
     torrent, requests, _ = await _shared_ready(db_session)
+    torrent.qb_state = "uploading"
     requests[0].unsubscribe_at = NOW
     await db_session.flush()
     first = await expire_ready_torrents_batch(db_session, now=NOW, retention_hours=18)
@@ -203,7 +215,9 @@ async def test_reaper_last_due_owner_starts_grace_and_is_replay_safe(
 
     assert len(first) == 1 and first[0].purge_job_id is not None
     assert replay == ()
-    assert torrent.state is ManagedTorrentState.PURGE_PENDING
+    assert torrent.state is ManagedTorrentState.READY
+    assert torrent.qb_state == "uploading"
+    assert torrent.purge_stop_pending is False
     assert torrent.purge_after == NOW + timedelta(hours=18)
     assert await db_session.scalar(select(func.count()).select_from(TorrentJob)) == 1
 
@@ -282,7 +296,9 @@ async def test_resubscribe_during_purge_grace_reuses_content_and_cancels_job(
 
 
 @pytest.mark.asyncio
-async def test_resubscribe_at_purge_deadline_is_rejected(db_session: AsyncSession) -> None:
+async def test_resubscribe_at_purge_deadline_wins_before_activation(
+    db_session: AsyncSession,
+) -> None:
     torrent, requests, owners = await _shared_ready(db_session)
     cancelled = await cancel_owned_torrent_request(
         db_session,
@@ -292,15 +308,20 @@ async def test_resubscribe_at_purge_deadline_is_rejected(db_session: AsyncSessio
         now=NOW,
     )
     assert cancelled is not None and cancelled.purge_after is not None
-    with pytest.raises(TorrentPurgeInProgressError):
-        await create_or_get_torrent_request(
-            db_session,
-            user_id=owners[0].id,
-            info_hash=torrent.info_hash,
-            name=torrent.name,
-            total_size=torrent.total_size,
-            now=cancelled.purge_after,
-        )
+    renewed = await create_or_get_torrent_request(
+        db_session,
+        user_id=owners[0].id,
+        info_hash=torrent.info_hash,
+        name=torrent.name,
+        total_size=torrent.total_size,
+        now=cancelled.purge_after,
+    )
+
+    assert renewed.request_created is True
+    assert torrent.state is ManagedTorrentState.READY
+    assert torrent.purge_after is None
+    purge_job = await db_session.scalar(select(TorrentJob))
+    assert purge_job is not None and purge_job.state is TorrentJobState.CANCELLED
 
 
 @pytest.mark.asyncio

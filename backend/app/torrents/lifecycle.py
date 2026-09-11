@@ -209,7 +209,7 @@ async def expire_ready_torrents_batch(
         )
         purge_job = None
         if not remaining:
-            purge_job = await _enter_purge_pending(
+            purge_job = await _schedule_deferred_purge(
                 session,
                 torrent,
                 origin_request_id=requests[0].id,
@@ -298,7 +298,7 @@ async def cancel_owned_torrent_request(
         )
 
     purge_after = timestamp + timedelta(hours=retention_hours)
-    await _enter_purge_pending(
+    await _schedule_deferred_purge(
         session,
         torrent,
         origin_request_id=request.id,
@@ -321,7 +321,7 @@ async def cancel_owned_torrent_request(
     )
 
 
-async def _enter_purge_pending(
+async def _schedule_deferred_purge(
     session: AsyncSession,
     torrent: ManagedTorrent,
     *,
@@ -329,32 +329,11 @@ async def _enter_purge_pending(
     purge_after: datetime,
     now: datetime,
 ) -> TorrentJob:
+    """Schedule physical deletion without changing the current qB lifecycle."""
+
     torrent.lifecycle_generation += 1
-    torrent.state = ManagedTorrentState.PURGE_PENDING
     torrent.purge_after = purge_after
-    torrent.desired_active = False
-    torrent.desired_priority = None
-    torrent.desired_download_limit = 0
-    torrent.purge_stop_pending = True
     torrent.updated_at = now
-    active_jobs = list(
-        (
-            await session.scalars(
-                select(TorrentJob)
-                .where(
-                    TorrentJob.managed_torrent_id == torrent.id,
-                    TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
-                )
-                .with_for_update()
-            )
-        ).all()
-    )
-    for job in active_jobs:
-        job.cancel_requested_at = now
-        job.updated_at = now
-        if job.state is TorrentJobState.QUEUED:
-            job.state = TorrentJobState.CANCELLED
-            job.finished_at = now
     purge_job = TorrentJob(
         managed_torrent_id=torrent.id,
         torrent_request_id=origin_request_id,

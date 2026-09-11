@@ -322,7 +322,7 @@ def main() -> int:
         "AND tj.job_type = 'PURGE_TORRENT' "
         f"WHERE tr.id = '{request_id}'::uuid;"
     )
-    if cancellation_status != 204 or retained != "PURGE_PENDING|CANCELLED|QUEUED":
+    if cancellation_status != 204 or retained != "READY|CANCELLED|QUEUED":
         raise RuntimeError(f"retained cancellation is invalid: {retained}")
     compose("start", "worker")
 

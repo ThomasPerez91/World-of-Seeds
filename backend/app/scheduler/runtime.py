@@ -117,8 +117,19 @@ class SchedulerRuntime:
             policy = SchedulerPolicy.from_options(options)
             purge_stops = await self._load_purge_stops(session)
             torrents = await self._load_control_set(session, state)
-            requests = await self._load_active_requests(session, torrents)
-            cooldown_released = _release_elapsed_cooldowns(torrents, requests, now=now)
+            grace_torrents = tuple(
+                torrent
+                for torrent in torrents
+                if torrent.desired_active
+                and torrent.purge_after is not None
+                and _utc(torrent.purge_after) > _utc(now)
+            )
+            grace_torrent_ids = {torrent.id for torrent in grace_torrents}
+            schedulable_torrents = tuple(
+                torrent for torrent in torrents if torrent.id not in grace_torrent_ids
+            )
+            requests = await self._load_active_requests(session, schedulable_torrents)
+            cooldown_released = _release_elapsed_cooldowns(schedulable_torrents, requests, now=now)
             ledger = await load_scheduler_ledger(session, state)
             (
                 fairness_user_order,
@@ -128,12 +139,12 @@ class SchedulerRuntime:
                 ledger.cursor_user_id,
                 now=now,
             )
-            candidates = _scheduler_candidates(torrents, requests, now=now)
+            candidates = _scheduler_candidates(schedulable_torrents, requests, now=now)
             selection = select_torrents(
                 candidates,
                 policy=policy,
                 now=now,
-                active_global=0,
+                active_global=len(grace_torrents),
                 active_by_user={},
                 ledger=ledger,
                 fairness_user_order=fairness_user_order,
@@ -146,9 +157,22 @@ class SchedulerRuntime:
                     storage_key=torrent.storage_key,
                     qbittorrent_account_ref=torrent.qbittorrent_account_ref,
                 )
-                for torrent in torrents
+                for torrent in schedulable_torrents
             )
-            controls = build_qbittorrent_control_plan(selection, identities, options=options)
+            scheduled_controls = build_qbittorrent_control_plan(
+                selection, identities, options=options
+            )
+            grace_controls = tuple(
+                QBittorrentV2DesiredControl(
+                    info_hash=torrent.info_hash,
+                    storage_key=torrent.storage_key,
+                    run_state=QBittorrentV2RunState.RUNNING,
+                    download_limit_bytes_per_second=torrent.desired_download_limit,
+                    qbittorrent_account_ref=torrent.qbittorrent_account_ref,
+                )
+                for torrent in grace_torrents
+            )
+            controls = (*grace_controls, *scheduled_controls)
             purge_controls = tuple(
                 QBittorrentV2DesiredControl(
                     info_hash=torrent.info_hash,
@@ -160,12 +184,18 @@ class SchedulerRuntime:
                 for torrent in purge_stops
             )
             generation = state.desired_generation + 1
-            previous_active = {torrent.id: torrent.desired_active for torrent in torrents}
+            previous_active = {
+                torrent.id: torrent.desired_active for torrent in schedulable_torrents
+            }
             purge_stop_generations = {
                 torrent.id: torrent.lifecycle_generation for torrent in purge_stops
             }
-            _persist_desired_controls(torrents, controls, generation=generation)
-            realtime_targets = _control_event_targets(torrents, requests, previous_active)
+            _persist_desired_controls(
+                schedulable_torrents, scheduled_controls, generation=generation
+            )
+            realtime_targets = _control_event_targets(
+                schedulable_torrents, requests, previous_active
+            )
             queue_changed_after_apply = bool(realtime_targets) and not cooldown_released
             state.desired_generation = generation
             await persist_scheduler_ledger(session, state, selection.ledger, now=now)
