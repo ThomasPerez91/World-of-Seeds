@@ -84,6 +84,6 @@ def test_local_smoke_covers_ready_downloads_and_retained_cancellation() -> None:
     assert 'headers={"Range": "bytes=0-0"}' in script
     assert "download-archive?snapshot=" in script
     assert 'method="DELETE"' in script
-    assert "PURGE_PENDING|CANCELLED|QUEUED" in script
+    assert "READY|CANCELLED|QUEUED" in script
     assert 'f"{base}/api/v2/metrics"' in script
     assert "secret_safe_metrics_checked" in script

@@ -193,8 +193,8 @@ async def test_last_cancellation_schedules_purge_and_new_owner_revokes_it(
 
     assert first_cancelled is not None and first_cancelled.purge_scheduled is False
     assert second_cancelled is not None and second_cancelled.purge_scheduled is True
-    assert first.managed_torrent.state is ManagedTorrentState.PURGE_PENDING
-    assert first.managed_torrent.purge_stop_pending is True
+    assert first.managed_torrent.state is ManagedTorrentState.READY
+    assert first.managed_torrent.purge_stop_pending is False
     purge = await db_session.scalar(
         select(TorrentJob).where(TorrentJob.job_type == "PURGE_TORRENT")
     )
@@ -234,9 +234,17 @@ async def test_last_owner_cancelling_downloading_torrent_persists_scheduler_stop
     )
     created.managed_torrent.state = ManagedTorrentState.DOWNLOADING
     created.managed_torrent.progress = 0.4
+    created.managed_torrent.qb_state = "downloading"
     created.managed_torrent.desired_active = True
     created.managed_torrent.desired_priority = 0
     created.request.state = TorrentRequestState.ACTIVE
+    existing_sync = TorrentJob(
+        managed_torrent_id=created.managed_torrent.id,
+        torrent_request_id=created.request.id,
+        job_type="SYNC_TORRENT",
+        idempotency_key=f"sync:{created.managed_torrent.id}:during-grace",
+    )
+    db_session.add(existing_sync)
     await db_session.flush()
 
     cancelled = await cancel_owned_torrent_request(
@@ -248,11 +256,14 @@ async def test_last_owner_cancelling_downloading_torrent_persists_scheduler_stop
     )
 
     assert cancelled is not None and cancelled.purge_scheduled is True
-    assert created.managed_torrent.state is ManagedTorrentState.PURGE_PENDING
-    assert created.managed_torrent.desired_active is False
-    assert created.managed_torrent.desired_priority is None
-    assert created.managed_torrent.purge_stop_pending is True
+    assert created.managed_torrent.state is ManagedTorrentState.DOWNLOADING
+    assert created.managed_torrent.desired_active is True
+    assert created.managed_torrent.desired_priority == 0
+    assert created.managed_torrent.purge_stop_pending is False
     assert created.managed_torrent.progress == 0.4
+    assert created.managed_torrent.qb_state == "downloading"
+    assert existing_sync.state is TorrentJobState.QUEUED
+    assert existing_sync.cancel_requested_at is None
 
 
 @pytest.mark.asyncio
@@ -294,9 +305,9 @@ async def test_new_owner_reactivating_retained_partial_torrent_changes_queue_mem
     )
 
     assert resumed.managed_torrent.state is ManagedTorrentState.DOWNLOADING
-    assert resumed.managed_torrent.desired_active is False
+    assert resumed.managed_torrent.desired_active is True
     assert resumed.request.state is TorrentRequestState.ACTIVE
-    assert resumed.queue_membership_changed is True
+    assert resumed.queue_membership_changed is False
 
 
 @pytest.mark.asyncio
