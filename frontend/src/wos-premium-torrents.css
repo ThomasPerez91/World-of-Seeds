@@ -99,6 +99,17 @@
   overflow: visible;
 }
 
+@media (min-width: 916px) {
+  .user-downloads .torrent-list-heading {
+    border-radius: 13px 13px 0 0;
+  }
+
+  .user-downloads .torrent-accordion-list {
+    border-top: 0;
+    border-radius: 0 0 13px 13px;
+  }
+}
+
 .torrent-accordion-list::before {
   display: none !important;
   content: none !important;
@@ -115,6 +126,7 @@
 .torrent-row-grid {
   min-height: 62px;
   padding-block: 0.55rem;
+  cursor: pointer;
   transition: background-color 150ms ease;
 }
 
@@ -244,6 +256,7 @@
   padding: 0 !important;
   border: 0 !important;
   background: transparent;
+  cursor: default;
 }
 
 .torrent-card-actions > .ui-tooltip-anchor {

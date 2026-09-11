@@ -469,7 +469,18 @@ function TorrentItem({
           contentClassName="torrent-accordion-content"
           title={(
             <div className="torrent-accordion-summary">
-              <div className={`torrent-row-grid${expanded ? " is-expanded" : ""}`}>
+              <div
+                className={`torrent-row-grid${expanded ? " is-expanded" : ""}`}
+                onClick={(event) => {
+                  const target = event.target;
+                  if (
+                    target instanceof Element &&
+                    target.closest("button, a, input, select, textarea, [role='button'], .torrent-card-actions") !== null
+                  ) return;
+                  if (!expanded) onOpen?.();
+                  onToggleDetails();
+                }}
+              >
                 <Tooltip content={torrent.name} overflowOnly className="torrent-summary-heading">
                   <strong>{torrent.name}</strong>
                 </Tooltip>
@@ -510,10 +521,7 @@ function TorrentItem({
                       className="torrent-action-download"
                       aria-label={t("common.download")}
                       disabled={downloadBusy}
-                      onClick={() => {
-                        if (!expanded) onToggleDetails();
-                        onDownload();
-                      }}
+                      onClick={onDownload}
                     >
                       <DownloadIcon />
                     </Button>
