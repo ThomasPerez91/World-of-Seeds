@@ -4,7 +4,9 @@ from app.options.postgres import (
     PostgresOptionsRegistry,
 )
 from app.options.registry import (
+    C411_ACCOUNT_SPECS,
     CATEGORY_LABELS,
+    DATABASE_OPTION_SPECS,
     OPTION_SPECS,
     OptionSpec,
     OptionValue,
@@ -21,6 +23,8 @@ from app.options.store import (
 
 __all__ = [
     "CATEGORY_LABELS",
+    "C411_ACCOUNT_SPECS",
+    "DATABASE_OPTION_SPECS",
     "DatabaseOptionsDriftError",
     "DatabaseOptionsUpdate",
     "OPTION_SPECS",

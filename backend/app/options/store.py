@@ -16,6 +16,7 @@ from app.integrations.newgreedy_config import (
     SecureDirectoryChain,
 )
 from app.options.registry import (
+    MAX_C411_ACCOUNTS,
     OPTION_SPECS,
     OPTION_SPECS_BY_KEY,
     OptionSpec,
@@ -361,6 +362,21 @@ def normalize_option_value(spec: OptionSpec, value: OptionValue) -> OptionValue:
         if spec.maximum is not None and value > spec.maximum:
             raise OptionsValidationError(f"La valeur maximale est {spec.maximum}.", field=spec.key)
         return value
+    if spec.input_type in {"text", "secret"}:
+        if not isinstance(value, str) or "\x00" in value or "\r" in value or "\n" in value:
+            raise OptionsValidationError("Une valeur texte valide est attendue.", field=spec.key)
+        if spec.input_type == "text":
+            if len(value) > 64 or (value and re.fullmatch(r"[0-9]{1,64}", value) is None):
+                raise OptionsValidationError(
+                    "Le numéro de compte doit contenir uniquement des chiffres.", field=spec.key
+                )
+        elif value and (
+            not 8 <= len(value) <= 256
+            or not value.isascii()
+            or any(character in "/?#" for character in value)
+        ):
+            raise OptionsValidationError("La passkey C411 est invalide.", field=spec.key)
+        return value
     if not isinstance(value, str) or value not in spec.choices:
         raise OptionsValidationError("Cette valeur n’est pas autorisée.", field=spec.key)
     return value
@@ -413,6 +429,42 @@ def validate_cross_options(values: Mapping[str, OptionValue]) -> None:
             code="inconsistent_options",
             field="WOS_SCHEDULER_SMALL_TORRENT_BYTES",
         )
+
+    account_numbers: set[str] = set()
+    passkeys: set[str] = set()
+    for slot in range(1, MAX_C411_ACCOUNTS + 1):
+        number_key = f"WOS_C411_ACCOUNT_{slot:02d}_NUMBER"
+        passkey_key = f"WOS_C411_ACCOUNT_{slot:02d}_PASSKEY"
+        if number_key not in values and passkey_key not in values:
+            continue
+        number = values.get(number_key)
+        passkey = values.get(passkey_key)
+        if not isinstance(number, str) or not isinstance(passkey, str):
+            raise OptionsValidationError(
+                "Le compte C411 est invalide.", code="inconsistent_options", field=number_key
+            )
+        if bool(number) != bool(passkey):
+            raise OptionsValidationError(
+                "Le numéro de compte et la passkey doivent être renseignés ensemble.",
+                code="inconsistent_options",
+                field=number_key if not number else passkey_key,
+            )
+        if not number:
+            continue
+        if number in account_numbers:
+            raise OptionsValidationError(
+                "Chaque numéro de compte C411 doit être unique.",
+                code="inconsistent_options",
+                field=number_key,
+            )
+        if passkey in passkeys:
+            raise OptionsValidationError(
+                "Chaque passkey C411 doit être unique.",
+                code="inconsistent_options",
+                field=passkey_key,
+            )
+        account_numbers.add(number)
+        passkeys.add(passkey)
 
 
 def _serialize(values: Mapping[str, OptionValue]) -> bytes:

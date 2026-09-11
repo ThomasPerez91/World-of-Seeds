@@ -48,10 +48,7 @@ def validate_worker_runtime(settings: Settings) -> None:
         if settings.environment == "production" and any(
             production_secret_is_unsafe(secret)
             for spec in specs
-            for secret in (
-                spec.c411_passkey.get_secret_value(),
-                spec.qbittorrent_password.get_secret_value(),
-            )
+            for secret in (spec.qbittorrent_password.get_secret_value(),)
         ):
             raise RuntimeError("v2_worker_integration_secret_invalid")
         return

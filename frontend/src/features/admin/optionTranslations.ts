@@ -3,6 +3,7 @@ import type { Locale } from "../../i18n";
 interface OptionCopy { label: string; description: string }
 
 const sections: Record<string, Record<Locale, string>> = {
+  c411_accounts: { fr: "Comptes C411", en: "C411 accounts" },
   downloads: { fr: "Téléchargements", en: "Downloads" },
   torrents: { fr: "Torrents", en: "Torrents" },
   performance: { fr: "Performance", en: "Performance" },
@@ -100,9 +101,26 @@ export function optionFieldCopy(
   locale: Locale,
   frenchFallback: OptionCopy,
 ): OptionCopy {
+  const c411 = /^WOS_C411_ACCOUNT_(\d{2})_(NUMBER|PASSKEY)$/.exec(key);
+  if (c411 !== null) {
+    const slot = Number(c411[1]);
+    const passkey = c411[2] === "PASSKEY";
+    if (locale === "en") {
+      return {
+        label: `C411 account ${slot} — ${passkey ? "passkey" : "number"}`,
+        description: passkey
+          ? "Passkey inserted into tracker URLs for torrents assigned to this account."
+          : "C411 account number. Leave both fields empty to disable this slot.",
+      };
+    }
+  }
   return (locale === "fr" ? frenchOptions[key] : englishOptions[key]) ?? frenchFallback;
 }
 
-export const translatedOptionKeys = new Set(
-  Object.keys(englishOptions).filter((key) => frenchOptions[key] !== undefined),
-);
+export const translatedOptionKeys = new Set([
+  ...Object.keys(englishOptions).filter((key) => frenchOptions[key] !== undefined),
+  ...Array.from({ length: 16 }, (_, index) => index + 1).flatMap((slot) => [
+    `WOS_C411_ACCOUNT_${String(slot).padStart(2, "0")}_NUMBER`,
+    `WOS_C411_ACCOUNT_${String(slot).padStart(2, "0")}_PASSKEY`,
+  ]),
+]);
