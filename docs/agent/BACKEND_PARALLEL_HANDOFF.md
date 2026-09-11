@@ -2,7 +2,8 @@
 
 - `BASE_SHA`: `d40aecc0732bae3de8e14e8027cbe782887cac60`
 - Branche d’intégration: `integration/backend-2.1`
-- Migrations: `20260910_25_subscription_lifecycle.py` après `20260909_24`
+- Migrations: `20260911_26_grace_period_seeding.py` après
+  `20260910_25_subscription_lifecycle.py`
 
 ## Cycle de vie d’un abonnement
 
@@ -28,6 +29,22 @@ unique d’un infohash.
   les lignes READY déjà arrivées à échéance sont masquées.
 - Une lease déjà engagée peut finir après désabonnement/expiration. Aucune nouvelle lease ne peut
   démarrer à ou après `unsubscribe_at`.
+
+## Grace period seeding semantics
+
+- La suppression ou l’expiration du dernier abonnement ne modifie pas immédiatement l’état
+  physique du torrent. Elle renseigne seulement `purge_after` et crée un job `PURGE_TORRENT`
+  durable, disponible à cette échéance.
+- Pendant la grâce, un torrent READY continue de seeder et de se synchroniser avec qBittorrent.
+  Un torrent DOWNLOADING déjà actif continue également son téléchargement avec ses consignes
+  qB existantes. Aucun arrêt qB ou NewGreedy n’est déclenché par le désabonnement.
+- Une nouvelle souscription pendant la grâce réutilise la même copie physique, efface
+  `purge_after` et annule le job de purge, sans nouvel ajout qB ni duplication du stockage.
+- À l’échéance seulement, le worker verrouille le torrent et recompte les abonnements actifs. Si
+  l’un d’eux existe, il annule la purge. Sinon il passe en `PURGE_PENDING`, demande l’arrêt durable
+  au scheduler, attend les leases actives, puis supprime qB et le contenu partagé.
+- Le verrou SQL sérialise la course entre réabonnement et activation de purge : le gagnant fixe
+  l’état durable, sans suppression physique si un abonnement actif est visible.
 
 ### Réponse torrent
 
