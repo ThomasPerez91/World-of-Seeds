@@ -343,7 +343,7 @@
 }
 
 .torrent-accordion-content {
-  margin: 0 0.75rem 0.75rem !important;
+  margin: 0.875rem 0.75rem 0.75rem !important;
   padding: 0.9rem !important;
   border: 1px solid rgba(102, 234, 157, 0.14) !important;
   border-radius: 12px;
@@ -379,9 +379,9 @@
 
 .ready-content {
   gap: 0.75rem;
-  margin-top: 0.8rem;
-  padding-top: 0.8rem;
-  border-top: 1px solid rgba(157, 220, 184, 0.1);
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .ready-content-heading {
@@ -520,7 +520,8 @@
 
 .ready-directory-toggle:hover,
 .ready-directory-toggle:focus,
-.ready-directory-toggle:focus-visible {
+.ready-directory-toggle:focus-visible,
+.ready-directory-toggle:active {
   color: inherit !important;
   background: transparent !important;
   box-shadow: none !important;

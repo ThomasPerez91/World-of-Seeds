@@ -178,7 +178,7 @@ body {
 }
 
 .login-page .brand-panel::after {
-  content: "v2.1.2";
+  content: "v2.2.0";
   position: absolute;
   top: 1.25rem;
   right: 1.35rem;
@@ -1025,15 +1025,23 @@ body {
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  transition: filter 150ms ease, transform 150ms ease !important;
+  transform: none !important;
+  transition: filter 150ms ease !important;
 }
 .account-trigger:hover,
+.account-trigger:focus,
+.account-trigger:focus-visible,
+.account-trigger:active,
 .account-trigger[aria-expanded="true"] {
   border: 0 !important;
   background: none !important;
   box-shadow: none !important;
   filter: brightness(1.08);
-  transform: scale(1.025);
+  transform: none !important;
+}
+.account-trigger:focus-visible {
+  outline: 2px solid var(--wos-accent) !important;
+  outline-offset: 3px;
 }
 .account-trigger strong { display: block !important; }
 .account-dropdown {
