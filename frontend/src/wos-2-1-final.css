@@ -412,12 +412,101 @@
   border-left: 1px solid var(--wos21-panel-border);
 }
 
+.torrent-ready-overview {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.8fr) minmax(420px, 1.2fr);
+  gap: 0.875rem;
+  align-items: stretch;
+}
+
+.torrent-ready-meta-card,
+.torrent-ready-content-card {
+  min-width: 0;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--wos21-panel-border);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.torrent-ready-meta-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.torrent-ready-meta-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.2rem;
+}
+
+.torrent-ready-meta-label,
+.torrent-ready-meta-value,
+.torrent-ready-content-card h3,
+.torrent-ready-content-card span {
+  margin: 0;
+}
+
+.torrent-ready-meta-label {
+  color: var(--wos-muted-2);
+  font-size: 0.68rem;
+}
+
+.torrent-ready-meta-value {
+  color: var(--wos-text);
+  font-size: 0.78rem;
+}
+
+.torrent-ready-meta-separator {
+  width: 1px;
+  align-self: stretch;
+  background: var(--wos21-panel-border);
+}
+
+.torrent-ready-content-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.torrent-ready-content-card > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.torrent-ready-content-card h3 {
+  color: var(--wos-text);
+  font-size: 0.86rem;
+}
+
+.torrent-ready-content-card span {
+  color: var(--wos-muted);
+  font-size: 0.7rem;
+}
+
+.torrent-ready-content-card > button,
+.torrent-ready-content-card > a {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
 .ready-directory-toggle.is-root {
   display: flex;
   width: 100%;
+  min-height: 0;
+  margin: 0 !important;
+  padding: 0;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  line-height: 1;
 }
 
 .ready-directory-root-label {
@@ -425,6 +514,14 @@
   min-width: 0;
   align-items: center;
   gap: 0.65rem;
+}
+
+.ready-directory-root-label,
+.ready-directory-root-label span,
+.ready-directory-root-label strong,
+.ready-directory-root-label svg,
+.ready-directory-toggle.is-root > .ready-directory-chevron {
+  margin-block: 0;
 }
 
 .ready-directory-root-label > svg {
@@ -493,7 +590,7 @@
 .c411-account-slot {
   min-width: 0;
   margin: 0;
-  padding: 0.8rem;
+  padding: 0.65rem 0.75rem 0.75rem;
   border: 1px solid var(--wos21-panel-border);
   border-radius: 12px;
   background: color-mix(in srgb, var(--wos-accent) 3%, transparent);
@@ -508,13 +605,23 @@
 
 .c411-account-fields {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(8rem, 1.7fr) minmax(0, 5.3fr);
+  grid-template-columns: minmax(180px, 0.8fr) minmax(100px, 0.35fr) minmax(300px, 1.5fr);
   gap: 0.7rem;
 }
 
 .c411-account-fields .option-field {
   grid-template-columns: minmax(0, 1fr);
   align-content: start;
+  gap: 0.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.c411-account-fields .option-control > input,
+.c411-account-fields .option-number-control input {
+  height: 2.35rem;
 }
 
 @media (min-width: 650px) {
@@ -563,6 +670,22 @@
 
 @media (max-width: 760px) {
   .c411-account-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 761px) and (max-width: 959px) {
+  .c411-account-fields {
+    grid-template-columns: minmax(0, 2fr) minmax(7rem, 0.8fr);
+  }
+
+  .c411-field-passkey {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 840px) {
+  .torrent-ready-overview {
     grid-template-columns: minmax(0, 1fr);
   }
 }

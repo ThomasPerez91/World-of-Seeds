@@ -315,16 +315,25 @@ export function AdminSettingsPage({
     const inputId = `option-${field.key.toLowerCase()}`;
     const hintId = `${inputId}-hint`;
     const errorId = `${inputId}-error`;
+    const c411Kind = /^WOS_C411_ACCOUNT_\d{2}_(USERNAME|NUMBER|PASSKEY)$/.exec(field.key)?.[1]?.toLowerCase();
+    const describedBy = c411Kind === undefined
+      ? `${hintId}${error === undefined ? "" : ` ${errorId}`}`
+      : error === undefined ? undefined : errorId;
     return (
-      <div className={`option-field${error === undefined ? "" : " invalid"}`} key={field.key}>
+      <div
+        className={`option-field${c411Kind === undefined ? "" : ` c411-option-field c411-field-${c411Kind}`}${error === undefined ? "" : " invalid"}`}
+        key={field.key}
+      >
         <div>
-          <label htmlFor={inputId}>{copy.label}</label>
-          <p id={hintId}>
-            {copy.description}
-            {field.restart_required && (
-              <span className="restart-required"> {t("admin.restartRequired")}</span>
-            )}
-          </p>
+          <label htmlFor={inputId} title={c411Kind === undefined ? undefined : copy.description}>{copy.label}</label>
+          {c411Kind === undefined && (
+            <p id={hintId}>
+              {copy.description}
+              {field.restart_required && (
+                <span className="restart-required"> {t("admin.restartRequired")}</span>
+              )}
+            </p>
+          )}
         </div>
         <div className="option-control">
           {field.input_type === "boolean" ? (
@@ -333,7 +342,7 @@ export function AdminSettingsPage({
               type="checkbox"
               checked={Boolean(draft[field.key])}
               disabled={!field.editable || saving}
-              aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
+              aria-describedby={describedBy}
               onChange={(event) => updateDraft(field.key, event.target.checked)}
             />
           ) : field.input_type === "select" ? (
@@ -341,7 +350,7 @@ export function AdminSettingsPage({
               id={inputId}
               value={String(draft[field.key])}
               disabled={!field.editable || saving}
-              aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
+              aria-describedby={describedBy}
               aria-invalid={error !== undefined}
               onChange={(event) => updateDraft(field.key, event.target.value)}
             >
@@ -359,7 +368,7 @@ export function AdminSettingsPage({
                 max={field.maximum ?? undefined}
                 step={1}
                 disabled={!field.editable || saving}
-                aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
+                aria-describedby={describedBy}
                 aria-invalid={error !== undefined}
                 onChange={(event) => updateDraft(field.key, event.target.value)}
               />
@@ -376,7 +385,7 @@ export function AdminSettingsPage({
               inputMode={field.key.endsWith("_NUMBER") ? "numeric" : undefined}
               autoComplete="off"
               disabled={!field.editable || saving}
-              aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
+              aria-describedby={describedBy}
               aria-invalid={error !== undefined}
               onChange={(event) => updateDraft(field.key, event.target.value)}
             />

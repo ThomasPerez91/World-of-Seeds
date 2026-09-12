@@ -253,7 +253,11 @@ describe("App", () => {
     });
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
-    await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
+    const accountTrigger = screen.getByRole("button", { name: "Ouvrir le menu du compte" });
+    expect(accountTrigger.classList).toContain("account-trigger");
+    expect(accountTrigger.getAttribute("style")).toBeNull();
+    await user.click(accountTrigger);
+    expect(accountTrigger.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getAllByRole("button", { name: "Administration" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Paramètres du compte" })).toBeNull();
     expect(screen.getByRole("button", { name: "Déconnexion" })).toBeTruthy();

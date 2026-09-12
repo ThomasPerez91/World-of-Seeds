@@ -585,7 +585,7 @@ function ReadyTorrentContent({
   onRetry: () => void;
   torrent: TorrentRequestV2;
 }) {
-  const { formatBytes, t } = useI18n();
+  const { formatBytes, formatDate, t } = useI18n();
   const snapshot = manifest?.snapshot ?? null;
   const compatible = !supportsRecursiveDirectoryDownload();
   const folderBusy = transfers.some(
@@ -593,6 +593,41 @@ function ReadyTorrentContent({
   );
   return (
     <section className="ready-content" aria-label={t("downloads.contentNamed", { name: torrent.name })}>
+      <div className="torrent-ready-overview">
+        <div className="torrent-ready-meta-card">
+          <div className="torrent-ready-meta-item">
+            <span className="torrent-ready-meta-label">{t("downloads.created")}</span>
+            <span className="torrent-ready-meta-value">{formatDate(torrent.created_at, { dateStyle: "short", timeStyle: "short" })}</span>
+          </div>
+          <span className="torrent-ready-meta-separator" aria-hidden="true" />
+          <div className="torrent-ready-meta-item">
+            <span className="torrent-ready-meta-label">{t("downloads.updated")}</span>
+            <span className="torrent-ready-meta-value">{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</span>
+          </div>
+        </div>
+        <div className="torrent-ready-content-card">
+          <div>
+            <h3>{t("downloads.content")}</h3>
+            {snapshot !== null && (
+              <span>{t(snapshot.file_count === 1 ? "downloads.contentSummaryOne" : "downloads.contentSummaryMany", { count: snapshot.file_count, size: formatBytes(snapshot.total_size) })}</span>
+            )}
+          </div>
+          {snapshot !== null && snapshot.file_count > 1 && !snapshot.archive_available && !compatible && (
+            <Button disabled={folderBusy} onClick={onDownloadAll}>
+              <DownloadIcon /> {t("downloads.downloadAll")}
+            </Button>
+          )}
+          {snapshot !== null && snapshot.file_count > 1 && snapshot.archive_available && (
+            <a
+              className="download-fallback-archive"
+              href={api.torrentArchiveDownloadUrlV2(torrent.id, snapshot.snapshot_id)}
+              download={`${torrent.name}.zip`}
+            >
+              <Archive aria-hidden="true" /> {t("downloads.archive")}
+            </a>
+          )}
+        </div>
+      </div>
       {transfers.map((transfer) => (
         <LocalTransferPanel
           key={transfer.id}
@@ -612,26 +647,6 @@ function ReadyTorrentContent({
         </StateMessage>
       ) : snapshot !== null ? (
         <>
-          <header className="ready-content-heading">
-            <div>
-              <h3>{t("downloads.content")}</h3>
-              <span>{t(snapshot.file_count === 1 ? "downloads.contentSummaryOne" : "downloads.contentSummaryMany", { count: snapshot.file_count, size: formatBytes(snapshot.total_size) })}</span>
-            </div>
-            {snapshot.file_count > 1 && !compatible && (
-              <Button disabled={folderBusy} onClick={onDownloadAll}>
-                <DownloadIcon /> {t("downloads.downloadAll")}
-              </Button>
-            )}
-            {snapshot.file_count > 1 && compatible && snapshot.archive_available && (
-              <a
-                className="download-fallback-archive"
-                href={api.torrentArchiveDownloadUrlV2(torrent.id, snapshot.snapshot_id)}
-                download={`${torrent.name}.zip`}
-              >
-                <Archive aria-hidden="true" /> {t("downloads.archive")}
-              </a>
-            )}
-          </header>
           {manifest.error !== "" && (
             <StateMessage tone="error" className="ready-manifest-error">
               <span>{manifest.error}</span>
@@ -780,10 +795,12 @@ function TorrentItem({
             </div>
           )}
         >
-          <dl className="torrent-detail-grid torrent-detail-dates">
-            <div><dt>{t("downloads.created")}</dt><dd>{formatDate(torrent.created_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
-            <div><dt>{t("downloads.updated")}</dt><dd>{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
-          </dl>
+          {torrent.state !== "ready" && (
+            <dl className="torrent-detail-grid torrent-detail-dates">
+              <div><dt>{t("downloads.created")}</dt><dd>{formatDate(torrent.created_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
+              <div><dt>{t("downloads.updated")}</dt><dd>{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
+            </dl>
+          )}
           {error !== null && <p className="torrent-detail-error" role="alert">{error}</p>}
           {details}
         </Accordion>

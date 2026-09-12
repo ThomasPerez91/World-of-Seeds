@@ -215,8 +215,16 @@ describe("AdminSettingsPage", () => {
     );
 
     expect(await screen.findByRole("group", { name: "Compte C411 1" })).toBeTruthy();
+    const accountFields = screen.getByRole("group", { name: "Compte C411 1" }).querySelector(".c411-account-fields");
+    expect(accountFields?.children).toHaveLength(3);
+    expect(accountFields?.querySelector(".c411-field-username")).toBeTruthy();
+    expect(accountFields?.querySelector(".c411-field-number")).toBeTruthy();
+    expect(accountFields?.querySelector(".c411-field-passkey")).toBeTruthy();
     const username = screen.getByLabelText("Nom d’utilisateur");
     expect(username.getAttribute("inputmode")).toBeNull();
+    expect(screen.queryByText("Libellé facultatif utilisé uniquement pour identifier ce compte dans l’administration.")).toBeNull();
+    expect(screen.queryByText("Numéro du compte C411. Laissez le numéro et la passkey vides pour désactiver cet emplacement.")).toBeNull();
+    expect(screen.queryByText("Passkey injectée dans les URL tracker des torrents affectés à ce compte.")).toBeNull();
     const passkey = screen.getByLabelText("Passkey");
     expect(passkey.getAttribute("type")).toBe("password");
     await user.clear(passkey);
