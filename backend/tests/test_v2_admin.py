@@ -75,8 +75,12 @@ async def test_admin_overview_exposes_options_scheduler_storage_and_bounded_audi
     assert body["storage"]["logical_bytes"] == 150
     assert 0 < len(body["audit"]) <= 50
     c411 = next(section for section in body["sections"] if section["id"] == "c411_accounts")
-    assert len(c411["fields"]) == 32
+    assert len(c411["fields"]) == 48
     assert sum(field["input_type"] == "secret" for field in c411["fields"]) == 16
+    username = next(
+        field for field in c411["fields"] if field["key"] == "WOS_C411_ACCOUNT_01_USERNAME"
+    )
+    assert username["input_type"] == "text"
 
 
 @pytest.mark.asyncio
@@ -116,6 +120,7 @@ async def test_admin_can_configure_c411_pair_without_exposing_passkey_in_audit(
         "/api/v2/admin/options",
         json={
             "changes": {
+                "WOS_C411_ACCOUNT_01_USERNAME": "Thomas",
                 "WOS_C411_ACCOUNT_01_NUMBER": "1001",
                 "WOS_C411_ACCOUNT_01_PASSKEY": "admin-passkey-123",
             }
@@ -127,6 +132,7 @@ async def test_admin_can_configure_c411_pair_without_exposing_passkey_in_audit(
     body = response.json()
     c411 = next(section for section in body["sections"] if section["id"] == "c411_accounts")
     fields = {field["key"]: field for field in c411["fields"]}
+    assert fields["WOS_C411_ACCOUNT_01_USERNAME"]["value"] == "Thomas"
     assert fields["WOS_C411_ACCOUNT_01_NUMBER"]["value"] == "1001"
     assert fields["WOS_C411_ACCOUNT_01_PASSKEY"]["value"] == "admin-passkey-123"
     assert all("admin-passkey-123" not in repr(event) for event in body["audit"])

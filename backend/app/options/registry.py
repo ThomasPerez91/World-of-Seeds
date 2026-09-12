@@ -502,9 +502,17 @@ C411_ACCOUNT_SPECS: tuple[OptionSpec, ...] = tuple(
     for slot in range(1, MAX_C411_ACCOUNTS + 1)
     for spec in (
         _text(
+            f"WOS_C411_ACCOUNT_{slot:02d}_USERNAME",
+            f"Compte C411 {slot} — nom d’utilisateur",
+            "Nom d’utilisateur facultatif, utilisé uniquement pour identifier ce compte "
+            "dans l’administration.",
+            "c411_accounts",
+        ),
+        _text(
             f"WOS_C411_ACCOUNT_{slot:02d}_NUMBER",
             f"Compte C411 {slot} — numéro",
-            "Numéro du compte C411. Laissez les deux champs vides pour désactiver cet emplacement.",
+            "Numéro du compte C411. Laissez le numéro et la passkey vides pour "
+            "désactiver cet emplacement.",
             "c411_accounts",
         ),
         _text(

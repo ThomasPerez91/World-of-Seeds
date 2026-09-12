@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import {
   api,
   ApiError,
-  type AdminReconciliationReport,
   type AdminStorageOverview,
 } from "../../api/client";
 import { Button, Card, Progress, StateMessage } from "../../components/ui";
@@ -21,9 +20,7 @@ export function AdminStoragePage({
 }) {
   const { formatBytes, formatNumber, t } = useI18n();
   const [overview, setOverview] = useState<AdminStorageOverview | null>(null);
-  const [reconciliation, setReconciliation] = useState<AdminReconciliationReport | null>(null);
   const [error, setError] = useState("");
-  const [reconciliationError, setReconciliationError] = useState("");
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
 
@@ -31,23 +28,18 @@ export function AdminStoragePage({
     let active = true;
     setLoading(true);
     setError("");
-    setReconciliationError("");
-    void Promise.allSettled([api.getAdminStorage(), api.getAdminReconciliation()])
-      .then(([storageResult, reportResult]) => {
+    void api.getAdminStorage()
+      .then((result) => {
         if (!active) return;
-        const authenticationFailed = [storageResult, reportResult].some(
-          (result) => result.status === "rejected"
-            && result.reason instanceof ApiError
-            && result.reason.status === 401,
-        );
-        if (authenticationFailed) {
+        setOverview(result);
+      })
+      .catch((caught) => {
+        if (!active) return;
+        if (caught instanceof ApiError && caught.status === 401) {
           onSessionExpired();
           return;
         }
-        if (storageResult.status === "fulfilled") setOverview(storageResult.value);
-        else setError(t("admin.loadFailed"));
-        if (reportResult.status === "fulfilled") setReconciliation(reportResult.value);
-        else setReconciliationError(t("admin.integrityLoadFailed"));
+        setError(t("admin.loadFailed"));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -121,37 +113,6 @@ export function AdminStoragePage({
         )}
 
         {error !== "" && overview !== null && <StateMessage tone="error">{error}</StateMessage>}
-
-        {reconciliation !== null && (
-          <Card className="reconciliation-panel" aria-labelledby="reconciliation-title">
-            <div>
-              <h3 id="reconciliation-title">{t("admin.reconciliation")}</h3>
-              <p>{t("admin.integrityIntro")}</p>
-            </div>
-            <dl className="reconciliation-metrics">
-              <div><dt>{t("admin.integrityDatabase")}</dt><dd>{formatNumber(reconciliation.database_scanned)}</dd></div>
-              <div><dt>{t("admin.integrityClient")}</dt><dd>{formatNumber(reconciliation.qbittorrent_scanned)}</dd></div>
-              <div><dt>{t("admin.integrityFiles")}</dt><dd>{formatNumber(reconciliation.storage_scanned)}</dd></div>
-              <div><dt>{t("admin.integrityExternal")}</dt><dd>{formatNumber(reconciliation.external_torrents)}</dd></div>
-            </dl>
-            {reconciliation.anomalies.length === 0 ? (
-              <strong className="reconciliation-ok">{t("admin.noAnomaly")}</strong>
-            ) : (
-              <ul>
-                {reconciliation.anomalies.map((anomaly, index) => (
-                  <li className={anomaly.severity} key={`${anomaly.code}-${anomaly.resource_id}-${index}`}>
-                    <strong>{anomaly.code}</strong>
-                    <span>{anomaly.action === "none" ? t("admin.noAction") : anomaly.action}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {reconciliation.truncated && (
-              <p className="truncated-notice">{t("admin.inventoryTruncated")}</p>
-            )}
-          </Card>
-        )}
-        {reconciliationError !== "" && <StateMessage tone="error">{reconciliationError}</StateMessage>}
       </section>
     </AdminPageShell>
   );

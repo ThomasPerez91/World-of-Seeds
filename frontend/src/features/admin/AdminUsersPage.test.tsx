@@ -38,6 +38,8 @@ describe("AdminUsersPage", () => {
       );
 
       expect(await screen.findByText(username)).toBeTruthy();
+      expect(screen.getByRole("navigation", { name: "Sections d’administration" }).querySelectorAll("button")).toHaveLength(4);
+      expect(screen.getByRole("button", { name: "Utilisateurs" }).getAttribute("aria-current")).toBe("page");
       expect(screen.getByRole("button", { name: `Suspendre ${username}` })).toBeTruthy();
       expect(screen.getByRole("button", { name: `Supprimer l’accès de ${username}` })).toBeTruthy();
       expect(view.container.querySelector(".user-row > div:nth-child(2) > strong")).toBeTruthy();

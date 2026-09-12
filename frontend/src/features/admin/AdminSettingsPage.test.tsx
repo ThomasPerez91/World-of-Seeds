@@ -72,7 +72,7 @@ function response(body: unknown, status = 200): Response {
 
 describe("AdminSettingsPage", () => {
   it("possède une traduction anglaise stable pour chaque option V2", () => {
-    expect(translatedOptionKeys.size).toBe(68);
+    expect(translatedOptionKeys.size).toBe(84);
     expect(translatedOptionKeys.has("WOS_ADMIN_REFRESH_INTERVAL_SECONDS")).toBe(true);
     expect(translatedNewGreedyFieldIds.size).toBe(44);
     expect(translatedNewGreedyFieldIds.has("advanced.inject_hours")).toBe(true);
@@ -155,6 +155,18 @@ describe("AdminSettingsPage", () => {
           fields: [
             {
               ...options.sections[0].fields[0],
+              key: "WOS_C411_ACCOUNT_01_USERNAME",
+              label: "Compte C411 1 — nom d’utilisateur",
+              description: "Nom facultatif.",
+              input_type: "text",
+              value: "Thomas",
+              default: "",
+              unit: null,
+              minimum: null,
+              maximum: null,
+            },
+            {
+              ...options.sections[0].fields[0],
               key: "WOS_C411_ACCOUNT_01_NUMBER",
               label: "Compte C411 1 — numéro",
               description: "Numéro du compte C411.",
@@ -202,7 +214,10 @@ describe("AdminSettingsPage", () => {
       </FeedbackProvider>,
     );
 
-    const passkey = await screen.findByLabelText("Compte C411 1 — passkey");
+    expect(await screen.findByRole("group", { name: "Compte C411 1" })).toBeTruthy();
+    const username = screen.getByLabelText("Nom d’utilisateur");
+    expect(username.getAttribute("inputmode")).toBeNull();
+    const passkey = screen.getByLabelText("Passkey");
     expect(passkey.getAttribute("type")).toBe("password");
     await user.clear(passkey);
     await user.type(passkey, "replacement-passkey-456");
