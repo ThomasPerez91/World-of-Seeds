@@ -740,7 +740,8 @@
 
 .ui-tooltip-anchor:hover > .ui-tooltip-content,
 .ui-tooltip-anchor:focus > .ui-tooltip-content,
-.ui-tooltip-anchor:focus-within > .ui-tooltip-content {
+.ui-tooltip-anchor:focus-within > .ui-tooltip-content,
+.ready-directory-toggle:focus-visible .ready-directory-name > .ui-tooltip-content {
   opacity: 1;
   transform: translate(-50%, 0);
 }
