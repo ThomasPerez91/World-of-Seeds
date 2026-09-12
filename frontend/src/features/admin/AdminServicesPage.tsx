@@ -23,6 +23,11 @@ const statusCopy: Record<ExternalServiceHealth["status"], MessageKey> = {
   unconfigured: "admin.serviceUnconfigured",
 } as const;
 
+export const EXPECTED_SERVICE_VERSIONS = {
+  newgreedy: "1.7.5",
+  qbittorrent: "5.2.3",
+} as const;
+
 function serviceMessage(service: ExternalServiceHealth): MessageKey {
   if (service.status === "healthy") return "admin.serviceHealthyDescription";
   if (service.status === "unconfigured") return "admin.serviceUnconfiguredDescription";
@@ -43,11 +48,13 @@ function ServiceCard({
   description,
   health,
   name,
+  fallbackVersion,
 }: {
   children: ReactNode;
   description: string;
   health: ExternalServiceHealth;
   name: string;
+  fallbackVersion: string;
 }) {
   const { formatNumber, t } = useI18n();
   return (
@@ -75,7 +82,7 @@ function ServiceCard({
         </div>
         <div>
           <dt>{t("admin.version")}</dt>
-          <dd>{health.version ?? "—"}</dd>
+          <dd>{health.version ?? fallbackVersion}</dd>
         </div>
       </dl>
     </Card>
@@ -159,6 +166,7 @@ export function AdminServicesPage({
                 name="NewGreedy"
                 description={t("admin.newgreedyDescription")}
                 health={health.newgreedy}
+                fallbackVersion={EXPECTED_SERVICE_VERSIONS.newgreedy}
               >
                 <NewGreedyServiceIcon />
               </ServiceCard>
@@ -166,6 +174,7 @@ export function AdminServicesPage({
                 name="qBittorrent"
                 description={t("admin.qbittorrentDescription")}
                 health={health.qbittorrent}
+                fallbackVersion={EXPECTED_SERVICE_VERSIONS.qbittorrent}
               >
                 <QBittorrentServiceIcon />
               </ServiceCard>

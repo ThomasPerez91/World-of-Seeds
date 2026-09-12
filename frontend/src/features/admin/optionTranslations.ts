@@ -101,18 +101,27 @@ export function optionFieldCopy(
   locale: Locale,
   frenchFallback: OptionCopy,
 ): OptionCopy {
-  const c411 = /^WOS_C411_ACCOUNT_(\d{2})_(NUMBER|PASSKEY)$/.exec(key);
+  const c411 = /^WOS_C411_ACCOUNT_(\d{2})_(USERNAME|NUMBER|PASSKEY)$/.exec(key);
   if (c411 !== null) {
-    const slot = Number(c411[1]);
-    const passkey = c411[2] === "PASSKEY";
+    const kind = c411[2];
     if (locale === "en") {
       return {
-        label: `C411 account ${slot} — ${passkey ? "passkey" : "number"}`,
-        description: passkey
-          ? "Passkey inserted into tracker URLs for torrents assigned to this account."
-          : "C411 account number. Leave both fields empty to disable this slot.",
+        label: kind === "USERNAME" ? "Username" : kind === "PASSKEY" ? "Passkey" : "Number",
+        description: kind === "USERNAME"
+          ? "Optional label used only to identify this account in administration."
+          : kind === "PASSKEY"
+            ? "Passkey inserted into tracker URLs for torrents assigned to this account."
+            : "C411 account number. Leave the number and passkey empty to disable this slot.",
       };
     }
+    return {
+      label: kind === "USERNAME" ? "Nom d’utilisateur" : kind === "PASSKEY" ? "Passkey" : "Numéro",
+      description: kind === "USERNAME"
+        ? "Libellé facultatif utilisé uniquement pour identifier ce compte dans l’administration."
+        : kind === "PASSKEY"
+          ? "Passkey injectée dans les URL tracker des torrents affectés à ce compte."
+          : "Numéro du compte C411. Laissez le numéro et la passkey vides pour désactiver cet emplacement.",
+    };
   }
   return (locale === "fr" ? frenchOptions[key] : englishOptions[key]) ?? frenchFallback;
 }
@@ -120,6 +129,7 @@ export function optionFieldCopy(
 export const translatedOptionKeys = new Set([
   ...Object.keys(englishOptions).filter((key) => frenchOptions[key] !== undefined),
   ...Array.from({ length: 16 }, (_, index) => index + 1).flatMap((slot) => [
+    `WOS_C411_ACCOUNT_${String(slot).padStart(2, "0")}_USERNAME`,
     `WOS_C411_ACCOUNT_${String(slot).padStart(2, "0")}_NUMBER`,
     `WOS_C411_ACCOUNT_${String(slot).padStart(2, "0")}_PASSKEY`,
   ]),

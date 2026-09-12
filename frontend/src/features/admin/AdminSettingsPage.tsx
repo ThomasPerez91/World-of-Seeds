@@ -1,4 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ChevronRight } from "lucide-react";
 
 import {
   api,
@@ -72,6 +73,17 @@ function validateField(
 function parsedValue(field: OptionField, draft: DraftValue): OptionValue {
   if (field.input_type === "integer") return Number(draft);
   return draft;
+}
+
+function groupC411Fields(fields: OptionField[]): Array<{ fields: OptionField[]; slot: number }> {
+  const grouped = new Map<number, OptionField[]>();
+  for (const field of fields) {
+    const match = /^WOS_C411_ACCOUNT_(\d{2})_(USERNAME|NUMBER|PASSKEY)$/.exec(field.key);
+    if (match === null) continue;
+    const slot = Number(match[1]);
+    grouped.set(slot, [...(grouped.get(slot) ?? []), field]);
+  }
+  return [...grouped.entries()].map(([slot, slotFields]) => ({ slot, fields: slotFields }));
 }
 
 export function AdminSettingsPage({
@@ -294,6 +306,87 @@ export function AdminSettingsPage({
     }
   }
 
+  function renderOptionField(field: OptionField) {
+    const copy = optionFieldCopy(field.key, locale, {
+      label: field.label,
+      description: field.description,
+    });
+    const error = fieldErrors[field.key];
+    const inputId = `option-${field.key.toLowerCase()}`;
+    const hintId = `${inputId}-hint`;
+    const errorId = `${inputId}-error`;
+    return (
+      <div className={`option-field${error === undefined ? "" : " invalid"}`} key={field.key}>
+        <div>
+          <label htmlFor={inputId}>{copy.label}</label>
+          <p id={hintId}>
+            {copy.description}
+            {field.restart_required && (
+              <span className="restart-required"> {t("admin.restartRequired")}</span>
+            )}
+          </p>
+        </div>
+        <div className="option-control">
+          {field.input_type === "boolean" ? (
+            <input
+              id={inputId}
+              type="checkbox"
+              checked={Boolean(draft[field.key])}
+              disabled={!field.editable || saving}
+              aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
+              onChange={(event) => updateDraft(field.key, event.target.checked)}
+            />
+          ) : field.input_type === "select" ? (
+            <select
+              id={inputId}
+              value={String(draft[field.key])}
+              disabled={!field.editable || saving}
+              aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
+              aria-invalid={error !== undefined}
+              onChange={(event) => updateDraft(field.key, event.target.value)}
+            >
+              {field.choices.map((choice) => (
+                <option value={choice} key={choice}>{choice}</option>
+              ))}
+            </select>
+          ) : field.input_type === "integer" ? (
+            <div className="option-number-control">
+              <input
+                id={inputId}
+                type="number"
+                value={String(draft[field.key])}
+                min={field.minimum ?? undefined}
+                max={field.maximum ?? undefined}
+                step={1}
+                disabled={!field.editable || saving}
+                aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
+                aria-invalid={error !== undefined}
+                onChange={(event) => updateDraft(field.key, event.target.value)}
+              />
+              {field.unit !== null && (
+                <span>{unitLabels[field.unit] === undefined ? field.unit : t(unitLabels[field.unit])}</span>
+              )}
+            </div>
+          ) : (
+            <input
+              id={inputId}
+              type={field.input_type === "secret" ? "password" : "text"}
+              value={String(draft[field.key])}
+              maxLength={field.input_type === "secret" ? 256 : 64}
+              inputMode={field.key.endsWith("_NUMBER") ? "numeric" : undefined}
+              autoComplete="off"
+              disabled={!field.editable || saving}
+              aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
+              aria-invalid={error !== undefined}
+              onChange={(event) => updateDraft(field.key, event.target.value)}
+            />
+          )}
+          {error !== undefined && <p id={errorId} className="option-error">{error}</p>}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <AdminPageShell activeView="admin-settings" onBack={onBack} onNavigate={onNavigate}>
       <section className="admin-section options-section" aria-labelledby="admin-options-title" aria-busy={loading}>
@@ -331,27 +424,29 @@ export function AdminSettingsPage({
         ) : options !== null ? (
           <>
             <div className="central-admin-status" aria-label={t("admin.operationalState")}>
-              <Card>
-                <span>Scheduler</span>
-                <Badge tone={options.scheduler.synchronized ? "success" : "warning"}>
-                  {options.scheduler.synchronized ? t("admin.synchronized") : t("admin.reconcileRequired")}
-                </Badge>
+              <Card className="admin-summary-card">
+                <header className="admin-summary-card-header"><span>Scheduler</span></header>
+                <div className="admin-summary-primary">
+                  <Badge tone={options.scheduler.synchronized ? "success" : "warning"}>
+                    {options.scheduler.synchronized ? t("admin.synchronized") : t("admin.reconcileRequired")}
+                  </Badge>
+                </div>
                 <dl className="admin-status-details">
                   <div><dt>{t("admin.desiredGeneration")}</dt><dd>{formatNumber(options.scheduler.desired_generation)}</dd></div>
                   <div><dt>{t("admin.appliedGeneration")}</dt><dd>{formatNumber(options.scheduler.applied_generation)}</dd></div>
                 </dl>
               </Card>
-              <Card>
-                <span>{t("admin.sharedStorage")}</span>
-                <strong>{formatBytes(options.storage.managed_bytes)}</strong>
+              <Card className="admin-summary-card">
+                <header className="admin-summary-card-header"><span>{t("admin.sharedStorage")}</span></header>
+                <strong className="admin-summary-primary">{formatBytes(options.storage.managed_bytes)}</strong>
                 <dl className="admin-status-details">
                   <div><dt>{t("admin.logicalSpace")}</dt><dd>{formatBytes(options.storage.logical_bytes)}</dd></div>
                   <div><dt>{t("admin.pressure")}</dt><dd>{options.storage.pressure}</dd></div>
                 </dl>
               </Card>
-              <Card>
-                <span>{t("admin.userQuota")}</span>
-                <strong>
+              <Card className="admin-summary-card">
+                <header className="admin-summary-card-header"><span>{t("admin.userQuota")}</span></header>
+                <strong className="admin-summary-primary">
                   {options.storage.user_quota_bytes === 0
                     ? t("admin.unlimited")
                     : formatBytes(options.storage.user_quota_bytes)}
@@ -366,91 +461,26 @@ export function AdminSettingsPage({
               <div className="options-sections">
                 {options.sections.map((section, sectionIndex) => (
                   <details key={section.id} open={sectionIndex === 0}>
-                    <summary>{optionSectionLabel(section.id, locale, section.label)}</summary>
-                    <div className="options-fields">
-                      {section.fields.map((field) => {
-                        const copy = optionFieldCopy(field.key, locale, {
-                          label: field.label,
-                          description: field.description,
-                        });
-                        const error = fieldErrors[field.key];
-                        const inputId = `option-${field.key.toLowerCase()}`;
-                        const hintId = `${inputId}-hint`;
-                        const errorId = `${inputId}-error`;
-                        return (
-                          <div className={`option-field${error === undefined ? "" : " invalid"}`} key={field.key}>
-                            <div>
-                              <label htmlFor={inputId}>{copy.label}</label>
-                              <p id={hintId}>
-                                {copy.description}
-                                {field.restart_required && (
-                                  <span className="restart-required"> {t("admin.restartRequired")}</span>
-                                )}
-                              </p>
+                    <summary>
+                      <span className="options-summary-content">
+                        <ChevronRight aria-hidden="true" />
+                        <span>{optionSectionLabel(section.id, locale, section.label)}</span>
+                      </span>
+                    </summary>
+                    {section.id === "c411_accounts" ? (
+                      <div className="c411-account-list">
+                        {groupC411Fields(section.fields).map((account) => (
+                          <fieldset className="c411-account-slot" key={account.slot}>
+                            <legend>{t("admin.c411Account", { slot: account.slot })}</legend>
+                            <div className="c411-account-fields">
+                              {account.fields.map(renderOptionField)}
                             </div>
-                            <div className="option-control">
-                              {field.input_type === "boolean" ? (
-                                <input
-                                  id={inputId}
-                                  type="checkbox"
-                                  checked={Boolean(draft[field.key])}
-                                  disabled={!field.editable || saving}
-                                  aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
-                                  onChange={(event) => updateDraft(field.key, event.target.checked)}
-                                />
-                              ) : field.input_type === "select" ? (
-                                <select
-                                  id={inputId}
-                                  value={String(draft[field.key])}
-                                  disabled={!field.editable || saving}
-                                  aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
-                                  aria-invalid={error !== undefined}
-                                  onChange={(event) => updateDraft(field.key, event.target.value)}
-                                >
-                                  {field.choices.map((choice) => (
-                                    <option value={choice} key={choice}>{choice}</option>
-                                  ))}
-                                </select>
-                              ) : field.input_type === "integer" ? (
-                                <div className="option-number-control">
-                                  <input
-                                    id={inputId}
-                                    type="number"
-                                    value={String(draft[field.key])}
-                                    min={field.minimum ?? undefined}
-                                    max={field.maximum ?? undefined}
-                                    step={1}
-                                    disabled={!field.editable || saving}
-                                    aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
-                                    aria-invalid={error !== undefined}
-                                    onChange={(event) => updateDraft(field.key, event.target.value)}
-                                  />
-                                  {field.unit !== null && (
-                                    <span>{unitLabels[field.unit] === undefined ? field.unit : t(unitLabels[field.unit])}</span>
-                                  )}
-                                </div>
-                              ) : (
-                                <input
-                                  id={inputId}
-                                  type={field.input_type === "secret" ? "password" : "text"}
-                                  value={String(draft[field.key])}
-                                  maxLength={field.input_type === "secret" ? 256 : 64}
-                                  inputMode={field.input_type === "text" ? "numeric" : undefined}
-                                  autoComplete="off"
-                                  disabled={!field.editable || saving}
-                                  aria-describedby={`${hintId}${error === undefined ? "" : ` ${errorId}`}`}
-                                  aria-invalid={error !== undefined}
-                                  onChange={(event) => updateDraft(field.key, event.target.value)}
-                                />
-                              )}
-                              {error !== undefined && (
-                                <p id={errorId} className="option-error">{error}</p>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          </fieldset>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="options-fields">{section.fields.map(renderOptionField)}</div>
+                    )}
                   </details>
                 ))}
               </div>

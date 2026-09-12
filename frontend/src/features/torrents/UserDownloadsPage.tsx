@@ -452,20 +452,33 @@ function TorrentDirectoryBrowser({
             aria-label={t(open ? "downloads.collapseFolder" : "downloads.expandFolder", { name: directory.name })}
             onClick={() => toggleDirectory(directory)}
           >
-            {depth > 0 && (open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />)}
-            {open ? <FolderOpen aria-hidden="true" /> : <Folder aria-hidden="true" />}
-            <span className="ready-directory-copy">
-              <Tooltip content={path} overflowOnly focusable={false} className="ready-directory-name">
-                <strong>{directory.name}</strong>
-              </Tooltip>
-              {depth > 0 && (
-                <small>{t(directory.file_count === 1 ? "downloads.folderSummaryOne" : "downloads.folderSummaryMany", {
-                  count: directory.file_count,
-                  size: formatBytes(directory.total_size),
-                })}</small>
-              )}
-            </span>
-            {depth === 0 && (open ? <ChevronDown className="ready-directory-chevron" aria-hidden="true" /> : <ChevronRight className="ready-directory-chevron" aria-hidden="true" />)}
+            {depth === 0 ? (
+              <>
+                <span className="ready-directory-root-label">
+                  {open ? <FolderOpen aria-hidden="true" /> : <Folder aria-hidden="true" />}
+                  <span className="ready-directory-copy">
+                    <Tooltip content={path} overflowOnly focusable={false} className="ready-directory-name">
+                      <strong>{directory.name}</strong>
+                    </Tooltip>
+                  </span>
+                </span>
+                {open ? <ChevronDown className="ready-directory-chevron" aria-hidden="true" /> : <ChevronRight className="ready-directory-chevron" aria-hidden="true" />}
+              </>
+            ) : (
+              <>
+                {open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+                {open ? <FolderOpen aria-hidden="true" /> : <Folder aria-hidden="true" />}
+                <span className="ready-directory-copy">
+                  <Tooltip content={path} overflowOnly focusable={false} className="ready-directory-name">
+                    <strong>{directory.name}</strong>
+                  </Tooltip>
+                  <small>{t(directory.file_count === 1 ? "downloads.folderSummaryOne" : "downloads.folderSummaryMany", {
+                    count: directory.file_count,
+                    size: formatBytes(directory.total_size),
+                  })}</small>
+                </span>
+              </>
+            )}
           </button>
           {depth > 0 && directory.archive_available && (
             <Tooltip content={t("downloads.downloadFolderZip", { name: directory.name })}>

@@ -366,7 +366,12 @@ def normalize_option_value(spec: OptionSpec, value: OptionValue) -> OptionValue:
         if not isinstance(value, str) or "\x00" in value or "\r" in value or "\n" in value:
             raise OptionsValidationError("Une valeur texte valide est attendue.", field=spec.key)
         if spec.input_type == "text":
-            if len(value) > 64 or (value and re.fullmatch(r"[0-9]{1,64}", value) is None):
+            if spec.key.endswith("_USERNAME"):
+                if len(value) > 64 or (value and not value.isprintable()):
+                    raise OptionsValidationError(
+                        "Le nom d’utilisateur C411 est invalide.", field=spec.key
+                    )
+            elif len(value) > 64 or (value and re.fullmatch(r"[0-9]{1,64}", value) is None):
                 raise OptionsValidationError(
                     "Le numéro de compte doit contenir uniquement des chiffres.", field=spec.key
                 )

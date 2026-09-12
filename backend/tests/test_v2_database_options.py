@@ -71,6 +71,7 @@ async def test_c411_account_options_require_complete_unique_pairs_and_redact_aud
     await registry.update(
         db_session,
         {
+            "WOS_C411_ACCOUNT_01_USERNAME": "Thomas",
             "WOS_C411_ACCOUNT_01_NUMBER": "12345",
             "WOS_C411_ACCOUNT_01_PASSKEY": "private-passkey-123",
         },
@@ -80,6 +81,7 @@ async def test_c411_account_options_require_complete_unique_pairs_and_redact_aud
     await db_session.commit()
 
     values = await registry.snapshot(db_session)
+    assert values["WOS_C411_ACCOUNT_01_USERNAME"] == "Thomas"
     assert values["WOS_C411_ACCOUNT_01_NUMBER"] == "12345"
     assert values["WOS_C411_ACCOUNT_01_PASSKEY"] == "private-passkey-123"
     audits = list(
@@ -91,6 +93,30 @@ async def test_c411_account_options_require_complete_unique_pairs_and_redact_aud
     )
     assert audits[-1].new_value == "[secret updated]"
     assert "private-passkey-123" not in repr(audits)
+
+    username_only = await registry.update(
+        db_session,
+        {"WOS_C411_ACCOUNT_02_USERNAME": "Compte de secours"},
+        actor_user_id=admin.id,
+        now=NOW,
+    )
+    assert username_only.changed_keys == ("WOS_C411_ACCOUNT_02_USERNAME",)
+
+    historical_pair = await registry.update(
+        db_session,
+        {
+            "WOS_C411_ACCOUNT_03_NUMBER": "67890",
+            "WOS_C411_ACCOUNT_03_PASSKEY": "historical-passkey-456",
+        },
+        actor_user_id=admin.id,
+        now=NOW,
+    )
+    assert historical_pair.changed_keys == (
+        "WOS_C411_ACCOUNT_03_NUMBER",
+        "WOS_C411_ACCOUNT_03_PASSKEY",
+    )
+    values = await registry.snapshot(db_session)
+    assert values["WOS_C411_ACCOUNT_03_USERNAME"] == ""
 
     with pytest.raises(OptionsValidationError, match="renseignés ensemble"):
         await registry.update(

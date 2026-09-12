@@ -355,8 +355,10 @@ async def test_shared_qb_uses_random_active_c411_slot_once_and_persists_it(
         await registry.update(
             session,
             {
+                "WOS_C411_ACCOUNT_01_USERNAME": "Principal",
                 "WOS_C411_ACCOUNT_01_NUMBER": "1001",
                 "WOS_C411_ACCOUNT_01_PASSKEY": "first-passkey-123",
+                "WOS_C411_ACCOUNT_02_USERNAME": "Secours",
                 "WOS_C411_ACCOUNT_02_NUMBER": "1002",
                 "WOS_C411_ACCOUNT_02_PASSKEY": "second-passkey-456",
             },

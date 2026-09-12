@@ -15,6 +15,7 @@ import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
 import { AccountMenuIcon, AdminIcon, BackIcon, HomeIcon, SettingsIcon } from "./components/icons";
 import { LanguageSelector } from "./components/LanguageSelector";
+import { SettingsShell } from "./components/SettingsShell";
 import {
   LegalLinks,
   LegalPage,
@@ -502,27 +503,15 @@ function AccountSettingsPage({
         <h1 id="account-settings-title">{t("account.title")}</h1>
         <p className="settings-intro">{t("account.intro")}</p>
       </div>
-      <div className="settings-layout wos-glass-panel">
-        <nav className="settings-navigation" aria-label={t("settings.navigation")}>
-          <button
-            type="button"
-            className={`settings-navigation-item${activeSection === "general" ? " is-active" : ""}`}
-            aria-current={activeSection === "general" ? "page" : undefined}
-            onClick={() => setActiveSection("general")}
-          >
-            {t("settings.general")}
-          </button>
-          <button
-            type="button"
-            className={`settings-navigation-item${activeSection === "security" ? " is-active" : ""}`}
-            aria-current={activeSection === "security" ? "page" : undefined}
-            onClick={() => setActiveSection("security")}
-          >
-            {t("settings.security")}
-          </button>
-        </nav>
-
-        <div className="settings-content">
+      <SettingsShell
+        activeView={activeSection}
+        navigation={[
+          { view: "general", label: t("settings.general") },
+          { view: "security", label: t("settings.security") },
+        ]}
+        navigationLabel={t("settings.navigation")}
+        onNavigate={setActiveSection}
+      >
           {activeSection === "general" ? (
             <section className="settings-panel" aria-labelledby="settings-general-title">
               <header className="settings-panel-header">
@@ -600,8 +589,7 @@ function AccountSettingsPage({
               </div>
             </section>
           )}
-        </div>
-      </div>
+      </SettingsShell>
     </section>
   );
 }
