@@ -164,12 +164,12 @@ describe("UserDownloadsPage", () => {
     expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
 
     await user.click(downloadButton);
-    expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
+    expect(within(article).getByRole("button", { name: "Masquer les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("true");
     await user.click(deleteButton);
-    expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
+    expect(within(article).getByRole("button", { name: "Masquer les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("true");
 
     await user.click(detailsButton);
-    expect(within(article).getByRole("button", { name: "Masquer les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("true");
+    expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
   });
 
   it("remplace le polling par les invalidations WebSocket et resynchronise après reconnexion", async () => {
@@ -730,8 +730,84 @@ describe("UserDownloadsPage", () => {
     expect(screen.getAllByTestId("subscription-expiry-indicator")).toHaveLength(1);
     expect(screen.getByRole("img", { name: /Désabonnement automatique dans 45 min/ })).toBeTruthy();
     expect(within(content).getByText("root.mkv")).toBeTruthy();
-    expect(within(content).getByText("Folder/one.mkv")).toBeTruthy();
-    expect(within(content).getByText("Folder/two.srt")).toBeTruthy();
+    expect(within(content).getByText("one.mkv")).toBeTruthy();
+    expect(within(content).getByText("two.srt")).toBeTruthy();
+    expect(within(content).getAllByText("Folder")).toHaveLength(2);
+  });
+
+  it("ouvre le contenu depuis le bouton de téléchargement et permet de télécharger chaque sous-dossier", async () => {
+    const user = userEvent.setup();
+    const snapshot = "e".repeat(64);
+    const directoryUrls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("download-directories")) {
+        directoryUrls.push(url);
+        const parent = new URL(url, "https://wos.test").searchParams.get("parent");
+        return response({
+          snapshot_id: snapshot,
+          path: parent ?? "",
+          directories: parent === "Series"
+            ? [{
+                name: "Saison 01",
+                relative_path: "Series/Saison 01",
+                file_count: 2,
+                total_size: 9,
+                archive_available: true,
+              }]
+            : [{
+                name: "Series",
+                relative_path: "Series",
+                file_count: 2,
+                total_size: 9,
+                archive_available: true,
+              }],
+        });
+      }
+      if (url.includes("download-manifest")) {
+        return response({
+          snapshot_id: snapshot,
+          manifest_version: 1,
+          file_count: 2,
+          total_size: 9,
+          archive_available: true,
+          retention_expires_at: null,
+          offset: 0,
+          limit: 50,
+          items: [
+            { id: "episode-1", file_index: 0, relative_path: "Series/Saison 01/Episode 01.mkv", size: 5 },
+            { id: "episode-2", file_index: 1, relative_path: "Series/Saison 01/Episode 02.mkv", size: 4 },
+          ],
+        });
+      }
+      return response({
+        items: [torrent({ state: "ready", progress: 1 })], offset: 0, limit: 10, total: 1,
+      });
+    }));
+    const view = renderPage();
+
+    const article = await screen.findByRole("article", { name: "Film.mkv" });
+    await user.click(within(article).getByRole("button", { name: "Télécharger" }));
+
+    expect(await within(article).findByRole("button", { name: "Masquer les détails de Film.mkv" })).toBeTruthy();
+    const content = await within(article).findByRole("region", { name: "Contenu de Film.mkv" });
+    const seriesDownload = await within(content).findByRole("link", {
+      name: "Télécharger le dossier « Series » en ZIP",
+    });
+    expect(seriesDownload.getAttribute("download")).toBe("Series.zip");
+    expect(new URL(seriesDownload.getAttribute("href") ?? "", "https://wos.test").searchParams.get("path")).toBe("Series");
+
+    await user.click(within(content).getByRole("button", { name: "Ouvrir le dossier « Series »" }));
+    const seasonDownload = await within(content).findByRole("link", {
+      name: "Télécharger le dossier « Saison 01 » en ZIP",
+    });
+    const seasonUrl = new URL(seasonDownload.getAttribute("href") ?? "", "https://wos.test");
+    expect(seasonUrl.searchParams.get("path")).toBe("Series/Saison 01");
+    expect(seasonUrl.searchParams.get("snapshot")).toBe(snapshot);
+    expect(directoryUrls.some((url) => new URL(url, "https://wos.test").searchParams.get("parent") === "Series")).toBe(true);
+    expect(within(content).getByText("Episode 01.mkv")).toBeTruthy();
+    expect(within(content).getAllByText("Series / Saison 01")).toHaveLength(2);
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
   it("charge uniquement le manifeste du READY ouvert et affiche son chargement", async () => {
@@ -777,7 +853,7 @@ describe("UserDownloadsPage", () => {
       limit: 50,
       items: [{ id: "one", file_index: 0, relative_path: "Prêt.mkv", size: 4 }],
     }));
-    expect(await screen.findByText("Prêt.mkv", { selector: ".ready-file-list span" })).toBeTruthy();
+    expect(await screen.findByText("Prêt.mkv", { selector: ".ready-file-list strong" })).toBeTruthy();
   });
 
   it("isole une erreur de manifeste et permet de réessayer", async () => {
@@ -885,17 +961,17 @@ describe("UserDownloadsPage", () => {
     const article = await screen.findByRole("article", { name: "Film.mkv" });
     await user.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
     const content = await screen.findByRole("region", { name: "Contenu de Film.mkv" });
-    expect(await within(content).findByText("Folder/0.bin")).toBeTruthy();
+    expect(await within(content).findByText("0.bin")).toBeTruthy();
     expect(within(content).queryByRole("link", { name: /ZIP/ })).toBeNull();
     await user.click(within(content).getByRole("button", { name: "Suivant" }));
-    expect(await within(content).findByText("Folder/50.bin")).toBeTruthy();
+    expect(await within(content).findByText("50.bin")).toBeTruthy();
     expect(within(content).getByText("2 / 3")).toBeTruthy();
     await user.click(within(content).getByRole("button", { name: "Suivant" }));
-    expect(await within(content).findByText("Folder/100.bin")).toBeTruthy();
+    expect(await within(content).findByText("100.bin")).toBeTruthy();
     expect(within(content).getByText("3 / 3")).toBeTruthy();
     expect((within(content).getByRole("button", { name: "Suivant" }) as HTMLButtonElement).disabled).toBe(true);
     await user.click(within(content).getByRole("button", { name: "Précédent" }));
-    expect(await within(content).findByText("Folder/50.bin")).toBeTruthy();
+    expect(await within(content).findByText("50.bin")).toBeTruthy();
     expect(manifestUrls[0]).not.toContain("snapshot=");
     expect(manifestUrls.slice(1).every((url) => url.includes(`snapshot=${snapshot}`))).toBe(true);
     expect(manifestUrls.map((url) => new URL(url, "https://wos.test").searchParams.get("offset")))
@@ -1230,7 +1306,8 @@ describe("UserDownloadsPage", () => {
     expect(within(article).queryByRole("link", { name: "Télécharger le contenu en ZIP" })).toBeNull();
     const otherArticle = screen.getByRole("article", { name: "Autre READY" });
     await user.click(within(otherArticle).getByRole("button", { name: "Afficher les détails de Autre READY" }));
-    expect(await within(otherArticle).findByText("Other/consultable.bin")).toBeTruthy();
+    expect(await within(otherArticle).findByText("consultable.bin")).toBeTruthy();
+    expect(within(otherArticle).getByText("Other")).toBeTruthy();
     expect(within(article).getByRole("button", { name: "Mettre en pause" })).toBeTruthy();
     await user.click(await within(article).findByRole("button", { name: "Mettre en pause" }));
     expect(await within(article).findByText("En pause", { selector: ".ui-badge" })).toBeTruthy();
@@ -1326,7 +1403,7 @@ describe("UserDownloadsPage", () => {
     const individual = screen.getByRole("link", { name: `Télécharger « ${longPath} »` });
     expect(archive.getAttribute("href")).toContain("download-archive?snapshot=");
     expect(individual.getAttribute("href")).toContain("/files/file-id/download?snapshot=");
-    const filePath = screen.getByText(longPath).closest(".ready-file-path");
+    const filePath = view.container.querySelector(`.ready-file-path[aria-label="${longPath}"]`);
     expect(filePath?.getAttribute("aria-label")).toBe(longPath);
     expect(screen.getByText("1 / 1000")).toBeTruthy();
     expect(manifestRequests).toBe(1);
