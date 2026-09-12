@@ -89,8 +89,14 @@ def test_review_fixes_share_one_transparent_settings_shell_and_center_tree_rows(
     assert '.settings-shell-navigation-item[aria-current="page"]' in styles
     assert ".options-summary-content" in styles
     assert ".c411-account-fields" in styles
-    assert "grid-template-columns: minmax(0, 3fr) minmax(8rem, 1.7fr)" in styles
+    assert (
+        "grid-template-columns: minmax(180px, 0.8fr) minmax(100px, 0.35fr) "
+        "minmax(300px, 1.5fr)" in styles
+    )
+    assert ".torrent-ready-overview" in styles
+    assert "grid-template-columns: minmax(320px, 0.8fr) minmax(420px, 1.2fr)" in styles
     assert ".ready-directory-root-label" in styles
+    assert "margin: 0 !important" in styles
     assert '<span className="ready-directory-root-label">' in downloads
     assert "getAdminReconciliation" not in storage
 

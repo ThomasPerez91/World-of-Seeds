@@ -163,7 +163,15 @@ describe("UserDownloadsPage", () => {
 
     await user.click(article.querySelector(".torrent-summary-size") as HTMLElement);
     expect(within(article).getByRole("button", { name: "Masquer les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("true");
-    expect(article.querySelector(".torrent-detail-dates")?.children).toHaveLength(2);
+    const readyOverview = article.querySelector(".torrent-ready-overview");
+    const readyMeta = article.querySelector(".torrent-ready-meta-card");
+    const readyContent = article.querySelector(".torrent-ready-content-card");
+    expect(readyOverview).toBeTruthy();
+    expect(Array.from(readyOverview?.children ?? [])).toEqual([readyMeta, readyContent]);
+    expect(readyMeta?.querySelectorAll(".torrent-ready-meta-item")).toHaveLength(2);
+    expect(readyMeta?.querySelector(".torrent-ready-meta-separator")).toBeTruthy();
+    expect(within(readyMeta as HTMLElement).getByText("Création")).toBeTruthy();
+    expect(within(readyMeta as HTMLElement).getByText("Mise à jour")).toBeTruthy();
     await user.click(article.querySelector(".torrent-summary-size") as HTMLElement);
     expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
 
@@ -835,6 +843,16 @@ describe("UserDownloadsPage", () => {
     const rootToggle = within(content).getByRole("button", { name: "Ouvrir le dossier « Series »" });
     expect(rootToggle.querySelector("small")).toBeNull();
     expect(rootToggle.querySelector(".ready-directory-chevron")).toBeTruthy();
+    expect(rootToggle.lastElementChild?.classList).toContain("ready-directory-chevron");
+    const overview = content.querySelector(".torrent-ready-overview");
+    const metadataCard = content.querySelector(".torrent-ready-meta-card");
+    const contentCard = content.querySelector(".torrent-ready-content-card");
+    expect(Array.from(overview?.children ?? [])).toEqual([metadataCard, contentCard]);
+    expect(contentCard?.querySelector(".download-fallback-archive")?.textContent).toContain("Télécharger le ZIP");
+    expect(contentCard?.textContent).toContain("2 fichiers · 9 o");
+    expect(rootToggle.textContent).not.toContain("2 fichiers");
+    expect(rootToggle.textContent).not.toContain("9 o");
+    expect(rootToggle.textContent).not.toContain("ZIP");
 
     await user.click(rootToggle);
     const seasonDownload = await within(content).findByRole("link", {
@@ -1180,7 +1198,7 @@ describe("UserDownloadsPage", () => {
             manifest_version: 1,
             file_count: 2,
             total_size: 3,
-            archive_available: true,
+            archive_available: false,
             retention_expires_at: null,
             offset: 0,
             limit: 500,
@@ -1253,7 +1271,7 @@ describe("UserDownloadsPage", () => {
           manifest_version: 1,
           file_count: items.length,
           total_size: items.length,
-          archive_available: true,
+          archive_available: false,
           retention_expires_at: null,
           offset: 0,
           limit: 500,
@@ -1319,7 +1337,7 @@ describe("UserDownloadsPage", () => {
           manifest_version: 1,
           file_count: 2,
           total_size: 2,
-          archive_available: true,
+          archive_available: false,
           retention_expires_at: null,
           offset: 0,
           limit: 500,

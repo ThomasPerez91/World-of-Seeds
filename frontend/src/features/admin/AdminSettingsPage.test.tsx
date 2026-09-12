@@ -215,10 +215,23 @@ describe("AdminSettingsPage", () => {
     );
 
     expect(await screen.findByRole("group", { name: "Compte C411 1" })).toBeTruthy();
+    const accountFields = screen.getByRole("group", { name: "Compte C411 1" }).querySelector(".c411-account-fields");
+    expect(accountFields?.children).toHaveLength(3);
+    expect(accountFields?.querySelector(".c411-field-username")).toBeTruthy();
+    expect(accountFields?.querySelector(".c411-field-number")).toBeTruthy();
+    expect(accountFields?.querySelector(".c411-field-passkey")).toBeTruthy();
     const username = screen.getByLabelText("Nom d’utilisateur");
     expect(username.getAttribute("inputmode")).toBeNull();
+    const usernameHint = screen.getByText("Libellé facultatif utilisé uniquement pour identifier ce compte dans l’administration.");
+    const numberHint = screen.getByText("Numéro du compte C411. Laissez le numéro et la passkey vides pour désactiver cet emplacement.");
+    const passkeyHint = screen.getByText("Passkey injectée dans les URL tracker des torrents affectés à ce compte.");
+    expect(usernameHint.classList.contains("sr-only")).toBe(true);
+    expect(numberHint.classList.contains("sr-only")).toBe(true);
+    expect(passkeyHint.classList.contains("sr-only")).toBe(true);
+    expect(username.getAttribute("aria-describedby")).toBe(usernameHint.id);
     const passkey = screen.getByLabelText("Passkey");
     expect(passkey.getAttribute("type")).toBe("password");
+    expect(passkey.getAttribute("aria-describedby")).toBe(passkeyHint.id);
     await user.clear(passkey);
     await user.type(passkey, "replacement-passkey-456");
     await user.click(screen.getByRole("button", { name: "Enregistrer" }));
