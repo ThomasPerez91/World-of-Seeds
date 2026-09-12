@@ -93,12 +93,8 @@ def test_windows_favicon_contract_is_valid_and_cache_busted() -> None:
         byte_count = int.from_bytes(icon[entry + 8 : entry + 12], "little")
         offset = int.from_bytes(icon[entry + 12 : entry + 16], "little")
         dib_size = int.from_bytes(icon[offset : offset + 4], "little")
-        dib_width = int.from_bytes(
-            icon[offset + 4 : offset + 8], "little", signed=True
-        )
-        dib_height = int.from_bytes(
-            icon[offset + 8 : offset + 12], "little", signed=True
-        )
+        dib_width = int.from_bytes(icon[offset + 4 : offset + 8], "little", signed=True)
+        dib_height = int.from_bytes(icon[offset + 8 : offset + 12], "little", signed=True)
         planes = int.from_bytes(icon[offset + 12 : offset + 14], "little")
         bits_per_pixel = int.from_bytes(icon[offset + 14 : offset + 16], "little")
 
