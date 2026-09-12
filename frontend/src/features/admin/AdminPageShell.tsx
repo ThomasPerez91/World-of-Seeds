@@ -39,6 +39,8 @@ export function AdminPageShell({
           <p className="eyebrow">{t("admin.adminEyebrow")}</p>
           <h1 id="administration-title">{t("admin.title")}</h1>
         </div>
+      </header>
+      <div className="admin-layout wos-glass-panel">
         <nav className="admin-navigation" aria-label={t("admin.navigation")}>
           {navigation.map((item) => (
             <Button
@@ -51,8 +53,8 @@ export function AdminPageShell({
             </Button>
           ))}
         </nav>
-      </header>
-      {children}
+        <div className="admin-content">{children}</div>
+      </div>
     </section>
   );
 }

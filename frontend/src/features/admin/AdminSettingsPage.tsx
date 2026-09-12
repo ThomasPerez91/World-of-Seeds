@@ -336,22 +336,18 @@ export function AdminSettingsPage({
                 <Badge tone={options.scheduler.synchronized ? "success" : "warning"}>
                   {options.scheduler.synchronized ? t("admin.synchronized") : t("admin.reconcileRequired")}
                 </Badge>
-                <small>
-                  {t("admin.schedulerGeneration", {
-                    desired: formatNumber(options.scheduler.desired_generation),
-                    applied: formatNumber(options.scheduler.applied_generation),
-                  })}
-                </small>
+                <dl className="admin-status-details">
+                  <div><dt>{t("admin.desiredGeneration")}</dt><dd>{formatNumber(options.scheduler.desired_generation)}</dd></div>
+                  <div><dt>{t("admin.appliedGeneration")}</dt><dd>{formatNumber(options.scheduler.applied_generation)}</dd></div>
+                </dl>
               </Card>
               <Card>
                 <span>{t("admin.sharedStorage")}</span>
                 <strong>{formatBytes(options.storage.managed_bytes)}</strong>
-                <small>
-                  {t("admin.storagePressure", {
-                    logical: formatBytes(options.storage.logical_bytes),
-                    pressure: options.storage.pressure,
-                  })}
-                </small>
+                <dl className="admin-status-details">
+                  <div><dt>{t("admin.logicalSpace")}</dt><dd>{formatBytes(options.storage.logical_bytes)}</dd></div>
+                  <div><dt>{t("admin.pressure")}</dt><dd>{options.storage.pressure}</dd></div>
+                </dl>
               </Card>
               <Card>
                 <span>{t("admin.userQuota")}</span>
@@ -360,7 +356,9 @@ export function AdminSettingsPage({
                     ? t("admin.unlimited")
                     : formatBytes(options.storage.user_quota_bytes)}
                 </strong>
-                <small>{t("admin.schedulerRounds", { count: formatNumber(options.scheduler.rounds) })}</small>
+                <dl className="admin-status-details">
+                  <div><dt>{t("admin.schedulerRoundsLabel")}</dt><dd>{formatNumber(options.scheduler.rounds)}</dd></div>
+                </dl>
               </Card>
             </div>
 
