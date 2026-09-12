@@ -80,20 +80,18 @@ def test_admin_finish_is_mobile_first_and_legacy_user_filesystem_ui_is_absent() 
 
 def test_review_fixes_share_one_transparent_settings_shell_and_center_tree_rows() -> None:
     styles = (REPOSITORY / "frontend/src/wos-2-1-final.css").read_text()
-    downloads = (
-        REPOSITORY / "frontend/src/features/torrents/UserDownloadsPage.tsx"
-    ).read_text()
+    downloads = (REPOSITORY / "frontend/src/features/torrents/UserDownloadsPage.tsx").read_text()
     storage = (REPOSITORY / "frontend/src/features/admin/AdminStoragePage.tsx").read_text()
 
     assert ".settings-shell-content > .admin-section" in styles
     assert ".settings-shell-content > .settings-panel" in styles
     assert "background: transparent !important" in styles
-    assert ".settings-shell-navigation-item[aria-current=\"page\"]" in styles
+    assert '.settings-shell-navigation-item[aria-current="page"]' in styles
     assert ".options-summary-content" in styles
     assert ".c411-account-fields" in styles
     assert "grid-template-columns: minmax(0, 3fr) minmax(8rem, 1.7fr)" in styles
     assert ".ready-directory-root-label" in styles
-    assert "<span className=\"ready-directory-root-label\">" in downloads
+    assert '<span className="ready-directory-root-label">' in downloads
     assert "getAdminReconciliation" not in storage
 
 
