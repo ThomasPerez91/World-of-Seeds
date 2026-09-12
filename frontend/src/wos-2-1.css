@@ -920,10 +920,9 @@ body {
   transition: border-color 150ms ease, background 150ms ease, transform 150ms ease, box-shadow 150ms ease;
 }
 
-.language-flag-toggle > span {
-  font-size: 1.16rem;
-  line-height: 1;
-  filter: saturate(1.05);
+.language-flag-toggle .language-flag {
+  width: 25px;
+  height: 17px;
 }
 
 .language-flag-toggle:hover:not(:disabled) {
