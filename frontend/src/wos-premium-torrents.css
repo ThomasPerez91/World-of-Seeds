@@ -89,6 +89,10 @@
   text-align: left;
 }
 
+.torrent-list-heading > span:nth-child(n + 2):nth-child(-n + 5) {
+  text-align: center;
+}
+
 .user-downloads .torrent-accordion-list {
   position: static;
   overflow: visible;
@@ -162,6 +166,7 @@
   display: flex !important;
   min-width: 0;
   align-items: center;
+  justify-content: center;
 }
 
 .torrent-primary-state {
@@ -237,7 +242,7 @@
   font-size: 0.75rem;
   font-weight: 680;
   line-height: 1;
-  text-align: left;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -540,30 +545,35 @@
   color: var(--wos-accent);
 }
 
-.ready-directory-toggle span,
-.ready-file-label > span {
+.ready-directory-copy {
   display: grid;
   min-width: 0;
   gap: 0.12rem;
 }
 
-.ready-directory-toggle strong,
-.ready-file-label strong,
-.ready-directory-toggle small,
-.ready-file-label small {
+.ready-directory-name,
+.ready-file-path {
+  display: block;
+  min-width: 0;
+}
+
+.ready-directory-name > strong,
+.ready-file-path > strong,
+.ready-directory-copy small {
+  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ready-directory-toggle strong,
-.ready-file-label strong {
+.ready-directory-name > strong,
+.ready-file-path > strong {
   color: var(--wos-text);
   font-size: 0.74rem;
 }
 
-.ready-directory-toggle small,
-.ready-file-label small {
+.ready-directory-copy small {
   color: var(--wos-muted);
   font-size: 0.65rem;
   font-weight: 500;
@@ -675,19 +685,19 @@
 .ready-file-label {
   display: grid;
   min-width: 0;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 0.5rem;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 0.7rem;
   align-items: center;
 }
 
 .ready-tree-file-row .ready-file-label {
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 20px minmax(0, 1fr);
 }
 
 .ready-file-label > svg {
-  width: 16px;
-  height: 16px;
-  color: var(--wos-muted-2);
+  width: 18px;
+  height: 18px;
+  color: var(--wos-accent);
 }
 
 .ready-file-download-button {
@@ -796,7 +806,7 @@
 
   .torrent-summary-heading { grid-area: name; }
   .torrent-summary-status { grid-area: status; }
-  .torrent-summary-queue { grid-area: queue; text-align: right; }
+  .torrent-summary-queue { grid-area: queue; text-align: center; }
   .torrent-summary-progress { grid-area: progress; }
   .torrent-summary-size { grid-area: size; }
   .torrent-card-actions { grid-area: actions; }

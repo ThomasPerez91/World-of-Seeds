@@ -805,6 +805,7 @@ describe("UserDownloadsPage", () => {
     const seriesDownload = await within(content).findByRole("link", {
       name: "Télécharger le dossier « Series » en ZIP",
     });
+    expect(content.querySelector('.ready-directory-name[aria-label="Series"]')).toBeTruthy();
     expect(seriesDownload.getAttribute("download")).toBe("Series.zip");
     expect(new URL(seriesDownload.getAttribute("href") ?? "", "https://wos.test").searchParams.get("path")).toBe("Series");
 
@@ -1488,6 +1489,7 @@ describe("UserDownloadsPage", () => {
     expect(individual.getAttribute("href")).toContain("/files/file-id/download?snapshot=");
     const filePath = view.container.querySelector(`.ready-file-path[aria-label="${longPath}"]`);
     expect(filePath?.getAttribute("aria-label")).toBe(longPath);
+    expect(filePath?.querySelector("strong")?.textContent).toBe(longPath.split("/").at(-1));
     expect(screen.queryByText("1 / 1000")).toBeNull();
     expect(manifestRequests).toBe(1);
     expect(view.container.querySelector("[style]")).toBeNull();

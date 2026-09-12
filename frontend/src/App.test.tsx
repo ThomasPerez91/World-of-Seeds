@@ -165,11 +165,12 @@ describe("App", () => {
     const user = userEvent.setup();
     const view = render(<App />);
     await screen.findByRole("heading", { name: "Dashboard" });
+    expect(screen.getByRole("button", { name: "Administration" })).toBeTruthy();
     expect((await screen.findAllByText("1 KB available")).length).toBeGreaterThan(0);
     expect(document.documentElement.lang).toBe("en");
 
     await user.click(screen.getByRole("button", { name: "Open account menu" }));
-    expect(screen.queryByRole("button", { name: "Administration" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Administration" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Account settings" })).toBeNull();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
@@ -251,9 +252,12 @@ describe("App", () => {
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
-    expect(screen.queryByRole("button", { name: "Administration" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Administration" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Paramètres du compte" })).toBeNull();
     expect(screen.getByRole("button", { name: "Déconnexion" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Administration" }));
+    await screen.findByRole("heading", { name: "Comptes utilisateurs" });
   });
 
   it("rend les informations légales accessibles avant la connexion", async () => {
@@ -449,6 +453,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByRole("heading", { name: "Dashboard" });
+    expect(screen.queryByRole("button", { name: "Administration" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Paramètres" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
 
