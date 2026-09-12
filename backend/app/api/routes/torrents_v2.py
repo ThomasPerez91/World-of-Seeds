@@ -376,6 +376,8 @@ async def get_torrent_download_directories(
     context: Annotated[AuthContext, Depends(require_current_credentials)],
     torrent_request_id: uuid.UUID,
     parent: Annotated[str | None, Query(max_length=4096)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=MAX_MANIFEST_PAGE_SIZE)] = MAX_MANIFEST_PAGE_SIZE,
 ) -> TorrentDownloadDirectoriesResponse:
     parent_parts = _directory_parts(parent, allow_root=True)
     now = datetime.now(UTC)
@@ -436,6 +438,7 @@ async def get_torrent_download_directories(
             "Le contenu a changé. Relance le téléchargement.",
         )
     directories: dict[str, tuple[int, int]] = {}
+    direct_files: list[TorrentFile] = []
     parent_exists = not parent_parts
     for item in files:
         parts = PurePosixPath(item.relative_path).parts
@@ -443,6 +446,7 @@ async def get_torrent_download_directories(
             continue
         parent_exists = True
         if len(parts) == len(parent_parts) + 1:
+            direct_files.append(item)
             continue
         child_parts = parts[: len(parent_parts) + 1]
         relative_path = "/".join(child_parts)
@@ -474,6 +478,18 @@ async def get_torrent_download_directories(
                 ),
             )
             for relative_path, (file_count, total_size) in sorted(directories.items())
+        ],
+        direct_file_count=len(direct_files),
+        offset=offset,
+        limit=limit,
+        files=[
+            TorrentDownloadFileResponse(
+                id=item.id,
+                file_index=item.file_index,
+                relative_path=item.relative_path,
+                size=item.size,
+            )
+            for item in direct_files[offset : offset + limit]
         ],
     )
     await db.rollback()

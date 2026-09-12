@@ -69,3 +69,7 @@ class TorrentDownloadDirectoriesResponse(BaseModel):
     snapshot_id: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     path: str
     directories: list[TorrentDownloadDirectoryResponse]
+    direct_file_count: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1, le=500)
+    files: list[TorrentDownloadFileResponse]
