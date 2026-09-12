@@ -155,6 +155,20 @@ export interface TorrentDownloadManifestPageV2 {
   items: TorrentDownloadFileV2[];
 }
 
+export interface TorrentDownloadDirectoryV2 {
+  name: string;
+  relative_path: string;
+  file_count: number;
+  total_size: number;
+  archive_available: boolean;
+}
+
+export interface TorrentDownloadDirectoriesV2 {
+  snapshot_id: string;
+  path: string;
+  directories: TorrentDownloadDirectoryV2[];
+}
+
 /** A recursively consumed manifest may span pages; the compatibility UI stores one page only. */
 export type TorrentDownloadSnapshotV2 = TorrentDownloadManifestPageV2;
 
@@ -678,6 +692,21 @@ export const api = {
     );
   },
 
+  getTorrentDownloadDirectoriesV2(
+    torrentRequestId: string,
+    parent: string | null = null,
+    signal?: AbortSignal,
+  ): Promise<TorrentDownloadDirectoriesV2> {
+    const search = new URLSearchParams();
+    if (parent !== null) search.set("parent", parent);
+    const encodedSearch = search.toString();
+    const query = encodedSearch === "" ? "" : `?${encodedSearch}`;
+    return requestV2<TorrentDownloadDirectoriesV2>(
+      `/torrents/${encodeURIComponent(torrentRequestId)}/download-directories${query}`,
+      { signal },
+    );
+  },
+
   torrentFileDownloadUrlV2(
     torrentRequestId: string,
     torrentFileId: string,
@@ -690,6 +719,15 @@ export const api = {
   torrentArchiveDownloadUrlV2(torrentRequestId: string, snapshotId: string): string {
     const snapshot = new URLSearchParams({ snapshot: snapshotId });
     return `/api/v2/torrents/${encodeURIComponent(torrentRequestId)}/download-archive?${snapshot.toString()}`;
+  },
+
+  torrentFolderArchiveDownloadUrlV2(
+    torrentRequestId: string,
+    relativePath: string,
+    snapshotId: string,
+  ): string {
+    const search = new URLSearchParams({ path: relativePath, snapshot: snapshotId });
+    return `/api/v2/torrents/${encodeURIComponent(torrentRequestId)}/download-folder-archive?${search.toString()}`;
   },
 
 };

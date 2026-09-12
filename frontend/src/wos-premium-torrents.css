@@ -421,6 +421,182 @@
   list-style: none;
 }
 
+.ready-directory-browser {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.ready-directory-browser > header,
+.ready-files-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--wos-text);
+}
+
+.ready-directory-browser > header > svg,
+.ready-files-heading > svg {
+  width: 17px;
+  height: 17px;
+  color: var(--wos-accent);
+}
+
+.ready-directory-browser h4,
+.ready-files-heading {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.ready-directory-browser header span {
+  display: block;
+  margin-top: 0.12rem;
+  color: var(--wos-muted);
+  font-size: 0.68rem;
+}
+
+.ready-directory-list,
+.ready-directory-children ul {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ready-directory-list {
+  overflow: hidden;
+  border: 1px solid rgba(157, 220, 184, 0.12);
+  border-radius: 11px;
+  background: rgba(12, 43, 30, 0.35);
+}
+
+.ready-directory-item {
+  min-width: 0;
+}
+
+.ready-directory-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.52rem 0.6rem 0.52rem calc(0.6rem + var(--directory-indent));
+  border-bottom: 1px solid rgba(157, 220, 184, 0.08);
+}
+
+.ready-directory-toggle {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 15px 20px minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ready-directory-toggle > svg:first-child {
+  width: 14px;
+  height: 14px;
+  color: var(--wos-muted);
+}
+
+.ready-directory-toggle > svg:nth-child(2) {
+  width: 18px;
+  height: 18px;
+  color: var(--wos-accent);
+}
+
+.ready-directory-toggle span,
+.ready-file-label > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.12rem;
+}
+
+.ready-directory-toggle strong,
+.ready-file-label strong,
+.ready-directory-toggle small,
+.ready-file-label small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ready-directory-toggle strong,
+.ready-file-label strong {
+  color: var(--wos-text);
+  font-size: 0.74rem;
+}
+
+.ready-directory-toggle small,
+.ready-file-label small {
+  color: var(--wos-muted);
+  font-size: 0.65rem;
+  font-weight: 500;
+}
+
+.ready-folder-download-button {
+  display: inline-flex;
+  min-width: 54px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.28rem;
+  padding: 0 0.5rem;
+  color: #bff6d3;
+  border: 1px solid rgba(67, 213, 129, 0.28);
+  border-radius: 9px;
+  background: rgba(43, 163, 95, 0.14);
+  font-size: 0.66rem;
+  font-weight: 760;
+  text-decoration: none;
+}
+
+.ready-folder-download-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ready-folder-download-button:hover {
+  color: #d8ffe6;
+  background: rgba(43, 163, 95, 0.24);
+}
+
+.ready-directory-loading,
+.ready-directory-empty {
+  display: block;
+  padding: 0.55rem 0.7rem 0.55rem 3.3rem;
+  color: var(--wos-muted);
+  font-size: 0.68rem;
+}
+
+.ready-directory-error,
+.ready-directories-state {
+  margin: 0;
+}
+
+.ready-directory-error,
+.ready-directories-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  color: #ffc1c6;
+  border: 1px solid rgba(239, 80, 92, 0.18);
+  border-radius: 9px;
+  background: rgba(171, 42, 53, 0.09);
+  font-size: 0.68rem;
+}
+
+.ready-files-heading {
+  margin-top: 0.15rem;
+}
+
 .ready-file-list li {
   display: grid !important;
   min-width: 0;
@@ -438,6 +614,20 @@
 .ready-file-list li:hover { background: rgba(102, 234, 157, 0.04); }
 .ready-file-list li > span:nth-child(2) { color: var(--wos-muted); white-space: nowrap; }
 .ready-file-list .ui-tooltip-anchor:last-child { justify-self: end; }
+
+.ready-file-label {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.ready-file-label > svg {
+  width: 16px;
+  height: 16px;
+  color: var(--wos-muted-2);
+}
 
 .ready-file-download-button {
   display: inline-flex;
