@@ -674,7 +674,7 @@
   }
 }
 
-@media (min-width: 761px) and (max-width: 959px) {
+@media (min-width: 761px) and (max-width: 1059px) {
   .c411-account-fields {
     grid-template-columns: minmax(0, 2fr) minmax(7rem, 0.8fr);
   }
@@ -684,7 +684,7 @@
   }
 }
 
-@media (max-width: 840px) {
+@media (max-width: 900px) {
   .torrent-ready-overview {
     grid-template-columns: minmax(0, 1fr);
   }

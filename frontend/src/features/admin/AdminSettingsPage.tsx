@@ -316,9 +316,7 @@ export function AdminSettingsPage({
     const hintId = `${inputId}-hint`;
     const errorId = `${inputId}-error`;
     const c411Kind = /^WOS_C411_ACCOUNT_\d{2}_(USERNAME|NUMBER|PASSKEY)$/.exec(field.key)?.[1]?.toLowerCase();
-    const describedBy = c411Kind === undefined
-      ? `${hintId}${error === undefined ? "" : ` ${errorId}`}`
-      : error === undefined ? undefined : errorId;
+    const describedBy = `${hintId}${error === undefined ? "" : ` ${errorId}`}`;
     return (
       <div
         className={`option-field${c411Kind === undefined ? "" : ` c411-option-field c411-field-${c411Kind}`}${error === undefined ? "" : " invalid"}`}
@@ -326,14 +324,12 @@ export function AdminSettingsPage({
       >
         <div>
           <label htmlFor={inputId} title={c411Kind === undefined ? undefined : copy.description}>{copy.label}</label>
-          {c411Kind === undefined && (
-            <p id={hintId}>
+          <p id={hintId} className={c411Kind === undefined ? undefined : "sr-only"}>
               {copy.description}
               {field.restart_required && (
                 <span className="restart-required"> {t("admin.restartRequired")}</span>
               )}
-            </p>
-          )}
+          </p>
         </div>
         <div className="option-control">
           {field.input_type === "boolean" ? (
