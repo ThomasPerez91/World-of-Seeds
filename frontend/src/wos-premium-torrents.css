@@ -469,7 +469,7 @@
 }
 
 .ready-directory-list {
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid rgba(157, 220, 184, 0.12);
   border-radius: 11px;
   background: rgba(12, 43, 30, 0.35);
