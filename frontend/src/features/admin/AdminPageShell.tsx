@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { BackIcon } from "../../components/icons";
+import { SettingsShell } from "../../components/SettingsShell";
 import { Button } from "../../components/ui";
 import { useI18n, type MessageKey } from "../../i18n";
 
@@ -40,21 +41,14 @@ export function AdminPageShell({
           <h1 id="administration-title">{t("admin.title")}</h1>
         </div>
       </header>
-      <div className="admin-layout wos-glass-panel">
-        <nav className="admin-navigation" aria-label={t("admin.navigation")}>
-          {navigation.map((item) => (
-            <Button
-              variant="ghost"
-              key={item.view}
-              aria-current={activeView === item.view ? "page" : undefined}
-              onClick={() => onNavigate(item.view)}
-            >
-              {t(item.label)}
-            </Button>
-          ))}
-        </nav>
-        <div className="admin-content">{children}</div>
-      </div>
+      <SettingsShell
+        activeView={activeView}
+        navigation={navigation.map((item) => ({ view: item.view, label: t(item.label) }))}
+        navigationLabel={t("admin.navigation")}
+        onNavigate={onNavigate}
+      >
+        {children}
+      </SettingsShell>
     </section>
   );
 }

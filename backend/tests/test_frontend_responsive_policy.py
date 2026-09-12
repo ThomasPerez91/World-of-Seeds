@@ -48,6 +48,7 @@ def test_dashboard_title_uses_normal_page_background_in_every_theme() -> None:
 def test_admin_finish_is_mobile_first_and_legacy_user_filesystem_ui_is_absent() -> None:
     admin_styles = (REPOSITORY / "frontend/src/features/admin/admin.css").read_text()
     shell = (REPOSITORY / "frontend/src/features/admin/AdminPageShell.tsx").read_text()
+    settings_shell = (REPOSITORY / "frontend/src/components/SettingsShell.tsx").read_text()
     app = (REPOSITORY / "frontend/src/App.tsx").read_text()
     client = (REPOSITORY / "frontend/src/api/client.ts").read_text()
 
@@ -56,7 +57,8 @@ def test_admin_finish_is_mobile_first_and_legacy_user_filesystem_ui_is_absent() 
     assert "@media (min-width: 900px)" in admin_styles
     assert "overflow-wrap: anywhere" in admin_styles
     assert "min-height: 2.75rem" in admin_styles
-    assert 'aria-current={activeView === item.view ? "page" : undefined}' in shell
+    assert "<SettingsShell" in shell
+    assert 'aria-current={activeView === item.view ? "page" : undefined}' in settings_shell
     assert '"admin-trash"' not in shell
     assert "AdminTrashPage" not in app
     assert 't("account.renameHint")' not in app
@@ -74,6 +76,25 @@ def test_admin_finish_is_mobile_first_and_legacy_user_filesystem_ui_is_absent() 
     assert ".admin-trash" not in styles
     assert "error.workspaceUnavailable" not in translations
     assert "admin.trashItems" not in translations
+
+
+def test_review_fixes_share_one_transparent_settings_shell_and_center_tree_rows() -> None:
+    styles = (REPOSITORY / "frontend/src/wos-2-1-final.css").read_text()
+    downloads = (
+        REPOSITORY / "frontend/src/features/torrents/UserDownloadsPage.tsx"
+    ).read_text()
+    storage = (REPOSITORY / "frontend/src/features/admin/AdminStoragePage.tsx").read_text()
+
+    assert ".settings-shell-content > .admin-section" in styles
+    assert ".settings-shell-content > .settings-panel" in styles
+    assert "background: transparent !important" in styles
+    assert ".settings-shell-navigation-item[aria-current=\"page\"]" in styles
+    assert ".options-summary-content" in styles
+    assert ".c411-account-fields" in styles
+    assert "grid-template-columns: minmax(0, 3fr) minmax(8rem, 1.7fr)" in styles
+    assert ".ready-directory-root-label" in styles
+    assert "<span className=\"ready-directory-root-label\">" in downloads
+    assert "getAdminReconciliation" not in storage
 
 
 def test_windows_favicon_contract_is_valid_and_cache_busted() -> None:
