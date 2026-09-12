@@ -805,7 +805,9 @@ describe("UserDownloadsPage", () => {
     const seriesDownload = await within(content).findByRole("link", {
       name: "Télécharger le dossier « Series » en ZIP",
     });
-    expect(content.querySelector('.ready-directory-name[aria-label="Series"]')).toBeTruthy();
+    const directoryName = content.querySelector('.ready-directory-name[aria-label="Series"]');
+    expect(directoryName).toBeTruthy();
+    expect(directoryName?.getAttribute("tabindex")).toBeNull();
     expect(seriesDownload.getAttribute("download")).toBe("Series.zip");
     expect(new URL(seriesDownload.getAttribute("href") ?? "", "https://wos.test").searchParams.get("path")).toBe("Series");
 

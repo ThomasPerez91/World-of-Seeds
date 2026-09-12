@@ -470,7 +470,7 @@ function TorrentDirectoryBrowser({
             {open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
             {open ? <FolderOpen aria-hidden="true" /> : <Folder aria-hidden="true" />}
             <span className="ready-directory-copy">
-              <Tooltip content={path} overflowOnly className="ready-directory-name">
+              <Tooltip content={path} overflowOnly focusable={false} className="ready-directory-name">
                 <strong>{directory.name}</strong>
               </Tooltip>
               <small>{t(directory.file_count === 1 ? "downloads.folderSummaryOne" : "downloads.folderSummaryMany", {
