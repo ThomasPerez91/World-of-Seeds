@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -248,7 +248,9 @@ describe("App", () => {
     expect(screen.getAllByText(`v${UI_VERSION}`).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Mes fichiers" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Corbeille" })).toBeNull();
-    expect(new URL(window.location.href).searchParams.has("path")).toBe(false);
+    await waitFor(() => {
+      expect(new URL(window.location.href).searchParams.has("path")).toBe(false);
+    });
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));

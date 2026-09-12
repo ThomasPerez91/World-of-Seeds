@@ -469,7 +469,7 @@
 }
 
 .ready-directory-list {
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid rgba(157, 220, 184, 0.12);
   border-radius: 11px;
   background: rgba(12, 43, 30, 0.35);
@@ -740,7 +740,8 @@
 
 .ui-tooltip-anchor:hover > .ui-tooltip-content,
 .ui-tooltip-anchor:focus > .ui-tooltip-content,
-.ui-tooltip-anchor:focus-within > .ui-tooltip-content {
+.ui-tooltip-anchor:focus-within > .ui-tooltip-content,
+.ready-directory-toggle:focus-visible .ready-directory-name > .ui-tooltip-content {
   opacity: 1;
   transform: translate(-50%, 0);
 }
