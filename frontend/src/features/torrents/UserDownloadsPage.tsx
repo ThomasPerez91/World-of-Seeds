@@ -315,10 +315,14 @@ interface DirectoryListingState {
 }
 
 function TorrentDirectoryBrowser({
+  fallbackLoading,
+  onLoadFallbackPage,
   onDownloadFile,
   snapshot,
   torrentId,
 }: {
+  fallbackLoading: boolean;
+  onLoadFallbackPage: (offset: number) => void;
   onDownloadFile: (file: TorrentDownloadFileV2) => void;
   snapshot: TorrentDownloadManifestPageV2;
   torrentId: string;
@@ -511,7 +515,9 @@ function TorrentDirectoryBrowser({
   }
   const rootDirectories = root?.response?.directories ?? [];
   const rootFiles = root?.response?.files ?? [];
-  const fallbackFiles = root?.error !== "" && root?.error !== undefined ? snapshot.items : [];
+  const fallbackActive = root?.error !== "" && root?.error !== undefined;
+  const fallbackFiles = fallbackActive ? snapshot.items : [];
+  const fallbackPageSize = Math.max(1, snapshot.limit);
   if (rootDirectories.length === 0 && rootFiles.length === 0 && fallbackFiles.length === 0) return null;
   return (
     <section className="ready-directory-browser" aria-labelledby={`torrent-folders-${torrentId}`}>
@@ -533,6 +539,27 @@ function TorrentDirectoryBrowser({
           ? renderListing(root.response, 0)
           : fallbackFiles.map((file) => renderFile(file, 0))}
       </ul>
+      {fallbackActive && snapshot.file_count > fallbackPageSize && (
+        <nav className="ready-manifest-pagination" aria-label={t("downloads.compatPagination")}>
+          <Button
+            variant="secondary"
+            disabled={fallbackLoading || snapshot.offset === 0}
+            onClick={() => onLoadFallbackPage(Math.max(0, snapshot.offset - fallbackPageSize))}
+          >
+            {t("common.previous")}
+          </Button>
+          <span>
+            {Math.floor(snapshot.offset / fallbackPageSize) + 1} / {Math.ceil(snapshot.file_count / fallbackPageSize)}
+          </span>
+          <Button
+            variant="secondary"
+            disabled={fallbackLoading || snapshot.offset + snapshot.items.length >= snapshot.file_count}
+            onClick={() => onLoadFallbackPage(snapshot.offset + snapshot.items.length)}
+          >
+            {t("common.next")}
+          </Button>
+        </nav>
+      )}
     </section>
   );
 }
@@ -544,6 +571,7 @@ function ReadyTorrentContent({
   onCloseTransfer,
   onDownloadAll,
   onDownloadFile,
+  onLoadPage,
   onPauseTransfer,
   onResumeTransfer,
   onRetry,
@@ -555,6 +583,7 @@ function ReadyTorrentContent({
   onCloseTransfer: (jobId: string) => void;
   onDownloadAll: () => void;
   onDownloadFile: (file: TorrentDownloadFileV2, snapshot: TorrentDownloadManifestPageV2) => void;
+  onLoadPage: (offset: number) => void;
   onPauseTransfer: (jobId: string) => void;
   onResumeTransfer: (jobId: string) => void;
   onRetry: () => void;
@@ -619,6 +648,8 @@ function ReadyTorrentContent({
           <TorrentDirectoryBrowser
             torrentId={torrent.id}
             snapshot={snapshot}
+            fallbackLoading={manifest.loading}
+            onLoadFallbackPage={onLoadPage}
             onDownloadFile={(file) => onDownloadFile(file, snapshot)}
           />
         </>
@@ -1388,6 +1419,11 @@ export function UserDownloadsPage({
                       torrent={torrent}
                       manifest={manifest}
                       transfers={transfers}
+                      onLoadPage={(requestedOffset) => void loadReadyManifest(
+                        torrent.id,
+                        requestedOffset,
+                        manifest?.firstPage?.snapshot_id ?? manifest?.snapshot?.snapshot_id ?? null,
+                      )}
                       onRetry={() => void loadReadyManifest(
                         torrent.id,
                         manifest?.requestedOffset ?? 0,

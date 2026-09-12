@@ -1017,6 +1017,53 @@ describe("UserDownloadsPage", () => {
     expect(directoryUrls.some((candidate) => new URL(candidate, "https://wos.test").searchParams.get("offset") === "2")).toBe(true);
   });
 
+  it("conserve la pagination du manifeste si l’arborescence est indisponible", async () => {
+    const user = userEvent.setup();
+    const snapshot = "6".repeat(64);
+    const manifestOffsets: number[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("download-directories")) {
+        return response({ detail: "unavailable" }, 503);
+      }
+      if (url.includes("download-manifest")) {
+        const requestedOffset = Number(new URL(url, "https://wos.test").searchParams.get("offset"));
+        manifestOffsets.push(requestedOffset);
+        const count = requestedOffset === 0 ? 50 : 1;
+        return response({
+          snapshot_id: snapshot,
+          manifest_version: 1,
+          file_count: 51,
+          total_size: 51,
+          archive_available: false,
+          retention_expires_at: null,
+          offset: requestedOffset,
+          limit: 50,
+          items: Array.from({ length: count }, (_, index) => ({
+            id: `fallback-${requestedOffset + index}`,
+            file_index: requestedOffset + index,
+            relative_path: `Folder/${requestedOffset + index}.bin`,
+            size: 1,
+          })),
+        });
+      }
+      return response({
+        items: [torrent({ state: "ready", progress: 1 })], offset: 0, limit: 10, total: 1,
+      });
+    }));
+    renderPage();
+
+    const article = await screen.findByRole("article", { name: "Film.mkv" });
+    await user.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
+    const content = await screen.findByRole("region", { name: "Contenu de Film.mkv" });
+    expect(await within(content).findByText("0.bin")).toBeTruthy();
+    expect(within(content).getByText("1 / 2")).toBeTruthy();
+    await user.click(within(content).getByRole("button", { name: "Suivant" }));
+    expect(await within(content).findByText("50.bin")).toBeTruthy();
+    expect(within(content).getByText("2 / 2")).toBeTruthy();
+    expect(manifestOffsets).toEqual([0, 50]);
+  });
+
   it("démarre Télécharger tout avec la page zéro mise en cache", async () => {
     const user = userEvent.setup();
     const snapshot = "7".repeat(64);
