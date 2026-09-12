@@ -13,7 +13,7 @@ import { AdminServicesPage } from "./features/admin/AdminServicesPage";
 import { AdminSettingsPage } from "./features/admin/AdminSettingsPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
-import { AccountMenuIcon, BackIcon, HomeIcon, SettingsIcon } from "./components/icons";
+import { AccountMenuIcon, AdminIcon, BackIcon, HomeIcon, SettingsIcon } from "./components/icons";
 import { LanguageSelector } from "./components/LanguageSelector";
 import {
   LegalLinks,
@@ -652,6 +652,16 @@ function Dashboard({
             <HomeIcon />
             <span>{t("dashboard.title")}</span>
           </Button>
+          {user.is_admin && (
+            <Button
+              variant="ghost"
+              aria-current={view.startsWith("admin-") ? "page" : undefined}
+              onClick={() => setView("admin-users")}
+            >
+              <AdminIcon />
+              <span>{t("dashboard.admin")}</span>
+            </Button>
+          )}
           <Button
             variant="ghost"
             aria-current={view === "settings" ? "page" : undefined}

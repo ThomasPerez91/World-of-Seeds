@@ -397,12 +397,12 @@ function TorrentDirectoryBrowser({
     return (
       <li key={file.id} className="ready-tree-file">
         <div className={`ready-tree-file-row ready-tree-depth-${Math.min(depth, 6)}`}>
-          <Tooltip content={file.relative_path} overflowOnly className="ready-file-path">
-            <span className="ready-file-label">
-              <File aria-hidden="true" />
+          <span className="ready-file-label">
+            <File aria-hidden="true" />
+            <Tooltip content={file.relative_path} overflowOnly className="ready-file-path">
               <strong>{name}</strong>
-            </span>
-          </Tooltip>
+            </Tooltip>
+          </span>
           <span className="ready-tree-file-size">{formatBytes(file.size)}</span>
           {managedFiles ? (
             <Tooltip content={t("common.download")}>
@@ -469,8 +469,10 @@ function TorrentDirectoryBrowser({
           >
             {open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
             {open ? <FolderOpen aria-hidden="true" /> : <Folder aria-hidden="true" />}
-            <span>
-              <strong>{directory.name}</strong>
+            <span className="ready-directory-copy">
+              <Tooltip content={path} overflowOnly focusable={false} className="ready-directory-name">
+                <strong>{directory.name}</strong>
+              </Tooltip>
               <small>{t(directory.file_count === 1 ? "downloads.folderSummaryOne" : "downloads.folderSummaryMany", {
                 count: directory.file_count,
                 size: formatBytes(directory.total_size),
