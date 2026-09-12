@@ -120,11 +120,20 @@ async def test_directory_listing_uses_manifest_summaries_and_supports_nested_par
         f"/api/v2/torrents/{request.id}/download-directories",
         params={"parent": "Extras"},
     )
-
+    season_first = await client.get(
+        f"/api/v2/torrents/{request.id}/download-directories",
+        params={"parent": "Saison 1", "limit": 1},
+    )
+    season_second = await client.get(
+        f"/api/v2/torrents/{request.id}/download-directories",
+        params={"parent": "Saison 1", "offset": 1, "limit": 1},
+    )
     assert root.status_code == 200
     payload = root.json()
     assert len(payload["snapshot_id"]) == 64
     assert payload["path"] == ""
+    assert payload["direct_file_count"] == 0
+    assert payload["files"] == []
     assert [item["name"] for item in payload["directories"]] == [
         "Bonus %_Été",
         "Docs",
@@ -144,6 +153,8 @@ async def test_directory_listing_uses_manifest_summaries_and_supports_nested_par
         "archive_available": True,
     }
     assert nested.status_code == 200
+    assert nested.json()["direct_file_count"] == 0
+    assert nested.json()["files"] == []
     assert nested.json()["directories"] == [
         {
             "name": "Sub",
@@ -153,6 +164,19 @@ async def test_directory_listing_uses_manifest_summaries_and_supports_nested_par
             "archive_available": True,
         }
     ]
+    assert season_first.status_code == 200
+    assert season_first.json()["direct_file_count"] == 2
+    assert season_first.json()["offset"] == 0
+    assert season_first.json()["limit"] == 1
+    assert [item["relative_path"] for item in season_first.json()["files"]] == [
+        "Saison 1/Episode 1.mkv"
+    ]
+    assert season_second.status_code == 200
+    assert season_second.json()["direct_file_count"] == 2
+    assert [item["relative_path"] for item in season_second.json()["files"]] == [
+        "Saison 1/Épisode 2 %.mkv"
+    ]
+    assert season_first.json()["directories"] == []
 
 
 @pytest.mark.asyncio

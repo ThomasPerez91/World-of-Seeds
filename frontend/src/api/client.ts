@@ -167,6 +167,10 @@ export interface TorrentDownloadDirectoriesV2 {
   snapshot_id: string;
   path: string;
   directories: TorrentDownloadDirectoryV2[];
+  direct_file_count: number;
+  offset: number;
+  limit: number;
+  files: TorrentDownloadFileV2[];
 }
 
 /** A recursively consumed manifest may span pages; the compatibility UI stores one page only. */
@@ -696,8 +700,10 @@ export const api = {
     torrentRequestId: string,
     parent: string | null = null,
     signal?: AbortSignal,
+    offset = 0,
+    limit = 500,
   ): Promise<TorrentDownloadDirectoriesV2> {
-    const search = new URLSearchParams();
+    const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
     if (parent !== null) search.set("parent", parent);
     const encodedSearch = search.toString();
     const query = encodedSearch === "" ? "" : `?${encodedSearch}`;

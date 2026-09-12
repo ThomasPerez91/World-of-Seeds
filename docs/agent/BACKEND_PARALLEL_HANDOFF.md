@@ -71,6 +71,7 @@ minimum `1`, maximum `16`. Elle borne les générations ZIP simultanées par pro
 ```http
 GET /api/v2/torrents/{request_id}/download-directories
 GET /api/v2/torrents/{request_id}/download-directories?parent=Series/Saison%201
+GET /api/v2/torrents/{request_id}/download-directories?parent=Series/Saison%201&offset=0&limit=500
 ```
 
 ```json
@@ -85,11 +86,25 @@ GET /api/v2/torrents/{request_id}/download-directories?parent=Series/Saison%201
       "total_size": 987654321,
       "archive_available": true
     }
+  ],
+  "direct_file_count": 2,
+  "offset": 0,
+  "limit": 500,
+  "files": [
+    {
+      "id": "identifiant du fichier",
+      "file_index": 1,
+      "relative_path": "Series/Episode 1.mkv",
+      "size": 123456789
+    }
   ]
 }
 ```
 
-Les résultats proviennent exclusivement du manifeste SQL `TorrentFile.relative_path`. Aucune
+`directories` contient les sous-dossiers immédiats et `files` les fichiers directement rattachés
+à `path`. Seuls les fichiers sont paginés, afin de permettre un explorateur arborescent sans
+réponse démesurée. Les résultats proviennent exclusivement du manifeste SQL
+`TorrentFile.relative_path`. Aucune
 adresse physique, infohash, clé de stockage ou inspection récursive du filesystem n’est exposée.
 
 ### Télécharger un sous-dossier

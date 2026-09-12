@@ -1,5 +1,4 @@
 import {
-  type CSSProperties,
   type ChangeEvent,
   type DragEvent,
   type ReactNode,
@@ -316,35 +315,50 @@ interface DirectoryListingState {
 }
 
 function TorrentDirectoryBrowser({
-  snapshotId,
+  onDownloadFile,
+  snapshot,
   torrentId,
 }: {
-  snapshotId: string;
+  onDownloadFile: (file: TorrentDownloadFileV2) => void;
+  snapshot: TorrentDownloadManifestPageV2;
   torrentId: string;
 }) {
   const { apiError, formatBytes, t } = useI18n();
   const [listings, setListings] = useState<Record<string, DirectoryListingState>>({});
   const [openPaths, setOpenPaths] = useState<Set<string>>(() => new Set());
+  const managedFiles = supportsManagedFileDownload();
 
-  const loadDirectories = useCallback((parent: string | null) => {
+  const loadDirectories = useCallback((parent: string | null, offset = 0) => {
     const key = parent ?? "";
     setListings((current) => ({
       ...current,
       [key]: { error: "", loading: true, response: current[key]?.response ?? null },
     }));
     const controller = new AbortController();
-    void api.getTorrentDownloadDirectoriesV2(torrentId, parent, controller.signal)
+    void api.getTorrentDownloadDirectoriesV2(torrentId, parent, controller.signal, offset)
       .then((response) => {
         if (
-          response.snapshot_id !== snapshotId
+          response.snapshot_id !== snapshot.snapshot_id
           || response.path !== key
           || !Array.isArray(response.directories)
+          || !Array.isArray(response.files)
+          || response.offset !== offset
         ) {
           throw new Error("manifest_changed");
         }
         setListings((current) => ({
           ...current,
-          [key]: { error: "", loading: false, response },
+          [key]: {
+            error: "",
+            loading: false,
+            response: offset > 0 && current[key]?.response !== null && current[key]?.response !== undefined
+              ? {
+                  ...response,
+                  offset: 0,
+                  files: [...(current[key]?.response?.files ?? []), ...response.files],
+                }
+              : response,
+          },
         }));
       })
       .catch((caught: unknown) => {
@@ -359,7 +373,7 @@ function TorrentDirectoryBrowser({
         }));
       });
     return () => controller.abort();
-  }, [apiError, snapshotId, torrentId]);
+  }, [apiError, snapshot.snapshot_id, torrentId]);
 
   useEffect(() => loadDirectories(null), [loadDirectories]);
 
@@ -374,17 +388,74 @@ function TorrentDirectoryBrowser({
     if (listings[path] === undefined) loadDirectories(path);
   }
 
+  function renderFile(file: TorrentDownloadFileV2, depth: number): ReactNode {
+    const name = file.relative_path.split("/").at(-1) ?? file.relative_path;
+    return (
+      <li key={file.id} className="ready-tree-file">
+        <div className={`ready-tree-file-row ready-tree-depth-${Math.min(depth, 6)}`}>
+          <Tooltip content={file.relative_path} overflowOnly className="ready-file-path">
+            <span className="ready-file-label">
+              <File aria-hidden="true" />
+              <strong>{name}</strong>
+            </span>
+          </Tooltip>
+          <span className="ready-tree-file-size">{formatBytes(file.size)}</span>
+          {managedFiles ? (
+            <Tooltip content={t("common.download")}>
+              <button
+                type="button"
+                className="ready-file-download-button"
+                aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
+                onClick={() => onDownloadFile(file)}
+              >
+                <Download aria-hidden="true" />
+              </button>
+            </Tooltip>
+          ) : (
+            <Tooltip content={t("common.download")}>
+              <a
+                className="ready-file-download-button"
+                href={api.torrentFileDownloadUrlV2(torrentId, file.id, snapshot.snapshot_id)}
+                download={name}
+                aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
+              >
+                <Download aria-hidden="true" />
+              </a>
+            </Tooltip>
+          )}
+        </div>
+      </li>
+    );
+  }
+
+  function renderListing(response: TorrentDownloadDirectoriesV2, depth: number): ReactNode {
+    const hasMoreFiles = response.files.length < response.direct_file_count;
+    return (
+      <>
+        {response.directories.map((directory) => renderDirectory(directory, depth))}
+        {response.files.map((file) => renderFile(file, depth))}
+        {hasMoreFiles && (
+          <li className="ready-tree-load-more">
+            <Button
+              variant="secondary"
+              disabled={listings[response.path]?.loading === true}
+              onClick={() => loadDirectories(response.path === "" ? null : response.path, response.files.length)}
+            >
+              {t("downloads.loadMoreFiles")}
+            </Button>
+          </li>
+        )}
+      </>
+    );
+  }
+
   function renderDirectory(directory: TorrentDownloadDirectoryV2, depth: number): ReactNode {
     const path = directory.relative_path;
     const listing = listings[path];
     const open = openPaths.has(path);
-    const childDirectories = listing?.response?.directories ?? [];
     return (
       <li key={path} className="ready-directory-item">
-        <div
-          className="ready-directory-row"
-          style={{ "--directory-indent": `${Math.min(depth, 6)}rem` } as CSSProperties}
-        >
+        <div className={`ready-directory-row ready-tree-depth-${Math.min(depth, 6)}`}>
           <button
             type="button"
             className="ready-directory-toggle"
@@ -406,7 +477,7 @@ function TorrentDirectoryBrowser({
             <Tooltip content={t("downloads.downloadFolderZip", { name: directory.name })}>
               <a
                 className="ready-folder-download-button"
-                href={api.torrentFolderArchiveDownloadUrlV2(torrentId, path, snapshotId)}
+                href={api.torrentFolderArchiveDownloadUrlV2(torrentId, path, snapshot.snapshot_id)}
                 download={`${directory.name}.zip`}
                 aria-label={t("downloads.downloadFolderZip", { name: directory.name })}
               >
@@ -425,11 +496,8 @@ function TorrentDirectoryBrowser({
                 <Button variant="secondary" onClick={() => loadDirectories(path)}>{t("common.retry")}</Button>
               </div>
             )}
-            {listing?.loading === false && listing.error === "" && childDirectories.length === 0 && (
-              <span className="ready-directory-empty">{t("downloads.noSubfolders")}</span>
-            )}
-            {childDirectories.length > 0 && (
-              <ul>{childDirectories.map((child) => renderDirectory(child, depth + 1))}</ul>
+            {listing?.response !== null && listing?.response !== undefined && (
+              <ul>{renderListing(listing.response, depth + 1)}</ul>
             )}
           </div>
         )}
@@ -441,38 +509,32 @@ function TorrentDirectoryBrowser({
   if (root?.loading === true && root.response === null) {
     return <StateMessage tone="loading" className="ready-directories-state">{t("downloads.directoriesLoading")}</StateMessage>;
   }
-  if (root?.error !== "" && root?.error !== undefined && root.response === null) {
-    return (
-      <div className="ready-directories-state ready-directories-error">
-        <span>{root.error}</span>
-        <Button variant="secondary" onClick={() => loadDirectories(null)}>{t("common.retry")}</Button>
-      </div>
-    );
-  }
   const rootDirectories = root?.response?.directories ?? [];
-  if (rootDirectories.length === 0) return null;
+  const rootFiles = root?.response?.files ?? [];
+  const fallbackFiles = root?.error !== "" && root?.error !== undefined ? snapshot.items : [];
+  if (rootDirectories.length === 0 && rootFiles.length === 0 && fallbackFiles.length === 0) return null;
   return (
     <section className="ready-directory-browser" aria-labelledby={`torrent-folders-${torrentId}`}>
       <header>
         <Folder aria-hidden="true" />
         <div>
-          <h4 id={`torrent-folders-${torrentId}`}>{t("downloads.folders")}</h4>
-          <span>{t("downloads.foldersHint")}</span>
+          <h4 id={`torrent-folders-${torrentId}`}>{t("downloads.contentTree")}</h4>
+          <span>{t("downloads.contentTreeHint")}</span>
         </div>
       </header>
+      {root?.error !== "" && root?.error !== undefined && root.response === null && (
+        <div className="ready-directories-state ready-directories-error">
+          <span>{root.error}</span>
+          <Button variant="secondary" onClick={() => loadDirectories(null)}>{t("common.retry")}</Button>
+        </div>
+      )}
       <ul className="ready-directory-list">
-        {rootDirectories.map((directory) => renderDirectory(directory, 0))}
+        {root?.response !== null && root?.response !== undefined
+          ? renderListing(root.response, 0)
+          : fallbackFiles.map((file) => renderFile(file, 0))}
       </ul>
     </section>
   );
-}
-
-function splitFilePath(relativePath: string): { directory: string; name: string } {
-  const parts = relativePath.split("/");
-  return {
-    directory: parts.slice(0, -1).join(" / "),
-    name: parts.at(-1) ?? relativePath,
-  };
 }
 
 function ReadyTorrentContent({
@@ -482,7 +544,6 @@ function ReadyTorrentContent({
   onCloseTransfer,
   onDownloadAll,
   onDownloadFile,
-  onLoadPage,
   onPauseTransfer,
   onResumeTransfer,
   onRetry,
@@ -494,7 +555,6 @@ function ReadyTorrentContent({
   onCloseTransfer: (jobId: string) => void;
   onDownloadAll: () => void;
   onDownloadFile: (file: TorrentDownloadFileV2, snapshot: TorrentDownloadManifestPageV2) => void;
-  onLoadPage: (offset: number) => void;
   onPauseTransfer: (jobId: string) => void;
   onResumeTransfer: (jobId: string) => void;
   onRetry: () => void;
@@ -503,7 +563,6 @@ function ReadyTorrentContent({
   const { formatBytes, t } = useI18n();
   const snapshot = manifest?.snapshot ?? null;
   const compatible = !supportsRecursiveDirectoryDownload();
-  const managedFiles = supportsManagedFileDownload();
   const folderBusy = transfers.some(
     (transfer) => transfer.kind === "folder" && !["completed", "cancelled"].includes(transfer.status),
   );
@@ -557,71 +616,11 @@ function ReadyTorrentContent({
               <Button variant="secondary" onClick={onRetry}>{t("common.retry")}</Button>
             </StateMessage>
           )}
-          {snapshot.file_count > 1 && (
-            <TorrentDirectoryBrowser torrentId={torrent.id} snapshotId={snapshot.snapshot_id} />
-          )}
-          <h4 className="ready-files-heading"><File aria-hidden="true" /> {t("downloads.filesHeading")}</h4>
-          <ul className="ready-file-list">
-            {snapshot.items.map((file) => {
-              const path = splitFilePath(file.relative_path);
-              return (
-              <li key={file.id}>
-                <Tooltip content={file.relative_path} overflowOnly className="ready-file-path">
-                  <span className="ready-file-label">
-                    <File aria-hidden="true" />
-                    <span>
-                      <strong>{path.name}</strong>
-                      {path.directory !== "" && <small>{path.directory}</small>}
-                    </span>
-                  </span>
-                </Tooltip>
-                <span>{formatBytes(file.size)}</span>
-                {managedFiles ? (
-                  <Tooltip content={t("common.download")}>
-                    <button
-                      type="button"
-                      className="ready-file-download-button"
-                      aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
-                      onClick={() => onDownloadFile(file, snapshot)}
-                    >
-                      <Download aria-hidden="true" />
-                    </button>
-                  </Tooltip>
-                ) : (
-                  <Tooltip content={t("common.download")}>
-                    <a
-                      className="ready-file-download-button"
-                      href={api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id)}
-                      download={file.relative_path.split("/").at(-1)}
-                      aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
-                    >
-                      <Download aria-hidden="true" />
-                    </a>
-                  </Tooltip>
-                )}
-              </li>
-              );
-            })}
-          </ul>
-          {snapshot.file_count > FALLBACK_PAGE_SIZE && (
-            <nav className="ready-manifest-pagination" aria-label={t("downloads.compatPagination")}>
-              <Button
-                variant="secondary"
-                disabled={manifest.loading || snapshot.offset === 0}
-                onClick={() => onLoadPage(Math.max(0, snapshot.offset - FALLBACK_PAGE_SIZE))}
-              >
-                {t("common.previous")}
-              </Button>
-              <span>{Math.floor(snapshot.offset / FALLBACK_PAGE_SIZE) + 1} / {Math.ceil(snapshot.file_count / FALLBACK_PAGE_SIZE)}</span>
-              <Button
-                variant="secondary"
-                disabled={manifest.loading || snapshot.offset + snapshot.items.length >= snapshot.file_count}
-                onClick={() => onLoadPage(snapshot.offset + snapshot.items.length)}
-              >
-                {t("common.next")}
-              </Button>
-            </nav>
-          )}
+          <TorrentDirectoryBrowser
+            torrentId={torrent.id}
+            snapshot={snapshot}
+            onDownloadFile={(file) => onDownloadFile(file, snapshot)}
+          />
         </>
       ) : null}
     </section>
@@ -1389,11 +1388,6 @@ export function UserDownloadsPage({
                       torrent={torrent}
                       manifest={manifest}
                       transfers={transfers}
-                      onLoadPage={(requestedOffset) => void loadReadyManifest(
-                        torrent.id,
-                        requestedOffset,
-                        manifest?.firstPage?.snapshot_id ?? manifest?.snapshot?.snapshot_id ?? null,
-                      )}
                       onRetry={() => void loadReadyManifest(
                         torrent.id,
                         manifest?.requestedOffset ?? 0,
