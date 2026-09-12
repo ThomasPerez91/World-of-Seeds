@@ -74,3 +74,40 @@
 .login-card form .login-input input:autofill:focus {
   box-shadow: 0 0 0 1000px var(--wos21-login-input-focus-bg) inset !important;
 }
+
+/* OS-independent language flags: Windows does not render country emoji reliably. */
+.language-flag {
+  display: block;
+  width: 1.5rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(157, 220, 184, 0.24);
+}
+
+.language-flag-toggle .language-flag {
+  width: 25px;
+  height: 17px;
+}
+
+.language-select-control {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.language-select-control > .language-flag {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 0.72rem;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.language-selector .language-select-control select {
+  width: 100%;
+  padding-inline-start: 2.75rem !important;
+}
+
