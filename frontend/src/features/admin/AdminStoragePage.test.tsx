@@ -42,7 +42,7 @@ describe("AdminStoragePage", () => {
                 action: "none",
               },
             ],
-            truncated: false,
+            truncated: true,
           });
         }
         throw new Error(`Requête inattendue : ${url}`);
@@ -56,6 +56,7 @@ describe("AdminStoragePage", () => {
     await screen.findByRole("heading", { name: "Intégrité du stockage" });
     expect(screen.getByText("Éléments externes")).toBeTruthy();
     expect(screen.getByText("Base de données")).toBeTruthy();
+    expect(screen.getByText("Analyse partielle — certains éléments restent à vérifier.")).toBeTruthy();
     expect(screen.getByText("Aucune action")).toBeTruthy();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
