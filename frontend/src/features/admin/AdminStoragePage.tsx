@@ -23,6 +23,7 @@ export function AdminStoragePage({
   const [overview, setOverview] = useState<AdminStorageOverview | null>(null);
   const [reconciliation, setReconciliation] = useState<AdminReconciliationReport | null>(null);
   const [error, setError] = useState("");
+  const [reconciliationError, setReconciliationError] = useState("");
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
 
@@ -30,20 +31,23 @@ export function AdminStoragePage({
     let active = true;
     setLoading(true);
     setError("");
-    void Promise.all([api.getAdminStorage(), api.getAdminReconciliation()])
-      .then(([storage, report]) => {
-        if (active) {
-          setOverview(storage);
-          setReconciliation(report);
-        }
-      })
-      .catch((caught: unknown) => {
+    setReconciliationError("");
+    void Promise.allSettled([api.getAdminStorage(), api.getAdminReconciliation()])
+      .then(([storageResult, reportResult]) => {
         if (!active) return;
-        if (caught instanceof ApiError && caught.status === 401) {
+        const authenticationFailed = [storageResult, reportResult].some(
+          (result) => result.status === "rejected"
+            && result.reason instanceof ApiError
+            && result.reason.status === 401,
+        );
+        if (authenticationFailed) {
           onSessionExpired();
           return;
         }
-        setError(t("admin.loadFailed"));
+        if (storageResult.status === "fulfilled") setOverview(storageResult.value);
+        else setError(t("admin.loadFailed"));
+        if (reportResult.status === "fulfilled") setReconciliation(reportResult.value);
+        else setReconciliationError(t("admin.integrityLoadFailed"));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -88,16 +92,12 @@ export function AdminStoragePage({
         {overview !== null && (
           <div className="admin-storage-summary">
             <Card className="admin-storage-usage">
-              <div className="admin-storage-usage-heading">
-                <div>
-                  <span>{t("admin.usedSpace")}</span>
-                  <strong>{formatBytes(overview.used)}</strong>
-                </div>
-                <div className="storage-copy-right">
-                  <span>{t("admin.available")}</span>
-                  <strong>{formatBytes(overview.available)}</strong>
-                </div>
-              </div>
+              <dl className="admin-storage-capacity">
+                <div><dt>{t("admin.totalSpace")}</dt><dd>{formatBytes(overview.total)}</dd></div>
+                <div><dt>{t("admin.usedSpace")}</dt><dd>{formatBytes(overview.used)}</dd></div>
+                <div><dt>{t("admin.available")}</dt><dd>{formatBytes(overview.available)}</dd></div>
+                <div><dt>{t("admin.utilization")}</dt><dd>{formatNumber(usagePercent, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %</dd></div>
+              </dl>
               <Progress value={usagePercent} label={usageLabel} />
               <p>
                 {t("admin.storageSummary", {
@@ -126,22 +126,14 @@ export function AdminStoragePage({
           <Card className="reconciliation-panel" aria-labelledby="reconciliation-title">
             <div>
               <h3 id="reconciliation-title">{t("admin.reconciliation")}</h3>
-              <p>
-                {t("admin.reconciliationScanned", {
-                  database: formatNumber(reconciliation.database_scanned),
-                  qbittorrent: formatNumber(reconciliation.qbittorrent_scanned),
-                  storage: formatNumber(reconciliation.storage_scanned),
-                })}
-              </p>
+              <p>{t("admin.integrityIntro")}</p>
             </div>
-            <p>
-              {t(
-                reconciliation.external_torrents === 1
-                  ? "admin.externalTorrentOne"
-                  : "admin.externalTorrentMany",
-                { count: formatNumber(reconciliation.external_torrents) },
-              )}
-            </p>
+            <dl className="reconciliation-metrics">
+              <div><dt>{t("admin.integrityDatabase")}</dt><dd>{formatNumber(reconciliation.database_scanned)}</dd></div>
+              <div><dt>{t("admin.integrityClient")}</dt><dd>{formatNumber(reconciliation.qbittorrent_scanned)}</dd></div>
+              <div><dt>{t("admin.integrityFiles")}</dt><dd>{formatNumber(reconciliation.storage_scanned)}</dd></div>
+              <div><dt>{t("admin.integrityExternal")}</dt><dd>{formatNumber(reconciliation.external_torrents)}</dd></div>
+            </dl>
             {reconciliation.anomalies.length === 0 ? (
               <strong className="reconciliation-ok">{t("admin.noAnomaly")}</strong>
             ) : (
@@ -159,6 +151,7 @@ export function AdminStoragePage({
             )}
           </Card>
         )}
+        {reconciliationError !== "" && <StateMessage tone="error">{reconciliationError}</StateMessage>}
       </section>
     </AdminPageShell>
   );

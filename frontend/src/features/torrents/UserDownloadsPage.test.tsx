@@ -154,12 +154,16 @@ describe("UserDownloadsPage", () => {
     expect(detailsButton.textContent).toBe("");
     expect(downloadButton.textContent).toBe("");
     expect(deleteButton.textContent).toBe("");
+    expect(within(article).getByRole("tooltip", { name: "Détails" })).toBeTruthy();
+    expect(within(article).getByRole("tooltip", { name: "Télécharger" })).toBeTruthy();
+    expect(within(article).getByRole("tooltip", { name: "Supprimer" })).toBeTruthy();
     expect(detailsButton.getAttribute("aria-expanded")).toBe("false");
     expect(article.querySelector(".torrent-row-grid")?.getAttribute("role")).toBeNull();
     expect(article.querySelector("details")).toBeNull();
 
     await user.click(article.querySelector(".torrent-summary-size") as HTMLElement);
     expect(within(article).getByRole("button", { name: "Masquer les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("true");
+    expect(article.querySelector(".torrent-detail-dates")?.children).toHaveLength(2);
     await user.click(article.querySelector(".torrent-summary-size") as HTMLElement);
     expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
 
@@ -170,6 +174,21 @@ describe("UserDownloadsPage", () => {
 
     await user.click(detailsButton);
     expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("associe aussi des tooltips aux actions d’un torrent actif", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({
+      items: [torrent()], offset: 0, limit: 10, total: 1,
+    })));
+    const view = renderPage();
+    const article = await screen.findByRole("article", { name: "Film.mkv" });
+
+    expect(within(article).getByRole("tooltip", { name: "Détails" })).toBeTruthy();
+    expect(within(article).getByRole("tooltip", { name: "Actualiser" })).toBeTruthy();
+    expect(within(article).getByRole("tooltip", { name: "Annuler" })).toBeTruthy();
+    expect(within(article).getByRole("button", { name: "Actualiser « Film.mkv »" })).toBeTruthy();
+    expect(within(article).getByRole("button", { name: "Annuler la demande Film.mkv" })).toBeTruthy();
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
   it("remplace le polling par les invalidations WebSocket et resynchronise après reconnexion", async () => {
@@ -398,10 +417,15 @@ describe("UserDownloadsPage", () => {
     expect(onActivityChanged).toHaveBeenCalled();
     expect(onLocalTransferChanged).toHaveBeenCalledWith({
       active: 0,
+      completedFiles: 0,
+      fileCount: 0,
+      jobCount: 0,
+      kind: null,
       maximum: 2,
       status: "idle",
       waiting: 0,
       name: null,
+      otherJobs: 0,
       downloadedBytes: 0,
       totalBytes: 0,
       percent: 0,
@@ -802,22 +826,24 @@ describe("UserDownloadsPage", () => {
 
     expect(await within(article).findByRole("button", { name: "Masquer les détails de Film.mkv" })).toBeTruthy();
     const content = await within(article).findByRole("region", { name: "Contenu de Film.mkv" });
-    const seriesDownload = await within(content).findByRole("link", {
-      name: "Télécharger le dossier « Series » en ZIP",
-    });
     const directoryName = content.querySelector('.ready-directory-name[aria-label="Series"]');
     expect(directoryName).toBeTruthy();
     expect(directoryName?.getAttribute("tabindex")).toBeNull();
-    expect(seriesDownload.getAttribute("download")).toBe("Series.zip");
-    expect(new URL(seriesDownload.getAttribute("href") ?? "", "https://wos.test").searchParams.get("path")).toBe("Series");
+    expect(within(content).queryByRole("link", { name: "Télécharger le dossier « Series » en ZIP" })).toBeNull();
+    expect(within(content).queryByRole("heading", { name: "Dossiers et fichiers" })).toBeNull();
+    expect(within(content).queryByText(/Le mode compatible propose/)).toBeNull();
+    const rootToggle = within(content).getByRole("button", { name: "Ouvrir le dossier « Series »" });
+    expect(rootToggle.querySelector("small")).toBeNull();
+    expect(rootToggle.querySelector(".ready-directory-chevron")).toBeTruthy();
 
-    await user.click(within(content).getByRole("button", { name: "Ouvrir le dossier « Series »" }));
+    await user.click(rootToggle);
     const seasonDownload = await within(content).findByRole("link", {
       name: "Télécharger le dossier « Saison 01 » en ZIP",
     });
     const seasonUrl = new URL(seasonDownload.getAttribute("href") ?? "", "https://wos.test");
     expect(seasonUrl.searchParams.get("path")).toBe("Series/Saison 01");
     expect(seasonUrl.searchParams.get("snapshot")).toBe(snapshot);
+    expect(within(content).queryByText("2 fichiers · 9 o", { selector: ".ready-directory-copy small" })).toBeTruthy();
     expect(directoryUrls.some((url) => new URL(url, "https://wos.test").searchParams.get("parent") === "Series")).toBe(true);
     expect(within(content).queryByText("Episode 01.mkv")).toBeNull();
     await user.click(within(content).getByRole("button", { name: "Ouvrir le dossier « Saison 01 »" }));
@@ -1390,7 +1416,7 @@ describe("UserDownloadsPage", () => {
     const article = await screen.findByRole("article", { name: "Film.mkv" });
     await user.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
     await user.click(await within(article).findByRole("button", { name: "Tout télécharger" }));
-    expect(within(article).queryByRole("link", { name: "Télécharger le contenu en ZIP" })).toBeNull();
+    expect(within(article).queryByRole("link", { name: "Télécharger le ZIP" })).toBeNull();
     const otherArticle = screen.getByRole("article", { name: "Autre READY" });
     await user.click(within(otherArticle).getByRole("button", { name: "Afficher les détails de Autre READY" }));
     expect(await within(otherArticle).findByText("consultable.bin")).toBeTruthy();
@@ -1484,7 +1510,7 @@ describe("UserDownloadsPage", () => {
     await user.click(await screen.findByRole("button", { name: "Afficher les détails de Film.mkv" }));
 
     const archive = await screen.findByRole("link", {
-      name: "Télécharger le contenu en ZIP",
+      name: "Télécharger le ZIP",
     });
     const individual = screen.getByRole("link", { name: `Télécharger « ${longPath} »` });
     expect(archive.getAttribute("href")).toContain("download-archive?snapshot=");

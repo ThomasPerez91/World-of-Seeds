@@ -7,6 +7,12 @@
   --wos21-login-input-focus-bg: #083324;
 }
 
+:root[data-theme="light"] {
+  --wos21-panel-surface: linear-gradient(145deg, rgba(21, 139, 78, 0.055), transparent 45%), rgba(238, 250, 243, 0.78);
+  --wos21-panel-card: rgba(247, 253, 249, 0.68);
+  --wos21-panel-border: rgba(24, 119, 68, 0.2);
+}
+
 /* Let the original artwork breathe a little more without filtering the image. */
 #root::before {
   background:
@@ -111,3 +117,279 @@
   padding-inline-start: 2.75rem !important;
 }
 
+/* Shared translucent surface for settings and administration. */
+:root {
+  --wos21-panel-surface: linear-gradient(145deg, rgba(111, 242, 168, 0.045), transparent 45%), rgba(5, 31, 21, 0.74);
+  --wos21-panel-card: rgba(8, 42, 28, 0.58);
+  --wos21-panel-border: rgba(134, 231, 176, 0.2);
+}
+
+.wos-glass-panel {
+  border: 1px solid var(--wos21-panel-border) !important;
+  background: var(--wos21-panel-surface) !important;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.22) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(120%);
+  backdrop-filter: blur(20px) saturate(120%);
+}
+
+.settings-page .back-button,
+.admin-back-button {
+  min-height: 0 !important;
+  padding: 0.35rem 0 !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.settings-page .back-button:hover,
+.settings-page .back-button:focus-visible,
+.admin-back-button:hover,
+.admin-back-button:focus-visible {
+  color: var(--wos-accent) !important;
+  border-color: transparent !important;
+  background: transparent !important;
+}
+
+.settings-layout {
+  padding: clamp(0.75rem, 2vw, 1.1rem) !important;
+  border-radius: 18px !important;
+}
+
+.settings-navigation,
+.settings-panel,
+.settings-subsection,
+.admin-navigation,
+.admin-section,
+.admin-page .ui-card {
+  border-color: var(--wos21-panel-border) !important;
+  background: var(--wos21-panel-card) !important;
+  box-shadow: none !important;
+}
+
+.local-download-primary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.local-download-primary > .ui-tooltip-anchor {
+  min-width: 0;
+}
+
+.local-download-primary strong {
+  display: block;
+}
+
+.admin-page-header {
+  padding: 0.45rem 0 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.admin-layout {
+  display: grid;
+  min-width: 0;
+  gap: 1rem;
+  padding: 0.75rem;
+  border-radius: 18px;
+}
+
+.admin-content {
+  min-width: 0;
+}
+
+.admin-navigation {
+  display: flex !important;
+  min-width: 0;
+  gap: 0.4rem !important;
+  overflow-x: auto !important;
+  padding: 0.4rem !important;
+  border-radius: 12px !important;
+  scrollbar-width: thin;
+}
+
+.admin-navigation .ui-button {
+  width: auto !important;
+  min-width: max-content !important;
+  justify-content: flex-start;
+  text-align: left !important;
+}
+
+.admin-navigation .ui-button[aria-current="page"] {
+  color: var(--wos-accent) !important;
+  background: rgba(74, 205, 132, 0.14) !important;
+  box-shadow: inset 3px 0 0 rgba(105, 241, 166, 0.72) !important;
+}
+
+.admin-section {
+  padding: clamp(0.85rem, 2vw, 1.25rem) !important;
+}
+
+.user-list {
+  gap: 0.45rem !important;
+}
+
+.user-row.ui-card {
+  padding: 0.7rem 0.8rem !important;
+}
+
+.central-admin-status {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.central-admin-status > .ui-card {
+  min-width: 0;
+  align-content: start;
+  background: var(--wos21-panel-card) !important;
+}
+
+.admin-status-details,
+.reconciliation-metrics,
+.admin-storage-capacity {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.35rem 0 0;
+}
+
+.admin-status-details > div,
+.reconciliation-metrics > div,
+.admin-storage-capacity > div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.admin-status-details dt,
+.reconciliation-metrics dt,
+.admin-storage-capacity dt {
+  color: var(--wos-muted);
+  font-size: 0.72rem;
+}
+
+.admin-status-details dd,
+.reconciliation-metrics dd,
+.admin-storage-capacity dd {
+  margin: 0;
+  color: var(--wos-text);
+  font-size: 0.75rem;
+  font-weight: 720;
+  text-align: right;
+}
+
+.reconciliation-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-block: 0.8rem;
+}
+
+.admin-storage-capacity {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0;
+}
+
+.admin-storage-capacity > div {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.55rem 0;
+}
+
+.admin-storage-capacity dd {
+  font-size: 1rem;
+  text-align: left;
+}
+
+.reconciliation-metrics > div {
+  padding: 0.65rem;
+  border: 1px solid var(--wos21-panel-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.torrent-detail-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.torrent-detail-dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.torrent-detail-grid.torrent-detail-dates > div {
+  min-width: 0;
+  padding: 0.65rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.torrent-detail-grid.torrent-detail-dates > div + div {
+  border-left: 1px solid var(--wos21-panel-border);
+}
+
+.ready-directory-toggle.is-root {
+  grid-template-columns: 20px minmax(0, 1fr) 15px;
+}
+
+.ready-directory-toggle.is-root > svg:first-child {
+  width: 18px;
+  height: 18px;
+  color: var(--wos-accent);
+}
+
+.ready-directory-toggle.is-root > .ready-directory-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--wos-muted);
+}
+
+@media (min-width: 650px) {
+  .central-admin-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .admin-storage-capacity {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 960px) {
+  .admin-layout {
+    grid-template-columns: minmax(12rem, 15rem) minmax(0, 1fr);
+    align-items: start;
+    padding: 1rem;
+  }
+
+  .admin-navigation {
+    position: sticky;
+    top: 1rem;
+    flex-direction: column;
+    overflow: visible !important;
+  }
+
+  .admin-navigation .ui-button {
+    width: 100% !important;
+  }
+
+  .central-admin-status {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .reconciliation-metrics,
+  .torrent-detail-dates {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .torrent-detail-grid.torrent-detail-dates > div + div {
+    border-top: 1px solid var(--wos21-panel-border);
+    border-left: 0;
+  }
+}

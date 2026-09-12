@@ -78,6 +78,26 @@ describe("AdminSettingsPage", () => {
     expect(translatedNewGreedyFieldIds.has("advanced.inject_hours")).toBe(true);
   });
 
+  it("présente trois synthèses lisibles sans concaténer leurs métriques", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/v2/admin/overview") return response(options);
+      throw new Error(`Requête inattendue : ${String(input)}`);
+    }));
+    const view = render(
+      <FeedbackProvider>
+        <AdminSettingsPage onBack={vi.fn()} onNavigate={vi.fn()} onSessionExpired={vi.fn()} />
+      </FeedbackProvider>,
+    );
+
+    await screen.findByText("Configuration demandée");
+    expect(screen.getByText("Configuration appliquée")).toBeTruthy();
+    expect(screen.getByText("Espace logique")).toBeTruthy();
+    expect(screen.getByText("Pression")).toBeTruthy();
+    expect(screen.getByText("Cycles du planificateur")).toBeTruthy();
+    expect(view.container.querySelectorAll(".central-admin-status > .ui-card")).toHaveLength(3);
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
   it("affiche une erreur métier structurée sous le champ concerné", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {

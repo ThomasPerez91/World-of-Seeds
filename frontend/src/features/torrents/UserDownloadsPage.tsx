@@ -57,7 +57,6 @@ import {
   pickDownloadDirectory,
   type LocalTransferQueueItem,
   type RecursiveTransferErrorCode,
-  type RecursiveTransferProgress,
   supportsRecursiveDirectoryDownload,
 } from "./recursiveDownload";
 import { SubscriptionExpiryIndicator } from "./SubscriptionExpiryIndicator";
@@ -70,34 +69,24 @@ export const TORRENT_UPLOAD_CONCURRENCY = 3;
 
 export interface LocalDownloadSummary {
   active: number;
+  completedFiles: number;
+  fileCount: number;
+  jobCount: number;
+  kind: BrowserDownloadJobSnapshot["kind"] | null;
   maximum: number;
-  status: "idle" | RecursiveTransferProgress["status"];
-  waiting: number;
   name: string | null;
-  downloadedBytes: number;
-  totalBytes: number;
+  otherJobs: number;
   percent: number;
+  status: "idle" | BrowserDownloadJobSnapshot["status"];
+  totalBytes: number;
+  waiting: number;
+  downloadedBytes: number;
 }
 
 interface UserDownloadsPageProps {
   onActivityChanged?: () => void;
   onLocalTransferChanged?: (summary: LocalDownloadSummary) => void;
   onSessionExpired: () => void;
-}
-
-export function summarizeLocalTransfer(
-  transfer: RecursiveTransferProgress | null,
-): LocalDownloadSummary {
-  return {
-    active: transfer?.queue.filter((item) => item.status === "active").length ?? 0,
-    maximum: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
-    status: transfer?.status ?? "idle",
-    waiting: transfer?.queue.filter((item) => item.status === "waiting").length ?? 0,
-    name: null,
-    downloadedBytes: transfer?.downloadedBytes ?? 0,
-    totalBytes: 0,
-    percent: 0,
-  };
 }
 
 export function summarizeDownloadManager(
@@ -111,27 +100,23 @@ export function summarizeDownloadManager(
     0,
   );
   const waiting = Math.max(manager.waitingJobs, waitingStreams);
-  const status: LocalDownloadSummary["status"] = manager.activeStreams > 0 || waiting > 0
-    ? "running"
-    : jobs.some((job) => job.status === "error")
-      ? "error"
-      : jobs.some((job) => job.status === "paused")
-        ? "paused"
-        : jobs.length > 0 && jobs.every((job) => job.status === "completed")
-          ? "completed"
-          : jobs.length > 0 && jobs.every((job) => job.status === "cancelled")
-            ? "cancelled"
-            : "idle";
-  const current = jobs.find((job) => job.status === "running" || job.status === "paused" || job.status === "queued") ?? null;
+  const current = (["running", "queued", "paused", "error", "completed", "cancelled"] as const)
+    .map((status) => jobs.find((job) => job.status === status))
+    .find((job) => job !== undefined) ?? null;
   const percent = current === null || current.totalBytes <= 0
     ? 0
     : Math.min(100, Math.max(0, (current.downloadedBytes / current.totalBytes) * 100));
   return {
     active: manager.activeStreams,
+    completedFiles: current?.completedFiles ?? 0,
+    fileCount: current?.fileCount ?? 0,
+    jobCount: jobs.length,
+    kind: current?.kind ?? null,
     maximum: manager.maxConcurrentStreams,
-    status,
+    status: current?.status ?? "idle",
     waiting,
     name: current?.name ?? null,
+    otherJobs: Math.max(0, jobs.length - (current === null ? 0 : 1)),
     downloadedBytes: current?.downloadedBytes ?? 0,
     totalBytes: current?.totalBytes ?? 0,
     percent,
@@ -459,27 +444,30 @@ function TorrentDirectoryBrowser({
     const open = openPaths.has(path);
     return (
       <li key={path} className="ready-directory-item">
-        <div className={`ready-directory-row ready-tree-depth-${Math.min(depth, 6)}`}>
+        <div className={`ready-directory-row${depth === 0 ? " is-root" : ""} ready-tree-depth-${Math.min(depth, 6)}`}>
           <button
             type="button"
-            className="ready-directory-toggle"
+            className={`ready-directory-toggle${depth === 0 ? " is-root" : ""}`}
             aria-expanded={open}
             aria-label={t(open ? "downloads.collapseFolder" : "downloads.expandFolder", { name: directory.name })}
             onClick={() => toggleDirectory(directory)}
           >
-            {open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+            {depth > 0 && (open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />)}
             {open ? <FolderOpen aria-hidden="true" /> : <Folder aria-hidden="true" />}
             <span className="ready-directory-copy">
               <Tooltip content={path} overflowOnly focusable={false} className="ready-directory-name">
                 <strong>{directory.name}</strong>
               </Tooltip>
-              <small>{t(directory.file_count === 1 ? "downloads.folderSummaryOne" : "downloads.folderSummaryMany", {
-                count: directory.file_count,
-                size: formatBytes(directory.total_size),
-              })}</small>
+              {depth > 0 && (
+                <small>{t(directory.file_count === 1 ? "downloads.folderSummaryOne" : "downloads.folderSummaryMany", {
+                  count: directory.file_count,
+                  size: formatBytes(directory.total_size),
+                })}</small>
+              )}
             </span>
+            {depth === 0 && (open ? <ChevronDown className="ready-directory-chevron" aria-hidden="true" /> : <ChevronRight className="ready-directory-chevron" aria-hidden="true" />)}
           </button>
-          {directory.archive_available && (
+          {depth > 0 && directory.archive_available && (
             <Tooltip content={t("downloads.downloadFolderZip", { name: directory.name })}>
               <a
                 className="ready-folder-download-button"
@@ -522,14 +510,7 @@ function TorrentDirectoryBrowser({
   const fallbackPageSize = Math.max(1, snapshot.limit);
   if (rootDirectories.length === 0 && rootFiles.length === 0 && fallbackFiles.length === 0) return null;
   return (
-    <section className="ready-directory-browser" aria-labelledby={`torrent-folders-${torrentId}`}>
-      <header>
-        <Folder aria-hidden="true" />
-        <div>
-          <h4 id={`torrent-folders-${torrentId}`}>{t("downloads.contentTree")}</h4>
-          <span>{t("downloads.contentTreeHint")}</span>
-        </div>
-      </header>
+    <section className="ready-directory-browser" aria-label={t("downloads.contentTreeLabel")}>
       {root?.error !== "" && root?.error !== undefined && root.response === null && (
         <div className="ready-directories-state ready-directories-error">
           <span>{root.error}</span>
@@ -638,9 +619,6 @@ function ReadyTorrentContent({
               </a>
             )}
           </header>
-          {compatible && snapshot.file_count > 1 && (
-            <p className="ready-compatibility-note">{t("downloads.compatHint")}</p>
-          )}
           {manifest.error !== "" && (
             <StateMessage tone="error" className="ready-manifest-error">
               <span>{manifest.error}</span>
@@ -753,37 +731,43 @@ function TorrentItem({
                     </Button>
                   </Tooltip>
                   {torrent.state === "ready" ? (
-                    <Button
-                      type="button"
-                      className="torrent-action-download"
-                      aria-label={t("common.download")}
-                      disabled={downloadBusy}
-                      onClick={onDownload}
-                    >
-                      <DownloadIcon />
-                    </Button>
+                    <Tooltip content={t("common.download")}>
+                      <Button
+                        type="button"
+                        className="torrent-action-download"
+                        aria-label={t("common.download")}
+                        disabled={downloadBusy}
+                        onClick={onDownload}
+                      >
+                        <DownloadIcon />
+                      </Button>
+                    </Tooltip>
                   ) : (
-                    <Button type="button" variant="secondary" aria-label={t("downloads.refreshNamed", { name: torrent.name })} onClick={onRefresh}>
-                      <RefreshIcon />
-                    </Button>
+                    <Tooltip content={t("common.refresh")}>
+                      <Button type="button" variant="secondary" aria-label={t("downloads.refreshNamed", { name: torrent.name })} onClick={onRefresh}>
+                        <RefreshIcon />
+                      </Button>
+                    </Tooltip>
                   )}
                   {!(["cancelled", "expired"] as TorrentRequestV2State[]).includes(torrent.state) && (
-                    <Button
-                      type="button"
-                      variant="danger"
-                      disabled={cancelBusy}
-                      onClick={onCancel}
-                      aria-label={t(torrent.state === "ready" ? "downloads.deleteNamed" : "downloads.cancelNamed", { name: torrent.name })}
-                    >
-                      <DeleteIcon />
-                    </Button>
+                    <Tooltip content={t(torrent.state === "ready" ? "common.delete" : "common.cancel")}>
+                      <Button
+                        type="button"
+                        variant="danger"
+                        disabled={cancelBusy}
+                        onClick={onCancel}
+                        aria-label={t(torrent.state === "ready" ? "downloads.deleteNamed" : "downloads.cancelNamed", { name: torrent.name })}
+                      >
+                        <DeleteIcon />
+                      </Button>
+                    </Tooltip>
                   )}
                 </div>
               </div>
             </div>
           )}
         >
-          <dl className="torrent-detail-grid">
+          <dl className="torrent-detail-grid torrent-detail-dates">
             <div><dt>{t("downloads.created")}</dt><dd>{formatDate(torrent.created_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
             <div><dt>{t("downloads.updated")}</dt><dd>{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
           </dl>

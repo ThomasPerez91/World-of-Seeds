@@ -502,7 +502,7 @@ function AccountSettingsPage({
         <h1 id="account-settings-title">{t("account.title")}</h1>
         <p className="settings-intro">{t("account.intro")}</p>
       </div>
-      <div className="settings-layout">
+      <div className="settings-layout wos-glass-panel">
         <nav className="settings-navigation" aria-label={t("settings.navigation")}>
           <button
             type="button"

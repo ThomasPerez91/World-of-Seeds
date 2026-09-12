@@ -6,7 +6,8 @@ import { api, type TorrentRequestV2 } from "../../api/client";
 import { FeedbackProvider } from "../../components/Feedback";
 import { I18nProvider, type Locale } from "../../i18n";
 import { auditAccessibility } from "../../test/accessibility";
-import { summarizeLocalTransfer } from "../torrents/UserDownloadsPage";
+import { summarizeDownloadManager } from "../torrents/UserDownloadsPage";
+import type { BrowserDownloadJobSnapshot } from "../torrents/downloadManager";
 import {
   classifyTorrentActivity,
   loadTorrentActivity,
@@ -30,6 +31,24 @@ function torrent(overrides: Partial<TorrentRequestV2> = {}): TorrentRequestV2 {
     queue_status: "downloading",
     created_at: "2026-09-08T12:00:00Z",
     updated_at: "2026-09-08T12:00:00Z",
+    ...overrides,
+  };
+}
+
+function localJob(overrides: Partial<BrowserDownloadJobSnapshot> = {}): BrowserDownloadJobSnapshot {
+  return {
+    id: "job-1",
+    torrentId: "torrent-1",
+    kind: "file",
+    name: "Film.mkv",
+    status: "running",
+    downloadedBytes: 512,
+    totalBytes: 1024,
+    completedFiles: 0,
+    fileCount: 1,
+    queuePosition: null,
+    error: null,
+    queue: [{ id: "file-1", relativePath: "Film.mkv", status: "active", position: null }],
     ...overrides,
   };
 }
@@ -128,24 +147,36 @@ describe("UserDashboardPage", () => {
   });
 
   it("résume exactement les états locaux visibles sans inventer une file globale", () => {
-    const local = summarizeLocalTransfer({
-      status: "running",
-      downloadedBytes: 128,
-      completedFiles: 1,
-      error: null,
-      queue: [
-        { id: "a", relativePath: "active", status: "active", position: null },
-        { id: "b", relativePath: "waiting", status: "waiting", position: 1 },
-        { id: "c", relativePath: "waiting-2", status: "waiting", position: 2 },
-        { id: "d", relativePath: "done", status: "completed", position: null },
-      ],
+    const local = summarizeDownloadManager({
+      activeStreams: 1,
+      maxConcurrentStreams: 2,
+      waitingJobs: 0,
+      jobs: [localJob({
+        kind: "folder",
+        name: "Dossier",
+        downloadedBytes: 128,
+        totalBytes: 0,
+        completedFiles: 1,
+        fileCount: 4,
+        queue: [
+          { id: "a", relativePath: "active", status: "active", position: null },
+          { id: "b", relativePath: "waiting", status: "waiting", position: 1 },
+          { id: "c", relativePath: "waiting-2", status: "waiting", position: 2 },
+          { id: "d", relativePath: "done", status: "completed", position: null },
+        ],
+      })],
     });
     expect(local).toEqual({
       active: 1,
+      completedFiles: 1,
+      fileCount: 4,
+      jobCount: 1,
+      kind: "folder",
       maximum: 2,
       status: "running",
       waiting: 2,
-      name: null,
+      name: "Dossier",
+      otherJobs: 0,
       downloadedBytes: 128,
       totalBytes: 0,
       percent: 0,
@@ -154,10 +185,50 @@ describe("UserDashboardPage", () => {
     const view = render(
       <I18nProvider><LocalDownloadCard local={local} /></I18nProvider>,
     );
-    expect(screen.getByText("1 / 2 actifs")).toBeTruthy();
-    expect(screen.getByText("2 fichiers en attente")).toBeTruthy();
+    expect(screen.getByText(/1 \/ 2 actifs/)).toBeTruthy();
+    expect(screen.getByText(/2 fichiers en attente/)).toBeTruthy();
     expect(screen.getByText(/navigateur uniquement/)).toBeTruthy();
     expect(view.container.textContent).not.toContain("globale");
+  });
+
+  it.each([
+    ["fichier actif", localJob(), "Film.mkv", "En cours"],
+    ["dossier actif", localJob({ kind: "folder", name: "Série", fileCount: 4, completedFiles: 2 }), "Série", "2 / 4 fichiers terminés"],
+    ["tâche en pause", localJob({ status: "paused" }), "Film.mkv", "En pause"],
+    ["tâche en erreur", localJob({ status: "error", error: "download_interrupted" }), "Film.mkv", "Erreur"],
+  ])("affiche le téléchargement local : %s", (_case, job, name, expected) => {
+    const summary = summarizeDownloadManager({
+      activeStreams: job.status === "running" ? 1 : 0,
+      maxConcurrentStreams: 2,
+      waitingJobs: 0,
+      jobs: [job],
+    });
+    const view = render(<I18nProvider><LocalDownloadCard local={summary} /></I18nProvider>);
+    expect(screen.getByText(name)).toBeTruthy();
+    expect(screen.getByText(expected)).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("value")).toBe("50");
+    view.unmount();
+  });
+
+  it("actualise la tâche principale et résume les autres récupérations", () => {
+    const initial = summarizeDownloadManager({
+      activeStreams: 1,
+      maxConcurrentStreams: 2,
+      waitingJobs: 1,
+      jobs: [localJob(), localJob({ id: "job-2", name: "Suite.mkv", status: "queued" })],
+    });
+    const view = render(<I18nProvider><LocalDownloadCard local={initial} /></I18nProvider>);
+    expect(screen.getByText("1 autre(s) récupération(s) dans la file")).toBeTruthy();
+
+    const updated = summarizeDownloadManager({
+      activeStreams: 0,
+      maxConcurrentStreams: 2,
+      waitingJobs: 0,
+      jobs: [localJob({ status: "completed", downloadedBytes: 1024 })],
+    });
+    view.rerender(<I18nProvider><LocalDownloadCard local={updated} /></I18nProvider>);
+    expect(screen.getByText("Terminée")).toBeTruthy();
+    expect(screen.getByText("1 Ko / 1 Ko · 100 %")).toBeTruthy();
   });
 
   it("annule l’agrégation au démontage", async () => {
