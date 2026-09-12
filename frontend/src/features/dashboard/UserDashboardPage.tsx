@@ -12,8 +12,8 @@ import {
   StorageIcon,
 } from "../../components/icons";
 import { ArrowRight, Check, Clock3, Download, HardDrive } from "lucide-react";
-import { Button, Card, Progress, StateMessage } from "../../components/ui";
-import { useI18n } from "../../i18n";
+import { Badge, Button, Card, Progress, StateMessage, Tooltip } from "../../components/ui";
+import { useI18n, type MessageKey } from "../../i18n";
 import {
   type LocalDownloadSummary,
   UserDownloadsPage,
@@ -21,6 +21,14 @@ import {
 import { DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY } from "../torrents/recursiveDownload";
 
 const ACTIVITY_PAGE_SIZE = 100;
+const localStatusLabels: Record<Exclude<LocalDownloadSummary["status"], "idle">, MessageKey> = {
+  queued: "dashboard.localStatus.queued",
+  running: "dashboard.localStatus.running",
+  paused: "dashboard.localStatus.paused",
+  completed: "dashboard.localStatus.completed",
+  error: "dashboard.localStatus.error",
+  cancelled: "dashboard.localStatus.cancelled",
+};
 
 export interface TorrentActivitySummary {
   active: number;
@@ -83,20 +91,26 @@ function SummaryHeading({
 
 export function LocalDownloadCard({ local }: { local: LocalDownloadSummary }) {
   const { formatBytes, t } = useI18n();
-  const content = local.status === "idle" || local.status === "completed" || local.status === "cancelled"
+  const content = local.status === "idle"
     ? <p className="dashboard-summary-empty">{t("dashboard.localIdle")}</p>
-    : local.status === "paused"
-      ? <p className="dashboard-summary-value">{t("downloads.localPaused")}</p>
-      : local.status === "error"
-        ? <StateMessage tone="error">{t("downloads.localError")}</StateMessage>
-        : local.name !== null ? (
+    : local.name !== null ? (
           <div className="local-download-progress">
-            <strong title={local.name}>{local.name}</strong>
+            <div className="local-download-primary">
+              <Tooltip content={local.name} overflowOnly><strong>{local.name}</strong></Tooltip>
+              <Badge tone={local.status === "error" ? "danger" : local.status === "completed" ? "success" : "neutral"}>
+                {t(localStatusLabels[local.status])}
+              </Badge>
+            </div>
             <Progress
               label={t("downloads.localProgress", { value: local.percent.toFixed(0) })}
               value={local.percent}
             />
-            <span>{formatBytes(local.downloadedBytes)} / {formatBytes(local.totalBytes)}</span>
+            <span>{formatBytes(local.downloadedBytes)} / {formatBytes(local.totalBytes)} · {local.percent.toFixed(0)} %</span>
+            <span>{t("dashboard.localActive", { active: local.active, maximum: local.maximum })} · {t("dashboard.localWaiting", { waiting: local.waiting })}</span>
+            {local.kind === "folder" && local.fileCount > 0 && (
+              <span>{t("dashboard.localFiles", { completed: local.completedFiles, total: local.fileCount })}</span>
+            )}
+            {local.otherJobs > 0 && <span>{t("dashboard.localOthers", { count: local.otherJobs })}</span>}
           </div>
         ) : (
           <>
@@ -122,10 +136,15 @@ export function LocalDownloadCard({ local }: { local: LocalDownloadSummary }) {
 
 const idleLocalSummary: LocalDownloadSummary = {
   active: 0,
+  completedFiles: 0,
+  fileCount: 0,
+  jobCount: 0,
+  kind: null,
   maximum: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
   status: "idle",
   waiting: 0,
   name: null,
+  otherJobs: 0,
   downloadedBytes: 0,
   totalBytes: 0,
   percent: 0,

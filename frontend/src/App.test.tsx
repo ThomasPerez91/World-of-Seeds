@@ -388,6 +388,8 @@ describe("App", () => {
     expect(screen.queryByText("Sombre")).toBeNull();
     expect(screen.queryByText("Système")).toBeNull();
     expect(screen.getByRole("button", { name: "Général" }).getAttribute("aria-current")).toBe("page");
+    expect(view.container.querySelector(".settings-layout.wos-glass-panel")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retour au Dashboard" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sécurité" }).getAttribute("aria-current")).toBeNull();
     expect(screen.getByRole("combobox", { name: "Langue" })).toBeTruthy();
     expect(screen.queryByLabelText("Mot de passe actuel")).toBeNull();
