@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   type ChangeEvent,
   type DragEvent,
   type ReactNode,
@@ -13,6 +14,8 @@ import {
   api,
   ApiError,
   parseTorrentRealtimeMessage,
+  type TorrentDownloadDirectoriesV2,
+  type TorrentDownloadDirectoryV2,
   type TorrentDownloadFileV2,
   type TorrentDownloadManifestPageV2,
   type TorrentRequestV2,
@@ -26,7 +29,19 @@ import {
   QueueIcon,
   RefreshIcon,
 } from "../../components/icons";
-import { Archive, Check, Clock3, Download, ListTree, Search } from "lucide-react";
+import {
+  Archive,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  Download,
+  File,
+  Folder,
+  FolderOpen,
+  ListTree,
+  Search,
+} from "lucide-react";
 import { Accordion, Badge, Button, Progress, StateMessage, Tooltip } from "../../components/ui";
 import { useI18n, type MessageKey } from "../../i18n";
 import {
@@ -294,6 +309,172 @@ function LocalTransferPanel({
   );
 }
 
+interface DirectoryListingState {
+  error: string;
+  loading: boolean;
+  response: TorrentDownloadDirectoriesV2 | null;
+}
+
+function TorrentDirectoryBrowser({
+  snapshotId,
+  torrentId,
+}: {
+  snapshotId: string;
+  torrentId: string;
+}) {
+  const { apiError, formatBytes, t } = useI18n();
+  const [listings, setListings] = useState<Record<string, DirectoryListingState>>({});
+  const [openPaths, setOpenPaths] = useState<Set<string>>(() => new Set());
+
+  const loadDirectories = useCallback((parent: string | null) => {
+    const key = parent ?? "";
+    setListings((current) => ({
+      ...current,
+      [key]: { error: "", loading: true, response: current[key]?.response ?? null },
+    }));
+    const controller = new AbortController();
+    void api.getTorrentDownloadDirectoriesV2(torrentId, parent, controller.signal)
+      .then((response) => {
+        if (
+          response.snapshot_id !== snapshotId
+          || response.path !== key
+          || !Array.isArray(response.directories)
+        ) {
+          throw new Error("manifest_changed");
+        }
+        setListings((current) => ({
+          ...current,
+          [key]: { error: "", loading: false, response },
+        }));
+      })
+      .catch((caught: unknown) => {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        setListings((current) => ({
+          ...current,
+          [key]: {
+            error: apiError(caught, "downloads.directoriesFailed"),
+            loading: false,
+            response: current[key]?.response ?? null,
+          },
+        }));
+      });
+    return () => controller.abort();
+  }, [apiError, snapshotId, torrentId]);
+
+  useEffect(() => loadDirectories(null), [loadDirectories]);
+
+  function toggleDirectory(directory: TorrentDownloadDirectoryV2) {
+    const path = directory.relative_path;
+    setOpenPaths((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+    if (listings[path] === undefined) loadDirectories(path);
+  }
+
+  function renderDirectory(directory: TorrentDownloadDirectoryV2, depth: number): ReactNode {
+    const path = directory.relative_path;
+    const listing = listings[path];
+    const open = openPaths.has(path);
+    const childDirectories = listing?.response?.directories ?? [];
+    return (
+      <li key={path} className="ready-directory-item">
+        <div
+          className="ready-directory-row"
+          style={{ "--directory-indent": `${Math.min(depth, 6)}rem` } as CSSProperties}
+        >
+          <button
+            type="button"
+            className="ready-directory-toggle"
+            aria-expanded={open}
+            aria-label={t(open ? "downloads.collapseFolder" : "downloads.expandFolder", { name: directory.name })}
+            onClick={() => toggleDirectory(directory)}
+          >
+            {open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+            {open ? <FolderOpen aria-hidden="true" /> : <Folder aria-hidden="true" />}
+            <span>
+              <strong>{directory.name}</strong>
+              <small>{t(directory.file_count === 1 ? "downloads.folderSummaryOne" : "downloads.folderSummaryMany", {
+                count: directory.file_count,
+                size: formatBytes(directory.total_size),
+              })}</small>
+            </span>
+          </button>
+          {directory.archive_available && (
+            <Tooltip content={t("downloads.downloadFolderZip", { name: directory.name })}>
+              <a
+                className="ready-folder-download-button"
+                href={api.torrentFolderArchiveDownloadUrlV2(torrentId, path, snapshotId)}
+                download={`${directory.name}.zip`}
+                aria-label={t("downloads.downloadFolderZip", { name: directory.name })}
+              >
+                <Archive aria-hidden="true" />
+                <span>ZIP</span>
+              </a>
+            </Tooltip>
+          )}
+        </div>
+        {open && (
+          <div className="ready-directory-children">
+            {listing?.loading === true && <span className="ready-directory-loading">{t("common.loading")}</span>}
+            {listing?.error !== "" && listing?.error !== undefined && (
+              <div className="ready-directory-error">
+                <span>{listing.error}</span>
+                <Button variant="secondary" onClick={() => loadDirectories(path)}>{t("common.retry")}</Button>
+              </div>
+            )}
+            {listing?.loading === false && listing.error === "" && childDirectories.length === 0 && (
+              <span className="ready-directory-empty">{t("downloads.noSubfolders")}</span>
+            )}
+            {childDirectories.length > 0 && (
+              <ul>{childDirectories.map((child) => renderDirectory(child, depth + 1))}</ul>
+            )}
+          </div>
+        )}
+      </li>
+    );
+  }
+
+  const root = listings[""];
+  if (root?.loading === true && root.response === null) {
+    return <StateMessage tone="loading" className="ready-directories-state">{t("downloads.directoriesLoading")}</StateMessage>;
+  }
+  if (root?.error !== "" && root?.error !== undefined && root.response === null) {
+    return (
+      <div className="ready-directories-state ready-directories-error">
+        <span>{root.error}</span>
+        <Button variant="secondary" onClick={() => loadDirectories(null)}>{t("common.retry")}</Button>
+      </div>
+    );
+  }
+  const rootDirectories = root?.response?.directories ?? [];
+  if (rootDirectories.length === 0) return null;
+  return (
+    <section className="ready-directory-browser" aria-labelledby={`torrent-folders-${torrentId}`}>
+      <header>
+        <Folder aria-hidden="true" />
+        <div>
+          <h4 id={`torrent-folders-${torrentId}`}>{t("downloads.folders")}</h4>
+          <span>{t("downloads.foldersHint")}</span>
+        </div>
+      </header>
+      <ul className="ready-directory-list">
+        {rootDirectories.map((directory) => renderDirectory(directory, 0))}
+      </ul>
+    </section>
+  );
+}
+
+function splitFilePath(relativePath: string): { directory: string; name: string } {
+  const parts = relativePath.split("/");
+  return {
+    directory: parts.slice(0, -1).join(" / "),
+    name: parts.at(-1) ?? relativePath,
+  };
+}
+
 function ReadyTorrentContent({
   manifest,
   transfers,
@@ -376,11 +557,23 @@ function ReadyTorrentContent({
               <Button variant="secondary" onClick={onRetry}>{t("common.retry")}</Button>
             </StateMessage>
           )}
+          {snapshot.file_count > 1 && (
+            <TorrentDirectoryBrowser torrentId={torrent.id} snapshotId={snapshot.snapshot_id} />
+          )}
+          <h4 className="ready-files-heading"><File aria-hidden="true" /> {t("downloads.filesHeading")}</h4>
           <ul className="ready-file-list">
-            {snapshot.items.map((file) => (
+            {snapshot.items.map((file) => {
+              const path = splitFilePath(file.relative_path);
+              return (
               <li key={file.id}>
                 <Tooltip content={file.relative_path} overflowOnly className="ready-file-path">
-                  <span>{file.relative_path}</span>
+                  <span className="ready-file-label">
+                    <File aria-hidden="true" />
+                    <span>
+                      <strong>{path.name}</strong>
+                      {path.directory !== "" && <small>{path.directory}</small>}
+                    </span>
+                  </span>
                 </Tooltip>
                 <span>{formatBytes(file.size)}</span>
                 {managedFiles ? (
@@ -407,7 +600,8 @@ function ReadyTorrentContent({
                   </Tooltip>
                 )}
               </li>
-            ))}
+              );
+            })}
           </ul>
           {snapshot.file_count > FALLBACK_PAGE_SIZE && (
             <nav className="ready-manifest-pagination" aria-label={t("downloads.compatPagination")}>
@@ -1181,7 +1375,12 @@ export function UserDownloadsPage({
                   })}
                   onRefresh={() => void load(offset)}
                   onOpen={torrent.state === "ready" && manifest === undefined ? () => void openReadyTorrent(torrent) : undefined}
-                  onDownload={() => void openReadyTorrent(torrent, true)}
+                  onDownload={() => {
+                    if (!openTorrentIds.has(torrent.id)) {
+                      setOpenTorrentIds((current) => new Set(current).add(torrent.id));
+                    }
+                    void openReadyTorrent(torrent, true);
+                  }}
                   onCancel={() => void cancelTorrentRequest(torrent)}
                   cancelBusy={cancellingId === torrent.id}
                   downloadBusy={torrent.state === "ready" && manifest?.loading === true && manifest.snapshot === null}
