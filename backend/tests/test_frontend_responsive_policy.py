@@ -75,6 +75,7 @@ def test_admin_finish_is_mobile_first_and_legacy_user_filesystem_ui_is_absent() 
     assert "error.workspaceUnavailable" not in translations
     assert "admin.trashItems" not in translations
 
+
 def test_windows_favicon_contract_is_valid_and_cache_busted() -> None:
     html = (REPOSITORY / "frontend/index.html").read_text()
     icon = (REPOSITORY / "frontend/public/favicon-v2.ico").read_bytes()
@@ -82,7 +83,7 @@ def test_windows_favicon_contract_is_valid_and_cache_busted() -> None:
     assert 'rel="icon" type="image/svg+xml" href="/favicon-v2.svg"' in html
     assert 'rel="icon" type="image/x-icon" href="/favicon-v2.ico"' in html
     assert 'rel="shortcut icon" href="/favicon-v2.ico"' in html
-    assert icon[:6] == b"\\x00\\x00\\x01\\x00\\x03\\x00"
+    assert icon[:6] == bytes((0, 0, 1, 0, 3, 0))
 
     sizes: list[int] = []
     for index in range(3):
@@ -92,8 +93,12 @@ def test_windows_favicon_contract_is_valid_and_cache_busted() -> None:
         byte_count = int.from_bytes(icon[entry + 8 : entry + 12], "little")
         offset = int.from_bytes(icon[entry + 12 : entry + 16], "little")
         dib_size = int.from_bytes(icon[offset : offset + 4], "little")
-        dib_width = int.from_bytes(icon[offset + 4 : offset + 8], "little", signed=True)
-        dib_height = int.from_bytes(icon[offset + 8 : offset + 12], "little", signed=True)
+        dib_width = int.from_bytes(
+            icon[offset + 4 : offset + 8], "little", signed=True
+        )
+        dib_height = int.from_bytes(
+            icon[offset + 8 : offset + 12], "little", signed=True
+        )
         planes = int.from_bytes(icon[offset + 12 : offset + 14], "little")
         bits_per_pixel = int.from_bytes(icon[offset + 14 : offset + 16], "little")
 
@@ -107,4 +112,3 @@ def test_windows_favicon_contract_is_valid_and_cache_busted() -> None:
         sizes.append(width)
 
     assert sizes == [16, 32, 48]
-
