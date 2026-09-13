@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Literal
 
 import httpx
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.auth.dependencies import AuthContext, require_current_credentials
 from app.core.config import Settings, get_settings
@@ -55,6 +55,7 @@ async def get_prometheus_network_client(
 
 @router.get("/network-throughput", response_model=NetworkThroughputResponse)
 async def get_network_throughput(
+    response: Response,
     _context: Annotated[AuthContext, Depends(require_current_credentials)],
     prometheus: Annotated[
         PrometheusNetworkClient | None,
@@ -62,6 +63,8 @@ async def get_network_throughput(
     ],
     period: Annotated[Literal["realtime"], Query()] = "realtime",
 ) -> NetworkThroughputResponse:
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     if prometheus is None:
         return NetworkThroughputResponse(status="unavailable")
     try:
