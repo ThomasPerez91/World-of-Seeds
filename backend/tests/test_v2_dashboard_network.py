@@ -347,7 +347,7 @@ async def test_network_endpoint_exposes_only_bounded_throughput_data(
         app.dependency_overrides.pop(get_prometheus_network_client, None)
 
     assert response.status_code == 200
-    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.headers["cache-control"] == "no-store"
     assert response.headers["pragma"] == "no-cache"
     assert fake.periods == ["realtime"]
     payload = response.json()
