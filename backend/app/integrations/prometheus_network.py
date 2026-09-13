@@ -20,6 +20,7 @@ MAX_PROMETHEUS_POINTS_PER_SERIES = 64
 NETWORK_HISTORY = timedelta(minutes=5)
 NETWORK_RATE_WINDOW = "1m"
 NETWORK_STEP_SECONDS = 15
+NETWORK_FRESHNESS = timedelta(seconds=NETWORK_STEP_SECONDS * 3)
 _DEVICE_NAME = re.compile(r"^[A-Za-z0-9_.:-]{1,32}$")
 _VIRTUAL_DEVICE = re.compile(
     r"^(?:lo|docker.*|br-[0-9a-f]+|veth.*|virbr.*|tun\d*|tap\d*|wg\d*|"
@@ -76,6 +77,8 @@ class PrometheusNetworkClient:
         except (httpx.HTTPError, IntegrationRequestError, ValueError) as exc:
             raise PrometheusNetworkError("prometheus network query failed") from exc
 
+        receive = _fresh_series(receive, end=end)
+        transmit = _fresh_series(transmit, end=end)
         device = _select_device(receive, transmit, configured=self._interface)
         if device is None:
             return NetworkThroughputSnapshot(status="no_data")
@@ -96,7 +99,8 @@ class PrometheusNetworkClient:
         start: datetime,
         end: datetime,
     ) -> dict[str, tuple[NetworkSample, ...]]:
-        response = await self._client.get(
+        async with self._client.stream(
+            "GET",
             "/api/v1/query_range",
             params={
                 "query": query,
@@ -104,13 +108,16 @@ class PrometheusNetworkClient:
                 "end": f"{end.timestamp():.3f}",
                 "step": str(NETWORK_STEP_SECONDS),
             },
-        )
-        response.raise_for_status()
-        payload = json.loads(
-            (await read_limited_bytes(response, max_bytes=MAX_PROMETHEUS_RESPONSE_BYTES)).decode(
-                "utf-8"
+        ) as response:
+            response.raise_for_status()
+            payload = json.loads(
+                (
+                    await read_limited_bytes(
+                        response,
+                        max_bytes=MAX_PROMETHEUS_RESPONSE_BYTES,
+                    )
+                ).decode("utf-8")
             )
-        )
         return _parse_matrix(payload)
 
 
@@ -188,6 +195,20 @@ def _select_device(
         return current, aggregate_rank, device
 
     return max(candidates, key=score)
+
+
+def _fresh_series(
+    series: dict[str, tuple[NetworkSample, ...]],
+    *,
+    end: datetime,
+) -> dict[str, tuple[NetworkSample, ...]]:
+    earliest = end - NETWORK_FRESHNESS
+    latest = end + timedelta(seconds=NETWORK_STEP_SECONDS)
+    return {
+        device: samples
+        for device, samples in series.items()
+        if samples and earliest <= samples[-1].timestamp <= latest
+    }
 
 
 def _direction(samples: tuple[NetworkSample, ...]) -> NetworkDirection | None:

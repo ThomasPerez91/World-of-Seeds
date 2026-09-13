@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 import httpx
@@ -170,6 +171,48 @@ async def test_prometheus_empty_response_is_no_data() -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://prometheus:9090") as client:
         snapshot = await PrometheusNetworkClient(client).snapshot("realtime", now=NOW)
     assert snapshot == NetworkThroughputSnapshot(status="no_data")
+
+
+@pytest.mark.asyncio
+async def test_prometheus_rejects_stale_series_as_no_data() -> None:
+    stale = NOW.timestamp() - 60
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(200, json=_matrix([("eno1", [(stale, "4096")])]))
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://prometheus:9090") as client:
+        snapshot = await PrometheusNetworkClient(client).snapshot("realtime", now=NOW)
+
+    assert snapshot == NetworkThroughputSnapshot(status="no_data")
+
+
+class _OversizedStream(httpx.AsyncByteStream):
+    def __init__(self) -> None:
+        self.chunks_read = 0
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for _ in range(10):
+            self.chunks_read += 1
+            yield b"x" * (512 * 1024)
+
+
+@pytest.mark.asyncio
+async def test_prometheus_stops_streaming_an_oversized_response() -> None:
+    streams: list[_OversizedStream] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        stream = _OversizedStream()
+        streams.append(stream)
+        return httpx.Response(200, stream=stream)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="http://prometheus:9090",
+    ) as client:
+        with pytest.raises(PrometheusNetworkError):
+            await PrometheusNetworkClient(client).snapshot("realtime", now=NOW)
+
+    assert streams
+    assert all(stream.chunks_read <= 3 for stream in streams)
 
 
 class _FakePrometheus:
