@@ -27,6 +27,7 @@ _VIRTUAL_DEVICE = re.compile(
     r"tailscale\d*|cni.*|flannel.*|kube.*)$",
     re.IGNORECASE,
 )
+_QBITTORRENT_DEVICE = "qbittorrent"
 
 
 class PrometheusNetworkError(RuntimeError):
@@ -67,6 +68,32 @@ class PrometheusNetworkClient:
             raise ValueError("unsupported network period")
         end = (now or datetime.now(UTC)).astimezone(UTC)
         start = end - NETWORK_HISTORY
+
+        # The dashboard is intended to reflect torrent activity. Prefer the exact
+        # qBittorrent transfer gauges exported by torrent-metrics instead of
+        # inferring traffic from the busiest host NIC. This avoids a stale/wrong
+        # interface selection when Docker/host traffic changes independently.
+        try:
+            qb_receive, qb_transmit = await asyncio.gather(
+                self._query_range(_qbittorrent_query("receive"), start=start, end=end),
+                self._query_range(_qbittorrent_query("transmit"), start=start, end=end),
+            )
+        except (httpx.HTTPError, IntegrationRequestError, ValueError) as exc:
+            raise PrometheusNetworkError("prometheus network query failed") from exc
+
+        qb_receive = _fresh_series(qb_receive, end=end)
+        qb_transmit = _fresh_series(qb_transmit, end=end)
+        if _QBITTORRENT_DEVICE in qb_receive or _QBITTORRENT_DEVICE in qb_transmit:
+            download = _direction(qb_receive.get(_QBITTORRENT_DEVICE, ()))
+            upload = _direction(qb_transmit.get(_QBITTORRENT_DEVICE, ()))
+            return NetworkThroughputSnapshot(
+                status="ok",
+                download=download or NetworkDirection(0, ()),
+                upload=upload or NetworkDirection(0, ()),
+            )
+
+        # Keep the host-NIC query as a compatibility fallback for deployments
+        # where the dedicated torrent-metrics exporter is not provisioned.
         receive_query = _network_query("receive")
         transmit_query = _network_query("transmit")
         try:
@@ -119,6 +146,18 @@ class PrometheusNetworkClient:
                 ).decode("utf-8")
             )
         return _parse_matrix(payload)
+
+
+def _qbittorrent_query(direction: Literal["receive", "transmit"]) -> str:
+    metric = (
+        "wos_torrent_qb_global_download_rate_bytes_per_second"
+        if direction == "receive"
+        else "wos_torrent_qb_global_upload_rate_bytes_per_second"
+    )
+    # The qBittorrent gauges are global and therefore have no device label.
+    # Add a bounded synthetic label so the existing matrix parser can safely
+    # reuse the same validation path as node-exporter data.
+    return f'label_replace({metric}, "device", "{_QBITTORRENT_DEVICE}", "", ".*")'
 
 
 def _network_query(direction: Literal["receive", "transmit"]) -> str:
