@@ -124,12 +124,27 @@ class PrometheusNetworkClient:
 
 
 def _network_query(direction: Literal["receive", "transmit"]) -> str:
-    metric = f"node_network_{direction}_bytes_total"
     excluded = (
         r"^(lo|docker.*|br-[0-9a-f]+|veth.*|virbr.*|tun[0-9]*|tap[0-9]*|"
         r"wg[0-9]*|tailscale[0-9]*|cni.*|flannel.*|kube.*)$"
     )
-    return f'irate({metric}{{job="node-exporter",device!~"{excluded}"}}[{NETWORK_RATE_WINDOW}])'
+    cadvisor_metric = f"container_network_{direction}_bytes_total"
+    node_metric = f"node_network_{direction}_bytes_total"
+    cadvisor = (
+        "label_replace("
+        f'irate({cadvisor_metric}{{job="cadvisor",id="/",interface!~"{excluded}"}}'
+        f"[{NETWORK_RATE_WINDOW}]),"
+        '"device","$1","interface","(.*)")'
+    )
+    node = (
+        f'irate({node_metric}{{job="node-exporter",device!~"{excluded}"}}'
+        f"[{NETWORK_RATE_WINDOW}])"
+    )
+    # node-exporter is intentionally isolated on the monitoring Docker network on Rise2.
+    # Its network collector therefore sees that container namespace, not the host NICs.
+    # cAdvisor exposes the host/root network namespace as id="/". Prefer the larger rate
+    # per device while retaining node-exporter as a compatibility fallback for local setups.
+    return f"max by (device) ({cadvisor} or {node})"
 
 
 def _parse_matrix(payload: object) -> dict[str, tuple[NetworkSample, ...]]:
