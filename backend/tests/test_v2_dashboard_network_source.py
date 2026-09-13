@@ -15,5 +15,6 @@ def test_network_query_prefers_cadvisor_root_namespace_with_node_fallback() -> N
         assert '"device","$1","interface","(.*)"' in query
         assert f"node_network_{direction}_bytes_total" in query
         assert 'job="node-exporter"' in query
+        assert "unless on()" in query
         assert "max by (device)" in query
         assert "irate(" in query
