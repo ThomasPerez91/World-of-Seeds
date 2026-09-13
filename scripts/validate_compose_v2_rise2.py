@@ -175,6 +175,17 @@ def validate_config(config: Mapping[str, Any]) -> None:
         if _network_names(_mapping(services[name], name)) != expected:
             raise ComposeRise2PolicyError(f"{name} networks violate Rise2 isolation")
 
+    node_exporter_mounts = _mounts_by_target(
+        _mapping(services["node-exporter"], "node-exporter"), "node-exporter"
+    )
+    host_network_mount = node_exporter_mounts.get("/host/proc/net")
+    if (
+        host_network_mount is None
+        or host_network_mount.get("source") != "/proc/1/net"
+        or host_network_mount.get("read_only") is not True
+    ):
+        raise ComposeRise2PolicyError("node-exporter must read the host network namespace safely")
+
     qbittorrent = _mapping(services["qbittorrent"], "qbittorrent")
     qbittorrent_environment = _mapping(qbittorrent.get("environment"), "qbittorrent.environment")
     if qbittorrent_environment.get("UMASK") != "077":

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 
 def _validator() -> tuple[type[RuntimeError], Callable[[dict[str, Any]], None]]:
@@ -183,6 +184,15 @@ def _valid_config() -> dict[str, Any]:
         "node-exporter": {
             "image": "prom/node-exporter:v1.12.1",
             "networks": {"monitoring": None},
+            "volumes": [
+                {
+                    "type": "bind",
+                    "source": "/proc/1/net",
+                    "target": "/host/proc/net",
+                    "read_only": True,
+                    "bind": {"create_host_path": False},
+                }
+            ],
         },
         "cadvisor": {
             "image": "ghcr.io/google/cadvisor:v0.60.5",
@@ -254,6 +264,26 @@ def _valid_config() -> dict[str, Any]:
             )
         },
     }
+
+
+def test_rise2_compose_binds_host_network_procfs_without_autocreate() -> None:
+    repository = Path(__file__).resolve().parents[2]
+    compose = yaml.safe_load((repository / "deploy/compose.rise2.v2.yaml").read_text())
+    volumes = compose["services"]["node-exporter"]["volumes"]
+    network_mounts = [
+        mount
+        for mount in volumes
+        if isinstance(mount, dict) and mount.get("target") == "/host/proc/net"
+    ]
+    assert network_mounts == [
+        {
+            "type": "bind",
+            "source": "/proc/1/net",
+            "target": "/host/proc/net",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
+    ]
 
 
 def test_rise2_policy_accepts_complete_isolated_stack() -> None:
@@ -328,6 +358,9 @@ def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
         lambda config: config["services"]["newgreedy"].update({"security_opt": []}),
         lambda config: config["services"]["cadvisor"].update({"privileged": False}),
         lambda config: config["services"]["prometheus"].update({"privileged": True}),
+        lambda config: config["services"]["node-exporter"]["volumes"][0].update(
+            {"source": "/proc/net"}
+        ),
         lambda config: config["services"]["newgreedy"].update(
             {"volumes": [{"type": "bind", "target": "/app/config.ini"}]}
         ),

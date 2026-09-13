@@ -456,6 +456,14 @@ services:
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
     volumes:
       - {type: bind, source: /proc, target: /host/proc, read_only: true}
+      # /proc/net follows the caller's network namespace. Overlay it with the
+      # host init namespace so node-exporter reports Rise2 traffic, not its own
+      # monitoring-container traffic.
+      - type: bind
+        source: /proc/1/net
+        target: /host/proc/net
+        read_only: true
+        bind: {create_host_path: false}
       - {type: bind, source: /sys, target: /host/sys, read_only: true}
       - type: bind
         source: /
