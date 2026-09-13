@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 
 def _validator() -> tuple[type[RuntimeError], Callable[[dict[str, Any]], None]]:
@@ -263,6 +264,26 @@ def _valid_config() -> dict[str, Any]:
             )
         },
     }
+
+
+def test_rise2_compose_binds_host_network_procfs_without_autocreate() -> None:
+    repository = Path(__file__).resolve().parents[2]
+    compose = yaml.safe_load((repository / "deploy/compose.rise2.v2.yaml").read_text())
+    volumes = compose["services"]["node-exporter"]["volumes"]
+    network_mounts = [
+        mount
+        for mount in volumes
+        if isinstance(mount, dict) and mount.get("target") == "/host/proc/net"
+    ]
+    assert network_mounts == [
+        {
+            "type": "bind",
+            "source": "/proc/1/net",
+            "target": "/host/proc/net",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
+    ]
 
 
 def test_rise2_policy_accepts_complete_isolated_stack() -> None:

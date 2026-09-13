@@ -183,10 +183,6 @@ def validate_config(config: Mapping[str, Any]) -> None:
         host_network_mount is None
         or host_network_mount.get("source") != "/proc/1/net"
         or host_network_mount.get("read_only") is not True
-        or _mapping(host_network_mount.get("bind"), "node-exporter network bind").get(
-            "create_host_path"
-        )
-        is not False
     ):
         raise ComposeRise2PolicyError("node-exporter must read the host network namespace safely")
 
