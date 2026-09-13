@@ -158,8 +158,11 @@ def _parse_matrix(payload: object) -> dict[str, tuple[NetworkSample, ...]]:
         for raw in values:
             if not isinstance(raw, list) or len(raw) != 2:
                 raise ValueError("prometheus sample is invalid")
-            timestamp = float(raw[0])
-            value = float(raw[1])
+            try:
+                timestamp = float(raw[0])
+                value = float(raw[1])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("prometheus sample is invalid") from exc
             if not math.isfinite(timestamp) or not math.isfinite(value):
                 continue
             samples.append(
