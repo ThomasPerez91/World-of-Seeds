@@ -127,7 +127,7 @@ def _network_query(direction: Literal["receive", "transmit"]) -> str:
         r"^(lo|docker.*|br-[0-9a-f]+|veth.*|virbr.*|tun[0-9]*|tap[0-9]*|"
         r"wg[0-9]*|tailscale[0-9]*|cni.*|flannel.*|kube.*)$"
     )
-    return f'rate({metric}{{job="node-exporter",device!~"{excluded}"}}[{NETWORK_RATE_WINDOW}])'
+    return f'irate({metric}{{job="node-exporter",device!~"{excluded}"}}[{NETWORK_RATE_WINDOW}])'
 
 
 def _parse_matrix(payload: object) -> dict[str, tuple[NetworkSample, ...]]:

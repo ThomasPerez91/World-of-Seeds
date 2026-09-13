@@ -66,6 +66,7 @@ async def test_prometheus_parses_rx_tx_series_and_uses_only_bounded_queries() ->
     assert all(request.url.path == "/api/v1/query_range" for request in requests)
     assert all(request.url.params["step"] == "15" for request in requests)
     assert all("[1m]" in request.url.params["query"] for request in requests)
+    assert all(request.url.params["query"].startswith("irate(") for request in requests)
     assert all("device!~" in request.url.params["query"] for request in requests)
 
 

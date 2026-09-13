@@ -183,6 +183,15 @@ def _valid_config() -> dict[str, Any]:
         "node-exporter": {
             "image": "prom/node-exporter:v1.12.1",
             "networks": {"monitoring": None},
+            "volumes": [
+                {
+                    "type": "bind",
+                    "source": "/proc/1/net",
+                    "target": "/host/proc/net",
+                    "read_only": True,
+                    "bind": {"create_host_path": False},
+                }
+            ],
         },
         "cadvisor": {
             "image": "ghcr.io/google/cadvisor:v0.60.5",
@@ -328,6 +337,9 @@ def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
         lambda config: config["services"]["newgreedy"].update({"security_opt": []}),
         lambda config: config["services"]["cadvisor"].update({"privileged": False}),
         lambda config: config["services"]["prometheus"].update({"privileged": True}),
+        lambda config: config["services"]["node-exporter"]["volumes"][0].update(
+            {"source": "/proc/net"}
+        ),
         lambda config: config["services"]["newgreedy"].update(
             {"volumes": [{"type": "bind", "target": "/app/config.ini"}]}
         ),
