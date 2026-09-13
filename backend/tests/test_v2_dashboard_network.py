@@ -40,33 +40,31 @@ def _matrix(series: list[tuple[str, list[tuple[float, str]]]]) -> dict[str, obje
 
 
 @pytest.mark.asyncio
-async def test_prometheus_prefers_live_qbittorrent_transfer_gauges() -> None:
+async def test_prometheus_uses_live_host_network_and_aggregates_interfaces() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         query = request.url.params["query"]
-        if "global_download_rate" in query:
+        if "receive" in query:
             return httpx.Response(
                 200,
                 json=_matrix(
                     [
-                        (
-                            "qbittorrent",
-                            [
-                                (NOW.timestamp() - 15, "104857600"),
-                                (NOW.timestamp(), "110100480"),
-                            ],
-                        )
+                        ("eno1", [(NOW.timestamp() - 15, "104857600"), (NOW.timestamp(), "100")]),
+                        ("eno2", [(NOW.timestamp(), "200")]),
                     ]
                 ),
             )
-        if "global_upload_rate" in query:
-            return httpx.Response(
-                200,
-                json=_matrix([("qbittorrent", [(NOW.timestamp(), "2097152")])]),
-            )
-        raise AssertionError(f"unexpected fallback query: {query}")
+        return httpx.Response(
+            200,
+            json=_matrix(
+                [
+                    ("eno1", [(NOW.timestamp(), "40265318")]),
+                    ("eno2", [(NOW.timestamp(), "1024")]),
+                ]
+            ),
+        )
 
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(handler),
@@ -76,60 +74,25 @@ async def test_prometheus_prefers_live_qbittorrent_transfer_gauges() -> None:
 
     assert snapshot.status == "ok"
     assert snapshot.download is not None
-    assert snapshot.download.current_bytes_per_second == 110100480
-    assert [sample.value_bytes_per_second for sample in snapshot.download.samples] == [
-        104857600,
-        110100480,
-    ]
-    assert snapshot.upload is not None and snapshot.upload.current_bytes_per_second == 2097152
+    assert snapshot.download.current_bytes_per_second == 300
+    assert snapshot.upload is not None
+    assert snapshot.upload.current_bytes_per_second == 40266342
     assert len(requests) == 2
     assert all(request.url.path == "/api/v1/query_range" for request in requests)
     assert all(request.url.params["step"] == "15" for request in requests)
-    assert all("wos_torrent_qb_global_" in request.url.params["query"] for request in requests)
-
-
-@pytest.mark.asyncio
-async def test_prometheus_falls_back_to_node_exporter_when_qb_metrics_are_missing() -> None:
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        query = request.url.params["query"]
-        if "wos_torrent_qb_global_" in query:
-            return httpx.Response(200, json=_matrix([]))
-        values = [(NOW.timestamp() - 15, "1024"), (NOW.timestamp(), "2048")]
-        if "receive" in query:
-            return httpx.Response(200, json=_matrix([("eno1", values)]))
-        return httpx.Response(200, json=_matrix([("eno1", [(NOW.timestamp(), "512")])]))
-
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(handler),
-        base_url="http://prometheus:9090",
-    ) as client:
-        snapshot = await PrometheusNetworkClient(client).snapshot("realtime", now=NOW)
-
-    assert snapshot.status == "ok"
-    assert snapshot.download is not None and snapshot.download.current_bytes_per_second == 2048
-    assert snapshot.upload is not None and snapshot.upload.current_bytes_per_second == 512
-    assert len(requests) == 4
-    node_requests = [
-        request
-        for request in requests
-        if "wos_torrent_qb_global_" not in request.url.params["query"]
-    ]
-    assert all("[1m]" in request.url.params["query"] for request in node_requests)
-    assert all("device!~" in request.url.params["query"] for request in node_requests)
+    assert all("node_network_" in request.url.params["query"] for request in requests)
+    assert all("irate(" in request.url.params["query"] for request in requests)
+    assert all("device!~" in request.url.params["query"] for request in requests)
+    assert all("wos_torrent_qb_global_" not in request.url.params["query"] for request in requests)
 
 
 @pytest.mark.asyncio
 async def test_prometheus_excludes_virtual_devices_and_normalizes_negative_rates() -> None:
     calls = 0
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(_request: httpx.Request) -> httpx.Response:
         nonlocal calls
         calls += 1
-        if "wos_torrent_qb_global_" in request.url.params["query"]:
-            return httpx.Response(200, json=_matrix([]))
         return httpx.Response(
             200,
             json=_matrix(
@@ -147,19 +110,16 @@ async def test_prometheus_excludes_virtual_devices_and_normalizes_negative_rates
     ) as client:
         snapshot = await PrometheusNetworkClient(client).snapshot("realtime", now=NOW)
 
-    assert calls == 4
+    assert calls == 2
     assert snapshot.status == "ok"
     assert snapshot.download is not None and snapshot.download.current_bytes_per_second == 0
     assert snapshot.upload is not None and snapshot.upload.current_bytes_per_second == 0
 
 
 @pytest.mark.asyncio
-async def test_prometheus_prefers_one_aggregate_device_on_equal_traffic() -> None:
+async def test_prometheus_prefers_aggregate_network_device_when_present() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        query = request.url.params["query"]
-        if "wos_torrent_qb_global_" in query:
-            return httpx.Response(200, json=_matrix([]))
-        receive = "receive" in query
+        receive = "receive" in request.url.params["query"]
         return httpx.Response(
             200,
             json=_matrix(
@@ -182,9 +142,7 @@ async def test_prometheus_prefers_one_aggregate_device_on_equal_traffic() -> Non
 
 @pytest.mark.asyncio
 async def test_prometheus_honors_configured_interface_without_summing_devices() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "wos_torrent_qb_global_" in request.url.params["query"]:
-            return httpx.Response(200, json=_matrix([]))
+    def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
             json=_matrix(
