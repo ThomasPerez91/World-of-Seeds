@@ -97,6 +97,15 @@ class Settings(BaseSettings):
     integration_health_cache_seconds: float = Field(default=10.0, ge=1, le=300)
     integration_auth_failure_cache_seconds: float = Field(default=300.0, ge=60, le=3600)
     newgreedy_config_max_bytes: int = Field(default=128 * 1024, ge=1024, le=1024 * 1024)
+    prometheus_url: AnyHttpUrl | None = None
+    prometheus_connect_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
+    prometheus_read_timeout_seconds: float = Field(default=3.0, gt=0, le=15)
+    network_interface: str = Field(
+        default="auto",
+        min_length=1,
+        max_length=32,
+        pattern=r"^(auto|[A-Za-z0-9_.:-]+)$",
+    )
 
     @field_validator("data_root", "static_root", "qbittorrent_data_root")
     @classmethod
@@ -151,7 +160,7 @@ class Settings(BaseSettings):
             raise ValueError("C411 passkey is invalid")
         return value
 
-    @field_validator("newgreedy_url", "qbittorrent_url")
+    @field_validator("newgreedy_url", "qbittorrent_url", "prometheus_url")
     @classmethod
     def require_origin_only_integration_url(cls, value: AnyHttpUrl | None) -> AnyHttpUrl | None:
         if value is None:

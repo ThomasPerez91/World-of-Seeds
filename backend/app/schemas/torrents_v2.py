@@ -18,6 +18,7 @@ class TorrentRequestV2Response(BaseModel):
     queue_position_estimate: int | None = Field(default=None, ge=1)
     queue_total_estimate: int | None = Field(default=None, ge=1)
     queue_status: Literal["waiting", "downloading", "stalled", "cooldown"] | None = None
+    scheduler_retry_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
