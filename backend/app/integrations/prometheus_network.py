@@ -208,7 +208,9 @@ def _aggregate_direction(
     totals: dict[datetime, float] = {}
     for device in devices:
         for sample in series.get(device, ()):
-            totals[sample.timestamp] = totals.get(sample.timestamp, 0.0) + sample.value_bytes_per_second
+            totals[sample.timestamp] = (
+                totals.get(sample.timestamp, 0.0) + sample.value_bytes_per_second
+            )
     if not totals:
         return None
     samples = tuple(
