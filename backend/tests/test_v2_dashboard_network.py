@@ -174,6 +174,23 @@ async def test_prometheus_empty_response_is_no_data() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("timestamp,value", [(None, "4096"), (NOW.timestamp(), None)])
+async def test_prometheus_malformed_sample_is_a_controlled_failure(
+    timestamp: object,
+    value: object,
+) -> None:
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            200,
+            json=_matrix([("eno1", [(timestamp, value)])]),  # type: ignore[list-item]
+        )
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://prometheus:9090") as client:
+        with pytest.raises(PrometheusNetworkError):
+            await PrometheusNetworkClient(client).snapshot("realtime", now=NOW)
+
+
+@pytest.mark.asyncio
 async def test_prometheus_rejects_stale_series_as_no_data() -> None:
     stale = NOW.timestamp() - 60
     transport = httpx.MockTransport(
