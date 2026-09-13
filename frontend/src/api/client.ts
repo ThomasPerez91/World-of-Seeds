@@ -51,6 +51,7 @@ export interface TorrentRequestV2 {
   queue_position_estimate: number | null;
   queue_total_estimate: number | null;
   queue_status: "waiting" | "downloading" | "stalled" | "cooldown" | null;
+  scheduler_retry_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -180,6 +181,24 @@ export interface SharedStorageCapacity {
   total_bytes: number;
   used_bytes: number;
   available_bytes: number;
+}
+
+export interface NetworkThroughputSample {
+  timestamp: string;
+  value_bytes_per_second: number;
+}
+
+export interface NetworkThroughputDirection {
+  current_bytes_per_second: number;
+  samples: NetworkThroughputSample[];
+}
+
+export interface NetworkThroughput {
+  status: "ok" | "no_data" | "unavailable";
+  period: "realtime";
+  sample_interval_seconds: number;
+  download: NetworkThroughputDirection | null;
+  upload: NetworkThroughputDirection | null;
 }
 
 export interface AdminStorageOverview {
@@ -561,6 +580,10 @@ export const api = {
 
   getSharedStorageCapacity(signal?: AbortSignal): Promise<SharedStorageCapacity> {
     return requestV2<SharedStorageCapacity>("/storage", { signal });
+  },
+
+  getNetworkThroughput(signal?: AbortSignal): Promise<NetworkThroughput> {
+    return requestV2<NetworkThroughput>("/dashboard/network-throughput?period=realtime", { signal });
   },
 
   getAdminStorage(): Promise<AdminStorageOverview> {

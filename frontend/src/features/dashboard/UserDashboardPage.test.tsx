@@ -2,16 +2,15 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api, type TorrentRequestV2 } from "../../api/client";
+import { api, type NetworkThroughput, type TorrentRequestV2 } from "../../api/client";
 import { FeedbackProvider } from "../../components/Feedback";
 import { I18nProvider, type Locale } from "../../i18n";
 import { auditAccessibility } from "../../test/accessibility";
-import { summarizeDownloadManager } from "../torrents/UserDownloadsPage";
-import type { BrowserDownloadJobSnapshot } from "../torrents/downloadManager";
 import {
   classifyTorrentActivity,
   loadTorrentActivity,
-  LocalDownloadCard,
+  NETWORK_REFRESH_MS,
+  NetworkThroughputCard,
   UserDashboardPage,
 } from "./UserDashboardPage";
 
@@ -29,32 +28,41 @@ function torrent(overrides: Partial<TorrentRequestV2> = {}): TorrentRequestV2 {
     queue_position_estimate: null,
     queue_total_estimate: null,
     queue_status: "downloading",
+    scheduler_retry_at: null,
     created_at: "2026-09-08T12:00:00Z",
     updated_at: "2026-09-08T12:00:00Z",
     ...overrides,
   };
 }
 
-function localJob(overrides: Partial<BrowserDownloadJobSnapshot> = {}): BrowserDownloadJobSnapshot {
+function network(overrides: Partial<NetworkThroughput> = {}): NetworkThroughput {
   return {
-    id: "job-1",
-    torrentId: "torrent-1",
-    kind: "file",
-    name: "Film.mkv",
-    status: "running",
-    downloadedBytes: 512,
-    totalBytes: 1024,
-    completedFiles: 0,
-    fileCount: 1,
-    queuePosition: null,
-    error: null,
-    queue: [{ id: "file-1", relativePath: "Film.mkv", status: "active", position: null }],
+    status: "ok",
+    period: "realtime",
+    sample_interval_seconds: 15,
+    download: {
+      current_bytes_per_second: 75 * 1024 * 1024,
+      samples: [
+        { timestamp: "2026-09-13T10:29:45Z", value_bytes_per_second: 64 * 1024 * 1024 },
+        { timestamp: "2026-09-13T10:30:00Z", value_bytes_per_second: 75 * 1024 * 1024 },
+      ],
+    },
+    upload: {
+      current_bytes_per_second: 1.5 * 1024 * 1024,
+      samples: [
+        { timestamp: "2026-09-13T10:29:45Z", value_bytes_per_second: 1024 * 1024 },
+        { timestamp: "2026-09-13T10:30:00Z", value_bytes_per_second: 1.5 * 1024 * 1024 },
+      ],
+    },
     ...overrides,
   };
 }
 
 function renderDashboard(locale: Locale = "fr") {
   localStorage.setItem("wos.preferred-locale", locale);
+  if (!vi.isMockFunction(api.getNetworkThroughput)) {
+    vi.spyOn(api, "getNetworkThroughput").mockResolvedValue(network());
+  }
   return render(
     <I18nProvider>
       <FeedbackProvider>
@@ -121,8 +129,14 @@ describe("UserDashboardPage", () => {
     const activity = screen.getByRole("region", { name: "Activité torrents" });
     await waitFor(() => expect(within(activity).getAllByText("1", { selector: "dd" })).toHaveLength(3));
     expect(within(activity).getAllByText("1", { selector: "dd" })).toHaveLength(3);
-    expect(screen.getByText("Aucune récupération locale en cours")).toBeTruthy();
-    expect(screen.getByText("File locale à ce navigateur uniquement.")).toBeTruthy();
+    expect(screen.queryByText("Récupération locale")).toBeNull();
+    const networkCard = screen.getByRole("region", { name: "Vitesse réseau" });
+    expect(within(networkCard).getByText("Temps réel")).toBeTruthy();
+    expect(within(networkCard).getByText("Download")).toBeTruthy();
+    expect(within(networkCard).getByText("Upload")).toBeTruthy();
+    expect(within(networkCard).getByText("75 Mo/s")).toBeTruthy();
+    expect(within(networkCard).getByText("1,5 Mo/s")).toBeTruthy();
+    expect(within(networkCard).getAllByRole("img")).toHaveLength(2);
     expect((await screen.findAllByText("1 Ko disponibles")).length).toBeGreaterThan(0);
     expect(screen.getByText("2 Ko au total")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Mes téléchargements" })).toBeTruthy();
@@ -132,12 +146,13 @@ describe("UserDashboardPage", () => {
   it("isole les erreurs des cartouches et permet leur nouvelle tentative", async () => {
     const torrents = vi.spyOn(api, "listTorrentRequestsV2").mockRejectedValue(new Error("offline"));
     const storage = vi.spyOn(api, "getSharedStorageCapacity").mockRejectedValue(new Error("offline"));
+    vi.spyOn(api, "getNetworkThroughput").mockRejectedValue(new Error("offline"));
     const view = renderDashboard("en");
 
     expect(await screen.findByText("Torrent activity is temporarily unavailable.")).toBeTruthy();
     expect(screen.getByText("Storage is temporarily unavailable.")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "My downloads" })).toBeTruthy();
-    expect(screen.getByText("No local download in progress")).toBeTruthy();
+    expect(screen.getByText("Network throughput is temporarily unavailable.")).toBeTruthy();
     const retries = screen.getAllByRole("button", { name: "Try again" });
     await userEvent.click(retries[0]);
     await userEvent.click(retries[1]);
@@ -146,89 +161,42 @@ describe("UserDashboardPage", () => {
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
-  it("résume exactement les états locaux visibles sans inventer une file globale", () => {
-    const local = summarizeDownloadManager({
-      activeStreams: 1,
-      maxConcurrentStreams: 2,
-      waitingJobs: 0,
-      jobs: [localJob({
-        kind: "folder",
-        name: "Dossier",
-        downloadedBytes: 128,
-        totalBytes: 0,
-        completedFiles: 1,
-        fileCount: 4,
-        queue: [
-          { id: "a", relativePath: "active", status: "active", position: null },
-          { id: "b", relativePath: "waiting", status: "waiting", position: 1 },
-          { id: "c", relativePath: "waiting-2", status: "waiting", position: 2 },
-          { id: "d", relativePath: "done", status: "completed", position: null },
-        ],
-      })],
-    });
-    expect(local).toEqual({
-      active: 1,
-      completedFiles: 1,
-      fileCount: 4,
-      jobCount: 1,
-      kind: "folder",
-      maximum: 2,
-      status: "running",
-      waiting: 2,
-      name: "Dossier",
-      otherJobs: 0,
-      downloadedBytes: 128,
-      totalBytes: 0,
-      percent: 0,
-    });
-
-    const view = render(
-      <I18nProvider><LocalDownloadCard local={local} /></I18nProvider>,
-    );
-    expect(screen.getByText(/1 \/ 2 actifs/)).toBeTruthy();
-    expect(screen.getByText(/2 fichiers en attente/)).toBeTruthy();
-    expect(screen.getByText(/navigateur uniquement/)).toBeTruthy();
-    expect(view.container.textContent).not.toContain("globale");
-  });
-
-  it.each([
-    ["fichier actif", localJob(), "Film.mkv", "En cours"],
-    ["dossier actif", localJob({ kind: "folder", name: "Série", fileCount: 4, completedFiles: 2 }), "Série", "2 / 4 fichiers terminés"],
-    ["tâche en pause", localJob({ status: "paused" }), "Film.mkv", "En pause"],
-    ["tâche en erreur", localJob({ status: "error", error: "download_interrupted" }), "Film.mkv", "Erreur"],
-  ])("affiche le téléchargement local : %s", (_case, job, name, expected) => {
-    const summary = summarizeDownloadManager({
-      activeStreams: job.status === "running" ? 1 : 0,
-      maxConcurrentStreams: 2,
-      waitingJobs: 0,
-      jobs: [job],
-    });
-    const view = render(<I18nProvider><LocalDownloadCard local={summary} /></I18nProvider>);
-    expect(screen.getByText(name)).toBeTruthy();
-    expect(screen.getByText(expected)).toBeTruthy();
-    expect(screen.getByRole("progressbar").getAttribute("value")).toBe("50");
+  it("gère le chargement et l’absence de mesures sans bloquer le Dashboard", async () => {
+    let resolveNetwork: ((value: NetworkThroughput) => void) | undefined;
+    vi.spyOn(api, "getNetworkThroughput").mockImplementation(() => new Promise((resolve) => {
+      resolveNetwork = resolve;
+    }));
+    const view = renderDashboard();
+    expect(await screen.findByText("Lecture du débit réseau…")).toBeTruthy();
+    await act(async () => resolveNetwork?.(network({ status: "no_data", download: null, upload: null })));
+    expect(await screen.findByText("Mesures réseau indisponibles")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Mes téléchargements" })).toBeTruthy();
     view.unmount();
   });
 
-  it("actualise la tâche principale et résume les autres récupérations", () => {
-    const initial = summarizeDownloadManager({
-      activeStreams: 1,
-      maxConcurrentStreams: 2,
-      waitingJobs: 1,
-      jobs: [localJob(), localJob({ id: "job-2", name: "Suite.mkv", status: "queued" })],
-    });
-    const view = render(<I18nProvider><LocalDownloadCard local={initial} /></I18nProvider>);
-    expect(screen.getByText("1 autre(s) récupération(s) dans la file")).toBeTruthy();
+  it("rafraîchit le débit toutes les 15 secondes", async () => {
+    vi.useFakeTimers();
+    const loadNetwork = vi.spyOn(api, "getNetworkThroughput").mockResolvedValue(network());
+    const view = render(
+      <I18nProvider><NetworkThroughputCard onSessionExpired={vi.fn()} /></I18nProvider>,
+    );
+    await act(async () => Promise.resolve());
+    expect(loadNetwork).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(NETWORK_REFRESH_MS));
+    expect(loadNetwork).toHaveBeenCalledTimes(2);
+    view.unmount();
+    vi.useRealTimers();
+  });
 
-    const updated = summarizeDownloadManager({
-      activeStreams: 0,
-      maxConcurrentStreams: 2,
-      waitingJobs: 0,
-      jobs: [localJob({ status: "completed", downloadedBytes: 1024 })],
-    });
-    view.rerender(<I18nProvider><LocalDownloadCard local={updated} /></I18nProvider>);
-    expect(screen.getByText("Terminée")).toBeTruthy();
-    expect(screen.getByText("1 Ko / 1 Ko · 100 %")).toBeTruthy();
+  it.each(["light", "dark", "system"] as const)("conserve la carte réseau avec le thème %s", async (theme) => {
+    document.documentElement.dataset.theme = theme;
+    vi.spyOn(api, "getNetworkThroughput").mockResolvedValue(network());
+    const view = render(
+      <I18nProvider><NetworkThroughputCard onSessionExpired={vi.fn()} /></I18nProvider>,
+    );
+    expect(await screen.findByRole("region", { name: "Vitesse réseau" })).toBeTruthy();
+    view.unmount();
+    delete document.documentElement.dataset.theme;
   });
 
   it("annule l’agrégation au démontage", async () => {
@@ -242,11 +210,17 @@ describe("UserDashboardPage", () => {
         reject(new DOMException("aborted", "AbortError"));
       }));
     });
+    let networkSignal: AbortSignal | undefined;
+    vi.spyOn(api, "getNetworkThroughput").mockImplementation((signal) => {
+      networkSignal = signal;
+      return new Promise(() => undefined);
+    });
     const view = renderDashboard();
     await act(async () => Promise.resolve());
     expect(screen.getByText("Lecture de l’activité…")).toBeTruthy();
     expect(screen.getByText("Lecture du stockage…")).toBeTruthy();
     view.unmount();
     expect(capturedSignal?.aborted).toBe(true);
+    expect(networkSignal?.aborted).toBe(true);
   });
 });

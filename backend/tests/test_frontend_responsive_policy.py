@@ -45,6 +45,22 @@ def test_dashboard_title_uses_normal_page_background_in_every_theme() -> None:
     assert ".user-dashboard-header" not in review_fixes
 
 
+def test_dashboard_network_card_is_green_responsive_and_replaces_only_the_summary_card() -> None:
+    page = (REPOSITORY / "frontend/src/features/dashboard/UserDashboardPage.tsx").read_text()
+    styles = (REPOSITORY / "frontend/src/wos-2-1-final.css").read_text()
+
+    assert "export const NETWORK_REFRESH_MS = 15_000" in page
+    assert "<NetworkThroughputCard" in page
+    assert "LocalDownloadCard" not in page
+    assert 'className="network-throughput-grid"' in page
+    assert "className={`network-sparkline ${tone}`}" in page
+    assert ".network-throughput-direction.download" in styles
+    assert "#63e6a0" in styles
+    assert "#a1d979" in styles
+    assert "@media (max-width: 460px)" in styles
+    assert "prefers-reduced-motion: reduce" in styles
+
+
 def test_admin_finish_is_mobile_first_and_legacy_user_filesystem_ui_is_absent() -> None:
     admin_styles = (REPOSITORY / "frontend/src/features/admin/admin.css").read_text()
     shell = (REPOSITORY / "frontend/src/features/admin/AdminPageShell.tsx").read_text()

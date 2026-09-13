@@ -222,6 +222,11 @@ def _response(
         ),
         queue_total_estimate=(visible_queue.total_estimate if visible_queue is not None else None),
         queue_status=visible_queue.status if visible_queue is not None else None,
+        scheduler_retry_at=(
+            _utc_datetime(torrent.scheduler_retry_at)
+            if visible_queue is not None and visible_queue.status == "cooldown"
+            else None
+        ),
         created_at=request.created_at,
         updated_at=max(
             _required_utc_datetime(request.updated_at),

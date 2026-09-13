@@ -153,7 +153,7 @@ export function matchesTorrentFilter(torrent: TorrentRequestV2, filter: TorrentS
   if (!isVisibleTorrentRequest(torrent)) return false;
   if (filter === "all") return true;
   if (filter === "ready") return torrent.state === "ready";
-  if (filter === "waiting") return torrentRowStatus(torrent) === "waiting";
+  if (filter === "waiting") return ["waiting", "stalled", "cooldown"].includes(torrentRowStatus(torrent));
   return torrentRowStatus(torrent) === "downloading";
 }
 
@@ -161,22 +161,23 @@ export function isVisibleTorrentRequest(torrent: TorrentRequestV2): boolean {
   return torrent.state !== "cancelled" && torrent.state !== "expired";
 }
 
-export type TorrentRowStatus = "downloading" | "ready" | "waiting" | "error";
+export type TorrentRowStatus = "downloading" | "ready" | "waiting" | "stalled" | "cooldown" | "error";
 
 export function torrentRowStatus(torrent: TorrentRequestV2): TorrentRowStatus {
   if (torrent.state === "ready") return "ready";
   if (torrent.state === "error") return "error";
-  if (
-    torrent.state === "requested"
-    || torrent.queue_status === "waiting"
-    || torrent.queue_status === "cooldown"
-  ) return "waiting";
+  if (torrent.queue_status === "cooldown") return "cooldown";
+  if (torrent.queue_status === "stalled") return "stalled";
+  if (torrent.queue_status === "waiting" || torrent.state === "requested") return "waiting";
   return "downloading";
 }
 
 export function torrentQueueLabel(torrent: TorrentRequestV2): string {
   const status = torrentRowStatus(torrent);
-  if (status === "ready" || status === "error" || torrent.queue_position_estimate === null) return "-";
+  if (
+    !["waiting", "downloading"].includes(status)
+    || torrent.queue_position_estimate === null
+  ) return "-";
   return `#${torrent.queue_position_estimate}`;
 }
 
@@ -184,6 +185,8 @@ const rowStatusLabels: Record<TorrentRowStatus, MessageKey> = {
   downloading: "downloads.statusDownloading",
   ready: "downloads.statusReady",
   waiting: "downloads.statusWaiting",
+  stalled: "downloads.statusStalled",
+  cooldown: "downloads.statusCooldown",
   error: "downloads.statusError",
 };
 
@@ -560,6 +563,23 @@ function TorrentDirectoryBrowser({
   );
 }
 
+export function TorrentMetaCard({ torrent }: { torrent: TorrentRequestV2 }) {
+  const { formatDate, t } = useI18n();
+  return (
+    <div className="torrent-meta-card">
+      <div className="torrent-meta-item">
+        <span className="torrent-meta-label">{t("downloads.created")}</span>
+        <span className="torrent-meta-value">{formatDate(torrent.created_at, { dateStyle: "short", timeStyle: "short" })}</span>
+      </div>
+      <span className="torrent-meta-separator" aria-hidden="true" />
+      <div className="torrent-meta-item">
+        <span className="torrent-meta-label">{t("downloads.updated")}</span>
+        <span className="torrent-meta-value">{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</span>
+      </div>
+    </div>
+  );
+}
+
 function ReadyTorrentContent({
   manifest,
   transfers,
@@ -585,7 +605,7 @@ function ReadyTorrentContent({
   onRetry: () => void;
   torrent: TorrentRequestV2;
 }) {
-  const { formatBytes, formatDate, t } = useI18n();
+  const { formatBytes, t } = useI18n();
   const snapshot = manifest?.snapshot ?? null;
   const compatible = !supportsRecursiveDirectoryDownload();
   const folderBusy = transfers.some(
@@ -594,17 +614,7 @@ function ReadyTorrentContent({
   return (
     <section className="ready-content" aria-label={t("downloads.contentNamed", { name: torrent.name })}>
       <div className="torrent-ready-overview">
-        <div className="torrent-ready-meta-card">
-          <div className="torrent-ready-meta-item">
-            <span className="torrent-ready-meta-label">{t("downloads.created")}</span>
-            <span className="torrent-ready-meta-value">{formatDate(torrent.created_at, { dateStyle: "short", timeStyle: "short" })}</span>
-          </div>
-          <span className="torrent-ready-meta-separator" aria-hidden="true" />
-          <div className="torrent-ready-meta-item">
-            <span className="torrent-ready-meta-label">{t("downloads.updated")}</span>
-            <span className="torrent-ready-meta-value">{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</span>
-          </div>
-        </div>
+        <TorrentMetaCard torrent={torrent} />
         <div className="torrent-ready-content-card">
           <div>
             <h3>{t("downloads.content")}</h3>
@@ -696,6 +706,18 @@ function TorrentItem({
   const error = torrent.error_code === null
     ? null
     : t(torrent.error_code === "torrent_failed" ? "downloads.needsAttention" : "downloads.stateError");
+  const statusLabel = t(rowStatusLabels[rowStatus]);
+  const statusTooltip = rowStatus === "cooldown"
+    ? `${t("downloads.cooldownTooltip")}${torrent.scheduler_retry_at === null ? "" : ` ${t("downloads.cooldownRetryAt", { time: formatDate(torrent.scheduler_retry_at, { timeStyle: "short" }) })}`}`
+    : rowStatus === "stalled" ? t("downloads.stalledTooltip") : null;
+  const statusBadge = (
+    <Badge
+      tone={rowStatus === "ready" || rowStatus === "downloading" ? "success" : rowStatus === "error" ? "danger" : "warning"}
+      className={`torrent-primary-state ${rowStatus}`}
+    >
+      {statusLabel}
+    </Badge>
+  );
   return (
     <li className="torrent-accordion-item">
       <article className="torrent-accordion-card" aria-label={torrent.name}>
@@ -722,12 +744,17 @@ function TorrentItem({
                   <strong>{torrent.name}</strong>
                 </Tooltip>
                 <span className="torrent-summary-status">
-                  <Badge
-                    tone={rowStatus === "ready" ? "success" : rowStatus === "error" ? "danger" : rowStatus === "waiting" ? "warning" : "neutral"}
-                    className={`torrent-primary-state ${rowStatus}`}
-                  >
-                    {t(rowStatusLabels[rowStatus])}
-                  </Badge>
+                  {statusTooltip === null ? statusBadge : (
+                    <Tooltip content={statusTooltip} className="torrent-status-tooltip">
+                      <span
+                        className="torrent-status-tooltip-trigger"
+                        tabIndex={0}
+                        aria-label={`${statusLabel}. ${statusTooltip}`}
+                      >
+                        {statusBadge}
+                      </span>
+                    </Tooltip>
+                  )}
                   {torrent.state === "ready" && (
                     <SubscriptionExpiryIndicator
                       readyAt={torrent.ready_at}
@@ -796,10 +823,9 @@ function TorrentItem({
           )}
         >
           {torrent.state !== "ready" && (
-            <dl className="torrent-detail-grid torrent-detail-dates">
-              <div><dt>{t("downloads.created")}</dt><dd>{formatDate(torrent.created_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
-              <div><dt>{t("downloads.updated")}</dt><dd>{formatDate(torrent.updated_at, { dateStyle: "short", timeStyle: "short" })}</dd></div>
-            </dl>
+            <div className="torrent-non-ready-overview">
+              <TorrentMetaCard torrent={torrent} />
+            </div>
           )}
           {error !== null && <p className="torrent-detail-error" role="alert">{error}</p>}
           {details}
