@@ -182,15 +182,34 @@
 }
 
 .torrent-primary-state.downloading {
-  color: #83cfff !important;
-  border-color: rgba(79, 175, 237, 0.3) !important;
-  background: rgba(45, 128, 190, 0.16) !important;
+  color: #8ff0b7 !important;
+  border-color: rgba(67, 213, 129, 0.3) !important;
+  background: rgba(41, 164, 94, 0.16) !important;
 }
 
 .torrent-primary-state.waiting {
   color: #ffd16d !important;
   border-color: rgba(246, 189, 70, 0.28) !important;
   background: rgba(170, 122, 26, 0.15) !important;
+}
+
+.torrent-primary-state.stalled,
+.torrent-primary-state.cooldown {
+  color: #ffbf67 !important;
+  border-color: rgba(244, 159, 51, 0.32) !important;
+  background: rgba(176, 97, 19, 0.17) !important;
+}
+
+.torrent-status-tooltip,
+.torrent-status-tooltip-trigger {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.torrent-status-tooltip-trigger:focus-visible {
+  border-radius: 999px;
+  outline: 2px solid var(--wos-focus);
+  outline-offset: 2px;
 }
 
 .torrent-primary-state.error {
@@ -276,13 +295,17 @@
   white-space: nowrap;
 }
 
-.torrent-summary-progress.downloading .torrent-row-progress::-webkit-progress-value { background: #4eaee9; }
+.torrent-summary-progress.downloading .torrent-row-progress::-webkit-progress-value { background: #43d581; }
 .torrent-summary-progress.ready .torrent-row-progress::-webkit-progress-value { background: #43d581; }
-.torrent-summary-progress.waiting .torrent-row-progress::-webkit-progress-value { background: #efb943; }
+.torrent-summary-progress.waiting .torrent-row-progress::-webkit-progress-value,
+.torrent-summary-progress.stalled .torrent-row-progress::-webkit-progress-value,
+.torrent-summary-progress.cooldown .torrent-row-progress::-webkit-progress-value { background: #efb943; }
 .torrent-summary-progress.error .torrent-row-progress::-webkit-progress-value { background: #e85b67; }
-.torrent-summary-progress.downloading .torrent-row-progress::-moz-progress-bar { background: #4eaee9; }
+.torrent-summary-progress.downloading .torrent-row-progress::-moz-progress-bar { background: #43d581; }
 .torrent-summary-progress.ready .torrent-row-progress::-moz-progress-bar { background: #43d581; }
-.torrent-summary-progress.waiting .torrent-row-progress::-moz-progress-bar { background: #efb943; }
+.torrent-summary-progress.waiting .torrent-row-progress::-moz-progress-bar,
+.torrent-summary-progress.stalled .torrent-row-progress::-moz-progress-bar,
+.torrent-summary-progress.cooldown .torrent-row-progress::-moz-progress-bar { background: #efb943; }
 .torrent-summary-progress.error .torrent-row-progress::-moz-progress-bar { background: #e85b67; }
 
 .torrent-card-actions {

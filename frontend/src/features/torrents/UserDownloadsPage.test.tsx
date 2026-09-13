@@ -36,6 +36,7 @@ function torrent(overrides: Record<string, unknown> = {}) {
     queue_position_estimate: null,
     queue_total_estimate: null,
     queue_status: null,
+    scheduler_retry_at: null,
     created_at: "2026-08-20T10:00:00Z",
     updated_at: "2026-08-20T10:05:00Z",
     ...overrides,
@@ -95,16 +96,18 @@ describe("UserDownloadsPage", () => {
       torrent(overrides) as Parameters<typeof torrentRowStatus>[0];
 
     expect(torrentRowStatus(request({ state: "active", queue_status: "downloading" }))).toBe("downloading");
-    expect(torrentRowStatus(request({ state: "active", queue_status: "stalled" }))).toBe("downloading");
+    expect(torrentRowStatus(request({ state: "active", queue_status: "stalled" }))).toBe("stalled");
     expect(torrentRowStatus(request({ state: "ready" }))).toBe("ready");
     expect(torrentRowStatus(request({ state: "requested", queue_status: "waiting" }))).toBe("waiting");
-    expect(torrentRowStatus(request({ state: "active", queue_status: "cooldown" }))).toBe("waiting");
+    expect(torrentRowStatus(request({ state: "active", queue_status: "cooldown" }))).toBe("cooldown");
     expect(torrentRowStatus(request({ state: "error" }))).toBe("error");
     expect(isVisibleTorrentRequest(request({ state: "expired" }))).toBe(false);
     expect(isVisibleTorrentRequest(request({ state: "cancelled" }))).toBe(false);
 
     expect(torrentQueueLabel(request({ state: "requested", queue_position_estimate: 3 }))).toBe("#3");
     expect(torrentQueueLabel(request({ state: "ready", queue_position_estimate: 3 }))).toBe("-");
+    expect(torrentQueueLabel(request({ state: "active", queue_status: "stalled", queue_position_estimate: 3 }))).toBe("-");
+    expect(torrentQueueLabel(request({ state: "active", queue_status: "cooldown", queue_position_estimate: 3 }))).toBe("-");
     expect(torrentQueueLabel(request({ state: "active", queue_position_estimate: null }))).toBe("-");
     expect(matchesTorrentFilter(request({ state: "active", queue_status: "cooldown" }), "waiting")).toBe(true);
     expect(matchesTorrentFilter(request({ state: "active", queue_status: "cooldown" }), "active")).toBe(false);
@@ -164,12 +167,12 @@ describe("UserDownloadsPage", () => {
     await user.click(article.querySelector(".torrent-summary-size") as HTMLElement);
     expect(within(article).getByRole("button", { name: "Masquer les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("true");
     const readyOverview = article.querySelector(".torrent-ready-overview");
-    const readyMeta = article.querySelector(".torrent-ready-meta-card");
+    const readyMeta = article.querySelector(".torrent-meta-card");
     const readyContent = article.querySelector(".torrent-ready-content-card");
     expect(readyOverview).toBeTruthy();
     expect(Array.from(readyOverview?.children ?? [])).toEqual([readyMeta, readyContent]);
-    expect(readyMeta?.querySelectorAll(".torrent-ready-meta-item")).toHaveLength(2);
-    expect(readyMeta?.querySelector(".torrent-ready-meta-separator")).toBeTruthy();
+    expect(readyMeta?.querySelectorAll(".torrent-meta-item")).toHaveLength(2);
+    expect(readyMeta?.querySelector(".torrent-meta-separator")).toBeTruthy();
     expect(within(readyMeta as HTMLElement).getByText("Création")).toBeTruthy();
     expect(within(readyMeta as HTMLElement).getByText("Mise à jour")).toBeTruthy();
     await user.click(article.querySelector(".torrent-summary-size") as HTMLElement);
@@ -196,7 +199,28 @@ describe("UserDownloadsPage", () => {
     expect(within(article).getByRole("tooltip", { name: "Annuler" })).toBeTruthy();
     expect(within(article).getByRole("button", { name: "Actualiser « Film.mkv »" })).toBeTruthy();
     expect(within(article).getByRole("button", { name: "Annuler la demande Film.mkv" })).toBeTruthy();
+    await userEvent.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
+    const meta = article.querySelector(".torrent-meta-card");
+    expect(meta).toBeTruthy();
+    expect(meta?.querySelectorAll(".torrent-meta-item")).toHaveLength(2);
+    expect(meta?.querySelector(".torrent-meta-separator")).toBeTruthy();
+    expect(article.querySelector(".torrent-detail-dates")).toBeNull();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
+  it.each([
+    ["requested", "waiting"],
+    ["active", "downloading"],
+    ["error", null],
+  ] as const)("réutilise TorrentMetaCard pour l’état %s", async (state, queueStatus) => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({
+      items: [torrent({ state, queue_status: queueStatus })], offset: 0, limit: 25, total: 1,
+    })));
+    renderPage();
+    const article = await screen.findByRole("article", { name: "Film.mkv" });
+    await userEvent.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
+    expect(article.querySelectorAll(".torrent-meta-card")).toHaveLength(1);
+    expect(article.querySelector(".torrent-detail-dates")).toBeNull();
   });
 
   it("remplace le polling par les invalidations WebSocket et resynchronise après reconnexion", async () => {
@@ -370,8 +394,14 @@ describe("UserDownloadsPage", () => {
       torrent({ id: crypto.randomUUID(), name: "Lointain", queue_status: "waiting", queue_position_estimate: 158, queue_total_estimate: 1_005 }),
       torrent({ id: crypto.randomUUID(), name: "Très lointain", queue_status: "waiting", queue_position_estimate: 1_005, queue_total_estimate: 1_005 }),
       torrent({ id: crypto.randomUUID(), name: "Sélectionné", queue_status: "downloading" }),
-      torrent({ id: crypto.randomUUID(), name: "Sans sources", queue_status: "stalled" }),
-      torrent({ id: crypto.randomUUID(), name: "Nouvelle tentative", queue_status: "cooldown" }),
+      torrent({ id: crypto.randomUUID(), name: "Sans sources", queue_status: "stalled", queue_position_estimate: 7 }),
+      torrent({
+        id: crypto.randomUUID(),
+        name: "Nouvelle tentative",
+        queue_status: "cooldown",
+        queue_position_estimate: 8,
+        scheduler_retry_at: "2026-09-13T12:14:00Z",
+      }),
       torrent({
         id: crypto.randomUUID(),
         name: "Prêt",
@@ -394,8 +424,25 @@ describe("UserDownloadsPage", () => {
     expect(within(screen.getByRole("article", { name: "Lointain" })).getByText("#158")).toBeTruthy();
     expect(within(screen.getByRole("article", { name: "Très lointain" })).getByText("#1005")).toBeTruthy();
     expect(within(screen.getByRole("article", { name: "Sélectionné" })).getByText("Téléchargement")).toBeTruthy();
-    expect(within(screen.getByRole("article", { name: "Sans sources" })).getByText("Téléchargement")).toBeTruthy();
-    expect(within(screen.getByRole("article", { name: "Nouvelle tentative" })).getByText("En attente")).toBeTruthy();
+    const stalled = screen.getByRole("article", { name: "Sans sources" });
+    expect(within(stalled).getByText("En attente de sources")).toBeTruthy();
+    expect(within(stalled).getByText("-")).toBeTruthy();
+    expect(within(stalled).getByText(/ne reçoit actuellement aucune donnée/, {
+      selector: ".ui-tooltip-content",
+    })).toBeTruthy();
+    const cooldown = screen.getByRole("article", { name: "Nouvelle tentative" });
+    expect(within(cooldown).getByText("Nouvelle tentative", {
+      selector: ".torrent-primary-state",
+    })).toBeTruthy();
+    expect(within(cooldown).getByText("-")).toBeTruthy();
+    const cooldownTooltip = within(cooldown).getByText(/réessaiera automatiquement/, {
+      selector: ".ui-tooltip-content",
+    });
+    expect(cooldownTooltip.textContent).toContain(
+      new Intl.DateTimeFormat("fr-FR", { timeStyle: "short" }).format(
+        new Date("2026-09-13T12:14:00Z"),
+      ),
+    );
     expect(screen.getByText("1005 torrents en attente")).toBeTruthy();
     expect(screen.getByText("La position peut évoluer selon l’équité, la taille et la disponibilité.")).toBeTruthy();
     const readyCard = screen.getByRole("article", { name: "Prêt" });
@@ -845,7 +892,7 @@ describe("UserDownloadsPage", () => {
     expect(rootToggle.querySelector(".ready-directory-chevron")).toBeTruthy();
     expect(rootToggle.lastElementChild?.classList).toContain("ready-directory-chevron");
     const overview = content.querySelector(".torrent-ready-overview");
-    const metadataCard = content.querySelector(".torrent-ready-meta-card");
+    const metadataCard = content.querySelector(".torrent-meta-card");
     const contentCard = content.querySelector(".torrent-ready-content-card");
     expect(Array.from(overview?.children ?? [])).toEqual([metadataCard, contentCard]);
     expect(contentCard?.querySelector(".download-fallback-archive")?.textContent).toContain("Télécharger le ZIP");

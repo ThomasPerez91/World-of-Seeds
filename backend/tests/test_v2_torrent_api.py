@@ -217,6 +217,40 @@ async def test_shared_torrent_exposes_one_physical_estimate_without_owner_data(
 
 
 @pytest.mark.asyncio
+async def test_v2_listing_exposes_retry_time_only_during_cooldown(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    retry_at = datetime.now(UTC) + timedelta(hours=1)
+    managed = ManagedTorrent(
+        info_hash="8" * 40,
+        name="Cooling down",
+        total_size=100,
+        state=ManagedTorrentState.PAUSED,
+        scheduler_retry_at=retry_at,
+    )
+    db_session.add_all(
+        [
+            managed,
+            TorrentRequest(user=owner, managed_torrent=managed),
+        ]
+    )
+    await db_session.commit()
+    await login(client)
+
+    cooling = (await client.get("/api/v2/torrents")).json()["items"][0]
+    assert cooling["queue_status"] == "cooldown"
+    assert datetime.fromisoformat(cooling["scheduler_retry_at"]) == retry_at
+
+    managed.scheduler_retry_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db_session.commit()
+    waiting = (await client.get("/api/v2/torrents")).json()["items"][0]
+    assert waiting["queue_status"] == "waiting"
+    assert waiting["scheduler_retry_at"] is None
+
+
+@pytest.mark.asyncio
 async def test_v2_api_requires_authentication_csrf_and_valid_torrent(
     client: AsyncClient,
     db_session: AsyncSession,

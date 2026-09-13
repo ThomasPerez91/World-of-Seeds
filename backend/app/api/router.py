@@ -4,6 +4,7 @@ from app.api.routes import (
     admin,
     admin_v2,
     auth,
+    dashboard_v2,
     downloads_v2,
     health,
     metrics_v2,
@@ -25,6 +26,7 @@ api_router = build_api_router(runtime_profile="v1")
 
 api_v2_router = APIRouter()
 api_v2_router.include_router(admin_v2.router, prefix="/admin", tags=["administration-v2"])
+api_v2_router.include_router(dashboard_v2.router, prefix="/dashboard", tags=["dashboard-v2"])
 api_v2_router.include_router(downloads_v2.router, prefix="/downloads", tags=["downloads-v2"])
 api_v2_router.include_router(metrics_v2.router, prefix="/metrics", tags=["metrics-v2"])
 api_v2_router.include_router(storage_v2.router, prefix="/storage", tags=["storage-v2"])
