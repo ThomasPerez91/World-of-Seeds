@@ -63,7 +63,6 @@ async def get_network_throughput(
     ],
     period: Annotated[Literal["realtime"], Query()] = "realtime",
 ) -> NetworkThroughputResponse:
-    response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["Pragma"] = "no-cache"
     if prometheus is None:
         return NetworkThroughputResponse(status="unavailable")
