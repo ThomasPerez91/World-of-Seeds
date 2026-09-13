@@ -137,8 +137,7 @@ def _network_query(direction: Literal["receive", "transmit"]) -> str:
         '"device","$1","interface","(.*)")'
     )
     node = (
-        f'irate({node_metric}{{job="node-exporter",device!~"{excluded}"}}'
-        f"[{NETWORK_RATE_WINDOW}])"
+        f'irate({node_metric}{{job="node-exporter",device!~"{excluded}"}}[{NETWORK_RATE_WINDOW}])'
     )
     # node-exporter is intentionally isolated on the monitoring Docker network on Rise2.
     # Its network collector therefore sees that container namespace, not the host NICs.
