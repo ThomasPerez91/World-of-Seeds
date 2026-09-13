@@ -113,7 +113,9 @@ async def test_prometheus_falls_back_to_node_exporter_when_qb_metrics_are_missin
     assert snapshot.upload is not None and snapshot.upload.current_bytes_per_second == 512
     assert len(requests) == 4
     node_requests = [
-        request for request in requests if "wos_torrent_qb_global_" not in request.url.params["query"]
+        request
+        for request in requests
+        if "wos_torrent_qb_global_" not in request.url.params["query"]
     ]
     assert all("[1m]" in request.url.params["query"] for request in node_requests)
     assert all("device!~" in request.url.params["query"] for request in node_requests)
