@@ -53,7 +53,7 @@ def test_dashboard_network_card_is_green_responsive_and_replaces_only_the_summar
     assert "<NetworkThroughputCard" in page
     assert "LocalDownloadCard" not in page
     assert 'className="network-throughput-grid"' in page
-    assert 'className={`network-sparkline ${tone}`}' in page
+    assert "className={`network-sparkline ${tone}`}" in page
     assert ".network-throughput-direction.download" in styles
     assert "#63e6a0" in styles
     assert "#a1d979" in styles
