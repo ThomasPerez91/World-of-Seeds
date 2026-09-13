@@ -129,10 +129,7 @@ def _network_query(direction: Literal["receive", "transmit"]) -> str:
         r"^(lo|docker.*|br-[0-9a-f]+|veth.*|virbr.*|tun[0-9]*|tap[0-9]*|"
         r"wg[0-9]*|tailscale[0-9]*|cni.*|flannel.*|kube.*)$"
     )
-    return (
-        f'irate({metric}{{job="node-exporter",device!~"{excluded}"}}'
-        f'[{NETWORK_RATE_WINDOW}])'
-    )
+    return f'irate({metric}{{job="node-exporter",device!~"{excluded}"}}[{NETWORK_RATE_WINDOW}])'
 
 
 def _parse_matrix(payload: object) -> dict[str, tuple[NetworkSample, ...]]:
@@ -193,9 +190,7 @@ def _select_devices(
     if not candidates:
         return ()
 
-    aggregate = sorted(
-        device for device in candidates if device.lower().startswith(("bond", "br"))
-    )
+    aggregate = sorted(device for device in candidates if device.lower().startswith(("bond", "br")))
     if aggregate:
         return tuple(aggregate)
     return tuple(sorted(candidates))
