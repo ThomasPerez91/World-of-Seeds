@@ -141,9 +141,10 @@ def _network_query(direction: Literal["receive", "transmit"]) -> str:
     )
     # node-exporter is intentionally isolated on the monitoring Docker network on Rise2.
     # Its network collector therefore sees that container namespace, not the host NICs.
-    # cAdvisor exposes the host/root network namespace as id="/". Prefer the larger rate
-    # per device while retaining node-exporter as a compatibility fallback for local setups.
-    return f"max by (device) ({cadvisor} or {node})"
+    # cAdvisor exposes the host/root network namespace as id="/". Use node-exporter only
+    # when cAdvisor returns no host-network series at all; never mix both namespaces.
+    fallback = f"({node} unless on() {cadvisor})"
+    return f"max by (device) ({cadvisor} or {fallback})"
 
 
 def _parse_matrix(payload: object) -> dict[str, tuple[NetworkSample, ...]]:
