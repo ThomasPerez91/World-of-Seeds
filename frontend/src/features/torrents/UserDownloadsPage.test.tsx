@@ -1108,7 +1108,7 @@ describe("UserDownloadsPage", () => {
     await user.click(within(content).getByRole("button", { name: "Afficher plus de fichiers" }));
     expect(await within(content).findByText("2.bin")).toBeTruthy();
     expect(within(content).queryByRole("button", { name: "Afficher plus de fichiers" })).toBeNull();
-    expect(directoryUrls.some((candidate) => new URL(candidate, "https://wos.test").searchParams.get("offset") === "2")).toBe(true);
+    expect(directoryUrls.some((url) => new URL(url, "https://wos.test").searchParams.get("offset") === "2")).toBe(true);
   });
 
   it("conserve la pagination du manifeste si l’arborescence est indisponible", async () => {
@@ -1748,7 +1748,7 @@ describe("UserDownloadsPage", () => {
     expect(screen.getByRole("alert").textContent).toContain("intervention");
   });
 
-  it("annule directement une demande via l’API V2", async () => {
+  it("confirme en deux clics avant d’annuler une demande via l’API V2", async () => {
     const user = userEvent.setup();
     let cancelled = false;
     const calls: Array<{ method: string; url: string }> = [];
@@ -1774,7 +1774,12 @@ describe("UserDownloadsPage", () => {
 
     const article = await screen.findByRole("article", { name: "Film.mkv" });
     expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
-    await user.click(screen.getByRole("button", { name: "Annuler la demande Film.mkv" }));
+    const cancelButton = screen.getByRole("button", { name: "Annuler la demande Film.mkv" });
+    await user.click(cancelButton);
+    expect(calls.some(({ method }) => method === "DELETE")).toBe(false);
+    expect(cancelButton.getAttribute("aria-pressed")).toBe("true");
+    expect(cancelButton.querySelector(".lucide-check")).toBeTruthy();
+    await user.click(cancelButton);
     expect(await screen.findByText("La demande « Film.mkv » a été annulée.")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(await auditAccessibility(document.body)).toMatchObject({ violations: [] });
@@ -1809,7 +1814,12 @@ describe("UserDownloadsPage", () => {
     }));
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Supprimer « Film.mkv »" }));
+    const deleteButton = await screen.findByRole("button", { name: "Supprimer « Film.mkv »" });
+    await user.click(deleteButton);
+    expect(calls.some(({ method }) => method === "DELETE")).toBe(false);
+    expect(deleteButton.getAttribute("aria-pressed")).toBe("true");
+    expect(deleteButton.querySelector(".lucide-check")).toBeTruthy();
+    await user.click(deleteButton);
     expect(await screen.findByText("La demande « Film.mkv » a été annulée.")).toBeTruthy();
     expect(calls).toContainEqual({
       method: "DELETE",
