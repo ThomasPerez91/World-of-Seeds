@@ -1,10 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { DeleteIcon } from "./icons";
 
 describe("DeleteIcon", () => {
-  it("demande deux clics dans les actions torrent et remplace la poubelle par une validation", () => {
+  it("demande deux clics dans les actions torrent et laisse le second clic atteindre le bouton", async () => {
     const onClick = vi.fn();
     const view = render(
       <div className="torrent-card-actions">
@@ -14,17 +14,19 @@ describe("DeleteIcon", () => {
       </div>,
     );
     const button = screen.getByRole("button", { name: "Supprimer" });
+    const deleteIcon = view.container.querySelector(".lucide-trash-2");
+    expect(deleteIcon).toBeTruthy();
 
-    expect(view.container.querySelector(".lucide-trash-2")).toBeTruthy();
-    fireEvent.click(button);
+    fireEvent.click(deleteIcon as Element);
 
     expect(onClick).not.toHaveBeenCalled();
-    expect(view.container.querySelector(".lucide-check")).toBeTruthy();
+    const confirmIcon = view.container.querySelector(".lucide-check");
+    expect(confirmIcon).toBeTruthy();
     expect(button.getAttribute("aria-pressed")).toBe("true");
 
-    fireEvent.click(button);
+    fireEvent.click(confirmIcon as Element);
     expect(onClick).toHaveBeenCalledTimes(1);
-    expect(view.container.querySelector(".lucide-trash-2")).toBeTruthy();
+    await waitFor(() => expect(view.container.querySelector(".lucide-trash-2")).toBeTruthy());
   });
 
   it("annule la confirmation si le bouton perd le focus", () => {
