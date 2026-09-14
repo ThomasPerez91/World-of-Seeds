@@ -8,6 +8,7 @@ from app.auth.dependencies import (
     DbSession,
     get_auth_context,
     require_csrf,
+    require_current_credentials,
     require_current_credentials_csrf,
 )
 from app.auth.service import (
@@ -24,6 +25,7 @@ from app.auth.service import (
 from app.core.config import CSRF_COOKIE_NAME, Settings
 from app.schemas.auth import (
     AuthResponse,
+    AuthSeedResponse,
     ChangeCredentialsRequest,
     ChangeLocaleRequest,
     ChangePasswordRequest,
@@ -104,6 +106,16 @@ async def me(
     context: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> AuthResponse:
     return AuthResponse(user=UserResponse.model_validate(context.user))
+
+
+@router.get("/auth-seed", response_model=AuthSeedResponse)
+async def get_auth_seed(
+    response: Response,
+    context: Annotated[AuthContext, Depends(require_current_credentials)],
+) -> AuthSeedResponse:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return AuthSeedResponse(auth_seed=context.user.auth_seed)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

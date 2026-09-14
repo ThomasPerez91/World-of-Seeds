@@ -4,7 +4,19 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.2.2`.
+- Version applicative cible : `2.2.3`.
+
+## Release 2.2.3 — quota, auth seeds et API externe
+
+- quota global dynamique `WOS_MAX_USER_ACCOUNTS`, appliqué par un provisioning transactionnel
+  sérialisé sous PostgreSQL ;
+- seed base62 de 25 caractères pour chaque compte, backfill migratoire et consultation propriétaire
+  non cacheable ;
+- API tierce stable `/api/external/v1` avec clients hashés, scopes, idempotence, rate limiting,
+  création d’utilisateur et téléchargements isolés par seed ;
+- gestion des clients API et du quota dans l’administration, seed masquée dans les paramètres du
+  compte ;
+- contrat documenté dans `docs/external-api-v1.md`.
 - Production : Rise2.
 - Branche de production : `master`.
 - Branche d'intégration : `develop`.

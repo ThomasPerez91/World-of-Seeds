@@ -1419,6 +1419,21 @@ input::placeholder {
   font-weight: 760;
 }
 
+.auth-seed-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.auth-seed-value code {
+  min-width: min(100%, 20rem);
+  padding: 0.8rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+
 .settings-section-intro {
   margin: 0.35rem 0 0.9rem !important;
   color: var(--wos-muted) !important;

@@ -12,11 +12,13 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.auth.security import generate_auth_seed
 from app.models.base import Base, utc_now
 
 if TYPE_CHECKING:
@@ -30,6 +32,7 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     username: Mapped[str] = mapped_column(String(32), nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    auth_seed: Mapped[str] = mapped_column(String(25), default=generate_auth_seed, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     must_change_credentials: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -43,6 +46,8 @@ class User(Base):
 
     __table_args__ = (
         CheckConstraint("length(username) BETWEEN 3 AND 32", name="ck_users_username_length"),
+        CheckConstraint("length(auth_seed) = 25", name="ck_users_auth_seed_length"),
+        UniqueConstraint("auth_seed", name="uq_users_auth_seed"),
         CheckConstraint("preferred_locale IN ('fr', 'en')", name="ck_users_preferred_locale"),
         CheckConstraint(
             "preferred_theme IN ('light', 'dark', 'system')", name="ck_users_preferred_theme"
