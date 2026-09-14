@@ -67,6 +67,7 @@ class PrometheusNetworkClient:
             raise ValueError("unsupported network period")
         end = (now or datetime.now(UTC)).astimezone(UTC)
         start = end - NETWORK_HISTORY
+
         receive_query = _network_query("receive")
         transmit_query = _network_query("transmit")
         try:
@@ -79,11 +80,12 @@ class PrometheusNetworkClient:
 
         receive = _fresh_series(receive, end=end)
         transmit = _fresh_series(transmit, end=end)
-        device = _select_device(receive, transmit, configured=self._interface)
-        if device is None:
+        devices = _select_devices(receive, transmit, configured=self._interface)
+        if not devices:
             return NetworkThroughputSnapshot(status="no_data")
-        download = _direction(receive.get(device, ()))
-        upload = _direction(transmit.get(device, ()))
+
+        download = _aggregate_direction(receive, devices)
+        upload = _aggregate_direction(transmit, devices)
         if download is None and upload is None:
             return NetworkThroughputSnapshot(status="no_data")
         return NetworkThroughputSnapshot(
@@ -122,12 +124,27 @@ class PrometheusNetworkClient:
 
 
 def _network_query(direction: Literal["receive", "transmit"]) -> str:
-    metric = f"node_network_{direction}_bytes_total"
     excluded = (
         r"^(lo|docker.*|br-[0-9a-f]+|veth.*|virbr.*|tun[0-9]*|tap[0-9]*|"
         r"wg[0-9]*|tailscale[0-9]*|cni.*|flannel.*|kube.*)$"
     )
-    return f'rate({metric}{{job="node-exporter",device!~"{excluded}"}}[{NETWORK_RATE_WINDOW}])'
+    cadvisor_metric = f"container_network_{direction}_bytes_total"
+    node_metric = f"node_network_{direction}_bytes_total"
+    cadvisor = (
+        "label_replace("
+        f'irate({cadvisor_metric}{{job="cadvisor",id="/",interface!~"{excluded}"}}'
+        f"[{NETWORK_RATE_WINDOW}]),"
+        '"device","$1","interface","(.*)")'
+    )
+    node = (
+        f'irate({node_metric}{{job="node-exporter",device!~"{excluded}"}}[{NETWORK_RATE_WINDOW}])'
+    )
+    # node-exporter is intentionally isolated on the monitoring Docker network on Rise2.
+    # Its network collector therefore sees that container namespace, not the host NICs.
+    # cAdvisor exposes the host/root network namespace as id="/". Use node-exporter only
+    # when cAdvisor returns no host-network series at all; never mix both namespaces.
+    fallback = f"({node} unless on() {cadvisor})"
+    return f"max by (device) ({cadvisor} or {fallback})"
 
 
 def _parse_matrix(payload: object) -> dict[str, tuple[NetworkSample, ...]]:
@@ -176,28 +193,44 @@ def _parse_matrix(payload: object) -> dict[str, tuple[NetworkSample, ...]]:
     return parsed
 
 
-def _select_device(
+def _select_devices(
     receive: dict[str, tuple[NetworkSample, ...]],
     transmit: dict[str, tuple[NetworkSample, ...]],
     *,
     configured: str,
-) -> str | None:
+) -> tuple[str, ...]:
     candidates = set(receive) | set(transmit)
     if configured != "auto":
-        return configured if configured in candidates else None
+        return (configured,) if configured in candidates else ()
     if not candidates:
+        return ()
+
+    aggregate = sorted(device for device in candidates if device.lower().startswith(("bond", "br")))
+    if aggregate:
+        return tuple(aggregate)
+    return tuple(sorted(candidates))
+
+
+def _aggregate_direction(
+    series: dict[str, tuple[NetworkSample, ...]],
+    devices: tuple[str, ...],
+) -> NetworkDirection | None:
+    totals: dict[datetime, float] = {}
+    for device in devices:
+        for sample in series.get(device, ()):
+            totals[sample.timestamp] = (
+                totals.get(sample.timestamp, 0.0) + sample.value_bytes_per_second
+            )
+    if not totals:
         return None
-
-    def score(device: str) -> tuple[float, int, str]:
-        rx = receive.get(device, ())
-        tx = transmit.get(device, ())
-        current = (rx[-1].value_bytes_per_second if rx else 0) + (
-            tx[-1].value_bytes_per_second if tx else 0
-        )
-        aggregate_rank = int(device.lower().startswith(("bond", "br")))
-        return current, aggregate_rank, device
-
-    return max(candidates, key=score)
+    samples = tuple(
+        NetworkSample(timestamp=timestamp, value_bytes_per_second=value)
+        for timestamp, value in sorted(totals.items())
+    )
+    return NetworkDirection(
+        current_bytes_per_second=samples[-1].value_bytes_per_second,
+        samples=samples,
+    )
 
 
 def _fresh_series(
@@ -212,12 +245,3 @@ def _fresh_series(
         for device, samples in series.items()
         if samples and earliest <= samples[-1].timestamp <= latest
     }
-
-
-def _direction(samples: tuple[NetworkSample, ...]) -> NetworkDirection | None:
-    if not samples:
-        return None
-    return NetworkDirection(
-        current_bytes_per_second=samples[-1].value_bytes_per_second,
-        samples=samples,
-    )
