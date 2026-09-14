@@ -41,6 +41,24 @@ jobs:
               raise SystemExit("download notification effect anchor not found")
           source = source.replace(old, new, 1)
 
+          old = '''    const files = Array.from(fileList);\n    if (files.length === 0) return;'''
+          new = '''    const files = Array.from(fileList);\n    if (files.length === 0) return;\n    const isBatch = files.length > 1;'''
+          if old not in source:
+              raise SystemExit("batch size anchor not found")
+          source = source.replace(old, new, 1)
+
+          old = '''    const notifyResult = (result: UploadFileResult) => {\n      if (result.status === "added") {'''
+          new = '''    const notifyResult = (result: UploadFileResult) => {\n      if (isBatch) return;\n      if (result.status === "added") {'''
+          if old not in source:
+              raise SystemExit("upload notify anchor not found")
+          source = source.replace(old, new, 1)
+
+          old = '''    setUploading(false);\n    if (!sessionExpired) {\n      setOffset(0);'''
+          new = '''    setUploading(false);\n    if (isBatch && !sessionExpired) {\n      const counts = {\n        added: results.filter((result) => result.status === "added").length,\n        duplicate: results.filter((result) => result.status === "duplicate").length,\n        invalid: results.filter((result) => result.status === "invalid").length,\n        failed: results.filter((result) => result.status === "failed").length,\n      };\n      feedback.toast({\n        tone: counts.invalid + counts.failed > 0 || counts.duplicate > 0 ? "warning" : "success",\n        title: t("downloads.batchComplete"),\n        message: t("downloads.batchSummary", counts),\n        dedupeKey: false,\n      });\n    }\n    if (!sessionExpired) {\n      setOffset(0);'''
+          if old not in source:
+              raise SystemExit("batch completion anchor not found")
+          source = source.replace(old, new, 1)
+
           old = '''                      onPauseTransfer={(jobId) => managerRef.current?.pause(jobId)}\n                      onResumeTransfer={(jobId) => managerRef.current?.resume(jobId)}\n                      onCancelTransfer={(jobId) => managerRef.current?.cancel(jobId)}'''
           new = '''                      onPauseTransfer={(jobId) => {\n                        managerRef.current?.pause(jobId);\n                        feedback.toast({\n                          tone: "info",\n                          title: t("downloads.pauseRecovery"),\n                          message: t("downloads.localNamed", { name: torrent.name }),\n                          dedupeKey: false,\n                        });\n                      }}\n                      onResumeTransfer={(jobId) => {\n                        failedDownloadNotificationsRef.current.delete(jobId);\n                        managerRef.current?.resume(jobId);\n                        feedback.toast({\n                          tone: "info",\n                          title: t("downloads.resumeRecovery"),\n                          message: t("downloads.localNamed", { name: torrent.name }),\n                          dedupeKey: false,\n                        });\n                      }}\n                      onCancelTransfer={(jobId) => {\n                        managerRef.current?.cancel(jobId);\n                        feedback.toast({\n                          tone: "info",\n                          title: t("downloads.cancelRecovery"),\n                          message: t("downloads.localNamed", { name: torrent.name }),\n                          dedupeKey: false,\n                        });\n                      }}'''
           if old not in source:
@@ -67,6 +85,42 @@ jobs:
               raise SystemExit("language i18n anchors not found")
           source = source.replace(old_fr, new_fr, 1).replace(old_en, new_en, 1)
           path.write_text(source, encoding="utf-8")
+
+          path = Path("frontend/src/components/Feedback.test.tsx")
+          source = path.read_text(encoding="utf-8")
+          source = source.replace('''    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });\n    renderFeedback();\n    await user.click(screen.getByRole("button", { name: "Succès" }));''', '''    renderFeedback();\n    fireEvent.click(screen.getByRole("button", { name: "Succès" }));''')
+          source = source.replace('''    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });\n    renderFeedback();\n    const add = screen.getByRole("button", { name: "Unique" });\n    for (let index = 0; index < MAX_VISIBLE_TOASTS + 1; index += 1) await user.click(add);''', '''    renderFeedback();\n    const add = screen.getByRole("button", { name: "Unique" });\n    for (let index = 0; index < MAX_VISIBLE_TOASTS + 1; index += 1) fireEvent.click(add);''')
+          source = source.replace('''    await user.click(within(notifications).getAllByRole("button", { name: "Fermer" })[0]);''', '''    fireEvent.click(within(notifications).getAllByRole("button", { name: "Fermer" })[0]);''')
+          source = source.replace('''    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });\n    renderFeedback();\n    const trigger = screen.getByRole("button", { name: "Succès" });\n\n    await user.click(trigger);\n    await user.click(trigger);''', '''    renderFeedback();\n    const trigger = screen.getByRole("button", { name: "Succès" });\n\n    fireEvent.click(trigger);\n    fireEvent.click(trigger);''')
+          source = source.replace('''    await user.click(trigger);\n    expect(screen.getAllByText("Terminé.")).toHaveLength(2);''', '''    fireEvent.click(trigger);\n    expect(screen.getAllByText("Terminé.")).toHaveLength(2);''')
+          source = source.replace('''    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });\n    renderFeedback();\n\n    await user.click(screen.getByRole("button", { name: "Retry" }));\n    const retry = screen.getByRole("button", { name: "Réessayer" });\n    await user.click(retry);''', '''    renderFeedback();\n\n    fireEvent.click(screen.getByRole("button", { name: "Retry" }));\n    const retry = screen.getByRole("button", { name: "Réessayer" });\n    fireEvent.click(retry);''')
+          source = source.replace('''    await user.click(screen.getByRole("button", { name: "Persistant" }));''', '''    fireEvent.click(screen.getByRole("button", { name: "Persistant" }));''')
+          source = source.replace('''    await user.click(screen.getByRole("button", { name: "Mettre à jour" }));''', '''    fireEvent.click(screen.getByRole("button", { name: "Mettre à jour" }));''')
+          source = source.replace('''    await user.click(screen.getByRole("button", { name: "Fermer via API" }));''', '''    fireEvent.click(screen.getByRole("button", { name: "Fermer via API" }));''')
+          if 'userEvent.setup({ advanceTimers: vi.advanceTimersByTime })' in source:
+              raise SystemExit("fake-timer userEvent setup remains")
+          path.write_text(source, encoding="utf-8")
+
+          path = Path("frontend/src/features/torrents/UserDownloadsPage.test.tsx")
+          source = path.read_text(encoding="utf-8")
+          old = '''      await waitFor(() => expect(screen.getAllByText("Torrent ajouté")).toHaveLength(count));\n      expect(view.container.querySelector(".torrent-upload-batch")).toBeNull();\n      expect(postCount).toBe(count);'''
+          new = '''      await waitFor(() => expect(postCount).toBe(count));\n      if (count === 1) {\n        expect(screen.getByText("Torrent ajouté")).toBeTruthy();\n      } else {\n        expect(screen.getByText("Lot terminé")).toBeTruthy();\n        expect(screen.getByText(`${count} ajoutés · 0 déjà présents · 0 invalides · 0 en erreur`)).toBeTruthy();\n      }\n      expect(view.container.querySelector(".torrent-upload-batch")).toBeNull();\n      expect(postCount).toBe(count);'''
+          if old not in source:
+              raise SystemExit("batch concurrency test anchor not found")
+          source = source.replace(old, new, 1)
+
+          old = '''    await waitFor(() => expect(screen.getAllByText("Torrent ajouté")).toHaveLength(2));\n    expect(screen.getByText("Torrent déjà présent")).toBeTruthy();\n    expect(screen.getAllByText("Échec de l’ajout")).toHaveLength(3);'''
+          new = '''    await waitFor(() => expect(screen.getByText("Lot terminé")).toBeTruthy());\n    expect(screen.getByText("2 ajoutés · 1 déjà présents · 2 invalides · 1 en erreur")).toBeTruthy();'''
+          if old not in source:
+              raise SystemExit("mixed upload test anchor not found")
+          source = source.replace(old, new, 1)
+
+          old = '''    await waitFor(() => expect(screen.getAllByText("Torrent ajouté")).toHaveLength(2));\n    expect(successful).toEqual(["ok-before.torrent", "ok-after.torrent"]);\n    expect(screen.getAllByText("Échec de l’ajout")).toHaveLength(6);'''
+          new = '''    await waitFor(() => expect(screen.getByText("Lot terminé")).toBeTruthy());\n    expect(successful).toEqual(["ok-before.torrent", "ok-after.torrent"]);\n    expect(screen.getByText("2 ajoutés · 0 déjà présents · 0 invalides · 6 en erreur")).toBeTruthy();'''
+          if old not in source:
+              raise SystemExit("classified upload test anchor not found")
+          source = source.replace(old, new, 1)
+          path.write_text(source, encoding="utf-8")
           PY
           git diff --check
 
@@ -90,7 +144,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/toast-v221-action-feedback-prep.yml
-          git add frontend/src/App.tsx frontend/src/i18n.tsx frontend/src/features/torrents/UserDownloadsPage.tsx
+          git add frontend/src/App.tsx frontend/src/i18n.tsx frontend/src/features/torrents/UserDownloadsPage.tsx frontend/src/features/torrents/UserDownloadsPage.test.tsx frontend/src/components/Feedback.test.tsx
           git diff --cached --check
           git commit -m "fix(frontend): complete explicit action toast feedback"
           git push origin HEAD:fix/toast-system-v2.2.1
