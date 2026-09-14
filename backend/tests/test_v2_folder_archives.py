@@ -208,6 +208,13 @@ async def test_subfolder_manifest_is_paginated_and_rebases_only_the_selected_sub
             "snapshot": root["snapshot_id"],
         },
     )
+    escaped_prefix = await client.get(
+        base,
+        params={
+            "path": "Bonus %_Été",
+            "snapshot": root["snapshot_id"],
+        },
+    )
 
     assert first.status_code == 200
     assert second.status_code == 200
@@ -215,6 +222,10 @@ async def test_subfolder_manifest_is_paginated_and_rebases_only_the_selected_sub
     assert first.json()["total_size"] == 6
     assert first.json()["items"][0]["relative_path"] == "Saison 1/Episode 1.mkv"
     assert second.json()["items"][0]["relative_path"] == "Saison 1/Épisode 2 %.mkv"
+    assert escaped_prefix.status_code == 200
+    assert escaped_prefix.json()["file_count"] == 1
+    assert escaped_prefix.json()["total_size"] == 1
+    assert escaped_prefix.json()["items"][0]["relative_path"] == "Bonus %_Été/A.txt"
     assert first.json()["snapshot_id"] == root["snapshot_id"]
 
 

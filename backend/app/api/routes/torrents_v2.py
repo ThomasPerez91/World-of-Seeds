@@ -330,29 +330,19 @@ async def get_torrent_download_manifest(
             "Le téléchargement est momentanément indisponible.",
         )
     if path_parts:
-        all_files = tuple(
-            (
-                await db.scalars(
-                    select(TorrentFile)
-                    .where(TorrentFile.managed_torrent_id == managed_torrent.id)
-                    .order_by(TorrentFile.file_index)
-                )
-            ).all()
+        subtree_prefix = f"{'/'.join(path_parts)}/"
+        subtree_filter = (
+            TorrentFile.managed_torrent_id == managed_torrent.id,
+            TorrentFile.relative_path.startswith(subtree_prefix, autoescape=True),
         )
-        if len(all_files) != managed_torrent.manifest_file_count:
-            await db.rollback()
-            _fail(
-                status.HTTP_409_CONFLICT,
-                "download_snapshot_changed",
-                "Le contenu a changé. Relance le téléchargement.",
+        selected_count, selected_size = (
+            await db.execute(
+                select(
+                    func.count(TorrentFile.id), func.coalesce(func.sum(TorrentFile.size), 0)
+                ).where(*subtree_filter)
             )
-        selected_files = tuple(
-            item
-            for item in all_files
-            if (parts := PurePosixPath(item.relative_path).parts)[: len(path_parts)] == path_parts
-            and len(parts) > len(path_parts)
-        )
-        if not selected_files:
+        ).one()
+        if selected_count == 0:
             await db.rollback()
             _fail(
                 status.HTTP_404_NOT_FOUND,
@@ -360,13 +350,32 @@ async def get_torrent_download_manifest(
                 "Ce dossier est introuvable ou vide.",
                 "path",
             )
+        page_files = tuple(
+            (
+                await db.scalars(
+                    select(TorrentFile)
+                    .where(*subtree_filter)
+                    .order_by(TorrentFile.file_index)
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ).all()
+        )
+        expected_count = min(limit, max(0, selected_count - offset))
+        if len(page_files) != expected_count:
+            await db.rollback()
+            _fail(
+                status.HTTP_409_CONFLICT,
+                "download_snapshot_changed",
+                "Le contenu a changé. Relance le téléchargement.",
+            )
         root_name = path_parts[-1]
         response_files = tuple(
             (
                 item,
-                "/".join((root_name, *PurePosixPath(item.relative_path).parts[len(path_parts) :])),
+                f"{root_name}/{item.relative_path[len(subtree_prefix) :]}",
             )
-            for item in selected_files
+            for item in page_files
         )
     else:
         files = tuple(
@@ -389,13 +398,8 @@ async def get_torrent_download_manifest(
                 "Le contenu a changé. Relance le téléchargement.",
             )
         response_files = tuple((item, item.relative_path) for item in files)
-    selected_count = len(response_files) if path_parts else managed_torrent.manifest_file_count
-    selected_size = (
-        sum(item.size for item, _relative_path in response_files)
-        if path_parts
-        else managed_torrent.manifest_total_size
-    )
-    page_files = response_files[offset : offset + limit] if path_parts else response_files
+        selected_count = managed_torrent.manifest_file_count
+        selected_size = managed_torrent.manifest_total_size
     response = TorrentDownloadManifestResponse(
         snapshot_id=snapshot_id,
         manifest_version=managed_torrent.manifest_version,
@@ -414,7 +418,7 @@ async def get_torrent_download_manifest(
                 relative_path=relative_path,
                 size=item.size,
             )
-            for item, relative_path in page_files
+            for item, relative_path in response_files
         ],
     )
     await db.rollback()
