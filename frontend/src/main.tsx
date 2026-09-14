@@ -10,7 +10,7 @@ import wos21StylesheetUrl from "./wos-2-1.css?url";
 import wos21FinalStylesheetUrl from "./wos-2-1-final.css?url";
 import "./styles.css";
 import "./features/admin/admin.css";
-import "./toast-system.css";
+import toastSystemStylesheetUrl from "./toast-system.css?url";
 
 function appendStylesheet(href: string, marker: string) {
   const stylesheet = document.createElement("link");
@@ -26,6 +26,7 @@ appendStylesheet(premiumTorrentStylesheetUrl, "premium-torrent-layout");
 appendStylesheet(premiumReviewFixesStylesheetUrl, "premium-review-fixes");
 appendStylesheet(wos21StylesheetUrl, "wos-2-1-branding");
 appendStylesheet(wos21FinalStylesheetUrl, "wos-2-1-final-polish");
+appendStylesheet(toastSystemStylesheetUrl, "toast-system");
 
 const root = document.getElementById("root");
 
