@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.0.0` ;
+- version stable : `2.2.2` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -227,7 +227,9 @@ Etat du dernier déploiement :
 - Refuser chemins absolus, `..`, évasions de racine et traversées de symlinks lors de toute résolution filesystem.
 - Les ouvertures sensibles utilisent des résolutions sûres/descripteurs et `O_NOFOLLOW` lorsque prévu par les primitives de téléchargement.
 - Ne jamais résoudre un problème de permissions avec `chmod 777`.
+- Les téléchargements READY privilégient la File System Access API pour reconstruire localement les dossiers ; le ZIP reste un fallback de compatibilité pour les navigateurs sans `showDirectoryPicker()`.
 - Les téléchargements READY doivent conserver les contrôles Range, leases, limites de concurrence et validation du manifeste.
+- Le plafond de flux simultanés par utilisateur s'applique aux comptes standards. Les administrateurs en sont exemptés, mais conservent une lease par flux et restent soumis aux rate limits et protections globales.
 - Les noms longs et chemins imbriqués ne doivent pas provoquer de débordement horizontal mobile.
 
 ## Torrent et sécurité tracker
@@ -310,6 +312,8 @@ L'interface torrent charge un état PostgreSQL autoritaire puis reçoit des év�
 - un WebSocket idle ne doit pas maintenir de session SQL.
 
 Les téléchargements récursifs utilisent un manifeste paginé/progressif et une concurrence bornée. Ne pas attendre un manifeste énorme complet avant de démarrer les premiers fichiers.
+
+La taille des lots `.torrent` reste limitée côté interface pour les comptes standards. Un administrateur peut déposer un lot de taille quelconque, mais le pipeline conserve une concurrence technique d'upload bornée afin de ne pas ouvrir une requête par fichier simultanément.
 
 Conserver ces mécanismes dans le Dashboard/les accordéons au lieu de créer un second système de suivi parallèle.
 

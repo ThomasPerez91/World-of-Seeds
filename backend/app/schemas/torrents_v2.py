@@ -36,7 +36,8 @@ class TorrentRequestV2ListingResponse(BaseModel):
 
 
 class TorrentDownloadPolicyResponse(BaseModel):
-    max_concurrent_streams: int = Field(ge=1, le=20)
+    max_concurrent_streams: int | None = Field(default=None, ge=1, le=20)
+    unlimited: bool
 
 
 class TorrentDownloadFileResponse(BaseModel):

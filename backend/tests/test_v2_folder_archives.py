@@ -180,6 +180,45 @@ async def test_directory_listing_uses_manifest_summaries_and_supports_nested_par
 
 
 @pytest.mark.asyncio
+async def test_subfolder_manifest_is_paginated_and_rebases_only_the_selected_subtree(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    request, _ = await _folder_torrent(db_session, data_root)
+    await _login(client)
+    base = f"/api/v2/torrents/{request.id}/download-manifest"
+    root = (await client.get(base)).json()
+
+    first = await client.get(
+        base,
+        params={
+            "path": "Saison 1",
+            "offset": 0,
+            "limit": 1,
+            "snapshot": root["snapshot_id"],
+        },
+    )
+    second = await client.get(
+        base,
+        params={
+            "path": "Saison 1",
+            "offset": 1,
+            "limit": 1,
+            "snapshot": root["snapshot_id"],
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["file_count"] == 2
+    assert first.json()["total_size"] == 6
+    assert first.json()["items"][0]["relative_path"] == "Saison 1/Episode 1.mkv"
+    assert second.json()["items"][0]["relative_path"] == "Saison 1/Épisode 2 %.mkv"
+    assert first.json()["snapshot_id"] == root["snapshot_id"]
+
+
+@pytest.mark.asyncio
 async def test_folder_zip_selects_exact_subtree_and_preserves_requested_root(
     client: AsyncClient,
     db_session: AsyncSession,
