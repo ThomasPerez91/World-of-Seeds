@@ -106,7 +106,7 @@ export function DeleteIcon(props: AppIconProps) {
 
     const handleClick = (event: MouseEvent) => {
       if (armed) {
-        setArmed(false);
+        window.setTimeout(() => setArmed(false), 0);
         return;
       }
       event.preventDefault();
