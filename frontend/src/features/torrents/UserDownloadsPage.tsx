@@ -857,7 +857,9 @@ export function UserDownloadsPage({
   const [managerSnapshot, setManagerSnapshot] = useState<BrowserDownloadManagerSnapshot>(EMPTY_MANAGER_SNAPSHOT);
   const loadGenerationRef = useRef(0);
   const managerRef = useRef<BrowserDownloadManager | null>(null);
+  const startedDownloadNotificationsRef = useRef(new Set<string>());
   const completedDownloadNotificationsRef = useRef(new Set<string>());
+  const failedDownloadNotificationsRef = useRef(new Set<string>());
   if (managerRef.current === null) {
     managerRef.current = new BrowserDownloadManager(
       DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
@@ -877,9 +879,35 @@ export function UserDownloadsPage({
 
   useEffect(() => {
     for (const job of managerSnapshot.jobs) {
+      if (
+        ["queued", "running"].includes(job.status)
+        && !startedDownloadNotificationsRef.current.has(job.id)
+      ) {
+        startedDownloadNotificationsRef.current.add(job.id);
+        feedback.toast({
+          tone: "info",
+          title: t("downloads.localRecovery"),
+          message: t("downloads.preparing", { name: job.name }),
+          dedupeKey: false,
+        });
+      }
+      if (job.status === "error" && !failedDownloadNotificationsRef.current.has(job.id)) {
+        failedDownloadNotificationsRef.current.add(job.id);
+        feedback.toast({
+          tone: "error",
+          title: t("downloads.localStatus.error"),
+          message: t("downloads.failed"),
+          dedupeKey: false,
+        });
+      }
       if (job.status !== "completed" || completedDownloadNotificationsRef.current.has(job.id)) continue;
       completedDownloadNotificationsRef.current.add(job.id);
-      feedback.toast({ tone: "success", message: t("downloads.completed", { name: job.name }) });
+      feedback.toast({
+        tone: "success",
+        title: t("downloads.localStatus.completed"),
+        message: t("downloads.completed", { name: job.name }),
+        dedupeKey: false,
+      });
     }
   }, [feedback, managerSnapshot.jobs, t]);
 
@@ -1082,6 +1110,7 @@ export function UserDownloadsPage({
     if (uploading) return;
     const files = Array.from(fileList);
     if (files.length === 0) return;
+    const isBatch = files.length > 1;
     if (files.length > MAX_TORRENT_BATCH_FILES) {
       feedback.toast({ tone: "error", message: t("downloads.batchTooLarge", { count: MAX_TORRENT_BATCH_FILES }) });
       if (inputRef.current !== null) inputRef.current.value = "";
@@ -1109,6 +1138,7 @@ export function UserDownloadsPage({
     if (inputRef.current !== null) inputRef.current.value = "";
 
     const notifyResult = (result: UploadFileResult) => {
+      if (isBatch) return;
       if (result.status === "added") {
         feedback.toast({ tone: "success", title: t("downloads.uploadSuccessTitle"), message: result.name });
       } else if (result.status === "duplicate") {
@@ -1176,6 +1206,20 @@ export function UserDownloadsPage({
       () => worker(),
     ));
     setUploading(false);
+    if (isBatch && !sessionExpired) {
+      const counts = {
+        added: results.filter((result) => result.status === "added").length,
+        duplicate: results.filter((result) => result.status === "duplicate").length,
+        invalid: results.filter((result) => result.status === "invalid").length,
+        failed: results.filter((result) => result.status === "failed").length,
+      };
+      feedback.toast({
+        tone: counts.invalid + counts.failed > 0 || counts.duplicate > 0 ? "warning" : "success",
+        title: t("downloads.batchComplete"),
+        message: t("downloads.batchSummary", counts),
+        dedupeKey: false,
+      });
+    }
     if (!sessionExpired) {
       setOffset(0);
       await load(0);
@@ -1476,9 +1520,34 @@ export function UserDownloadsPage({
                         if (firstPage !== null && firstPage !== undefined) void startRecursiveDownload(torrent, firstPage);
                       }}
                       onDownloadFile={(file, snapshot) => void startManagedFileDownload(torrent, snapshot, file)}
-                      onPauseTransfer={(jobId) => managerRef.current?.pause(jobId)}
-                      onResumeTransfer={(jobId) => managerRef.current?.resume(jobId)}
-                      onCancelTransfer={(jobId) => managerRef.current?.cancel(jobId)}
+                      onPauseTransfer={(jobId) => {
+                        managerRef.current?.pause(jobId);
+                        feedback.toast({
+                          tone: "info",
+                          title: t("downloads.pauseRecovery"),
+                          message: t("downloads.localNamed", { name: torrent.name }),
+                          dedupeKey: false,
+                        });
+                      }}
+                      onResumeTransfer={(jobId) => {
+                        failedDownloadNotificationsRef.current.delete(jobId);
+                        managerRef.current?.resume(jobId);
+                        feedback.toast({
+                          tone: "info",
+                          title: t("downloads.resumeRecovery"),
+                          message: t("downloads.localNamed", { name: torrent.name }),
+                          dedupeKey: false,
+                        });
+                      }}
+                      onCancelTransfer={(jobId) => {
+                        managerRef.current?.cancel(jobId);
+                        feedback.toast({
+                          tone: "info",
+                          title: t("downloads.cancelRecovery"),
+                          message: t("downloads.localNamed", { name: torrent.name }),
+                          dedupeKey: false,
+                        });
+                      }}
                       onCloseTransfer={(jobId) => managerRef.current?.remove(jobId)}
                     />
                   ) : undefined}
