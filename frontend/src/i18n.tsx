@@ -1164,6 +1164,10 @@ function interpolate(template: string, params: Params = {}): string {
   );
 }
 
+export function translate(locale: Locale, key: MessageKey, params?: Params): string {
+  return interpolate(messages[locale][key], params);
+}
+
 const apiErrorKeys: Record<string, MessageKey> = {
   authentication_failed: "login.failed",
   authentication_throttled: "login.throttled",
