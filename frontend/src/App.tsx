@@ -27,7 +27,7 @@ import { UI_VERSION } from "./uiVersion";
 import { FeedbackProvider } from "./components/Feedback";
 import { useFeedback } from "./components/Feedback";
 import { I18nProvider, translate, useI18n, type Locale } from "./i18n";
-import { Eye, EyeOff, LockKeyhole, LogOut, UserRound } from "lucide-react";
+import { Copy, Eye, EyeOff, LockKeyhole, LogOut, UserRound } from "lucide-react";
 
 type AuthState =
   | { status: "loading" }
@@ -444,13 +444,12 @@ function AccountSettingsPage({
   const [passwordError, setPasswordError] = useState("");
   const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const [username, setUsername] = useState(user.username);
-  const [activeSection, setActiveSection] = useState<"general" | "security">("general");
+  const [activeSection, setActiveSection] = useState<"general" | "security" | "secrets">("general");
   const [authSeed, setAuthSeed] = useState<string | null>(null);
-  const [authSeedVisible, setAuthSeedVisible] = useState(false);
   const [authSeedLoading, setAuthSeedLoading] = useState(false);
 
   useEffect(() => {
-    if (activeSection !== "security" || authSeed !== null) return;
+    if (activeSection !== "secrets" || authSeed !== null) return;
     let active = true;
     setAuthSeedLoading(true);
     void api
@@ -547,6 +546,7 @@ function AccountSettingsPage({
         navigation={[
           { view: "general", label: t("settings.general") },
           { view: "security", label: t("settings.security") },
+          { view: "secrets", label: t("settings.secrets") },
         ]}
         navigationLabel={t("settings.navigation")}
         onNavigate={setActiveSection}
@@ -557,35 +557,6 @@ function AccountSettingsPage({
                 <h2 id="settings-general-title">{t("settings.general")}</h2>
                 <p>{t("settings.generalIntro")}</p>
               </header>
-              <div className="settings-subsection auth-seed-section">
-                <h3>{t("account.authSeed")}</h3>
-                <p className="settings-section-intro">{t("account.authSeedHint")}</p>
-                <div className="auth-seed-value">
-                  <code aria-live="polite">
-                    {authSeedLoading
-                      ? t("common.loading")
-                      : authSeedVisible && authSeed !== null
-                        ? authSeed
-                        : "•••••••••••••••••••••••••"}
-                  </code>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={authSeed === null}
-                    onClick={() => setAuthSeedVisible((visible) => !visible)}
-                  >
-                    {authSeedVisible ? t("account.hideAuthSeed") : t("account.showAuthSeed")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={authSeed === null}
-                    onClick={() => void copyAuthSeed()}
-                  >
-                    {t("admin.copy")}
-                  </Button>
-                </div>
-              </div>
               <div className="settings-subsection">
                 <h3 id="preferences-title">{t("preferences.title")}</h3>
                 <p className="settings-section-intro">{t("preferences.intro")}</p>
@@ -613,7 +584,7 @@ function AccountSettingsPage({
                 </form>
               </div>
             </section>
-          ) : (
+          ) : activeSection === "security" ? (
             <section className="settings-panel" aria-labelledby="settings-security-title">
               <header className="settings-panel-header">
                 <h2 id="settings-security-title">{t("settings.security")}</h2>
@@ -654,6 +625,37 @@ function AccountSettingsPage({
                     {passwordSubmitting ? t("common.processing") : t("account.updatePassword")}
                   </Button>
                 </form>
+              </div>
+            </section>
+          ) : (
+            <section className="settings-panel" aria-labelledby="settings-secrets-title">
+              <header className="settings-panel-header">
+                <h2 id="settings-secrets-title">{t("settings.secrets")}</h2>
+                <p>{t("settings.secretsIntro")}</p>
+              </header>
+              <div className="settings-subsection auth-seed-section">
+                <label htmlFor="account-auth-seed">{t("account.authSeed")}</label>
+                <p className="settings-section-intro">{t("account.authSeedHint")}</p>
+                <div className="auth-seed-input">
+                  <input
+                    id="account-auth-seed"
+                    type="text"
+                    value={authSeed ?? ""}
+                    placeholder={authSeedLoading ? t("common.loading") : ""}
+                    readOnly
+                    aria-busy={authSeedLoading}
+                  />
+                  <button
+                    type="button"
+                    className="auth-seed-copy"
+                    aria-label={t("account.copyAuthSeed")}
+                    title={t("account.copyAuthSeed")}
+                    disabled={authSeed === null}
+                    onClick={() => void copyAuthSeed()}
+                  >
+                    <Copy aria-hidden="true" />
+                  </button>
+                </div>
               </div>
             </section>
           )}
