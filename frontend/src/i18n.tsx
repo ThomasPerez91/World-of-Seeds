@@ -27,6 +27,7 @@ const messages = {
     "language.fr": "Français",
     "language.en": "English",
     "language.saveFailed": "La préférence de langue n’a pas pu être enregistrée.",
+    "language.saved": "Préférence de langue enregistrée.",
     "common.cancel": "Annuler",
     "common.close": "Fermer",
     "common.retry": "Réessayer",
@@ -578,6 +579,7 @@ const messages = {
     "language.fr": "Français",
     "language.en": "English",
     "language.saveFailed": "The language preference could not be saved.",
+    "language.saved": "Language preference saved.",
     "common.cancel": "Cancel",
     "common.close": "Close",
     "common.retry": "Try again",
@@ -1160,6 +1162,10 @@ function interpolate(template: string, params: Params = {}): string {
   return template.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (match, key: string) =>
     Object.hasOwn(params, key) ? String(params[key]) : match,
   );
+}
+
+export function translate(locale: Locale, key: MessageKey, params?: Params): string {
+  return interpolate(messages[locale][key], params);
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {

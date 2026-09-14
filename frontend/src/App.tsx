@@ -26,7 +26,7 @@ import { Button, Card, Badge, StateMessage } from "./components/ui";
 import { UI_VERSION } from "./uiVersion";
 import { FeedbackProvider } from "./components/Feedback";
 import { useFeedback } from "./components/Feedback";
-import { I18nProvider, useI18n, type Locale } from "./i18n";
+import { I18nProvider, translate, useI18n, type Locale } from "./i18n";
 import { Eye, EyeOff, LockKeyhole, LogOut, UserRound } from "lucide-react";
 
 type AuthState =
@@ -431,6 +431,7 @@ function AccountSettingsPage({
     setLocaleSaving(true);
     try {
       onChanged(await api.changeLocale(locale));
+      feedback.toast({ tone: "success", message: translate(locale, "language.saved") });
     } catch {
       setLocale(user.preferred_locale ?? "fr");
       feedback.toast({ tone: "error", message: t("language.saveFailed") });

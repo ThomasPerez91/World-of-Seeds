@@ -466,6 +466,8 @@ describe("App", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
 
     await screen.findByRole("heading", { name: "Account settings" });
+    expect(await screen.findByText("Language preference saved.")).toBeTruthy();
+    expect(screen.queryByText("Préférence de langue enregistrée.")).toBeNull();
     expect(screen.getByRole("button", { name: "General" }).getAttribute("aria-current")).toBe("page");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/locale",
