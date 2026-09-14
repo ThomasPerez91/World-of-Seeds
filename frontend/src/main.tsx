@@ -10,6 +10,7 @@ import wos21StylesheetUrl from "./wos-2-1.css?url";
 import wos21FinalStylesheetUrl from "./wos-2-1-final.css?url";
 import "./styles.css";
 import "./features/admin/admin.css";
+import "./toast-system.css";
 
 function appendStylesheet(href: string, marker: string) {
   const stylesheet = document.createElement("link");
