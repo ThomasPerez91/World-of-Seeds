@@ -60,3 +60,14 @@ class UserStatusRequest(BaseModel):
 class GeneratedCredentialsResponse(BaseModel):
     user: UserResponse
     initial_password: str
+    auth_seed: str = Field(min_length=25, max_length=25)
+
+
+class AuthSeedResponse(BaseModel):
+    auth_seed: str = Field(min_length=25, max_length=25)
+
+
+class UserQuotaResponse(BaseModel):
+    used: int = Field(ge=0)
+    maximum: int = Field(gt=0)
+    reached: bool

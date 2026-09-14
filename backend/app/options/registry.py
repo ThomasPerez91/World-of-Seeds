@@ -109,6 +109,16 @@ def _text(
 
 OPTION_SPECS: tuple[OptionSpec, ...] = (
     _integer(
+        "WOS_MAX_USER_ACCOUNTS",
+        "Nombre maximal de comptes",
+        "Nombre maximal de comptes utilisateurs pouvant exister simultanément dans World of Seeds.",
+        100,
+        "security",
+        minimum=1,
+        maximum=100_000,
+        unit="count",
+    ),
+    _integer(
         "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
         "Débit maximal par utilisateur",
         "Plafond de téléchargement HTTP par utilisateur ; 0 désactive la limite.",

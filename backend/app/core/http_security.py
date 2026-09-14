@@ -31,7 +31,9 @@ class SecurityHeadersMiddleware:
                         (b"x-robots-tag", b"noindex, nofollow, noarchive"),
                     ]
                 )
-                if scope["path"].startswith("/api/"):
+                if scope["path"].startswith("/api/") and not any(
+                    key.lower() == b"cache-control" for key, _ in headers
+                ):
                     headers.append((b"cache-control", b"no-store"))
                 if self.enable_hsts:
                     headers.append(

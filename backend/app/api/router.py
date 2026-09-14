@@ -1,5 +1,7 @@
 from fastapi import APIRouter
 
+from app.api.external import router as external_api_router
+from app.api.external.admin import router as external_admin_router
 from app.api.routes import (
     admin,
     admin_v2,
@@ -17,6 +19,11 @@ def build_api_router(*, runtime_profile: str) -> APIRouter:
     router = APIRouter()
     router.include_router(auth.router, prefix="/auth", tags=["authentication"])
     router.include_router(admin.router, prefix="/admin", tags=["administration"])
+    router.include_router(
+        external_admin_router,
+        prefix="/admin/external-api-clients",
+        tags=["administration"],
+    )
     router.include_router(health.router, prefix="/health", tags=["health"])
     return router
 
@@ -31,3 +38,5 @@ api_v2_router.include_router(downloads_v2.router, prefix="/downloads", tags=["do
 api_v2_router.include_router(metrics_v2.router, prefix="/metrics", tags=["metrics-v2"])
 api_v2_router.include_router(storage_v2.router, prefix="/storage", tags=["storage-v2"])
 api_v2_router.include_router(torrents_v2.router, prefix="/torrents", tags=["torrents-v2"])
+
+external_v1_router = external_api_router
