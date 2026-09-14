@@ -1,0 +1,96 @@
+name: Toast v2.2.1 action feedback prep
+
+on:
+  push:
+    branches:
+      - fix/toast-system-v2.2.1
+    paths:
+      - .github/workflows/toast-v221-action-feedback-prep.yml
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-feedback:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v7
+        with:
+          ref: fix/toast-system-v2.2.1
+          fetch-depth: 0
+
+      - name: Apply targeted mutation feedback changes
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("frontend/src/features/torrents/UserDownloadsPage.tsx")
+          source = path.read_text(encoding="utf-8")
+
+          old = '''  const managerRef = useRef<BrowserDownloadManager | null>(null);\n  const completedDownloadNotificationsRef = useRef(new Set<string>());'''
+          new = '''  const managerRef = useRef<BrowserDownloadManager | null>(null);\n  const startedDownloadNotificationsRef = useRef(new Set<string>());\n  const completedDownloadNotificationsRef = useRef(new Set<string>());\n  const failedDownloadNotificationsRef = useRef(new Set<string>());'''
+          if old not in source:
+              raise SystemExit("download notification refs anchor not found")
+          source = source.replace(old, new, 1)
+
+          old = '''  useEffect(() => {\n    for (const job of managerSnapshot.jobs) {\n      if (job.status !== "completed" || completedDownloadNotificationsRef.current.has(job.id)) continue;\n      completedDownloadNotificationsRef.current.add(job.id);\n      feedback.toast({ tone: "success", message: t("downloads.completed", { name: job.name }) });\n    }\n  }, [feedback, managerSnapshot.jobs, t]);'''
+          new = '''  useEffect(() => {\n    for (const job of managerSnapshot.jobs) {\n      if (\n        ["queued", "running"].includes(job.status)\n        && !startedDownloadNotificationsRef.current.has(job.id)\n      ) {\n        startedDownloadNotificationsRef.current.add(job.id);\n        feedback.toast({\n          tone: "info",\n          title: t("downloads.localRecovery"),\n          message: t("downloads.preparing", { name: job.name }),\n          dedupeKey: false,\n        });\n      }\n      if (job.status === "error" && !failedDownloadNotificationsRef.current.has(job.id)) {\n        failedDownloadNotificationsRef.current.add(job.id);\n        feedback.toast({\n          tone: "error",\n          title: t("downloads.localStatus.error"),\n          message: t("downloads.failed"),\n          dedupeKey: false,\n        });\n      }\n      if (job.status !== "completed" || completedDownloadNotificationsRef.current.has(job.id)) continue;\n      completedDownloadNotificationsRef.current.add(job.id);\n      feedback.toast({\n        tone: "success",\n        title: t("downloads.localStatus.completed"),\n        message: t("downloads.completed", { name: job.name }),\n        dedupeKey: false,\n      });\n    }\n  }, [feedback, managerSnapshot.jobs, t]);'''
+          if old not in source:
+              raise SystemExit("download notification effect anchor not found")
+          source = source.replace(old, new, 1)
+
+          old = '''                      onPauseTransfer={(jobId) => managerRef.current?.pause(jobId)}\n                      onResumeTransfer={(jobId) => managerRef.current?.resume(jobId)}\n                      onCancelTransfer={(jobId) => managerRef.current?.cancel(jobId)}'''
+          new = '''                      onPauseTransfer={(jobId) => {\n                        managerRef.current?.pause(jobId);\n                        feedback.toast({\n                          tone: "info",\n                          title: t("downloads.pauseRecovery"),\n                          message: t("downloads.localNamed", { name: torrent.name }),\n                          dedupeKey: false,\n                        });\n                      }}\n                      onResumeTransfer={(jobId) => {\n                        failedDownloadNotificationsRef.current.delete(jobId);\n                        managerRef.current?.resume(jobId);\n                        feedback.toast({\n                          tone: "info",\n                          title: t("downloads.resumeRecovery"),\n                          message: t("downloads.localNamed", { name: torrent.name }),\n                          dedupeKey: false,\n                        });\n                      }}\n                      onCancelTransfer={(jobId) => {\n                        managerRef.current?.cancel(jobId);\n                        feedback.toast({\n                          tone: "info",\n                          title: t("downloads.cancelRecovery"),\n                          message: t("downloads.localNamed", { name: torrent.name }),\n                          dedupeKey: false,\n                        });\n                      }}'''
+          if old not in source:
+              raise SystemExit("local transfer action anchor not found")
+          source = source.replace(old, new, 1)
+          path.write_text(source, encoding="utf-8")
+
+          path = Path("frontend/src/App.tsx")
+          source = path.read_text(encoding="utf-8")
+          old = '''    try {\n      onChanged(await api.changeLocale(locale));\n    } catch {\n      setLocale(user.preferred_locale ?? "fr");\n      feedback.toast({ tone: "error", message: t("language.saveFailed") });'''
+          new = '''    try {\n      onChanged(await api.changeLocale(locale));\n      feedback.toast({ tone: "success", message: t("language.saved") });\n    } catch {\n      setLocale(user.preferred_locale ?? "fr");\n      feedback.toast({ tone: "error", message: t("language.saveFailed") });'''
+          if old not in source:
+              raise SystemExit("account locale mutation anchor not found")
+          source = source.replace(old, new, 1)
+          path.write_text(source, encoding="utf-8")
+
+          path = Path("frontend/src/i18n.tsx")
+          source = path.read_text(encoding="utf-8")
+          old_fr = '    "language.saveFailed": "La préférence de langue n’a pas pu être enregistrée.",'
+          new_fr = old_fr + '\n    "language.saved": "Préférence de langue enregistrée.",'
+          old_en = '    "language.saveFailed": "The language preference could not be saved.",'
+          new_en = old_en + '\n    "language.saved": "Language preference saved.",'
+          if old_fr not in source or old_en not in source:
+              raise SystemExit("language i18n anchors not found")
+          source = source.replace(old_fr, new_fr, 1).replace(old_en, new_en, 1)
+          path.write_text(source, encoding="utf-8")
+          PY
+          git diff --check
+
+      - name: Validate targeted frontend changes
+        working-directory: frontend
+        run: |
+          set -Eeuo pipefail
+          npm ci
+          npm run check
+          npm run test -- src/components/Feedback.test.tsx src/features/torrents/UserDownloadsPage.test.tsx src/App.test.tsx
+          npm run build
+
+      - name: Validate release mirrors
+        run: |
+          set -Eeuo pipefail
+          python scripts/versioning.py check --channel v2 --expected-version 2.2.1 --print-version
+
+      - name: Commit validated feedback changes and remove helper
+        run: |
+          set -Eeuo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/toast-v221-action-feedback-prep.yml
+          git add frontend/src/App.tsx frontend/src/i18n.tsx frontend/src/features/torrents/UserDownloadsPage.tsx
+          git diff --cached --check
+          git commit -m "fix(frontend): complete explicit action toast feedback"
+          git push origin HEAD:fix/toast-system-v2.2.1
