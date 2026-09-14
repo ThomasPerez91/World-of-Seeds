@@ -710,9 +710,11 @@ export const api = {
     snapshot: string | null = null,
     signal?: AbortSignal,
     limit = 500,
+    path: string | null = null,
   ): Promise<TorrentDownloadManifestPageV2> {
     const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
     if (snapshot !== null) search.set("snapshot", snapshot);
+    if (path !== null) search.set("path", path);
     return requestV2<TorrentDownloadManifestPageV2>(
       `/torrents/${encodeURIComponent(torrentRequestId)}/download-manifest?${search.toString()}`,
       { signal },

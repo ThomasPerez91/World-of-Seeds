@@ -672,7 +672,7 @@ function Dashboard({
       </header>
       <div id="dashboard-content" className="dashboard-content" tabIndex={-1}>
         <div hidden={view !== "dashboard"}>
-          <UserDashboardPage onSessionExpired={onSessionExpired} />
+          <UserDashboardPage isAdmin={user.is_admin} onSessionExpired={onSessionExpired} />
         </div>
         {view === "settings" ? (
           <AccountSettingsPage

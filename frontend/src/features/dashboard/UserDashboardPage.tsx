@@ -171,7 +171,13 @@ export function NetworkThroughputCard({ onSessionExpired }: { onSessionExpired: 
   );
 }
 
-export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () => void }) {
+export function UserDashboardPage({
+  isAdmin = false,
+  onSessionExpired,
+}: {
+  isAdmin?: boolean;
+  onSessionExpired: () => void;
+}) {
   const { apiError, formatBytes, t } = useI18n();
   const [activity, setActivity] = useState<TorrentActivitySummary | null>(null);
   const [activityError, setActivityError] = useState("");
@@ -318,6 +324,7 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
       </div>
 
       <UserDownloadsPage
+        isAdmin={isAdmin}
         onActivityChanged={refreshActivity}
         onSessionExpired={onSessionExpired}
       />
