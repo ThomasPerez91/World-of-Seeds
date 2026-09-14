@@ -1852,7 +1852,13 @@ describe("UserDownloadsPage", () => {
 
       fireEvent.change(input, { target: { files } });
 
-      await waitFor(() => expect(screen.getAllByText("Torrent ajouté")).toHaveLength(count));
+      await waitFor(() => expect(postCount).toBe(count));
+      if (count === 1) {
+        expect(await screen.findByText("Torrent ajouté")).toBeTruthy();
+      } else {
+        expect(await screen.findByText("Lot terminé")).toBeTruthy();
+        expect(screen.getByText(`${count} ajoutés · 0 déjà présents · 0 invalides · 0 en erreur`)).toBeTruthy();
+      }
       expect(view.container.querySelector(".torrent-upload-batch")).toBeNull();
       expect(postCount).toBe(count);
       expect(maximumActive).toBe(Math.min(count, TORRENT_UPLOAD_CONCURRENCY));
@@ -1892,10 +1898,8 @@ describe("UserDownloadsPage", () => {
 
     fireEvent.change(input, { target: { files } });
 
-    await waitFor(() => expect(screen.getAllByText("Torrent ajouté")).toHaveLength(2));
-    expect(screen.getByText("Torrent déjà présent")).toBeTruthy();
-    expect(screen.getAllByText("Échec de l’ajout")).toHaveLength(3);
-    expect(screen.getByText(/empty\.torrent.*Le fichier \.torrent est vide\./s)).toBeTruthy();
+    expect(await screen.findByText("Lot terminé")).toBeTruthy();
+    expect(screen.getByText("2 ajoutés · 1 déjà présents · 2 invalides · 1 en erreur")).toBeTruthy();
     expect(view.container.querySelector(".torrent-upload-batch")).toBeNull();
     const postCalls = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
     expect(postCalls).toHaveLength(3);
@@ -1944,9 +1948,9 @@ describe("UserDownloadsPage", () => {
 
     fireEvent.change(input, { target: { files } });
 
-    await waitFor(() => expect(screen.getAllByText("Torrent ajouté")).toHaveLength(2));
+    expect(await screen.findByText("Lot terminé")).toBeTruthy();
     expect(successful).toEqual(["ok-before.torrent", "ok-after.torrent"]);
-    expect(screen.getAllByText("Échec de l’ajout")).toHaveLength(6);
+    expect(screen.getByText("2 ajoutés · 0 déjà présents · 2 invalides · 4 en erreur")).toBeTruthy();
     expect(screen.getByText("Stockage sous pression")).toBeTruthy();
   });
 

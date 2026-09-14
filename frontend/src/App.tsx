@@ -431,6 +431,7 @@ function AccountSettingsPage({
     setLocaleSaving(true);
     try {
       onChanged(await api.changeLocale(locale));
+      feedback.toast({ tone: "success", message: t("language.saved") });
     } catch {
       setLocale(user.preferred_locale ?? "fr");
       feedback.toast({ tone: "error", message: t("language.saveFailed") });

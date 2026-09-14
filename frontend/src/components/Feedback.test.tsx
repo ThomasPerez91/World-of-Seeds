@@ -157,9 +157,8 @@ describe("FeedbackProvider", () => {
 
   it("ferme automatiquement un succès après sa durée et son animation de sortie", async () => {
     vi.useFakeTimers();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderFeedback();
-    await user.click(screen.getByRole("button", { name: "Succès" }));
+    fireEvent.click(screen.getByRole("button", { name: "Succès" }));
 
     await act(async () => { await vi.advanceTimersByTimeAsync(4_499); });
     expect(screen.getByText("Terminé.")).toBeTruthy();
@@ -171,9 +170,8 @@ describe("FeedbackProvider", () => {
 
   it("met le timer en pause au survol puis le reprend", async () => {
     vi.useFakeTimers();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderFeedback();
-    await user.click(screen.getByRole("button", { name: "Succès" }));
+    fireEvent.click(screen.getByRole("button", { name: "Succès" }));
     const item = screen.getByText("Terminé.").closest(".feedback-toast-item") as HTMLElement;
 
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
@@ -187,9 +185,8 @@ describe("FeedbackProvider", () => {
 
   it("met aussi le timer en pause au focus et le reprend à la sortie du toast", async () => {
     vi.useFakeTimers();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderFeedback();
-    await user.click(screen.getByRole("button", { name: "Succès" }));
+    fireEvent.click(screen.getByRole("button", { name: "Succès" }));
     const close = screen.getByRole("button", { name: "Fermer" });
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
@@ -203,16 +200,15 @@ describe("FeedbackProvider", () => {
 
   it("limite l’affichage à quatre toasts et dépile la file sans perdre le suivant", async () => {
     vi.useFakeTimers();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderFeedback();
     const add = screen.getByRole("button", { name: "Unique" });
-    for (let index = 0; index < MAX_VISIBLE_TOASTS + 1; index += 1) await user.click(add);
+    for (let index = 0; index < MAX_VISIBLE_TOASTS + 1; index += 1) fireEvent.click(add);
 
     const notifications = screen.getByRole("region", { name: "Notifications" });
     expect(within(notifications).getAllByRole("status")).toHaveLength(MAX_VISIBLE_TOASTS);
     expect(within(notifications).queryByText(`Message ${MAX_VISIBLE_TOASTS + 1}`)).toBeNull();
 
-    await user.click(within(notifications).getAllByRole("button", { name: "Fermer" })[0]);
+    fireEvent.click(within(notifications).getAllByRole("button", { name: "Fermer" })[0]);
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_EXIT_MS); });
     expect(within(notifications).getByText(`Message ${MAX_VISIBLE_TOASTS + 1}`)).toBeTruthy();
     expect(within(notifications).getAllByRole("status")).toHaveLength(MAX_VISIBLE_TOASTS);
@@ -220,36 +216,34 @@ describe("FeedbackProvider", () => {
 
   it("déduplique brièvement une notification identique sans bloquer les opérations suivantes", async () => {
     vi.useFakeTimers();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderFeedback();
     const trigger = screen.getByRole("button", { name: "Succès" });
 
-    await user.click(trigger);
-    await user.click(trigger);
+    fireEvent.click(trigger);
+    fireEvent.click(trigger);
     expect(screen.getAllByText("Terminé.")).toHaveLength(1);
 
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_DEDUPE_WINDOW_MS + 1); });
-    await user.click(trigger);
+    fireEvent.click(trigger);
     expect(screen.getAllByText("Terminé.")).toHaveLength(2);
   });
 
   it("conserve le retry et permet update puis dismiss d’un toast de progression", async () => {
     vi.useFakeTimers();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderFeedback();
 
-    await user.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     const retry = screen.getByRole("button", { name: "Réessayer" });
-    await user.click(retry);
+    fireEvent.click(retry);
     expect(screen.getByText("Retries: 1")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Persistant" }));
+    fireEvent.click(screen.getByRole("button", { name: "Persistant" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     expect(screen.getByText("Préparation…")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Mettre à jour" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mettre à jour" }));
     expect(screen.getByText("Téléchargement terminé")).toBeTruthy();
     expect(screen.getByText("Le contenu est disponible.")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Fermer via API" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fermer via API" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_EXIT_MS); });
     expect(screen.queryByText("Téléchargement terminé")).toBeNull();
   });
