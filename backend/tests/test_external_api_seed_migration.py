@@ -64,11 +64,10 @@ async def test_seed_migration_backfills_all_users_and_reverses() -> None:
                     {"active": active_id, "deleted": deleted_id},
                 )
                 await connection.run_sync(migrate)
-                seeds = (
-                    (await connection.execute(text("SELECT auth_seed FROM users ORDER BY id")))
-                    .scalars()
-                    .all()
-                )
+                seed_rows = (
+                    await connection.execute(text("SELECT id, auth_seed FROM users ORDER BY id"))
+                ).all()
+                seeds = [row.auth_seed for row in seed_rows]
                 assert len(seeds) == 2
                 assert len(set(seeds)) == 2
                 assert all(len(seed) == 25 and seed.isalnum() for seed in seeds)
@@ -91,7 +90,12 @@ async def test_seed_migration_backfills_all_users_and_reverses() -> None:
                     async with connection.begin_nested():
                         await connection.execute(
                             text("UPDATE users SET auth_seed=:seed WHERE id=:id"),
-                            {"id": active_id, "seed": seeds[1]},
+                            {
+                                "id": active_id,
+                                "seed": next(
+                                    row.auth_seed for row in seed_rows if row.id != active_id
+                                ),
+                            },
                         )
                 await connection.run_sync(lambda conn: migrate(conn, downgrade=True))
                 assert list((await connection.execute(text("SELECT * FROM users"))).keys()) == [
