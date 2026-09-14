@@ -14,6 +14,7 @@ import {
 import { Badge, Button, Card, StateMessage } from "../../components/ui";
 import { type MessageKey, useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
+import { ExternalApiClientsPanel } from "./ExternalApiClientsPanel";
 import { NewGreedyControlPanel } from "./NewGreedyControlPanel";
 import { TorrentMonitoringPanel } from "./TorrentMonitoringPanel";
 
@@ -197,6 +198,7 @@ export function AdminServicesPage({
           </div>
         )}
       </section>
+      <ExternalApiClientsPanel onSessionExpired={onSessionExpired} />
     </AdminPageShell>
   );
 }

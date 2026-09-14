@@ -12,7 +12,8 @@ def test_authenticated_navigation_keeps_the_browser_download_manager_mounted() -
 
     assert '<main className="app-shell" hidden={hidden}>' in app
     assert '<div hidden={view !== "dashboard"}>' in app
-    assert "<UserDashboardPage onSessionExpired={onSessionExpired} />" in app
+    dashboard = "<UserDashboardPage isAdmin={user.is_admin} onSessionExpired={onSessionExpired} />"
+    assert dashboard in app
     assert "hidden={legalDocument !== null}" in app
     assert 'auth.status === "authenticated" && !auth.user.must_change_credentials' in app
 

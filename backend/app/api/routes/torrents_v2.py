@@ -274,7 +274,9 @@ async def get_torrent_download_manifest(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=MAX_MANIFEST_PAGE_SIZE)] = MAX_MANIFEST_PAGE_SIZE,
     snapshot: Annotated[str | None, Query(min_length=64, max_length=64)] = None,
+    path: Annotated[str | None, Query(max_length=4096)] = None,
 ) -> TorrentDownloadManifestResponse:
+    path_parts = _directory_parts(path, allow_root=True)
     now = datetime.now(UTC)
     row = (
         await db.execute(
@@ -327,33 +329,84 @@ async def get_torrent_download_manifest(
             "download_options_unavailable",
             "Le téléchargement est momentanément indisponible.",
         )
-    files = tuple(
-        (
-            await db.scalars(
-                select(TorrentFile)
-                .where(TorrentFile.managed_torrent_id == managed_torrent.id)
-                .order_by(TorrentFile.file_index)
-                .offset(offset)
-                .limit(limit)
-            )
-        ).all()
-    )
-    expected_count = min(limit, max(0, managed_torrent.manifest_file_count - offset))
-    if len(files) != expected_count:
-        await db.rollback()
-        _fail(
-            status.HTTP_409_CONFLICT,
-            "download_snapshot_changed",
-            "Le contenu a changé. Relance le téléchargement.",
+    if path_parts:
+        subtree_prefix = f"{'/'.join(path_parts)}/"
+        subtree_filter = (
+            TorrentFile.managed_torrent_id == managed_torrent.id,
+            TorrentFile.relative_path.startswith(subtree_prefix, autoescape=True),
         )
+        selected_count, selected_size = (
+            await db.execute(
+                select(
+                    func.count(TorrentFile.id), func.coalesce(func.sum(TorrentFile.size), 0)
+                ).where(*subtree_filter)
+            )
+        ).one()
+        if selected_count == 0:
+            await db.rollback()
+            _fail(
+                status.HTTP_404_NOT_FOUND,
+                "download_directory_not_found",
+                "Ce dossier est introuvable ou vide.",
+                "path",
+            )
+        page_files = tuple(
+            (
+                await db.scalars(
+                    select(TorrentFile)
+                    .where(*subtree_filter)
+                    .order_by(TorrentFile.file_index)
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ).all()
+        )
+        expected_count = min(limit, max(0, selected_count - offset))
+        if len(page_files) != expected_count:
+            await db.rollback()
+            _fail(
+                status.HTTP_409_CONFLICT,
+                "download_snapshot_changed",
+                "Le contenu a changé. Relance le téléchargement.",
+            )
+        root_name = path_parts[-1]
+        response_files = tuple(
+            (
+                item,
+                f"{root_name}/{item.relative_path[len(subtree_prefix) :]}",
+            )
+            for item in page_files
+        )
+    else:
+        files = tuple(
+            (
+                await db.scalars(
+                    select(TorrentFile)
+                    .where(TorrentFile.managed_torrent_id == managed_torrent.id)
+                    .order_by(TorrentFile.file_index)
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ).all()
+        )
+        expected_count = min(limit, max(0, managed_torrent.manifest_file_count - offset))
+        if len(files) != expected_count:
+            await db.rollback()
+            _fail(
+                status.HTTP_409_CONFLICT,
+                "download_snapshot_changed",
+                "Le contenu a changé. Relance le téléchargement.",
+            )
+        response_files = tuple((item, item.relative_path) for item in files)
+        selected_count = managed_torrent.manifest_file_count
+        selected_size = managed_torrent.manifest_total_size
     response = TorrentDownloadManifestResponse(
         snapshot_id=snapshot_id,
         manifest_version=managed_torrent.manifest_version,
-        file_count=managed_torrent.manifest_file_count,
-        total_size=managed_torrent.manifest_total_size,
+        file_count=selected_count,
+        total_size=selected_size,
         archive_available=(
-            managed_torrent.manifest_total_size <= archive_max_bytes
-            and managed_torrent.manifest_file_count <= MAX_MANAGED_ARCHIVE_ENTRIES
+            selected_size <= archive_max_bytes and selected_count <= MAX_MANAGED_ARCHIVE_ENTRIES
         ),
         retention_expires_at=_utc_datetime(torrent_request.unsubscribe_at),
         offset=offset,
@@ -362,10 +415,10 @@ async def get_torrent_download_manifest(
             TorrentDownloadFileResponse(
                 id=item.id,
                 file_index=item.file_index,
-                relative_path=item.relative_path,
+                relative_path=relative_path,
                 size=item.size,
             )
-            for item in files
+            for item, relative_path in response_files
         ],
     )
     await db.rollback()
@@ -517,6 +570,7 @@ async def download_torrent_folder_archive(
 ) -> Response:
     path_parts = _directory_parts(path, allow_root=False)
     owner_id = context.user.id
+    is_admin = context.user.is_admin
     now = datetime.now(UTC)
     row = (
         await db.execute(
@@ -650,7 +704,7 @@ async def download_torrent_folder_archive(
             managed_torrent_id=managed_torrent_id,
             torrent_request_id=torrent_request_id,
             torrent_file_id=first_file_id,
-            max_concurrent=max_concurrent,
+            max_concurrent=None if is_admin else max_concurrent,
         )
     except DownloadConcurrencyError:
         _fail(
@@ -708,6 +762,7 @@ async def download_torrent_archive(
     snapshot: Annotated[str, Query(min_length=64, max_length=64)],
 ) -> Response:
     owner_id = context.user.id
+    is_admin = context.user.is_admin
     now = datetime.now(UTC)
     row = (
         await db.execute(
@@ -814,7 +869,7 @@ async def download_torrent_archive(
             managed_torrent_id=managed_torrent_id,
             torrent_request_id=torrent_request_id,
             torrent_file_id=first_file_id,
-            max_concurrent=max_concurrent,
+            max_concurrent=None if is_admin else max_concurrent,
         )
     except DownloadConcurrencyError:
         _fail(
@@ -879,6 +934,7 @@ async def download_torrent_file(
     snapshot: Annotated[str | None, Query(min_length=64, max_length=64)] = None,
 ) -> Response:
     owner_id = context.user.id
+    is_admin = context.user.is_admin
     now = datetime.now(UTC)
     row = (
         await db.execute(
@@ -963,7 +1019,7 @@ async def download_torrent_file(
                 managed_torrent_id=managed_torrent_id,
                 torrent_request_id=torrent_request_id,
                 torrent_file_id=torrent_file_id,
-                max_concurrent=max_concurrent,
+                max_concurrent=None if is_admin else max_concurrent,
             )
         except DownloadConcurrencyError:
             _fail(

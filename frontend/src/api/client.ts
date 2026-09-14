@@ -28,6 +28,29 @@ export interface LivenessHealth {
 export interface GeneratedCredentials {
   user: User;
   initial_password: string;
+  auth_seed: string;
+}
+
+export interface UserQuota {
+  used: number;
+  maximum: number;
+  reached: boolean;
+}
+
+export interface ExternalApiClient {
+  id: string;
+  name: string;
+  key_prefix: string;
+  is_active: boolean;
+  scopes: Array<"users:create" | "downloads:read">;
+  created_at: string;
+  updated_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface CreatedExternalApiClient extends ExternalApiClient {
+  api_key: string;
 }
 
 export type TorrentRequestV2State =
@@ -559,6 +582,10 @@ export const api = {
     return request<User[]>("/admin/users");
   },
 
+  getUserQuota(): Promise<UserQuota> {
+    return request<UserQuota>("/admin/users/quota");
+  },
+
   createUser(): Promise<GeneratedCredentials> {
     return request<GeneratedCredentials>("/admin/users", {
       method: "POST",
@@ -574,6 +601,30 @@ export const api = {
 
   deleteUser(userId: string): Promise<void> {
     return request<void>(`/admin/users/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  getAuthSeed(): Promise<string> {
+    return request<{ auth_seed: string }>("/auth/auth-seed").then((result) => result.auth_seed);
+  },
+
+  listExternalApiClients(): Promise<ExternalApiClient[]> {
+    return request<ExternalApiClient[]>("/admin/external-api-clients");
+  },
+
+  createExternalApiClient(
+    name: string,
+    scopes: ExternalApiClient["scopes"],
+  ): Promise<CreatedExternalApiClient> {
+    return request<CreatedExternalApiClient>("/admin/external-api-clients", {
+      method: "POST",
+      body: JSON.stringify({ name, scopes }),
+    });
+  },
+
+  revokeExternalApiClient(clientId: string): Promise<void> {
+    return request<void>(`/admin/external-api-clients/${encodeURIComponent(clientId)}`, {
       method: "DELETE",
     });
   },
@@ -710,9 +761,11 @@ export const api = {
     snapshot: string | null = null,
     signal?: AbortSignal,
     limit = 500,
+    path: string | null = null,
   ): Promise<TorrentDownloadManifestPageV2> {
     const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
     if (snapshot !== null) search.set("snapshot", snapshot);
+    if (path !== null) search.set("path", path);
     return requestV2<TorrentDownloadManifestPageV2>(
       `/torrents/${encodeURIComponent(torrentRequestId)}/download-manifest?${search.toString()}`,
       { signal },

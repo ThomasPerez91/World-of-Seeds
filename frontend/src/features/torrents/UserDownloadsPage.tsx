@@ -73,7 +73,7 @@ export interface LocalDownloadSummary {
   fileCount: number;
   jobCount: number;
   kind: BrowserDownloadJobSnapshot["kind"] | null;
-  maximum: number;
+  maximum: number | null;
   name: string | null;
   otherJobs: number;
   percent: number;
@@ -84,6 +84,7 @@ export interface LocalDownloadSummary {
 }
 
 interface UserDownloadsPageProps {
+  isAdmin?: boolean;
   onActivityChanged?: () => void;
   onLocalTransferChanged?: (summary: LocalDownloadSummary) => void;
   onSessionExpired: () => void;
@@ -306,12 +307,14 @@ function TorrentDirectoryBrowser({
   fallbackLoading,
   onLoadFallbackPage,
   onDownloadFile,
+  onDownloadFolder,
   snapshot,
   torrentId,
 }: {
   fallbackLoading: boolean;
   onLoadFallbackPage: (offset: number) => void;
   onDownloadFile: (file: TorrentDownloadFileV2) => void;
+  onDownloadFolder: (directory: TorrentDownloadDirectoryV2) => void;
   snapshot: TorrentDownloadManifestPageV2;
   torrentId: string;
 }) {
@@ -319,6 +322,7 @@ function TorrentDirectoryBrowser({
   const [listings, setListings] = useState<Record<string, DirectoryListingState>>({});
   const [openPaths, setOpenPaths] = useState<Set<string>>(() => new Set());
   const managedFiles = supportsManagedFileDownload();
+  const nativeDirectories = supportsRecursiveDirectoryDownload();
 
   const loadDirectories = useCallback((parent: string | null, offset = 0) => {
     const key = parent ?? "";
@@ -483,7 +487,18 @@ function TorrentDirectoryBrowser({
               </>
             )}
           </button>
-          {depth > 0 && directory.archive_available && (
+          {nativeDirectories ? (
+            <Tooltip content={t("downloads.downloadFolderNamed", { name: directory.name })}>
+              <button
+                type="button"
+                className="ready-folder-download-button"
+                aria-label={t("downloads.downloadFolderNamed", { name: directory.name })}
+                onClick={() => onDownloadFolder(directory)}
+              >
+                <Download aria-hidden="true" />
+              </button>
+            </Tooltip>
+          ) : depth > 0 && directory.archive_available ? (
             <Tooltip content={t("downloads.downloadFolderZip", { name: directory.name })}>
               <a
                 className="ready-folder-download-button"
@@ -495,7 +510,7 @@ function TorrentDirectoryBrowser({
                 <span>ZIP</span>
               </a>
             </Tooltip>
-          )}
+          ) : null}
         </div>
         {open && (
           <div className="ready-directory-children">
@@ -587,6 +602,7 @@ function ReadyTorrentContent({
   onCloseTransfer,
   onDownloadAll,
   onDownloadFile,
+  onDownloadFolder,
   onLoadPage,
   onPauseTransfer,
   onResumeTransfer,
@@ -599,6 +615,10 @@ function ReadyTorrentContent({
   onCloseTransfer: (jobId: string) => void;
   onDownloadAll: () => void;
   onDownloadFile: (file: TorrentDownloadFileV2, snapshot: TorrentDownloadManifestPageV2) => void;
+  onDownloadFolder: (
+    directory: TorrentDownloadDirectoryV2,
+    snapshot: TorrentDownloadManifestPageV2,
+  ) => void;
   onLoadPage: (offset: number) => void;
   onPauseTransfer: (jobId: string) => void;
   onResumeTransfer: (jobId: string) => void;
@@ -607,7 +627,7 @@ function ReadyTorrentContent({
 }) {
   const { formatBytes, t } = useI18n();
   const snapshot = manifest?.snapshot ?? null;
-  const compatible = !supportsRecursiveDirectoryDownload();
+  const compatible = supportsRecursiveDirectoryDownload();
   const folderBusy = transfers.some(
     (transfer) => transfer.kind === "folder" && !["completed", "cancelled"].includes(transfer.status),
   );
@@ -621,13 +641,16 @@ function ReadyTorrentContent({
             {snapshot !== null && (
               <span>{t(snapshot.file_count === 1 ? "downloads.contentSummaryOne" : "downloads.contentSummaryMany", { count: snapshot.file_count, size: formatBytes(snapshot.total_size) })}</span>
             )}
+            {snapshot !== null && snapshot.file_count > 1 && !compatible && (
+              <small>{t("downloads.nativeUnavailable")}</small>
+            )}
           </div>
-          {snapshot !== null && snapshot.file_count > 1 && !snapshot.archive_available && !compatible && (
+          {snapshot !== null && snapshot.file_count > 1 && compatible && (
             <Button disabled={folderBusy} onClick={onDownloadAll}>
-              <DownloadIcon /> {t("downloads.downloadAll")}
+              <DownloadIcon /> {t("downloads.downloadFolder")}
             </Button>
           )}
-          {snapshot !== null && snapshot.file_count > 1 && snapshot.archive_available && (
+          {snapshot !== null && snapshot.file_count > 1 && !compatible && snapshot.archive_available && (
             <a
               className="download-fallback-archive"
               href={api.torrentArchiveDownloadUrlV2(torrent.id, snapshot.snapshot_id)}
@@ -669,6 +692,7 @@ function ReadyTorrentContent({
             fallbackLoading={manifest.loading}
             onLoadFallbackPage={onLoadPage}
             onDownloadFile={(file) => onDownloadFile(file, snapshot)}
+            onDownloadFolder={(directory) => onDownloadFolder(directory, snapshot)}
           />
         </>
       ) : null}
@@ -836,6 +860,7 @@ function TorrentItem({
 }
 
 export function UserDownloadsPage({
+  isAdmin = false,
   onActivityChanged,
   onLocalTransferChanged,
   onSessionExpired,
@@ -1111,7 +1136,7 @@ export function UserDownloadsPage({
     const files = Array.from(fileList);
     if (files.length === 0) return;
     const isBatch = files.length > 1;
-    if (files.length > MAX_TORRENT_BATCH_FILES) {
+    if (!isAdmin && files.length > MAX_TORRENT_BATCH_FILES) {
       feedback.toast({ tone: "error", message: t("downloads.batchTooLarge", { count: MAX_TORRENT_BATCH_FILES }) });
       if (inputRef.current !== null) inputRef.current.value = "";
       return;
@@ -1236,21 +1261,37 @@ export function UserDownloadsPage({
     void submitBatch(event.target.files ?? []);
   }
 
-  async function startRecursiveDownload(torrent: TorrentRequestV2, snapshot: TorrentDownloadManifestPageV2) {
+  async function startRecursiveDownload(
+    torrent: TorrentRequestV2,
+    snapshot: TorrentDownloadManifestPageV2,
+    path: string | null = null,
+    name = torrent.name,
+  ) {
     if (!supportsRecursiveDirectoryDownload() || snapshot.offset !== 0) return;
     try {
       const directory = await pickDownloadDirectory();
+      const firstPage = path === null
+        ? snapshot
+        : await api.getTorrentDownloadManifestPageV2(
+            torrent.id,
+            0,
+            snapshot.snapshot_id,
+            undefined,
+            snapshot.limit,
+            path,
+          );
       managerRef.current?.enqueueFolder({
         torrentId: torrent.id,
-        name: torrent.name,
-        snapshot,
+        name,
+        snapshot: firstPage,
         directory,
         loadManifestPage: (requestedOffset, snapshotId, signal) => api.getTorrentDownloadManifestPageV2(
           torrent.id,
           requestedOffset,
           snapshotId,
           signal,
-          snapshot.limit,
+          firstPage.limit,
+          path,
         ),
       });
       refreshDownloadPolicy();
@@ -1296,8 +1337,12 @@ export function UserDownloadsPage({
   async function openReadyTorrent(torrent: TorrentRequestV2, directSingleFile = false) {
     const existing = readyManifestsRef.current[torrent.id];
     const snapshot = existing?.firstPage ?? await loadReadyManifest(torrent.id);
-    if (directSingleFile && snapshot?.file_count === 1 && snapshot.items.length === 1) {
-      await startManagedFileDownload(torrent, snapshot, snapshot.items[0]);
+    if (directSingleFile && snapshot !== null && snapshot !== undefined) {
+      if (snapshot.file_count === 1 && snapshot.items.length === 1) {
+        await startManagedFileDownload(torrent, snapshot, snapshot.items[0]);
+      } else if (snapshot.file_count > 1 && supportsRecursiveDirectoryDownload()) {
+        await startRecursiveDownload(torrent, snapshot);
+      }
     }
   }
 
@@ -1395,7 +1440,7 @@ export function UserDownloadsPage({
       >
         <DownloadIcon />
         <strong>{t("downloads.dropTitle")}</strong>
-        <span>{t("downloads.dropHint")}</span>
+        <span>{t(isAdmin ? "downloads.dropHintAdmin" : "downloads.dropHint")}</span>
       </div>
       <p className="torrent-atomic-note">
         <InfoIcon />
@@ -1437,7 +1482,9 @@ export function UserDownloadsPage({
         <aside className="torrent-queue-summary local-download-manager-summary" aria-live="polite">
           <QueueIcon />
           <div>
-            <strong>{t("downloads.localActive", { active: localDownloadSummary.active, maximum: localDownloadSummary.maximum })}</strong>
+            <strong>{localDownloadSummary.maximum === null
+              ? t("downloads.localActiveUnlimited", { active: localDownloadSummary.active })
+              : t("downloads.localActive", { active: localDownloadSummary.active, maximum: localDownloadSummary.maximum })}</strong>
             <span>{t("downloads.localWaitingCount", { waiting: localDownloadSummary.waiting })}</span>
           </div>
         </aside>
@@ -1520,6 +1567,12 @@ export function UserDownloadsPage({
                         if (firstPage !== null && firstPage !== undefined) void startRecursiveDownload(torrent, firstPage);
                       }}
                       onDownloadFile={(file, snapshot) => void startManagedFileDownload(torrent, snapshot, file)}
+                      onDownloadFolder={(directory, snapshot) => void startRecursiveDownload(
+                        torrent,
+                        snapshot,
+                        directory.relative_path,
+                        directory.name,
+                      )}
                       onPauseTransfer={(jobId) => {
                         managerRef.current?.pause(jobId);
                         feedback.toast({

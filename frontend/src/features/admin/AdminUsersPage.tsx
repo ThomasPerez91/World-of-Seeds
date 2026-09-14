@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 
-import { api, ApiError, type GeneratedCredentials, type User } from "../../api/client";
+import {
+  api,
+  ApiError,
+  type GeneratedCredentials,
+  type User,
+  type UserQuota,
+} from "../../api/client";
 import { Dialog } from "../../components/Dialog";
 import { useFeedback } from "../../components/Feedback";
 import { Badge, Button, Card, StateMessage } from "../../components/ui";
@@ -19,6 +25,7 @@ export function AdminUsersPage({
   const feedback = useFeedback();
   const { t } = useI18n();
   const [users, setUsers] = useState<User[]>([]);
+  const [quota, setQuota] = useState<UserQuota | null>(null);
   const [credentials, setCredentials] = useState<GeneratedCredentials | null>(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -29,10 +36,12 @@ export function AdminUsersPage({
   useEffect(() => {
     let active = true;
     setLoading(true);
-    void api
-      .listUsers()
-      .then((result) => {
-        if (active) setUsers(result);
+    void Promise.all([api.listUsers(), api.getUserQuota()])
+      .then(([result, quotaResult]) => {
+        if (active) {
+          setUsers(result);
+          setQuota(quotaResult);
+        }
       })
       .catch((caught: unknown) => {
         if (!active) return;
@@ -57,13 +66,24 @@ export function AdminUsersPage({
       const generated = await api.createUser();
       setCredentials(generated);
       setUsers((current) => [generated.user, ...current]);
+      setQuota((current) =>
+        current === null
+          ? current
+          : { ...current, used: current.used + 1, reached: current.used + 1 >= current.maximum },
+      );
       feedback.toast({ tone: "success", message: t("admin.userCreated") });
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      feedback.toast({ tone: "error", message: t("admin.userCreateFailed") });
+      feedback.toast({
+        tone: "error",
+        message:
+          caught instanceof ApiError && caught.code === "account_quota_reached"
+            ? t("admin.accountQuotaReached")
+            : t("admin.userCreateFailed"),
+      });
     } finally {
       setGenerating(false);
     }
@@ -99,6 +119,15 @@ export function AdminUsersPage({
     try {
       await api.deleteUser(account.id);
       setUsers((current) => current.filter((candidate) => candidate.id !== account.id));
+      setQuota((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              used: Math.max(0, current.used - 1),
+              reached: Math.max(0, current.used - 1) >= current.maximum,
+            },
+      );
       feedback.toast({
         tone: "success",
         message: t("admin.userDeleted", { name: account.username }),
@@ -134,9 +163,18 @@ export function AdminUsersPage({
             <p className="eyebrow">{t("admin.access")}</p>
             <h2 id="admin-users-title">{t("admin.userAccounts")}</h2>
             <p className="section-intro">{t("admin.userIntro")}</p>
+            {quota !== null && (
+              <p className="account-quota" role="status">
+                {t("admin.accountsUsed", { used: quota.used, maximum: quota.maximum })}
+              </p>
+            )}
           </div>
           <div className="generator-controls">
-            <Button onClick={() => void generateUser()} disabled={generating}>
+            <Button
+              onClick={() => void generateUser()}
+              disabled={generating || quota?.reached === true}
+              title={quota?.reached === true ? t("admin.accountQuotaReached") : undefined}
+            >
               {generating ? t("admin.generating") : t("admin.generateUser")}
             </Button>
           </div>
@@ -149,6 +187,13 @@ export function AdminUsersPage({
               <span>{t("admin.username")}</span>
               <code>{credentials.user.username}</code>
               <Button variant="ghost" className="text-button" onClick={() => void copy(credentials.user.username)}>
+                {t("admin.copy")}
+              </Button>
+            </div>
+            <div className="credential-row">
+              <span>{t("account.authSeed")}</span>
+              <code>{credentials.auth_seed}</code>
+              <Button variant="ghost" className="text-button" onClick={() => void copy(credentials.auth_seed)}>
                 {t("admin.copy")}
               </Button>
             </div>

@@ -1,5 +1,11 @@
 from app.models.auth import LoginThrottle, User, UserSession
 from app.models.base import Base
+from app.models.external_api import (
+    ExternalApiAudit,
+    ExternalApiClient,
+    ExternalApiIdempotency,
+    UserProvisioningAudit,
+)
 from app.models.options_v2 import DatabaseOption, DatabaseOptionAudit
 from app.models.torrent import UserTorrent
 from app.models.torrent_v2 import (
@@ -32,6 +38,9 @@ __all__ = [
     "DatabaseOption",
     "DatabaseOptionAudit",
     "DownloadLease",
+    "ExternalApiAudit",
+    "ExternalApiClient",
+    "ExternalApiIdempotency",
     "IntegrationServiceHealth",
     "IntegrationServiceState",
     "LoginThrottle",
@@ -55,6 +64,7 @@ __all__ = [
     "TorrentRequestState",
     "User",
     "UserSession",
+    "UserProvisioningAudit",
     "UserTorrent",
     "V1ImportItem",
     "V1ImportRun",

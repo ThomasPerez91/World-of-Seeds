@@ -445,6 +445,44 @@ function AccountSettingsPage({
   const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const [username, setUsername] = useState(user.username);
   const [activeSection, setActiveSection] = useState<"general" | "security">("general");
+  const [authSeed, setAuthSeed] = useState<string | null>(null);
+  const [authSeedVisible, setAuthSeedVisible] = useState(false);
+  const [authSeedLoading, setAuthSeedLoading] = useState(false);
+
+  useEffect(() => {
+    if (activeSection !== "security" || authSeed !== null) return;
+    let active = true;
+    setAuthSeedLoading(true);
+    void api
+      .getAuthSeed()
+      .then((seed) => {
+        if (active) setAuthSeed(seed);
+      })
+      .catch((caught: unknown) => {
+        if (!active) return;
+        if (caught instanceof ApiError && caught.status === 401) {
+          onSessionExpired();
+          return;
+        }
+        feedback.toast({ tone: "error", message: t("account.authSeedLoadFailed") });
+      })
+      .finally(() => {
+        if (active) setAuthSeedLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeSection, authSeed, feedback, onSessionExpired, t]);
+
+  async function copyAuthSeed() {
+    if (authSeed === null) return;
+    try {
+      await navigator.clipboard.writeText(authSeed);
+      feedback.toast({ tone: "success", message: t("account.authSeedCopied") });
+    } catch {
+      feedback.toast({ tone: "error", message: t("admin.copyFailed") });
+    }
+  }
 
   async function submitUsername(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -519,6 +557,35 @@ function AccountSettingsPage({
                 <h2 id="settings-general-title">{t("settings.general")}</h2>
                 <p>{t("settings.generalIntro")}</p>
               </header>
+              <div className="settings-subsection auth-seed-section">
+                <h3>{t("account.authSeed")}</h3>
+                <p className="settings-section-intro">{t("account.authSeedHint")}</p>
+                <div className="auth-seed-value">
+                  <code aria-live="polite">
+                    {authSeedLoading
+                      ? t("common.loading")
+                      : authSeedVisible && authSeed !== null
+                        ? authSeed
+                        : "•••••••••••••••••••••••••"}
+                  </code>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={authSeed === null}
+                    onClick={() => setAuthSeedVisible((visible) => !visible)}
+                  >
+                    {authSeedVisible ? t("account.hideAuthSeed") : t("account.showAuthSeed")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={authSeed === null}
+                    onClick={() => void copyAuthSeed()}
+                  >
+                    {t("admin.copy")}
+                  </Button>
+                </div>
+              </div>
               <div className="settings-subsection">
                 <h3 id="preferences-title">{t("preferences.title")}</h3>
                 <p className="settings-section-intro">{t("preferences.intro")}</p>
@@ -672,7 +739,7 @@ function Dashboard({
       </header>
       <div id="dashboard-content" className="dashboard-content" tabIndex={-1}>
         <div hidden={view !== "dashboard"}>
-          <UserDashboardPage onSessionExpired={onSessionExpired} />
+          <UserDashboardPage isAdmin={user.is_admin} onSessionExpired={onSessionExpired} />
         </div>
         {view === "settings" ? (
           <AccountSettingsPage
