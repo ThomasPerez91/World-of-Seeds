@@ -101,13 +101,13 @@ describe("CompatibilityDirectoryBrowser", () => {
     );
 
     const seasonOne = await screen.findByRole("link", {
-      name: "Télécharger le contenu en ZIP — Saison 1",
+      name: "Télécharger le ZIP — Saison 1",
     });
     expect(seasonOne.getAttribute("download")).toBe("Saison 1.zip");
     expect(seasonOne.getAttribute("href")).toContain("download-folder-archive");
     expect(seasonOne.getAttribute("href")).toContain("path=Saison+1");
     expect(screen.queryByRole("link", {
-      name: "Télécharger le contenu en ZIP — Saison 2",
+      name: "Télécharger le ZIP — Saison 2",
     })).toBeNull();
 
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));

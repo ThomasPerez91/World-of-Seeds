@@ -48,6 +48,7 @@ import {
   supportsRecursiveDirectoryDownload,
 } from "./recursiveDownload";
 import { CompatibilityDirectoryBrowser } from "./CompatibilityDirectoryBrowser";
+import { SubscriptionExpiryIndicator } from "./SubscriptionExpiryIndicator";
 import { RetentionWarning } from "./RetentionWarning";
 
 export const PAGE_SIZE = 25;
@@ -605,11 +606,14 @@ function TorrentItem({
                   >
                     {t(rowStatusLabels[rowStatus])}
                   </Badge>
-                  {torrent.state === "ready" && (
-                    <RetentionWarning
-                      retentionExpiresAt={torrent.retention_expires_at}
-                      compact
+                  {torrent.state === "ready" && torrent.ready_at != null && torrent.unsubscribe_at != null && (
+                    <SubscriptionExpiryIndicator
+                      readyAt={torrent.ready_at}
+                      unsubscribeAt={torrent.unsubscribe_at}
                     />
+                  )}
+                  {torrent.state === "ready" && (torrent.ready_at == null || torrent.unsubscribe_at == null) && (
+                    <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />
                   )}
                 </span>
                 <span className="torrent-summary-queue">{torrentQueueLabel(torrent)}</span>
