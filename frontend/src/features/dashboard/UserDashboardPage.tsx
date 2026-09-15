@@ -15,7 +15,10 @@ import {
 import { ArrowDown, ArrowRight, ArrowUp, Check, Clock3, Download, Gauge, HardDrive } from "lucide-react";
 import { Button, Card, Progress, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
-import { UserDownloadsPage } from "../torrents/UserDownloadsPage";
+import {
+  UserDownloadsPage,
+  type LocalDownloadSummary,
+} from "../torrents/UserDownloadsPage";
 
 const ACTIVITY_PAGE_SIZE = 100;
 export const NETWORK_REFRESH_MS = 15_000;
@@ -183,6 +186,7 @@ export function UserDashboardPage({
   const [activityError, setActivityError] = useState("");
   const [storage, setStorage] = useState<SharedStorageCapacity | null>(null);
   const [storageError, setStorageError] = useState("");
+  const [localTransfer, setLocalTransfer] = useState<LocalDownloadSummary | null>(null);
   const activityController = useRef<AbortController | null>(null);
   const storageController = useRef<AbortController | null>(null);
   const activityRunning = useRef(false);
@@ -254,6 +258,9 @@ export function UserDashboardPage({
   const usedPercent = storage === null || storage.total_bytes === 0
     ? 0
     : Math.min(100, Math.max(0, (storage.used_bytes / storage.total_bytes) * 100));
+  const showLocalTransfer = localTransfer !== null
+    && localTransfer.name !== null
+    && localTransfer.status !== "idle";
 
   return (
     <section className="user-dashboard" aria-labelledby="user-dashboard-title">
@@ -323,9 +330,25 @@ export function UserDashboardPage({
         </Card>
       </div>
 
+      {showLocalTransfer && localTransfer !== null && (
+        <aside className="torrent-queue-summary local-download-manager-summary" aria-live="polite">
+          <Download aria-hidden="true" />
+          <div>
+            <strong>{t("downloads.localRecovery")}</strong>
+            <span>{localTransfer.name}</span>
+            {localTransfer.totalBytes > 0 && (
+              <span>
+                {formatBytes(localTransfer.downloadedBytes)} / {formatBytes(localTransfer.totalBytes)} · {Math.round(localTransfer.percent)} %
+              </span>
+            )}
+          </div>
+        </aside>
+      )}
+
       <UserDownloadsPage
         isAdmin={isAdmin}
         onActivityChanged={refreshActivity}
+        onLocalTransferChanged={setLocalTransfer}
         onSessionExpired={onSessionExpired}
       />
     </section>

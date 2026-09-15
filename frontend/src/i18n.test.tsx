@@ -59,12 +59,12 @@ describe("I18nProvider", () => {
 
     const frenchButton = screen.getByRole("button", { name: "Langue : Français" });
     expect(frenchButton.querySelector('[data-language-flag="fr"]')).toBeTruthy();
-    expect(frenchButton.textContent).not.toContain("🇫🇷");
+    expect(frenchButton.textContent).not.toMatch(/🇫🇷|🇬🇧/u);
     await user.click(frenchButton);
 
     const englishButton = screen.getByRole("button", { name: "Language : English" });
     expect(englishButton.querySelector('[data-language-flag="en"]')).toBeTruthy();
-    expect(englishButton.textContent).not.toContain("🇬🇧");
+    expect(englishButton.textContent).not.toMatch(/🇫🇷|🇬🇧/u);
     expect(document.documentElement.lang).toBe("en");
     expect(window.localStorage.getItem("wos.preferred-locale")).toBe("en");
   });

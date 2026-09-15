@@ -147,3 +147,20 @@ Codes métier principaux:
    caractères Unicode, `%` ou `_`.
 8. Traduire les codes 404/409/413/422/429/503 ci-dessus; un 413 de ZIP global n’interdit pas les
    ZIP de sous-dossiers disponibles.
+# 2.2.4 torrent query and authentication-seed rotation
+
+- `GET /api/v2/torrents` accepts `search`, `status=downloading|waiting|ready|blocked`,
+  `sort_by=name|state|queue|size`, `sort_order=asc|desc`, and
+  `retention_bucket=green|orange|red`, in addition to `offset` and `limit`.
+- Search, status, retention and sorting are applied in SQL before pagination. Name sorting is
+  case-insensitive, size is numeric, queue nulls stay last, and every order has a deterministic
+  creation/id tie-break. Canonical UX state order is downloading, waiting, ready, blocked.
+- Retention buckets use the per-user `TorrentRequest.ready_at`/`unsubscribe_at` interval: green
+  before one third elapsed, orange from one to two thirds elapsed, red thereafter. Rows without a
+  live READY deadline belong to no bucket.
+- Listing responses expose global `status_counts` and `retention_counts`; the latter is faceted by
+  the current search and status but not by the selected retention bucket.
+- `POST /api/v1/auth/auth-seed/rotate` requires the normal authenticated session and CSRF token,
+  locks the current user, reuses `generate_auth_seed()`, commits a unique replacement, and returns
+  `{ "auth_seed": "..." }` with `Cache-Control: no-store` and `Pragma: no-cache`. The old
+  `X-WOS-User-Seed` stops resolving immediately; browser sessions are unchanged.
