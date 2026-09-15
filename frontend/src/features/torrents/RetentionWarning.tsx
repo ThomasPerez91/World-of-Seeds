@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { WarningIcon } from "../../components/icons";
+import { Badge, Tooltip } from "../../components/ui";
 import { useI18n, type MessageKey } from "../../i18n";
 
 const MINUTE_MS = 60_000;
@@ -76,6 +78,8 @@ export function RetentionWarning({
 }) {
   const { formatDate, t } = useI18n();
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const [compactTarget, setCompactTarget] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     if (retentionExpiresAt === null) return undefined;
@@ -95,6 +99,17 @@ export function RetentionWarning({
     };
   }, [retentionExpiresAt]);
 
+  useLayoutEffect(() => {
+    if (!compact) {
+      setCompactTarget(null);
+      return;
+    }
+    const target = anchorRef.current
+      ?.closest(".torrent-accordion-card")
+      ?.querySelector<HTMLElement>(".torrent-summary-status") ?? null;
+    setCompactTarget(target);
+  }, [compact, retentionExpiresAt]);
+
   if (retentionExpiresAt === null) return null;
   const presentation = retentionWarningPresentation(retentionExpiresAt, nowMs);
   if (
@@ -104,20 +119,45 @@ export function RetentionWarning({
     || presentation.messageKey === null
   ) return null;
 
+  const remaining = t(presentation.messageKey, presentation.params);
   const absolute = t("downloads.retentionExpiresAt", {
     date: formatDate(retentionExpiresAt, { dateStyle: "short", timeStyle: "short" }),
   });
+
+  if (compact) {
+    const tooltip = `${remaining} · ${absolute}`;
+    const marker = (
+      <Tooltip content={tooltip} className="retention-warning-tooltip">
+        <Badge
+          tone={presentation.tier === "danger" ? "danger" : "warning"}
+          className={`retention-warning compact retention-warning-indicator ${presentation.tier}`}
+          data-testid="retention-warning"
+        >
+          <span className="retention-warning-focus" role="img" aria-label={tooltip} tabIndex={0}>
+            <WarningIcon />
+            <span className="sr-only">{remaining}</span>
+            <span className="sr-only">{absolute}</span>
+          </span>
+        </Badge>
+      </Tooltip>
+    );
+    return (
+      <>
+        <span ref={anchorRef} className="retention-warning-anchor" aria-hidden="true" />
+        {compactTarget === null ? null : createPortal(marker, compactTarget)}
+      </>
+    );
+  }
+
   return (
     <div
-      className={`retention-warning ${presentation.tier}${compact ? " compact" : ""}`}
+      className={`retention-warning ${presentation.tier}`}
       data-testid="retention-warning"
     >
       <WarningIcon />
       <span>
-        <strong>{t(presentation.messageKey, presentation.params)}</strong>
-        {compact ? <span className="sr-only"> · {absolute}</span> : (
-          <time dateTime={retentionExpiresAt}>{absolute}</time>
-        )}
+        <strong>{remaining}</strong>
+        <time dateTime={retentionExpiresAt}>{absolute}</time>
       </span>
     </div>
   );

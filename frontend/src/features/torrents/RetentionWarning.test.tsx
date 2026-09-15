@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "../../i18n";
@@ -48,6 +48,27 @@ describe("RetentionWarning", () => {
     expect(warning.textContent).toContain("Suppression automatique dans 2 j");
     expect(warning.textContent).toContain("Expiration le");
     expect(view.container.querySelector("svg[aria-hidden='true']")).toBeTruthy();
+    vi.useRealTimers();
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
+  it("rend le mode compact dans la cellule statut plutôt qu'en ligne sous le torrent", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const view = render(
+      <I18nProvider>
+        <article className="torrent-accordion-card">
+          <span className="torrent-summary-status" data-testid="status-cell" />
+          <RetentionWarning retentionExpiresAt={deadline(47 * 60 * 60 * 1_000)} compact />
+        </article>
+      </I18nProvider>,
+    );
+
+    const statusCell = screen.getByTestId("status-cell");
+    const warning = within(statusCell).getByTestId("retention-warning");
+    expect(warning.classList.contains("compact")).toBe(true);
+    expect(view.container.querySelector(".torrent-accordion-card > .retention-warning.compact")).toBeNull();
+    expect(view.container.querySelector(".retention-warning-anchor")).toBeTruthy();
     vi.useRealTimers();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
