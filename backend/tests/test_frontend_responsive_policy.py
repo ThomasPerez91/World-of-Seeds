@@ -46,15 +46,16 @@ def test_dashboard_title_uses_normal_page_background_in_every_theme() -> None:
     assert ".user-dashboard-header" not in review_fixes
 
 
-def test_directory_rows_do_not_inherit_the_global_button_hover_effect() -> None:
+def test_accordion_rows_keep_subtle_hover_without_global_button_effect() -> None:
     styles = (REPOSITORY / "frontend/src/wos-premium-torrents.css").read_text()
     rule_start = styles.index(".user-downloads .ready-directory-toggle:hover:not(:disabled) {")
     rule = styles[rule_start : styles.index("}", rule_start) + 1]
 
     assert "background: transparent" in rule
     assert "transform: none" in rule
-    assert ".ready-directory-row:hover" not in styles
+    assert ".ready-directory-row:hover" in styles
     assert ".ready-tree-file-row:hover" in styles
+    assert "background: rgba(102, 234, 157, 0.04)" in styles
 
 
 def test_dashboard_network_card_is_green_responsive_and_replaces_only_the_summary_card() -> None:
