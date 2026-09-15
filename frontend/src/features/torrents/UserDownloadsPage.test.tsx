@@ -149,27 +149,28 @@ describe("UserDownloadsPage", () => {
     expect(within(article).getByRole("progressbar").getAttribute("value")).toBe("100");
 
     const detailsButton = within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" });
-    const downloadButton = within(article).getByRole("button", { name: "Télécharger" });
     const deleteButton = within(article).getByRole("button", { name: "Supprimer « Film.mkv »" });
     expect(detailsButton.textContent).toBe("");
+    expect(within(article).queryByRole("button", { name: "Télécharger" })).toBeNull();
+    await user.click(detailsButton);
+    const downloadButton = await within(article).findByRole("button", { name: "Télécharger" });
     expect(downloadButton.textContent).toBe("");
     expect(deleteButton.textContent).toBe("");
-    expect(detailsButton.getAttribute("aria-expanded")).toBe("false");
+    expect(detailsButton.getAttribute("aria-expanded")).toBe("true");
     expect(article.querySelector(".torrent-row-grid")?.getAttribute("role")).toBeNull();
     expect(article.querySelector("details")).toBeNull();
 
     await user.click(article.querySelector(".torrent-summary-size") as HTMLElement);
-    expect(within(article).getByRole("button", { name: "Masquer les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("true");
-    await user.click(article.querySelector(".torrent-summary-size") as HTMLElement);
-    expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
-
-    await user.click(downloadButton);
-    expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
-    await user.click(deleteButton);
     expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
 
     await user.click(detailsButton);
+    await user.click(downloadButton);
     expect(within(article).getByRole("button", { name: "Masquer les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("true");
+    await user.click(deleteButton);
+    expect(within(article).getByRole("button", { name: "Masquer les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("true");
+
+    await user.click(within(article).getByRole("button", { name: "Masquer les détails de Film.mkv" }));
+    await waitFor(() => expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false"));
   });
 
   it("remplace le polling par les invalidations WebSocket et resynchronise après reconnexion", async () => {
@@ -570,7 +571,7 @@ describe("UserDownloadsPage", () => {
     }));
     const view = renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Télécharger" }));
+    await user.click(await screen.findByRole("button", { name: "Afficher les détails de Film.mkv" }));
     expect(screen.getByText("Suppression imminente dans 45 min")).toBeTruthy();
     MockWebSocket.instances[0].message({
       type: "torrent.retention_extended",
@@ -785,6 +786,8 @@ describe("UserDownloadsPage", () => {
     const view = renderPage("fr", { onLocalTransferChanged });
 
     const article = await screen.findByRole("article", { name: "Film.mkv" });
+    await user.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
+    await within(article).findByRole("button", { name: "Télécharger" });
     await user.click(within(article).getByRole("button", { name: "Télécharger" }));
     const link = within(article).getByRole("link", { name: "Télécharger « Folder/Film final.mkv »", hidden: true });
     expect(link.getAttribute("href")).toContain(`/files/single-id/download?snapshot=${"3".repeat(64)}`);
@@ -1388,13 +1391,21 @@ describe("UserDownloadsPage", () => {
             progress: index >= 25 ? 1 : 0,
           }));
         const requestUrl = new URL(url, "http://localhost");
+        const status = requestUrl.searchParams.get("status");
+        const query = (requestUrl.searchParams.get("search") ?? "").toLocaleLowerCase();
+        const filtered = allItems.filter((item) => (
+          (status !== "ready" || item.state === "ready")
+          && (query === "" || item.name.toLocaleLowerCase().includes(query))
+        ));
         const requestedOffset = Number(requestUrl.searchParams.get("offset") ?? 0);
         const requestedLimit = Number(requestUrl.searchParams.get("limit") ?? 25);
         return response({
-          items: allItems.slice(requestedOffset, requestedOffset + requestedLimit),
+          items: filtered.slice(requestedOffset, requestedOffset + requestedLimit),
           offset: requestedOffset,
           limit: requestedLimit,
-          total: allItems.length,
+          total: filtered.length,
+          status_counts: { all: 51, downloading: 0, ready: 26, waiting: 25, blocked: 0 },
+          retention_counts: { green: 0, orange: 0, red: 0 },
         });
       }),
     );
@@ -1422,27 +1433,69 @@ describe("UserDownloadsPage", () => {
   });
 
   it("combine recherche partielle insensible à la casse et filtre de statut", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => response({
-      items: [
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const requestUrl = new URL(String(input), "http://localhost");
+      const rows = [
         torrent({ id: "d86528f5-bc01-4a8b-86a1-74fe3404864b", name: "ubuntu-24.04.iso", state: "ready", progress: 1 }),
         torrent({ id: "c8c69f91-8e73-48b3-a14f-35199ce7c101", name: "BUN-source.iso", state: "active" }),
         torrent({ id: "6a6cbfc8-11d0-4cf2-82f8-3533924c83de", name: "archive.iso", state: "requested", queue_status: "waiting" }),
-      ],
+      ];
+      const query = (requestUrl.searchParams.get("search") ?? "").toLocaleLowerCase();
+      const status = requestUrl.searchParams.get("status");
+      const items = rows.filter((item) => (
+        (query === "" || item.name.toLocaleLowerCase().includes(query))
+        && (status !== "ready" || item.state === "ready")
+      ));
+      return response({
+      items,
       offset: 0,
       limit: 100,
-      total: 3,
-    })));
+      total: items.length,
+      status_counts: { all: 3, downloading: 1, ready: 1, waiting: 1, blocked: 0 },
+      retention_counts: { green: 0, orange: 0, red: 0 },
+    }); }));
     renderPage();
 
     const search = await screen.findByRole("searchbox", { name: "Rechercher un torrent" });
     await userEvent.type(search, "BUN");
-    expect(screen.getByRole("article", { name: "ubuntu-24.04.iso" })).toBeTruthy();
-    expect(screen.getByRole("article", { name: "BUN-source.iso" })).toBeTruthy();
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes("search=BUN"))).toBe(true));
 
     await userEvent.click(screen.getByRole("button", { name: /Prêts/ }));
-    expect(screen.getByRole("article", { name: "ubuntu-24.04.iso" })).toBeTruthy();
-    expect(screen.queryByRole("article", { name: "BUN-source.iso" })).toBeNull();
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) => {
+      const url = String(input);
+      return url.includes("search=BUN") && url.includes("status=ready");
+    })).toBe(true));
     expect(screen.getByRole("button", { name: /Tous3/ })).toBeTruthy();
+  });
+
+  it("transmet tri global et bucket de rétention au backend", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return response({
+        items: [torrent({ name: "ubuntu.iso", state: "ready", progress: 1 })],
+        offset: 0,
+        limit: 25,
+        total: 1,
+        status_counts: { all: 1, downloading: 0, ready: 1, waiting: 0, blocked: 0 },
+        retention_counts: { green: 0, orange: 0, red: 1 },
+      });
+    }));
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("article", { name: "ubuntu.iso" });
+
+    await user.click(screen.getByRole("button", { name: "Nom" }));
+    await waitFor(() => expect(calls.some((url) => url.includes("sort_by=name") && url.includes("sort_order=asc"))).toBe(true));
+    await user.click(screen.getByRole("button", { name: "Nom" }));
+    await user.click(screen.getByRole("button", { name: "Moins d’1/3 du délai restant" }));
+    await user.type(screen.getByRole("searchbox", { name: "Rechercher un torrent" }), "ubuntu");
+    await waitFor(() => expect(calls.some((url) => (
+      url.includes("sort_by=name")
+      && url.includes("sort_order=desc")
+      && url.includes("retention_bucket=red")
+      && url.includes("search=ubuntu")
+    ))).toBe(true));
   });
 
   it("supporte le drop, le sélecteur clavier et les erreurs métier bornées", async () => {

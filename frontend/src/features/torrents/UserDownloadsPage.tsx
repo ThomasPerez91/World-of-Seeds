@@ -26,7 +26,7 @@ import {
   QueueIcon,
   RefreshIcon,
 } from "../../components/icons";
-import { Archive, Check, Clock3, Download, ListTree, Search } from "lucide-react";
+import { AlertTriangle, Archive, ArrowDown, ArrowUp, ArrowUpDown, Check, Clock3, Download, ListTree, Search } from "lucide-react";
 import { Accordion, Badge, Button, Progress, StateMessage, Tooltip } from "../../components/ui";
 import { useI18n, type MessageKey } from "../../i18n";
 import {
@@ -206,6 +206,9 @@ const EMPTY_MANAGER_SNAPSHOT: BrowserDownloadManagerSnapshot = {
 };
 
 type TorrentStatusFilter = "all" | "active" | "ready" | "waiting";
+type TorrentSort = "name" | "state" | "queue" | "size";
+type SortOrder = "asc" | "desc";
+type RetentionBucket = "green" | "orange" | "red";
 
 export function matchesTorrentFilter(torrent: TorrentRequestV2, filter: TorrentStatusFilter): boolean {
   if (filter === "all") return true;
@@ -423,7 +426,11 @@ function ReadyTorrentContent({
             )}
           </header>
           {compatible && snapshot.file_count > 1 && (
-            <p className="ready-compatibility-note">{t("downloads.compatHint")}</p>
+            <p className="ready-compatibility-note">
+              {window.isSecureContext === false
+                ? t("downloads.insecureContextHint")
+                : t("downloads.compatHint")}
+            </p>
           )}
           {manifest.error !== "" && (
             <StateMessage tone="error" className="ready-manifest-error">
@@ -494,6 +501,7 @@ function TorrentItem({
   torrent,
   onRefresh,
   onDownload,
+  downloadAvailable,
   onCancel,
   cancelBusy,
   downloadBusy,
@@ -505,6 +513,7 @@ function TorrentItem({
   torrent: TorrentRequestV2;
   onRefresh: () => void;
   onDownload: () => void;
+  downloadAvailable: boolean;
   onCancel: () => void;
   cancelBusy: boolean;
   downloadBusy: boolean;
@@ -576,7 +585,7 @@ function TorrentItem({
                       <ListTree aria-hidden="true" />
                     </Button>
                   </Tooltip>
-                  {torrent.state === "ready" ? (
+                  {torrent.state === "ready" && downloadAvailable ? (
                     <Button
                       type="button"
                       className="torrent-action-download"
@@ -586,11 +595,11 @@ function TorrentItem({
                     >
                       <DownloadIcon />
                     </Button>
-                  ) : (
+                  ) : torrent.state !== "ready" ? (
                     <Button type="button" variant="secondary" aria-label={t("downloads.refreshNamed", { name: torrent.name })} onClick={onRefresh}>
                       <RefreshIcon />
                     </Button>
-                  )}
+                  ) : null}
                   {!(["cancelled", "expired"] as TorrentRequestV2State[]).includes(torrent.state) && (
                     <Button
                       type="button"
@@ -638,6 +647,11 @@ export function UserDownloadsPage({
   const [pageError, setPageError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TorrentStatusFilter>("all");
+  const [retentionFilter, setRetentionFilter] = useState<RetentionBucket | null>(null);
+  const [sort, setSort] = useState<{ by: TorrentSort; order: SortOrder } | null>(null);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState({ all: 0, active: 0, ready: 0, waiting: 0 });
+  const [retentionCounts, setRetentionCounts] = useState({ green: 0, orange: 0, red: 0 });
   const [openTorrentIds, setOpenTorrentIds] = useState<Set<string>>(() => new Set());
   const [managerSnapshot, setManagerSnapshot] = useState<BrowserDownloadManagerSnapshot>(EMPTY_MANAGER_SNAPSHOT);
   const [nativeDownloads, setNativeDownloads] = useState<NativeDownloadStart[]>(loadNativeDownloadStarts);
@@ -699,22 +713,27 @@ export function UserDownloadsPage({
       });
   }, [onSessionExpired]);
 
-  const load = useCallback(async (_requestedOffset: number, signal?: AbortSignal) => {
+  const load = useCallback(async (requestedOffset: number, signal?: AbortSignal) => {
     const generation = ++loadGenerationRef.current;
     setRefreshing(true);
     try {
-      const items: TorrentRequestV2[] = [];
-      let apiOffset = 0;
-      let expectedTotal: number | null = null;
-      while (expectedTotal === null || apiOffset < expectedTotal) {
-        const result = await api.listTorrentRequestsV2(apiOffset, PAGE_SIZE, signal);
-        if (expectedTotal === null) expectedTotal = result.total;
-        items.push(...result.items);
-        if (result.items.length < PAGE_SIZE) break;
-        apiOffset += result.items.length;
-      }
+      const result = await api.listTorrentRequestsV2(requestedOffset, PAGE_SIZE, signal, {
+        search: searchQuery.trim() || undefined,
+        status: statusFilter === "all" ? undefined : statusFilter === "active" ? "downloading" : statusFilter,
+        sort_by: sort?.by,
+        sort_order: sort?.order,
+        retention_bucket: retentionFilter ?? undefined,
+      });
       if (generation !== loadGenerationRef.current) return;
-      setTorrents(items);
+      setTorrents(result.items);
+      setTotal(result.total);
+      setCounts(result.status_counts === undefined ? {
+        all: result.total,
+        active: result.items.filter((torrent) => matchesTorrentFilter(torrent, "active")).length,
+        ready: result.items.filter((torrent) => matchesTorrentFilter(torrent, "ready")).length,
+        waiting: result.items.filter((torrent) => matchesTorrentFilter(torrent, "waiting")).length,
+      } : { all: result.status_counts.all, active: result.status_counts.downloading, ready: result.status_counts.ready, waiting: result.status_counts.waiting });
+      setRetentionCounts(result.retention_counts ?? { green: 0, orange: 0, red: 0 });
       setPageError("");
       onActivityChanged?.();
     } catch (caught) {
@@ -731,7 +750,7 @@ export function UserDownloadsPage({
         setRefreshing(false);
       }
     }
-  }, [apiError, onActivityChanged, onSessionExpired]);
+  }, [apiError, onActivityChanged, onSessionExpired, retentionFilter, searchQuery, sort, statusFilter]);
 
   const loadReadyManifest = useCallback((
     torrentId: string,
@@ -1062,6 +1081,28 @@ export function UserDownloadsPage({
     }
   }
 
+  async function downloadFromRow(
+    torrent: TorrentRequestV2,
+    snapshot: TorrentDownloadManifestPageV2,
+  ) {
+    if (snapshot.file_count === 1 && snapshot.items.length === 1) {
+      await startManagedFileDownload(torrent, snapshot, snapshot.items[0]);
+      return;
+    }
+    if (supportsRecursiveDirectoryDownload()) {
+      await startRecursiveDownload(torrent, snapshot);
+      return;
+    }
+    if (snapshot.archive_available) {
+      const name = `${torrent.name}.zip`;
+      recordNativeDownload(name, "archive");
+      const link = document.createElement("a");
+      link.href = api.torrentArchiveDownloadUrlV2(torrent.id, snapshot.snapshot_id);
+      link.download = name;
+      link.click();
+    }
+  }
+
   async function cancelTorrentRequest(torrent: TorrentRequestV2) {
     if (cancellingId !== null) return;
     setCancellingId(torrent.id);
@@ -1085,20 +1126,9 @@ export function UserDownloadsPage({
     }
   }
 
-  const normalizedSearch = searchQuery.trim().toLocaleLowerCase();
-  const counts = useMemo(() => ({
-    all: torrents.length,
-    active: torrents.filter((torrent) => matchesTorrentFilter(torrent, "active")).length,
-    ready: torrents.filter((torrent) => matchesTorrentFilter(torrent, "ready")).length,
-    waiting: torrents.filter((torrent) => matchesTorrentFilter(torrent, "waiting")).length,
-  }), [torrents]);
-  const filteredTorrents = useMemo(() => torrents.filter((torrent) => (
-    matchesTorrentFilter(torrent, statusFilter)
-    && (normalizedSearch === "" || torrent.name.toLocaleLowerCase().includes(normalizedSearch))
-  )), [normalizedSearch, statusFilter, torrents]);
-  const visibleTorrents = filteredTorrents.slice(offset, offset + PAGE_SIZE);
+  const visibleTorrents = torrents;
   const page = Math.floor(offset / PAGE_SIZE) + 1;
-  const pageCount = Math.max(1, Math.ceil(filteredTorrents.length / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const queueTotal = torrents.find((torrent) => torrent.queue_total_estimate !== null)?.queue_total_estimate ?? null;
   const localDownloadSummary = summarizeDownloadManager(managerSnapshot, nativeDownloads);
 
@@ -1111,9 +1141,24 @@ export function UserDownloadsPage({
   }, [torrents]);
 
   useEffect(() => {
-    if (offset < filteredTorrents.length || offset === 0) return;
-    setOffset(Math.max(0, Math.floor((filteredTorrents.length - 1) / PAGE_SIZE) * PAGE_SIZE));
-  }, [filteredTorrents.length, offset]);
+    if (offset < total || offset === 0) return;
+    setOffset(Math.max(0, Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE));
+  }, [offset, total]);
+
+  function toggleSort(by: TorrentSort) {
+    setSort((current) => ({
+      by,
+      order: current?.by === by && current.order === "asc" ? "desc" : "asc",
+    }));
+    setOffset(0);
+  }
+
+  function SortIndicator({ by }: { by: TorrentSort }) {
+    if (sort?.by !== by) return <ArrowUpDown aria-hidden="true" />;
+    return sort.order === "asc"
+      ? <ArrowUp aria-hidden="true" />
+      : <ArrowDown aria-hidden="true" />;
+  }
 
   return (
     <section className="user-downloads" aria-labelledby="user-downloads-title">
@@ -1191,6 +1236,23 @@ export function UserDownloadsPage({
               {icon}{label}<span className="torrent-filter-count">{counts[filter]}</span>
             </button>
           ))}
+          {(["green", "orange", "red"] as const).map((bucket) => (
+            <Tooltip key={bucket} content={t(`downloads.retentionFilter.${bucket}` as MessageKey)}>
+              <button
+                type="button"
+                className={`torrent-filter torrent-retention-filter ${bucket}${retentionFilter === bucket ? " active" : ""}`}
+                aria-pressed={retentionFilter === bucket}
+                aria-label={t(`downloads.retentionFilter.${bucket}` as MessageKey)}
+                onClick={() => {
+                  setRetentionFilter((current) => current === bucket ? null : bucket);
+                  setOffset(0);
+                }}
+              >
+                <AlertTriangle aria-hidden="true" />
+                <span className="torrent-filter-count">{retentionCounts[bucket]}</span>
+              </button>
+            </Tooltip>
+          ))}
         </div>
       </div>
 
@@ -1214,7 +1276,7 @@ export function UserDownloadsPage({
 
       {loading ? (
         <StateMessage tone="loading" className="torrent-list-state">{t("downloads.reading")}</StateMessage>
-      ) : filteredTorrents.length === 0 ? (
+      ) : total === 0 ? (
         <StateMessage tone="empty" className="torrent-list-state">{t("downloads.empty")}</StateMessage>
       ) : (
         <>
@@ -1227,12 +1289,12 @@ export function UserDownloadsPage({
               </div>
             </aside>
           )}
-          <div className="torrent-list-heading" aria-hidden="true">
-            <span>{t("downloads.name")}</span>
-            <span>{t("downloads.status")}</span>
-            <span>{t("downloads.queue")}</span>
+          <div className="torrent-list-heading" aria-label={t("downloads.sorting")}>
+            <button type="button" onClick={() => toggleSort("name")}>{t("downloads.name")}<SortIndicator by="name" /></button>
+            <button type="button" onClick={() => toggleSort("state")}>{t("downloads.status")}<SortIndicator by="state" /></button>
+            <button type="button" onClick={() => toggleSort("queue")}>{t("downloads.queue")}<SortIndicator by="queue" /></button>
             <span>{t("downloads.progress")}</span>
-            <span>{t("downloads.size")}</span>
+            <button type="button" onClick={() => toggleSort("size")}>{t("downloads.size")}<SortIndicator by="size" /></button>
             <span />
           </div>
           <ul className="torrent-accordion-list" aria-label={t("downloads.requests")} aria-busy={refreshing}>
@@ -1252,7 +1314,16 @@ export function UserDownloadsPage({
                   })}
                   onRefresh={() => void load(offset)}
                   onOpen={torrent.state === "ready" && manifest === undefined ? () => void openReadyTorrent(torrent) : undefined}
-                  onDownload={() => void openReadyTorrent(torrent, true)}
+                  downloadAvailable={manifest?.firstPage !== null && manifest?.firstPage !== undefined && (
+                    manifest.firstPage.file_count === 1
+                    || supportsRecursiveDirectoryDownload()
+                    || manifest.firstPage.archive_available
+                  )}
+                  onDownload={() => {
+                    if (manifest?.firstPage !== null && manifest?.firstPage !== undefined) {
+                      void downloadFromRow(torrent, manifest.firstPage);
+                    }
+                  }}
                   onCancel={() => void cancelTorrentRequest(torrent)}
                   cancelBusy={cancellingId === torrent.id}
                   downloadBusy={torrent.state === "ready" && manifest?.loading === true && manifest.snapshot === null}
@@ -1296,11 +1367,11 @@ export function UserDownloadsPage({
             >
               {t("common.previous")}
             </button>
-            <span aria-live="polite">{t(filteredTorrents.length === 1 ? "downloads.pageOne" : "downloads.pageMany", { page, pages: pageCount, total: filteredTorrents.length })}</span>
+            <span aria-live="polite">{t(total === 1 ? "downloads.pageOne" : "downloads.pageMany", { page, pages: pageCount, total })}</span>
             <button
               type="button"
               className="secondary-button"
-              disabled={offset + PAGE_SIZE >= filteredTorrents.length || refreshing}
+              disabled={offset + PAGE_SIZE >= total || refreshing}
               onClick={() => setOffset(offset + PAGE_SIZE)}
             >
               {t("common.next")}

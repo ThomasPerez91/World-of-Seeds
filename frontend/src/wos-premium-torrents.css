@@ -84,9 +84,41 @@
   text-align: left;
 }
 
-.torrent-list-heading > span {
+.torrent-list-heading > span,
+.torrent-list-heading > button {
   min-width: 0;
   text-align: left;
+}
+
+.torrent-list-heading > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.torrent-list-heading > button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.torrent-retention-filter.green > svg { color: #62dc91; }
+.torrent-retention-filter.orange > svg { color: #f3a847; }
+.torrent-retention-filter.red > svg { color: #ff6570; }
+
+.torrent-card-actions .torrent-action-download:hover:not(:disabled),
+.ready-file-download-button:hover {
+  color: #d8ffe7 !important;
+  background: rgba(55, 190, 111, 0.25) !important;
+  box-shadow: 0 0 12px rgba(55, 190, 111, 0.14) !important;
+  filter: none !important;
 }
 
 .user-downloads .torrent-accordion-list {

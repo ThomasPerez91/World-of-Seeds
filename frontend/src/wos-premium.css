@@ -995,6 +995,47 @@ input::placeholder {
   text-transform: uppercase;
 }
 
+.auth-seed-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.auth-seed-controls input {
+  min-width: 0;
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  user-select: all;
+}
+
+.auth-seed-controls .ui-button {
+  height: 44px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.auth-seed-controls svg { width: 17px; height: 17px; }
+
+.auth-seed-confirmation {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid rgba(239, 80, 92, 0.3);
+  border-radius: 12px;
+  background: rgba(171, 42, 53, 0.08);
+}
+
+.auth-seed-confirmation > div {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-end;
+}
+
+@media (max-width: 680px) {
+  .auth-seed-controls { grid-template-columns: 1fr 1fr; }
+  .auth-seed-controls input { grid-column: 1 / -1; }
+}
+
 .torrent-accordion-list {
   display: grid !important;
   gap: 0 !important;
