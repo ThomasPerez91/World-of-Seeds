@@ -119,7 +119,7 @@ export function CompatibilityDirectoryBrowser({
           <span className="ready-file-label">
             <File aria-hidden="true" />
             <Tooltip content={file.relative_path} overflowOnly className="ready-file-path">
-              <strong>{name}</strong>
+              <strong>{file.relative_path}</strong>
             </Tooltip>
           </span>
           <span className="ready-tree-file-size">{formatBytes(file.size)}</span>
