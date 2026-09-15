@@ -46,6 +46,7 @@ import {
   type RecursiveTransferProgress,
   supportsRecursiveDirectoryDownload,
 } from "./recursiveDownload";
+import { CompatibilityDirectoryBrowser } from "./CompatibilityDirectoryBrowser";
 import { RetentionWarning } from "./RetentionWarning";
 
 export const PAGE_SIZE = 25;
@@ -439,58 +440,71 @@ function ReadyTorrentContent({
               <Button variant="secondary" onClick={onRetry}>{t("common.retry")}</Button>
             </StateMessage>
           )}
-          <ul className="ready-file-list">
-            {snapshot.items.map((file) => (
-              <li key={file.id}>
-                <Tooltip content={file.relative_path} overflowOnly className="ready-file-path">
-                  <span>{file.relative_path}</span>
-                </Tooltip>
-                <span>{formatBytes(file.size)}</span>
-                {managedFiles ? (
-                  <Tooltip content={t("common.download")}>
-                    <button
-                      type="button"
-                      className="ready-file-download-button"
-                      aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
-                      onClick={() => onDownloadFile(file, snapshot)}
-                    >
-                      <Download aria-hidden="true" />
-                    </button>
-                  </Tooltip>
-                ) : (
-                  <Tooltip content={t("common.download")}>
-                    <a
-                      className="ready-file-download-button"
-                      href={api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id)}
-                      download={file.relative_path.split("/").at(-1)}
-                      aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
-                      onClick={() => onNativeDownload(file.relative_path.split("/").at(-1) ?? file.relative_path, "file")}
-                    >
-                      <Download aria-hidden="true" />
-                    </a>
-                  </Tooltip>
-                )}
-              </li>
-            ))}
-          </ul>
-          {snapshot.file_count > FALLBACK_PAGE_SIZE && (
-            <nav className="ready-manifest-pagination" aria-label={t("downloads.compatPagination")}>
-              <Button
-                variant="secondary"
-                disabled={manifest.loading || snapshot.offset === 0}
-                onClick={() => onLoadPage(Math.max(0, snapshot.offset - FALLBACK_PAGE_SIZE))}
-              >
-                {t("common.previous")}
-              </Button>
-              <span>{Math.floor(snapshot.offset / FALLBACK_PAGE_SIZE) + 1} / {Math.ceil(snapshot.file_count / FALLBACK_PAGE_SIZE)}</span>
-              <Button
-                variant="secondary"
-                disabled={manifest.loading || snapshot.offset + snapshot.items.length >= snapshot.file_count}
-                onClick={() => onLoadPage(snapshot.offset + snapshot.items.length)}
-              >
-                {t("common.next")}
-              </Button>
-            </nav>
+          {compatible && snapshot.file_count > 1 ? (
+            <CompatibilityDirectoryBrowser
+              fallbackLoading={manifest.loading}
+              onLoadFallbackPage={onLoadPage}
+              onDownloadFile={(file) => onDownloadFile(file, snapshot)}
+              onNativeDownload={onNativeDownload}
+              snapshot={snapshot}
+              torrentId={torrent.id}
+            />
+          ) : (
+            <>
+              <ul className="ready-file-list">
+                {snapshot.items.map((file) => (
+                  <li key={file.id}>
+                    <Tooltip content={file.relative_path} overflowOnly className="ready-file-path">
+                      <span>{file.relative_path}</span>
+                    </Tooltip>
+                    <span>{formatBytes(file.size)}</span>
+                    {managedFiles ? (
+                      <Tooltip content={t("common.download")}>
+                        <button
+                          type="button"
+                          className="ready-file-download-button"
+                          aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
+                          onClick={() => onDownloadFile(file, snapshot)}
+                        >
+                          <Download aria-hidden="true" />
+                        </button>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip content={t("common.download")}>
+                        <a
+                          className="ready-file-download-button"
+                          href={api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id)}
+                          download={file.relative_path.split("/").at(-1)}
+                          aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
+                          onClick={() => onNativeDownload(file.relative_path.split("/").at(-1) ?? file.relative_path, "file")}
+                        >
+                          <Download aria-hidden="true" />
+                        </a>
+                      </Tooltip>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {snapshot.file_count > FALLBACK_PAGE_SIZE && (
+                <nav className="ready-manifest-pagination" aria-label={t("downloads.compatPagination")}>
+                  <Button
+                    variant="secondary"
+                    disabled={manifest.loading || snapshot.offset === 0}
+                    onClick={() => onLoadPage(Math.max(0, snapshot.offset - FALLBACK_PAGE_SIZE))}
+                  >
+                    {t("common.previous")}
+                  </Button>
+                  <span>{Math.floor(snapshot.offset / FALLBACK_PAGE_SIZE) + 1} / {Math.ceil(snapshot.file_count / FALLBACK_PAGE_SIZE)}</span>
+                  <Button
+                    variant="secondary"
+                    disabled={manifest.loading || snapshot.offset + snapshot.items.length >= snapshot.file_count}
+                    onClick={() => onLoadPage(snapshot.offset + snapshot.items.length)}
+                  >
+                    {t("common.next")}
+                  </Button>
+                </nav>
+              )}
+            </>
           )}
         </>
       ) : null}
