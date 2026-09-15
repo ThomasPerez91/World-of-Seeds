@@ -108,6 +108,10 @@ def version_sources(
             root / "frontend/src/version.ts",
             r'^export const APP_VERSION = "([^"]+)";$',
         ),
+        "frontend/src/uiVersion.ts": _match_one(
+            root / "frontend/src/uiVersion.ts",
+            r'^export const UI_VERSION = "([^"]+)";$',
+        ),
     }
 
 
@@ -189,6 +193,11 @@ def set_version(
     _replace_one(
         root / "frontend/src/version.ts",
         r'(^export const APP_VERSION = ")[^"]+((";)$)',
+        rf"\g<1>{version}\g<2>",
+    )
+    _replace_one(
+        root / "frontend/src/uiVersion.ts",
+        r'(^export const UI_VERSION = ")[^"]+((";)$)',
         rf"\g<1>{version}\g<2>",
     )
     validate(root, channel=channel, expected_version=version)

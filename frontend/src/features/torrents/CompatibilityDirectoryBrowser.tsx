@@ -24,6 +24,7 @@ import {
 import { Button, StateMessage, Tooltip } from "../../components/ui";
 import { useI18n } from "../../i18n";
 import { supportsManagedFileDownload } from "./downloadManager";
+import { supportsRecursiveDirectoryDownload } from "./recursiveDownload";
 
 interface DirectoryListingState {
   error: string;
@@ -31,10 +32,93 @@ interface DirectoryListingState {
   response: TorrentDownloadDirectoriesV2 | null;
 }
 
+export type ManifestTreeNode =
+  | {
+      kind: "directory";
+      name: string;
+      relativePath: string;
+      fileCount: number;
+      totalSize: number;
+      children: ManifestTreeNode[];
+    }
+  | {
+      kind: "file";
+      name: string;
+      relativePath: string;
+      file: TorrentDownloadFileV2;
+    };
+
+type ManifestTreeFile = Extract<ManifestTreeNode, { kind: "file" }>;
+
+interface MutableManifestDirectory {
+  kind: "directory";
+  name: string;
+  relativePath: string;
+  fileCount: number;
+  totalSize: number;
+  children: Map<string, MutableManifestDirectory | ManifestTreeFile>;
+}
+
+function finalizeManifestTree(
+  children: Map<string, MutableManifestDirectory | ManifestTreeFile>,
+): ManifestTreeNode[] {
+  return [...children.values()]
+    .map((node): ManifestTreeNode => node.kind === "file" ? node : ({
+      kind: "directory",
+      name: node.name,
+      relativePath: node.relativePath,
+      fileCount: node.fileCount,
+      totalSize: node.totalSize,
+      children: finalizeManifestTree(node.children),
+    }))
+    .sort((left, right) => {
+      if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
+      return left.name.localeCompare(right.name);
+    });
+}
+
+export function buildManifestTree(files: readonly TorrentDownloadFileV2[]): ManifestTreeNode[] {
+  const root = new Map<string, MutableManifestDirectory | ManifestTreeFile>();
+  for (const file of files) {
+    const segments = file.relative_path.split("/").filter(Boolean);
+    const name = segments.pop() ?? file.relative_path;
+    let children = root;
+    let parentPath = "";
+    for (const segment of segments) {
+      const relativePath = parentPath === "" ? segment : `${parentPath}/${segment}`;
+      const key = `directory:${segment}`;
+      let directory = children.get(key);
+      if (directory?.kind !== "directory") {
+        directory = {
+          kind: "directory",
+          name: segment,
+          relativePath,
+          fileCount: 0,
+          totalSize: 0,
+          children: new Map(),
+        };
+        children.set(key, directory);
+      }
+      directory.fileCount += 1;
+      directory.totalSize += file.size;
+      children = directory.children;
+      parentPath = relativePath;
+    }
+    children.set(`file:${file.id}`, {
+      kind: "file",
+      name,
+      relativePath: file.relative_path,
+      file,
+    });
+  }
+  return finalizeManifestTree(root);
+}
+
 export function CompatibilityDirectoryBrowser({
   fallbackLoading,
   fallbackPageSize = 50,
   onDownloadFile,
+  onDownloadFolder,
   onLoadFallbackPage,
   onNativeDownload,
   snapshot,
@@ -43,6 +127,9 @@ export function CompatibilityDirectoryBrowser({
   fallbackLoading: boolean;
   fallbackPageSize?: number;
   onDownloadFile: (file: TorrentDownloadFileV2) => void;
+  onDownloadFolder: (
+    directory: Pick<TorrentDownloadDirectoryV2, "name" | "relative_path">,
+  ) => void;
   onLoadFallbackPage: (offset: number) => void;
   onNativeDownload: (name: string, kind: "archive" | "file") => void;
   snapshot: TorrentDownloadManifestPageV2;
@@ -52,6 +139,7 @@ export function CompatibilityDirectoryBrowser({
   const [listings, setListings] = useState<Record<string, DirectoryListingState>>({});
   const [openPaths, setOpenPaths] = useState<Set<string>>(() => new Set());
   const managedFiles = supportsManagedFileDownload();
+  const nativeDirectories = supportsRecursiveDirectoryDownload();
 
   const loadDirectories = useCallback((parent: string | null, offset = 0) => {
     const key = parent ?? "";
@@ -121,7 +209,7 @@ export function CompatibilityDirectoryBrowser({
           <span className="ready-file-label">
             <File aria-hidden="true" />
             <Tooltip content={file.relative_path} overflowOnly className="ready-file-path">
-              <strong>{file.relative_path}</strong>
+              <strong>{name}</strong>
             </Tooltip>
           </span>
           <span className="ready-tree-file-size">{formatBytes(file.size)}</span>
@@ -150,6 +238,61 @@ export function CompatibilityDirectoryBrowser({
             </Tooltip>
           )}
         </div>
+      </li>
+    );
+  }
+
+  function renderFallbackNode(node: ManifestTreeNode, depth: number): ReactNode {
+    if (node.kind === "file") return renderFile(node.file, depth);
+    const open = openPaths.has(node.relativePath);
+    return (
+      <li key={node.relativePath} className="ready-directory-item">
+        <div className={`ready-directory-row ready-tree-depth-${Math.min(depth, 6)}`}>
+          <button
+            type="button"
+            className="ready-directory-toggle"
+            aria-expanded={open}
+            aria-label={`${t("downloads.details")} — ${node.name}`}
+            onClick={() => setOpenPaths((current) => {
+              const next = new Set(current);
+              if (next.has(node.relativePath)) next.delete(node.relativePath);
+              else next.add(node.relativePath);
+              return next;
+            })}
+          >
+            {open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+            {open ? <FolderOpen aria-hidden="true" /> : <Folder aria-hidden="true" />}
+            <span className="ready-directory-copy">
+              <Tooltip content={node.relativePath} overflowOnly focusable={false} className="ready-directory-name">
+                <strong>{node.name}</strong>
+              </Tooltip>
+              <small>{t(node.fileCount === 1 ? "downloads.contentSummaryOne" : "downloads.contentSummaryMany", {
+                count: node.fileCount,
+                size: formatBytes(node.totalSize),
+              })}</small>
+            </span>
+          </button>
+          {nativeDirectories && (
+            <Tooltip content={t("downloads.downloadFolderNamed", { name: node.name })}>
+              <button
+                type="button"
+                className="ready-folder-download-button"
+                aria-label={t("downloads.downloadFolderNamed", { name: node.name })}
+                onClick={() => onDownloadFolder({
+                  name: node.name,
+                  relative_path: node.relativePath,
+                })}
+              >
+                <Download aria-hidden="true" />
+              </button>
+            </Tooltip>
+          )}
+        </div>
+        {open && (
+          <div className="ready-directory-children">
+            <ul>{node.children.map((child) => renderFallbackNode(child, depth + 1))}</ul>
+          </div>
+        )}
       </li>
     );
   }
@@ -219,7 +362,18 @@ export function CompatibilityDirectoryBrowser({
               </>
             )}
           </button>
-          {directory.archive_available ? (
+          {nativeDirectories ? (
+            <Tooltip content={t("downloads.downloadFolderNamed", { name: directory.name })}>
+              <button
+                type="button"
+                className="ready-folder-download-button"
+                aria-label={t("downloads.downloadFolderNamed", { name: directory.name })}
+                onClick={() => onDownloadFolder(directory)}
+              >
+                <Download aria-hidden="true" />
+              </button>
+            </Tooltip>
+          ) : directory.archive_available ? (
             <Tooltip content={archiveLabel}>
               <a
                 className="ready-folder-download-button"
@@ -260,8 +414,9 @@ export function CompatibilityDirectoryBrowser({
   const rootFiles = root?.response?.files ?? [];
   const fallbackActive = root?.error !== "" && root?.error !== undefined;
   const fallbackFiles = fallbackActive ? snapshot.items : [];
+  const fallbackTree = buildManifestTree(fallbackFiles);
   const safeFallbackPageSize = Math.max(1, fallbackPageSize);
-  if (rootDirectories.length === 0 && rootFiles.length === 0 && fallbackFiles.length === 0) return null;
+  if (rootDirectories.length === 0 && rootFiles.length === 0 && fallbackTree.length === 0) return null;
   return (
     <section className="ready-directory-browser" aria-label={t("downloads.content")}>
       {root?.error !== "" && root?.error !== undefined && root.response === null && (
@@ -273,7 +428,7 @@ export function CompatibilityDirectoryBrowser({
       <ul className="ready-directory-list">
         {root?.response !== null && root?.response !== undefined
           ? renderListing(root.response, 0)
-          : fallbackFiles.map((file) => renderFile(file, 0))}
+          : fallbackTree.map((node) => renderFallbackNode(node, 0))}
       </ul>
       {fallbackActive && snapshot.file_count > safeFallbackPageSize && (
         <nav className="ready-manifest-pagination" aria-label={t("downloads.compatPagination")}>

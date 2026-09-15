@@ -65,8 +65,7 @@
     minmax(118px, max-content);
 }
 
-.user-downloads .torrent-list-heading,
-.user-downloads .torrent-row-grid {
+.user-downloads .torrent-column-grid {
   display: grid;
   grid-template-columns: var(--torrent-list-columns);
   column-gap: 0.7rem;
@@ -88,6 +87,11 @@
 .torrent-list-heading > button {
   min-width: 0;
   text-align: left;
+}
+
+.torrent-list-heading > :nth-child(n + 2):nth-child(-n + 5) {
+  justify-self: center;
+  text-align: center;
 }
 
 .torrent-list-heading > button {
@@ -194,6 +198,8 @@
   display: flex !important;
   min-width: 0;
   align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
 }
 
 .torrent-primary-state {
@@ -234,7 +240,7 @@
   font-size: 0.75rem;
   font-weight: 680;
   line-height: 1;
-  text-align: left;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -245,6 +251,12 @@
   grid-template-columns: minmax(75px, 1fr) auto !important;
   align-items: center;
   gap: 0.5rem;
+}
+
+.torrent-summary-progress,
+.torrent-summary-queue,
+.torrent-summary-size {
+  justify-self: stretch;
 }
 
 .torrent-summary-progress .torrent-row-progress {
@@ -350,6 +362,10 @@
   margin: 0;
 }
 
+.torrent-meta-card {
+  min-width: 0;
+}
+
 .torrent-detail-grid > div {
   min-width: 0;
   padding: 0.65rem;
@@ -445,6 +461,189 @@
 .download-fallback-archive svg {
   width: 16px;
   height: 16px;
+}
+
+.ready-directory-browser,
+.ready-directory-list,
+.ready-directory-children ul {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ready-directory-browser {
+  overflow: hidden;
+  border: 1px solid rgba(157, 220, 184, 0.1);
+  border-radius: 11px;
+  background: rgba(2, 20, 13, 0.46);
+}
+
+.ready-directory-item,
+.ready-tree-file {
+  min-width: 0;
+}
+
+.ready-directory-row,
+.ready-tree-file-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.48rem 0.6rem;
+  border-bottom: 1px solid rgba(157, 220, 184, 0.08);
+  transition: background-color 140ms ease;
+}
+
+.ready-directory-row:hover,
+.ready-tree-file-row:hover {
+  background: rgba(102, 234, 157, 0.04);
+}
+
+.ready-directory-toggle {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ready-directory-toggle > svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: var(--wos-accent);
+}
+
+.ready-directory-copy,
+.ready-directory-name,
+.ready-file-label,
+.ready-file-path {
+  min-width: 0;
+}
+
+.ready-directory-copy {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.ready-directory-name strong,
+.ready-file-path strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wos-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ready-directory-copy small,
+.ready-tree-file-size {
+  color: var(--wos-muted);
+  font-size: 0.7rem;
+}
+
+.ready-file-label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.ready-file-label > svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: var(--wos-accent);
+}
+
+.ready-tree-file-row {
+  grid-template-columns: minmax(0, 1fr) auto 38px;
+}
+
+.ready-directory-children {
+  min-width: 0;
+}
+
+.ready-directory-children .ready-directory-row,
+.ready-directory-children .ready-tree-file-row {
+  padding-left: calc(0.6rem + 1.15rem * var(--tree-depth, 1));
+}
+
+.ready-tree-depth-1 { --tree-depth: 1; }
+.ready-tree-depth-2 { --tree-depth: 2; }
+.ready-tree-depth-3 { --tree-depth: 3; }
+.ready-tree-depth-4 { --tree-depth: 4; }
+.ready-tree-depth-5 { --tree-depth: 5; }
+.ready-tree-depth-6 { --tree-depth: 6; }
+
+.ready-folder-download-button {
+  display: inline-flex;
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0;
+  color: #bff6d3;
+  border: 1px solid rgba(67, 213, 129, 0.28);
+  border-radius: 10px;
+  background: rgba(43, 163, 95, 0.16);
+  font-size: 0.62rem;
+  font-weight: 780;
+  text-decoration: none;
+}
+
+.ready-folder-download-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ready-directory-loading,
+.ready-directory-error,
+.ready-tree-load-more {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.65rem 0.8rem 0.65rem 2.35rem;
+  color: var(--wos-muted);
+  font-size: 0.72rem;
+}
+
+.retention-warning-indicator {
+  display: inline-grid !important;
+  width: 26px !important;
+  min-width: 26px !important;
+  height: 26px !important;
+  padding: 0 !important;
+  place-items: center;
+  border-radius: 999px !important;
+  line-height: 1 !important;
+}
+
+.retention-warning-focus {
+  display: inline-grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  border-radius: inherit;
+}
+
+.retention-warning-focus svg {
+  width: 15px;
+  height: 15px;
+}
+
+.retention-warning-focus:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 .ui-tooltip-anchor {

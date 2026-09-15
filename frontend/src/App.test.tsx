@@ -435,6 +435,44 @@ describe("App", () => {
     );
   });
 
+  it("présente Copier et Régénérer comme boutons carrés icon-only accessibles", async () => {
+    const currentUser = {
+      id: "bc68aa7c-d753-4db7-8698-acf8d09045a3",
+      username: "thomas",
+      is_admin: false,
+      is_active: true,
+      must_change_credentials: false,
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input);
+      if (url === "/api/v1/auth/me") return response({ user: currentUser }, 200);
+      if (url === "/api/v1/auth/auth-seed") return response({ auth_seed: "A".repeat(25) }, 200);
+      if (url === "/api/v2/storage") return storageResponse(1000, 0, 1000);
+      if (url === "/api/v1/health/status") {
+        return response({ status: "ok", checked_at: "2026-09-15T12:00:00Z" }, 200);
+      }
+      const torrentListing = emptyTorrentListing(url);
+      if (torrentListing !== null) return torrentListing;
+      throw new Error(`Requête inattendue : GET ${url}`);
+    }));
+
+    const user = userEvent.setup();
+    const view = render(<App />);
+    await screen.findByRole("heading", { name: "Dashboard" });
+    await user.click(screen.getByRole("button", { name: "Paramètres" }));
+    await user.click(screen.getByRole("button", { name: "Secrets" }));
+
+    const copy = await screen.findByRole("button", { name: "Copier la seed" });
+    const regenerate = screen.getByRole("button", { name: "Régénérer la seed" });
+    expect(copy.textContent).toBe("");
+    expect(regenerate.textContent).toBe("");
+    expect(copy.classList).toContain("auth-seed-action");
+    expect(regenerate.classList).toContain("auth-seed-action");
+    expect(copy.closest(".ui-tooltip-anchor")?.getAttribute("aria-describedby")).not.toBeNull();
+    expect(regenerate.closest(".ui-tooltip-anchor")?.getAttribute("aria-describedby")).not.toBeNull();
+    expect(view.container.querySelectorAll(".auth-seed-action svg")).toHaveLength(2);
+  });
+
   it("conserve le changement de langue depuis la section Général", async () => {
     let currentUser = {
       id: "bc68aa7c-d753-4db7-8698-acf8d09045a3",
