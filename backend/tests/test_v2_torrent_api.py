@@ -90,6 +90,89 @@ async def login(client: AsyncClient, username: str = "thomas") -> dict[str, str]
 
 
 @pytest.mark.asyncio
+async def test_listing_sorts_before_pagination_and_filters_retention_facets(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    now = datetime.now(UTC)
+    for index in range(30):
+        managed = ManagedTorrent(
+            info_hash=f"{index + 1:040x}",
+            name=("avatar" if index == 0 else "Alien" if index == 1 else f"Film {29 - index:02d}"),
+            total_size=index + 1,
+            state=ManagedTorrentState.READY,
+            progress=1,
+            ready_at=now - timedelta(hours=20),
+        )
+        db_session.add(
+            TorrentRequest(
+                user_id=owner.id,
+                managed_torrent=managed,
+                state=TorrentRequestState.READY,
+                ready_at=now - timedelta(hours=20),
+                unsubscribe_at=now + timedelta(hours=80),
+            )
+        )
+    orange = TorrentRequest(
+        user_id=owner.id,
+        managed_torrent=ManagedTorrent(
+            info_hash="e" * 40,
+            name="Orange",
+            total_size=100,
+            state=ManagedTorrentState.READY,
+            progress=1,
+        ),
+        state=TorrentRequestState.READY,
+        ready_at=now - timedelta(hours=50),
+        unsubscribe_at=now + timedelta(hours=50),
+    )
+    red = TorrentRequest(
+        user_id=owner.id,
+        managed_torrent=ManagedTorrent(
+            info_hash="f" * 40,
+            name="Red",
+            total_size=101,
+            state=ManagedTorrentState.READY,
+            progress=1,
+        ),
+        state=TorrentRequestState.READY,
+        ready_at=now - timedelta(hours=90),
+        unsubscribe_at=now + timedelta(hours=10),
+    )
+    db_session.add_all([orange, red])
+    await db_session.commit()
+    await login(client)
+
+    first = await client.get(
+        "/api/v2/torrents",
+        params={"limit": 25, "sort_by": "name", "sort_order": "asc"},
+    )
+    assert first.status_code == 200, first.text
+    payload = first.json()
+    assert payload["total"] == 32
+    assert len(payload["items"]) == 25
+    assert [item["name"].casefold() for item in payload["items"]] == sorted(
+        item["name"].casefold() for item in payload["items"]
+    )
+    second = await client.get(
+        "/api/v2/torrents",
+        params={"offset": 25, "limit": 25, "sort_by": "name", "sort_order": "asc"},
+    )
+    all_names = [item["name"] for item in payload["items"] + second.json()["items"]]
+    assert [name.casefold() for name in all_names] == sorted(name.casefold() for name in all_names)
+    assert payload["retention_counts"] == {"green": 30, "orange": 1, "red": 1}
+
+    filtered = await client.get(
+        "/api/v2/torrents",
+        params={"retention_bucket": "red", "sort_by": "size", "sort_order": "desc"},
+    )
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["items"][0]["name"] == "Red"
+
+
+@pytest.mark.asyncio
 async def test_v2_upload_is_durable_idempotent_and_secret_free(
     client: AsyncClient,
     db_session: AsyncSession,

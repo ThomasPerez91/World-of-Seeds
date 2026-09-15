@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from typing import Annotated, Literal, Never, cast
+from typing import Annotated, Any, Literal, Never, cast
 
 from fastapi import (
     APIRouter,
@@ -19,7 +19,7 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
-from sqlalchemy import func, select
+from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
@@ -109,6 +109,10 @@ ACTIVE_REQUEST_STATES = (
 )
 RequestState = Literal["requested", "active", "ready", "cancelled", "expired", "error"]
 PressureState = Literal["normal", "warning", "critical"]
+TorrentSort = Literal["name", "state", "queue", "size"]
+SortOrder = Literal["asc", "desc"]
+TorrentStatusFilter = Literal["downloading", "ready", "waiting", "blocked"]
+RetentionBucket = Literal["green", "orange", "red"]
 
 
 def _utc_datetime(value: datetime | None) -> datetime | None:
@@ -1324,27 +1328,123 @@ async def list_torrent_requests(
     context: Annotated[AuthContext, Depends(require_current_credentials)],
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 25,
+    search: Annotated[str | None, Query(max_length=200)] = None,
+    status_filter: Annotated[TorrentStatusFilter | None, Query(alias="status")] = None,
+    sort_by: TorrentSort | None = None,
+    sort_order: SortOrder = "asc",
+    retention_bucket: RetentionBucket | None = None,
 ) -> TorrentRequestV2ListingResponse:
     now = datetime.now(UTC)
     visible_request = TorrentRequest.state.in_(ACTIVE_REQUEST_STATES) & (
         (TorrentRequest.state != TorrentRequestState.READY)
         | (TorrentRequest.unsubscribe_at.is_not(None) & (TorrentRequest.unsubscribe_at > now))
     )
-    total = await db.scalar(
-        select(func.count())
-        .select_from(TorrentRequest)
-        .where(TorrentRequest.user_id == context.user.id, visible_request)
+    filters = [TorrentRequest.user_id == context.user.id, visible_request]
+    if search and (normalized_search := search.strip()):
+        filters.append(func.lower(ManagedTorrent.name).contains(normalized_search.casefold()))
+
+    ux_state = case(
+        (ManagedTorrent.state == ManagedTorrentState.ERROR, literal(3)),
+        (TorrentRequest.state == TorrentRequestState.READY, literal(2)),
+        (ManagedTorrent.desired_active.is_(True), literal(0)),
+        else_=literal(1),
     )
-    rows = (
+    status_counts_row = (
         await db.execute(
-            select(TorrentRequest, ManagedTorrent)
+            select(
+                func.count().label("all"),
+                *[
+                    func.count().filter(ux_state == rank).label(bucket)
+                    for bucket, rank in {
+                        "downloading": 0,
+                        "waiting": 1,
+                        "ready": 2,
+                        "blocked": 3,
+                    }.items()
+                ],
+            )
+            .select_from(TorrentRequest)
             .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
-            .where(TorrentRequest.user_id == context.user.id, visible_request)
-            .order_by(TorrentRequest.created_at.desc(), TorrentRequest.id.desc())
-            .offset(offset)
-            .limit(limit)
+            .where(*filters)
         )
-    ).all()
+    ).one()
+    if status_filter is not None:
+        filters.append(
+            ux_state == {"downloading": 0, "waiting": 1, "ready": 2, "blocked": 3}[status_filter]
+        )
+
+    if db.get_bind().dialect.name == "sqlite":
+        elapsed = func.julianday(now) - func.julianday(TorrentRequest.ready_at)
+        duration = func.julianday(TorrentRequest.unsubscribe_at) - func.julianday(
+            TorrentRequest.ready_at
+        )
+    else:
+        elapsed = func.extract("epoch", now - TorrentRequest.ready_at)
+        duration = func.extract("epoch", TorrentRequest.unsubscribe_at - TorrentRequest.ready_at)
+    retention_base = (
+        (TorrentRequest.state == TorrentRequestState.READY)
+        & TorrentRequest.ready_at.is_not(None)
+        & TorrentRequest.unsubscribe_at.is_not(None)
+        & (TorrentRequest.unsubscribe_at > now)
+        & (duration > 0)
+    )
+    bucket_conditions = {
+        "green": retention_base & (elapsed < duration / 3),
+        "orange": retention_base & (elapsed >= duration / 3) & (elapsed < duration * 2 / 3),
+        "red": retention_base & (elapsed >= duration * 2 / 3),
+    }
+    base_query = (
+        select(TorrentRequest, ManagedTorrent)
+        .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
+        .where(*filters)
+    )
+    retention_counts_row = (
+        await db.execute(
+            select(
+                *[
+                    func.count().filter(condition).label(bucket)
+                    for bucket, condition in bucket_conditions.items()
+                ]
+            )
+            .select_from(TorrentRequest)
+            .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
+            .where(*filters)
+        )
+    ).one()
+    if retention_bucket is not None:
+        base_query = base_query.where(bucket_conditions[retention_bucket])
+    total = await db.scalar(select(func.count()).select_from(base_query.subquery()))
+
+    direction = "desc" if sort_order == "desc" else "asc"
+    stable_order = (
+        getattr(TorrentRequest.created_at, direction)(),
+        getattr(TorrentRequest.id, direction)(),
+    )
+    order: tuple[Any, ...]
+    if sort_by == "name":
+        order = (getattr(func.lower(ManagedTorrent.name), direction)(), *stable_order)
+    elif sort_by == "state":
+        order = (getattr(ux_state, direction)(), *stable_order)
+    elif sort_by == "size":
+        order = (getattr(ManagedTorrent.total_size, direction)(), *stable_order)
+    elif sort_by == "queue":
+        database_now = now.replace(tzinfo=None) if db.get_bind().dialect.name == "sqlite" else now
+        is_ranked = (
+            ManagedTorrent.state.in_((ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED))
+            & ManagedTorrent.desired_active.is_(False)
+            & or_(
+                ManagedTorrent.scheduler_retry_at.is_(None),
+                ManagedTorrent.scheduler_retry_at <= database_now,
+            )
+        )
+        order = (
+            case((is_ranked, literal(0)), else_=literal(1)).asc(),
+            getattr(ManagedTorrent.created_at, direction)(),
+            getattr(ManagedTorrent.id, direction)(),
+        )
+    else:
+        order = (TorrentRequest.created_at.desc(), TorrentRequest.id.desc())
+    rows = (await db.execute(base_query.order_by(*order).offset(offset).limit(limit))).all()
     queue_visibility = await load_torrent_queue_visibility(
         db,
         tuple(managed for _, managed in rows),
@@ -1362,6 +1462,18 @@ async def list_torrent_requests(
         offset=offset,
         limit=limit,
         total=total or 0,
+        status_counts={
+            "all": int(status_counts_row.all or 0),
+            "downloading": int(status_counts_row.downloading or 0),
+            "ready": int(status_counts_row.ready or 0),
+            "waiting": int(status_counts_row.waiting or 0),
+            "blocked": int(status_counts_row.blocked or 0),
+        },
+        retention_counts={
+            "green": int(retention_counts_row.green or 0),
+            "orange": int(retention_counts_row.orange or 0),
+            "red": int(retention_counts_row.red or 0),
+        },
     )
 
 
