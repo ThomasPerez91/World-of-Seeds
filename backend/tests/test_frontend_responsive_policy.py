@@ -48,9 +48,7 @@ def test_dashboard_title_uses_normal_page_background_in_every_theme() -> None:
 
 def test_directory_rows_do_not_inherit_the_global_button_hover_effect() -> None:
     styles = (REPOSITORY / "frontend/src/wos-premium-torrents.css").read_text()
-    rule_start = styles.index(
-        ".user-downloads .ready-directory-toggle:hover:not(:disabled) {"
-    )
+    rule_start = styles.index(".user-downloads .ready-directory-toggle:hover:not(:disabled) {")
     rule = styles[rule_start : styles.index("}", rule_start) + 1]
 
     assert "background: transparent" in rule
