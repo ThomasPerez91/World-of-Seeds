@@ -33,6 +33,7 @@ interface DirectoryListingState {
 
 export function CompatibilityDirectoryBrowser({
   fallbackLoading,
+  fallbackPageSize = 50,
   onDownloadFile,
   onLoadFallbackPage,
   onNativeDownload,
@@ -40,6 +41,7 @@ export function CompatibilityDirectoryBrowser({
   torrentId,
 }: {
   fallbackLoading: boolean;
+  fallbackPageSize?: number;
   onDownloadFile: (file: TorrentDownloadFileV2) => void;
   onLoadFallbackPage: (offset: number) => void;
   onNativeDownload: (name: string, kind: "archive" | "file") => void;
@@ -258,7 +260,7 @@ export function CompatibilityDirectoryBrowser({
   const rootFiles = root?.response?.files ?? [];
   const fallbackActive = root?.error !== "" && root?.error !== undefined;
   const fallbackFiles = fallbackActive ? snapshot.items : [];
-  const fallbackPageSize = Math.max(1, snapshot.limit);
+  const safeFallbackPageSize = Math.max(1, fallbackPageSize);
   if (rootDirectories.length === 0 && rootFiles.length === 0 && fallbackFiles.length === 0) return null;
   return (
     <section className="ready-directory-browser" aria-label={t("downloads.content")}>
@@ -273,17 +275,17 @@ export function CompatibilityDirectoryBrowser({
           ? renderListing(root.response, 0)
           : fallbackFiles.map((file) => renderFile(file, 0))}
       </ul>
-      {fallbackActive && snapshot.file_count > fallbackPageSize && (
+      {fallbackActive && snapshot.file_count > safeFallbackPageSize && (
         <nav className="ready-manifest-pagination" aria-label={t("downloads.compatPagination")}>
           <Button
             variant="secondary"
             disabled={fallbackLoading || snapshot.offset === 0}
-            onClick={() => onLoadFallbackPage(Math.max(0, snapshot.offset - fallbackPageSize))}
+            onClick={() => onLoadFallbackPage(Math.max(0, snapshot.offset - safeFallbackPageSize))}
           >
             {t("common.previous")}
           </Button>
           <span>
-            {Math.floor(snapshot.offset / fallbackPageSize) + 1} / {Math.ceil(snapshot.file_count / fallbackPageSize)}
+            {Math.floor(snapshot.offset / safeFallbackPageSize) + 1} / {Math.ceil(snapshot.file_count / safeFallbackPageSize)}
           </span>
           <Button
             variant="secondary"
