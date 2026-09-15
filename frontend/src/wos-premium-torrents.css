@@ -79,13 +79,14 @@
 
 .user-downloads .torrent-list-heading {
   margin: 0.1rem 1rem 0;
-  padding-block: 0.58rem;
+  padding-block: 0.38rem;
   text-align: left;
 }
 
 .torrent-list-heading > span,
 .torrent-list-heading > button {
   min-width: 0;
+  align-self: center;
   text-align: left;
 }
 
@@ -96,8 +97,11 @@
 
 .torrent-list-heading > button {
   display: inline-flex;
+  min-height: 24px;
+  height: auto;
   align-items: center;
   gap: 0.3rem;
+  margin: 0;
   padding: 0;
   color: inherit;
   border: 0;
