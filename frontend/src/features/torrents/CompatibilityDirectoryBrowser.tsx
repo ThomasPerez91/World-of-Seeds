@@ -89,7 +89,7 @@ export function CompatibilityDirectoryBrowser({
         setListings((current) => ({
           ...current,
           [key]: {
-            error: apiError(caught, "downloads.directoriesFailed"),
+            error: apiError(caught, "downloads.manifestFailed"),
             loading: false,
             response: current[key]?.response ?? null,
           },
@@ -165,7 +165,7 @@ export function CompatibilityDirectoryBrowser({
               disabled={listings[response.path]?.loading === true}
               onClick={() => loadDirectories(response.path === "" ? null : response.path, response.files.length)}
             >
-              {t("downloads.loadMoreFiles")}
+              {t("common.next")}
             </Button>
           </li>
         )}
@@ -177,6 +177,8 @@ export function CompatibilityDirectoryBrowser({
     const path = directory.relative_path;
     const listing = listings[path];
     const open = openPaths.has(path);
+    const detailsLabel = `${t("downloads.details")} — ${directory.name}`;
+    const archiveLabel = `${t("downloads.archive")} — ${directory.name}`;
     return (
       <li key={path} className="ready-directory-item">
         <div className={`ready-directory-row${depth === 0 ? " is-root" : ""} ready-tree-depth-${Math.min(depth, 6)}`}>
@@ -184,7 +186,7 @@ export function CompatibilityDirectoryBrowser({
             type="button"
             className={`ready-directory-toggle${depth === 0 ? " is-root" : ""}`}
             aria-expanded={open}
-            aria-label={t(open ? "downloads.collapseFolder" : "downloads.expandFolder", { name: directory.name })}
+            aria-label={detailsLabel}
             onClick={() => toggleDirectory(directory)}
           >
             {depth === 0 ? (
@@ -207,7 +209,7 @@ export function CompatibilityDirectoryBrowser({
                   <Tooltip content={path} overflowOnly focusable={false} className="ready-directory-name">
                     <strong>{directory.name}</strong>
                   </Tooltip>
-                  <small>{t(directory.file_count === 1 ? "downloads.folderSummaryOne" : "downloads.folderSummaryMany", {
+                  <small>{t(directory.file_count === 1 ? "downloads.contentSummaryOne" : "downloads.contentSummaryMany", {
                     count: directory.file_count,
                     size: formatBytes(directory.total_size),
                   })}</small>
@@ -216,12 +218,12 @@ export function CompatibilityDirectoryBrowser({
             )}
           </button>
           {directory.archive_available ? (
-            <Tooltip content={t("downloads.downloadFolderZip", { name: directory.name })}>
+            <Tooltip content={archiveLabel}>
               <a
                 className="ready-folder-download-button"
                 href={api.torrentFolderArchiveDownloadUrlV2(torrentId, path, snapshot.snapshot_id)}
                 download={`${directory.name}.zip`}
-                aria-label={t("downloads.downloadFolderZip", { name: directory.name })}
+                aria-label={archiveLabel}
                 onClick={() => onNativeDownload(`${directory.name}.zip`, "archive")}
               >
                 <Archive aria-hidden="true" />
@@ -250,7 +252,7 @@ export function CompatibilityDirectoryBrowser({
 
   const root = listings[""];
   if (root?.loading === true && root.response === null) {
-    return <StateMessage tone="loading" className="ready-directories-state">{t("downloads.directoriesLoading")}</StateMessage>;
+    return <StateMessage tone="loading" className="ready-directories-state">{t("downloads.manifestLoading")}</StateMessage>;
   }
   const rootDirectories = root?.response?.directories ?? [];
   const rootFiles = root?.response?.files ?? [];
@@ -259,7 +261,7 @@ export function CompatibilityDirectoryBrowser({
   const fallbackPageSize = Math.max(1, snapshot.limit);
   if (rootDirectories.length === 0 && rootFiles.length === 0 && fallbackFiles.length === 0) return null;
   return (
-    <section className="ready-directory-browser" aria-label={t("downloads.contentTreeLabel")}>
+    <section className="ready-directory-browser" aria-label={t("downloads.content")}>
       {root?.error !== "" && root?.error !== undefined && root.response === null && (
         <div className="ready-directories-state ready-directories-error">
           <span>{root.error}</span>
