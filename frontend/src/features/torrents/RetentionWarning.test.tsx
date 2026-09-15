@@ -65,8 +65,9 @@ describe("RetentionWarning", () => {
     );
 
     const statusCell = screen.getByTestId("status-cell");
-    expect(within(statusCell).getByTestId("retention-warning-indicator")).toBeTruthy();
-    expect(view.container.querySelector(".retention-warning.compact")).toBeNull();
+    const warning = within(statusCell).getByTestId("retention-warning");
+    expect(warning.classList.contains("compact")).toBe(true);
+    expect(view.container.querySelector(".torrent-accordion-card > .retention-warning.compact")).toBeNull();
     expect(view.container.querySelector(".retention-warning-anchor")).toBeTruthy();
     vi.useRealTimers();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
