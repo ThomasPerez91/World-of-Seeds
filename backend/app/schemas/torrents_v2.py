@@ -33,6 +33,8 @@ class TorrentRequestV2ListingResponse(BaseModel):
     offset: int
     limit: int
     total: int
+    status_counts: dict[Literal["all", "downloading", "ready", "waiting", "blocked"], int]
+    retention_counts: dict[Literal["green", "orange", "red"], int]
 
 
 class TorrentDownloadPolicyResponse(BaseModel):

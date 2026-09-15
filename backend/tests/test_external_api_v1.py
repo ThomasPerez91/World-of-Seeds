@@ -96,6 +96,52 @@ def test_auth_seed_generator_is_exact_base62_and_distinct() -> None:
     assert all(set(seed) <= set(AUTH_SEED_ALPHABET) for seed in seeds)
 
 
+@pytest.mark.asyncio
+async def test_auth_seed_rotation_is_csrf_protected_immediate_and_session_safe(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await _user(db_session, "seed-rotation")
+    user_id = user.id
+    _, raw_key = await _api_client(db_session, scopes=["downloads:read"])
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"username": user.username, "password": "correct-horse-battery"},
+    )
+    assert login.status_code == 200
+    csrf = client.cookies.get("wos_csrf")
+    assert csrf is not None
+    current = await client.get("/api/v1/auth/auth-seed")
+    old_seed = current.json()["auth_seed"]
+
+    missing_csrf = await client.post("/api/v1/auth/auth-seed/rotate")
+    assert missing_csrf.status_code == 403
+    rotated = await client.post(
+        "/api/v1/auth/auth-seed/rotate",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert rotated.status_code == 200
+    new_seed = rotated.json()["auth_seed"]
+    assert new_seed != old_seed
+    assert len(new_seed) == 25
+    assert set(new_seed) <= set(AUTH_SEED_ALPHABET)
+    assert rotated.headers["cache-control"] == "no-store"
+    assert rotated.headers["pragma"] == "no-cache"
+
+    db_session.expire_all()
+    persisted = await db_session.get(User, user_id)
+    assert persisted is not None and persisted.auth_seed == new_seed
+    old_access = await client.get(
+        "/api/external/v1/me/downloads", headers=_headers(raw_key, old_seed)
+    )
+    assert old_access.status_code == 401
+    assert old_access.json()["error"]["code"] == "invalid_user_seed"
+    assert (
+        await client.get("/api/external/v1/me/downloads", headers=_headers(raw_key, new_seed))
+    ).status_code == 200
+    assert (await client.get("/api/v1/auth/me")).status_code == 200
+
+
 @pytest.mark.parametrize(
     ("request_state", "torrent_state", "desired_active", "qb_state", "cooldown", "expected"),
     [

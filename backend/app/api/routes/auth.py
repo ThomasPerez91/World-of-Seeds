@@ -1,6 +1,8 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.auth.dependencies import (
     AppSettings,
@@ -11,6 +13,7 @@ from app.auth.dependencies import (
     require_current_credentials,
     require_current_credentials_csrf,
 )
+from app.auth.security import generate_auth_seed
 from app.auth.service import (
     AuthenticationFailedError,
     AuthenticationLockedError,
@@ -23,6 +26,7 @@ from app.auth.service import (
     revoke_session,
 )
 from app.core.config import CSRF_COOKIE_NAME, Settings
+from app.models import User
 from app.schemas.auth import (
     AuthResponse,
     AuthSeedResponse,
@@ -116,6 +120,46 @@ async def get_auth_seed(
     response.headers["Cache-Control"] = "no-store"
     response.headers["Pragma"] = "no-cache"
     return AuthSeedResponse(auth_seed=context.user.auth_seed)
+
+
+@router.post("/auth-seed/rotate", response_model=AuthSeedResponse)
+async def rotate_auth_seed(
+    response: Response,
+    db: DbSession,
+    context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
+) -> AuthSeedResponse:
+    """Atomically invalidate the external API seed without touching web sessions."""
+
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    async with db.begin():
+        user = await db.scalar(select(User).where(User.id == context.user.id).with_for_update())
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=_detail("not_authenticated", "Not authenticated"),
+            )
+        previous_seed = user.auth_seed
+        for _ in range(20):
+            candidate = generate_auth_seed()
+            if candidate == previous_seed:
+                continue
+            collision = await db.scalar(select(User.id).where(User.auth_seed == candidate))
+            if collision is not None:
+                continue
+            user.auth_seed = candidate
+            try:
+                async with db.begin_nested():
+                    await db.flush()
+            except IntegrityError:
+                user.auth_seed = previous_seed
+                continue
+            context.user.auth_seed = candidate
+            return AuthSeedResponse(auth_seed=candidate)
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=_detail("auth_seed_rotation_unavailable", "Authentication seed rotation failed"),
+    )
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
