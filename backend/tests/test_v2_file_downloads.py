@@ -49,8 +49,9 @@ async def _ready_file(
     data_root: Path,
     *,
     content: bytes = CONTENT,
+    is_admin: bool = False,
 ) -> tuple[User, ManagedTorrent, TorrentRequest, TorrentFile, Path]:
-    owner = User(username="thomas", password_hash=hash_password(PASSWORD))
+    owner = User(username="thomas", password_hash=hash_password(PASSWORD), is_admin=is_admin)
     torrent = ManagedTorrent(
         info_hash="d" * 40,
         name="Example",
@@ -254,6 +255,40 @@ async def test_download_lease_limit_reclaims_expired_entries(
         max_concurrent=1,
     )
     assert replacement.id != lease.id
+
+
+@pytest.mark.asyncio
+async def test_admin_file_download_bypasses_only_the_per_user_lease_ceiling(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    owner, torrent, request, torrent_file, _ = await _ready_file(
+        db_session,
+        data_root,
+        is_admin=True,
+    )
+    manager = DownloadLeaseManager(db_session, lease_seconds=60)
+    existing = [
+        await manager.acquire(
+            user_id=owner.id,
+            managed_torrent_id=torrent.id,
+            torrent_request_id=request.id,
+            torrent_file_id=torrent_file.id,
+            max_concurrent=None,
+        )
+        for _ in range(2)
+    ]
+    existing_ids = [lease.id for lease in existing]
+    await _login(client)
+
+    downloaded = await client.get(_url(request, torrent_file))
+
+    assert downloaded.status_code == 200
+    assert downloaded.content == CONTENT
+    assert await db_session.scalar(select(func.count()).select_from(DownloadLease)) == 2
+    for lease_id in existing_ids:
+        await manager.release(lease_id)
 
 
 @pytest.mark.asyncio

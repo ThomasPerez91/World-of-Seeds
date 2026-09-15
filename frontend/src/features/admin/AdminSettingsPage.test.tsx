@@ -72,10 +72,30 @@ function response(body: unknown, status = 200): Response {
 
 describe("AdminSettingsPage", () => {
   it("possède une traduction anglaise stable pour chaque option V2", () => {
-    expect(translatedOptionKeys.size).toBe(36);
+    expect(translatedOptionKeys.size).toBe(85);
     expect(translatedOptionKeys.has("WOS_ADMIN_REFRESH_INTERVAL_SECONDS")).toBe(true);
     expect(translatedNewGreedyFieldIds.size).toBe(44);
     expect(translatedNewGreedyFieldIds.has("advanced.inject_hours")).toBe(true);
+  });
+
+  it("présente trois synthèses lisibles sans concaténer leurs métriques", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/v2/admin/overview") return response(options);
+      throw new Error(`Requête inattendue : ${String(input)}`);
+    }));
+    const view = render(
+      <FeedbackProvider>
+        <AdminSettingsPage onBack={vi.fn()} onNavigate={vi.fn()} onSessionExpired={vi.fn()} />
+      </FeedbackProvider>,
+    );
+
+    await screen.findByText("Configuration demandée");
+    expect(screen.getByText("Configuration appliquée")).toBeTruthy();
+    expect(screen.getByText("Espace logique")).toBeTruthy();
+    expect(screen.getByText("Pression")).toBeTruthy();
+    expect(screen.getByText("Cycles du planificateur")).toBeTruthy();
+    expect(view.container.querySelectorAll(".central-admin-status > .ui-card")).toHaveLength(3);
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
   it("affiche une erreur métier structurée sous le champ concerné", async () => {
@@ -123,6 +143,108 @@ describe("AdminSettingsPage", () => {
     expect(await screen.findAllByText("Cette limite est incompatible avec la capacité globale.")).toHaveLength(2);
     expect(input.getAttribute("aria-invalid")).toBe("true");
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
+  it("affiche et modifie une passkey C411 comme un champ secret", async () => {
+    const c411Options = {
+      ...options,
+      sections: [
+        {
+          id: "c411_accounts",
+          label: "Comptes C411",
+          fields: [
+            {
+              ...options.sections[0].fields[0],
+              key: "WOS_C411_ACCOUNT_01_USERNAME",
+              label: "Compte C411 1 — nom d’utilisateur",
+              description: "Nom facultatif.",
+              input_type: "text",
+              value: "Thomas",
+              default: "",
+              unit: null,
+              minimum: null,
+              maximum: null,
+            },
+            {
+              ...options.sections[0].fields[0],
+              key: "WOS_C411_ACCOUNT_01_NUMBER",
+              label: "Compte C411 1 — numéro",
+              description: "Numéro du compte C411.",
+              input_type: "text",
+              value: "1001",
+              default: "",
+              unit: null,
+              minimum: null,
+              maximum: null,
+            },
+            {
+              ...options.sections[0].fields[0],
+              key: "WOS_C411_ACCOUNT_01_PASSKEY",
+              label: "Compte C411 1 — passkey",
+              description: "Passkey C411.",
+              input_type: "secret",
+              value: "initial-passkey-123",
+              default: "",
+              unit: null,
+              minimum: null,
+              maximum: null,
+            },
+          ],
+        },
+      ],
+    } as const;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        if (String(input) === "/api/v2/admin/overview") return response(c411Options);
+        if (String(input) === "/api/v2/admin/options" && init?.method === "PATCH") {
+          return response(c411Options);
+        }
+        throw new Error(`Requête inattendue : ${init?.method ?? "GET"} ${String(input)}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(
+      <FeedbackProvider>
+        <AdminSettingsPage
+          onBack={vi.fn()}
+          onNavigate={vi.fn()}
+          onSessionExpired={vi.fn()}
+        />
+      </FeedbackProvider>,
+    );
+
+    expect(await screen.findByRole("group", { name: "Compte C411 1" })).toBeTruthy();
+    const accountFields = screen.getByRole("group", { name: "Compte C411 1" }).querySelector(".c411-account-fields");
+    expect(accountFields?.children).toHaveLength(3);
+    expect(accountFields?.querySelector(".c411-field-username")).toBeTruthy();
+    expect(accountFields?.querySelector(".c411-field-number")).toBeTruthy();
+    expect(accountFields?.querySelector(".c411-field-passkey")).toBeTruthy();
+    const username = screen.getByLabelText("Nom d’utilisateur");
+    expect(username.getAttribute("inputmode")).toBeNull();
+    const usernameHint = screen.getByText("Libellé facultatif utilisé uniquement pour identifier ce compte dans l’administration.");
+    const numberHint = screen.getByText("Numéro du compte C411. Laissez le numéro et la passkey vides pour désactiver cet emplacement.");
+    const passkeyHint = screen.getByText("Passkey injectée dans les URL tracker des torrents affectés à ce compte.");
+    expect(usernameHint.classList.contains("sr-only")).toBe(true);
+    expect(numberHint.classList.contains("sr-only")).toBe(true);
+    expect(passkeyHint.classList.contains("sr-only")).toBe(true);
+    expect(username.getAttribute("aria-describedby")).toBe(usernameHint.id);
+    const passkey = screen.getByLabelText("Passkey");
+    expect(passkey.getAttribute("type")).toBe("password");
+    expect(passkey.getAttribute("aria-describedby")).toBe(passkeyHint.id);
+    await user.clear(passkey);
+    await user.type(passkey, "replacement-passkey-456");
+    await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v2/admin/options",
+      expect.objectContaining({
+        body: JSON.stringify({
+          changes: { WOS_C411_ACCOUNT_01_PASSKEY: "replacement-passkey-456" },
+        }),
+        method: "PATCH",
+      }),
+    );
   });
 
   it("confirme le redémarrage puis attend le retour du service", async () => {

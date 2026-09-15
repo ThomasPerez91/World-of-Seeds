@@ -90,6 +90,89 @@ async def login(client: AsyncClient, username: str = "thomas") -> dict[str, str]
 
 
 @pytest.mark.asyncio
+async def test_listing_sorts_before_pagination_and_filters_retention_facets(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    now = datetime.now(UTC)
+    for index in range(30):
+        managed = ManagedTorrent(
+            info_hash=f"{index + 1:040x}",
+            name=("avatar" if index == 0 else "Alien" if index == 1 else f"Film {29 - index:02d}"),
+            total_size=index + 1,
+            state=ManagedTorrentState.READY,
+            progress=1,
+            ready_at=now - timedelta(hours=20),
+        )
+        db_session.add(
+            TorrentRequest(
+                user_id=owner.id,
+                managed_torrent=managed,
+                state=TorrentRequestState.READY,
+                ready_at=now - timedelta(hours=20),
+                unsubscribe_at=now + timedelta(hours=80),
+            )
+        )
+    orange = TorrentRequest(
+        user_id=owner.id,
+        managed_torrent=ManagedTorrent(
+            info_hash="e" * 40,
+            name="Orange",
+            total_size=100,
+            state=ManagedTorrentState.READY,
+            progress=1,
+        ),
+        state=TorrentRequestState.READY,
+        ready_at=now - timedelta(hours=50),
+        unsubscribe_at=now + timedelta(hours=50),
+    )
+    red = TorrentRequest(
+        user_id=owner.id,
+        managed_torrent=ManagedTorrent(
+            info_hash="f" * 40,
+            name="Red",
+            total_size=101,
+            state=ManagedTorrentState.READY,
+            progress=1,
+        ),
+        state=TorrentRequestState.READY,
+        ready_at=now - timedelta(hours=90),
+        unsubscribe_at=now + timedelta(hours=10),
+    )
+    db_session.add_all([orange, red])
+    await db_session.commit()
+    await login(client)
+
+    first = await client.get(
+        "/api/v2/torrents",
+        params={"limit": 25, "sort_by": "name", "sort_order": "asc"},
+    )
+    assert first.status_code == 200, first.text
+    payload = first.json()
+    assert payload["total"] == 32
+    assert len(payload["items"]) == 25
+    assert [item["name"].casefold() for item in payload["items"]] == sorted(
+        item["name"].casefold() for item in payload["items"]
+    )
+    second = await client.get(
+        "/api/v2/torrents",
+        params={"offset": 25, "limit": 25, "sort_by": "name", "sort_order": "asc"},
+    )
+    all_names = [item["name"] for item in payload["items"] + second.json()["items"]]
+    assert [name.casefold() for name in all_names] == sorted(name.casefold() for name in all_names)
+    assert payload["retention_counts"] == {"green": 30, "orange": 1, "red": 1}
+
+    filtered = await client.get(
+        "/api/v2/torrents",
+        params={"retention_bucket": "red", "sort_by": "size", "sort_order": "desc"},
+    )
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["items"][0]["name"] == "Red"
+
+
+@pytest.mark.asyncio
 async def test_v2_upload_is_durable_idempotent_and_secret_free(
     client: AsyncClient,
     db_session: AsyncSession,
@@ -217,6 +300,40 @@ async def test_shared_torrent_exposes_one_physical_estimate_without_owner_data(
 
 
 @pytest.mark.asyncio
+async def test_v2_listing_exposes_retry_time_only_during_cooldown(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    retry_at = datetime.now(UTC) + timedelta(hours=1)
+    managed = ManagedTorrent(
+        info_hash="8" * 40,
+        name="Cooling down",
+        total_size=100,
+        state=ManagedTorrentState.PAUSED,
+        scheduler_retry_at=retry_at,
+    )
+    db_session.add_all(
+        [
+            managed,
+            TorrentRequest(user=owner, managed_torrent=managed),
+        ]
+    )
+    await db_session.commit()
+    await login(client)
+
+    cooling = (await client.get("/api/v2/torrents")).json()["items"][0]
+    assert cooling["queue_status"] == "cooldown"
+    assert datetime.fromisoformat(cooling["scheduler_retry_at"]) == retry_at
+
+    managed.scheduler_retry_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db_session.commit()
+    waiting = (await client.get("/api/v2/torrents")).json()["items"][0]
+    assert waiting["queue_status"] == "waiting"
+    assert waiting["scheduler_retry_at"] is None
+
+
+@pytest.mark.asyncio
 async def test_v2_api_requires_authentication_csrf_and_valid_torrent(
     client: AsyncClient,
     db_session: AsyncSession,
@@ -319,6 +436,7 @@ async def test_ready_deadline_is_per_subscription_and_secret_free(
     assert second.status_code == 201, second.text
     second_deadline = datetime.fromisoformat(second.json()["unsubscribe_at"])
     assert second_deadline > ready_at + timedelta(hours=47)
+    assert datetime.fromisoformat(second.json()["ready_at"]) < second_deadline
     assert second.json()["retention_expires_at"] == second.json()["unsubscribe_at"]
     assert all(
         event.event_type is not TorrentEventType.RETENTION_EXTENDED for _, event in redis.events
@@ -329,11 +447,13 @@ async def test_ready_deadline_is_per_subscription_and_secret_free(
     assert second_listing.status_code == 200
     second_item = second_listing.json()["items"][0]
     assert datetime.fromisoformat(second_item["unsubscribe_at"]) == second_deadline
+    assert datetime.fromisoformat(second_item["ready_at"]) < second_deadline
 
     await login(client, owner_username)
     first_listing = await client.get("/api/v2/torrents")
     assert first_listing.status_code == 200
     first_item = first_listing.json()["items"][0]
+    assert datetime.fromisoformat(first_item["ready_at"]) == ready_at
     assert datetime.fromisoformat(first_item["unsubscribe_at"]) == initial_deadline
     assert first_item["unsubscribe_at"] != second_item["unsubscribe_at"]
     forbidden = {
@@ -348,13 +468,13 @@ async def test_ready_deadline_is_per_subscription_and_secret_free(
 
 
 @pytest.mark.asyncio
-async def test_expired_request_never_exposes_a_stale_countdown(
+async def test_listing_excludes_terminal_and_overdue_subscriptions_from_items_and_total(
     client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
     owner = await prepare_user(db_session)
     expired_at = datetime.now(UTC) - timedelta(minutes=1)
-    managed = ManagedTorrent(
+    expired_managed = ManagedTorrent(
         info_hash="9" * 40,
         name="Expired",
         total_size=100,
@@ -363,20 +483,66 @@ async def test_expired_request_never_exposes_a_stale_countdown(
         ready_at=expired_at - timedelta(days=5),
         retention_expires_at=expired_at,
     )
-    request = TorrentRequest(
+    expired_request = TorrentRequest(
         user_id=owner.id,
-        managed_torrent=managed,
+        managed_torrent=expired_managed,
         state=TorrentRequestState.EXPIRED,
     )
-    db_session.add(request)
+    cancelled_managed = ManagedTorrent(
+        info_hash="8" * 40,
+        name="Cancelled",
+        total_size=100,
+        state=ManagedTorrentState.READY,
+        progress=1,
+    )
+    overdue_managed = ManagedTorrent(
+        info_hash="7" * 40,
+        name="Overdue",
+        total_size=100,
+        state=ManagedTorrentState.READY,
+        progress=1,
+    )
+    visible_managed = ManagedTorrent(
+        info_hash="6" * 40,
+        name="Visible",
+        total_size=100,
+        state=ManagedTorrentState.READY,
+        progress=1,
+    )
+    visible_ready_at = expired_at - timedelta(hours=1)
+    db_session.add_all(
+        [
+            expired_request,
+            TorrentRequest(
+                user_id=owner.id,
+                managed_torrent=cancelled_managed,
+                state=TorrentRequestState.CANCELLED,
+            ),
+            TorrentRequest(
+                user_id=owner.id,
+                managed_torrent=overdue_managed,
+                state=TorrentRequestState.READY,
+                ready_at=expired_at - timedelta(hours=2),
+                unsubscribe_at=expired_at,
+            ),
+            TorrentRequest(
+                user_id=owner.id,
+                managed_torrent=visible_managed,
+                state=TorrentRequestState.READY,
+                ready_at=visible_ready_at,
+                unsubscribe_at=expired_at + timedelta(days=1),
+            ),
+        ]
+    )
     await db_session.commit()
     await login(client)
 
     response = await client.get("/api/v2/torrents")
 
     assert response.status_code == 200
-    assert response.json()["items"] == []
-    assert response.json()["total"] == 0
+    assert [item["name"] for item in response.json()["items"]] == ["Visible"]
+    assert response.json()["total"] == 1
+    assert datetime.fromisoformat(response.json()["items"][0]["ready_at"]) == visible_ready_at
 
 
 @pytest.mark.asyncio

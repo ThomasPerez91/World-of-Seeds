@@ -35,4 +35,30 @@ async def test_download_policy_exposes_configured_stream_limit(
     response = await client.get("/api/v2/downloads/policy")
 
     assert response.status_code == 200
-    assert response.json() == {"max_concurrent_streams": 2}
+    assert response.json() == {"max_concurrent_streams": 2, "unlimited": False}
+
+
+@pytest.mark.asyncio
+async def test_download_policy_exposes_unlimited_concurrency_for_active_admin(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    db_session.add(
+        User(
+            username="download-admin",
+            password_hash=hash_password("correct-horse-battery"),
+            is_admin=True,
+        )
+    )
+    await PostgresOptionsRegistry().initialize(db_session)
+    await db_session.commit()
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"username": "download-admin", "password": "correct-horse-battery"},
+    )
+    assert login.status_code == 200
+
+    response = await client.get("/api/v2/downloads/policy")
+
+    assert response.status_code == 200
+    assert response.json() == {"max_concurrent_streams": None, "unlimited": True}

@@ -12,21 +12,26 @@ read-only côté V1 et dry-run par défaut, décrite dans [`import-v1-v2.md`](im
 1. Copier `deploy/.env.rise2.v2.example` vers `/etc/world-of-seeds-v2/environment`, remplacer
    toutes les valeurs et appliquer le mode `0600`.
 2. Utiliser uniquement des images WOS/NewGreedy épinglées par digest et des secrets distincts de
-   V1. Le JSON des comptes d'intégration reste dans ce fichier non versionné et ne doit jamais être
-   affiché dans les journaux ou commandes de diagnostic.
+   V1. Le JSON d'intégration contient uniquement l'accès au qBittorrent/NewGreedy partagé ; il
+   reste dans ce fichier non versionné et ne doit jamais être affiché dans les journaux ou
+   commandes de diagnostic.
 3. Créer `/srv/world-of-seeds-v2/data` sans lien symbolique, avec l'UID/GID WOS V2 dédiés. Ce chemin
    doit être le point de montage actif du filesystem de données ; un simple répertoire présent sur
    le filesystem racine n'est jamais un stockage V2 valide.
 4. Conserver le registre `WOS_V2_INTEGRATION_ACCOUNTS_JSON` dans le fichier d'environnement
-   privé, avec des quotes simples autour du JSON pour préserver les `$` littéraux. Les routes
-   visant cette instance doivent partager exactement les mêmes credentials et l'URL
-   `http://qbittorrent:8080`. Le username utilise 1–128 caractères ASCII alphanumériques ou
+   privé, avec des quotes simples autour du JSON pour préserver les `$` littéraux. La route
+   unique vise l'URL `http://qbittorrent:8080`. Le username utilise 1–128 caractères ASCII alphanumériques ou
    `_.@-`, le password 20–1024 caractères UTF-8. Préparer uniquement le répertoire parent de
-   `WOS_V2_QBITTORRENT_CONFIG_PATH` : le préflight génère le fichier privé lui-même.
-5. Installer `config.ini` NewGreedy en `0640`, propriété de l'UID applicatif WOS et du groupe GID
+   `WOS_V2_QBITTORRENT_CONFIG_PATH` : le préflight génère le fichier privé lui-même. Ce registre
+   doit contenir une seule route qBittorrent ; les anciennes clés tracker/passkey sont encore
+   acceptées pendant la transition mais ne sont plus utilisées.
+5. Après migration, renseigner dans **Administration → Paramètres → Comptes C411** autant de
+   paires numéro/passkey que nécessaire, entre 1 et 16. Les emplacements entièrement vides sont
+   ignorés et aucune passkey C411 n'est requise dans le fichier d'environnement.
+6. Installer `config.ini` NewGreedy en `0640`, propriété de l'UID applicatif WOS et du groupe GID
    NewGreedy. Créer le répertoire `WOS_V2_NEWGREEDY_STATE_HOST_PATH` en `0700`, propriété de
    `root:root`, sans préparer ses fichiers à la main.
-6. Exécuter `scripts/rise2_v2_preflight.sh /etc/world-of-seeds-v2/environment`. Le préflight
+7. Exécuter `scripts/rise2_v2_preflight.sh /etc/world-of-seeds-v2/environment`. Le préflight
    refuse maintenant le démarrage si le stockage configuré n'est pas un point de montage actif,
    valide ensuite la pile normalisée, initialise idempotemment `stats.json`, `torrent_registry.json`,
    `newgreedy.log` et `purge_pending.json` en `0600`, puis vérifie leurs accès réels ainsi que

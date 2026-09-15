@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { BackIcon } from "../../components/icons";
+import { SettingsShell } from "../../components/SettingsShell";
 import { Button } from "../../components/ui";
 import { useI18n, type MessageKey } from "../../i18n";
 
@@ -39,20 +40,15 @@ export function AdminPageShell({
           <p className="eyebrow">{t("admin.adminEyebrow")}</p>
           <h1 id="administration-title">{t("admin.title")}</h1>
         </div>
-        <nav className="admin-navigation" aria-label={t("admin.navigation")}>
-          {navigation.map((item) => (
-            <Button
-              variant="ghost"
-              key={item.view}
-              aria-current={activeView === item.view ? "page" : undefined}
-              onClick={() => onNavigate(item.view)}
-            >
-              {t(item.label)}
-            </Button>
-          ))}
-        </nav>
       </header>
-      {children}
+      <SettingsShell
+        activeView={activeView}
+        navigation={navigation.map((item) => ({ view: item.view, label: t(item.label) }))}
+        navigationLabel={t("admin.navigation")}
+        onNavigate={onNavigate}
+      >
+        {children}
+      </SettingsShell>
     </section>
   );
 }

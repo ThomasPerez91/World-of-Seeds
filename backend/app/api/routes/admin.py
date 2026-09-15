@@ -17,8 +17,6 @@ from app.auth.dependencies import (
 from app.auth.service import (
     ManagedUserNotFoundError,
     ProtectedUserError,
-    UsernameUnavailableError,
-    create_managed_user,
     delete_managed_user,
     set_managed_user_active,
 )
@@ -60,6 +58,7 @@ from app.options.dependencies import OptionsStoreDependency
 from app.schemas.admin import AdminStorageResponse
 from app.schemas.auth import (
     GeneratedCredentialsResponse,
+    UserQuotaResponse,
     UserResponse,
     UserStatusRequest,
 )
@@ -84,6 +83,8 @@ from app.schemas.options import (
     OptionsResponse,
     OptionsUpdateRequest,
 )
+from app.users import UserAccountQuotaReachedError, UserProvisioningService
+from app.users.provisioning import UserProvisioningConflictError
 
 router = APIRouter()
 
@@ -509,21 +510,47 @@ async def list_users(
     return [UserResponse.model_validate(user) for user in users]
 
 
+@router.get("/users/quota", response_model=UserQuotaResponse)
+async def get_user_quota(
+    db: DbSession,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> UserQuotaResponse:
+    used, maximum = await UserProvisioningService().quota(db)
+    await db.rollback()
+    return UserQuotaResponse(used=used, maximum=maximum, reached=used >= maximum)
+
+
 @router.post("/users", response_model=GeneratedCredentialsResponse)
 async def generate_user(
     db: DbSession,
-    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> GeneratedCredentialsResponse:
     try:
-        user, initial_password = await create_managed_user(db)
-    except UsernameUnavailableError as exc:
+        result = await UserProvisioningService().provision(
+            db,
+            source="admin",
+            actor_user_id=context.user.id,
+        )
+        await db.commit()
+        await db.refresh(result.user)
+    except UserAccountQuotaReachedError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_business_detail("account_quota_reached", "Account quota reached"),
+        ) from exc
+    except UserProvisioningConflictError as exc:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="A unique username could not be generated",
+            detail=_business_detail(
+                "user_credentials_unavailable", "Unique credentials could not be generated"
+            ),
         ) from exc
     return GeneratedCredentialsResponse(
-        user=UserResponse.model_validate(user),
-        initial_password=initial_password,
+        user=UserResponse.model_validate(result.user),
+        initial_password=result.initial_password,
+        auth_seed=result.user.auth_seed,
     )
 
 

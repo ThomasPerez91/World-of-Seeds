@@ -3,6 +3,7 @@ import type { Locale } from "../../i18n";
 interface OptionCopy { label: string; description: string }
 
 const sections: Record<string, Record<Locale, string>> = {
+  c411_accounts: { fr: "Comptes C411", en: "C411 accounts" },
   downloads: { fr: "Téléchargements", en: "Downloads" },
   torrents: { fr: "Torrents", en: "Torrents" },
   performance: { fr: "Performance", en: "Performance" },
@@ -14,9 +15,10 @@ const sections: Record<string, Record<Locale, string>> = {
 };
 
 const englishOptions: Record<string, OptionCopy> = {
+  WOS_MAX_USER_ACCOUNTS: { label: "Maximum user accounts", description: "Maximum number of user accounts that may exist simultaneously in World of Seeds." },
   WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER: { label: "Maximum rate per user", description: "HTTP download rate cap per user; 0 disables the limit." },
   WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL: { label: "Maximum global rate", description: "Combined HTTP download rate cap; 0 disables the limit." },
-  WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER: { label: "Concurrent downloads per user", description: "Maximum number of file streams open for one account." },
+  WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER: { label: "Concurrent downloads per user", description: "Maximum number of concurrent recovery streams for a standard user. Administrators are not subject to this limit." },
   WOS_DOWNLOAD_LEASE_SECONDS: { label: "Download lease duration", description: "How long content remains protected while it is being downloaded." },
   WOS_FOLDER_ARCHIVE_MAX_BYTES: { label: "Maximum folder archive size", description: "Maximum source size accepted for a folder ZIP download." },
   WOS_TORRENT_MAX_ACTIVE_PER_USER: { label: "Active torrents per user", description: "Maximum active requests for one account." },
@@ -53,9 +55,10 @@ const englishOptions: Record<string, OptionCopy> = {
 };
 
 const frenchOptions: Record<string, OptionCopy> = {
+  WOS_MAX_USER_ACCOUNTS: { label: "Nombre maximal de comptes", description: "Nombre maximal de comptes utilisateurs pouvant exister simultanément dans World of Seeds." },
   WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER: { label: "Débit maximal par utilisateur", description: "Plafond de téléchargement HTTP par utilisateur ; 0 désactive la limite." },
   WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL: { label: "Débit maximal global", description: "Plafond cumulé des téléchargements HTTP ; 0 désactive la limite." },
-  WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER: { label: "Téléchargements simultanés par utilisateur", description: "Nombre maximal de flux de fichiers ouverts par un même compte." },
+  WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER: { label: "Téléchargements simultanés par utilisateur", description: "Nombre maximal de flux de récupération simultanés pour un utilisateur standard. Les administrateurs ne sont pas soumis à cette limite." },
   WOS_DOWNLOAD_LEASE_SECONDS: { label: "Durée d’une lease", description: "Durée de protection d’un contenu pendant son téléchargement." },
   WOS_FOLDER_ARCHIVE_MAX_BYTES: { label: "Taille maximale d’une archive dossier", description: "Volume source maximal accepté pour un téléchargement ZIP de dossier." },
   WOS_TORRENT_MAX_ACTIVE_PER_USER: { label: "Torrents actifs par utilisateur", description: "Nombre maximal de demandes actives pour un même compte." },
@@ -100,9 +103,36 @@ export function optionFieldCopy(
   locale: Locale,
   frenchFallback: OptionCopy,
 ): OptionCopy {
+  const c411 = /^WOS_C411_ACCOUNT_(\d{2})_(USERNAME|NUMBER|PASSKEY)$/.exec(key);
+  if (c411 !== null) {
+    const kind = c411[2];
+    if (locale === "en") {
+      return {
+        label: kind === "USERNAME" ? "Username" : kind === "PASSKEY" ? "Passkey" : "Number",
+        description: kind === "USERNAME"
+          ? "Optional label used only to identify this account in administration."
+          : kind === "PASSKEY"
+            ? "Passkey inserted into tracker URLs for torrents assigned to this account."
+            : "C411 account number. Leave the number and passkey empty to disable this slot.",
+      };
+    }
+    return {
+      label: kind === "USERNAME" ? "Nom d’utilisateur" : kind === "PASSKEY" ? "Passkey" : "Numéro",
+      description: kind === "USERNAME"
+        ? "Libellé facultatif utilisé uniquement pour identifier ce compte dans l’administration."
+        : kind === "PASSKEY"
+          ? "Passkey injectée dans les URL tracker des torrents affectés à ce compte."
+          : "Numéro du compte C411. Laissez le numéro et la passkey vides pour désactiver cet emplacement.",
+    };
+  }
   return (locale === "fr" ? frenchOptions[key] : englishOptions[key]) ?? frenchFallback;
 }
 
-export const translatedOptionKeys = new Set(
-  Object.keys(englishOptions).filter((key) => frenchOptions[key] !== undefined),
-);
+export const translatedOptionKeys = new Set([
+  ...Object.keys(englishOptions).filter((key) => frenchOptions[key] !== undefined),
+  ...Array.from({ length: 16 }, (_, index) => index + 1).flatMap((slot) => [
+    `WOS_C411_ACCOUNT_${String(slot).padStart(2, "0")}_USERNAME`,
+    `WOS_C411_ACCOUNT_${String(slot).padStart(2, "0")}_NUMBER`,
+    `WOS_C411_ACCOUNT_${String(slot).padStart(2, "0")}_PASSKEY`,
+  ]),
+]);

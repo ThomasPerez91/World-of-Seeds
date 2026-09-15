@@ -1,6 +1,8 @@
+import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   ArrowLeft,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -24,6 +26,7 @@ import {
   Save,
   Search,
   Server,
+  ShieldCheck,
   Settings2,
   Sprout,
   Trash2,
@@ -92,7 +95,39 @@ export function MoveIcon(props: AppIconProps) {
 }
 
 export function DeleteIcon(props: AppIconProps) {
-  return <Trash2 {...decorative} {...props} />;
+  const iconRef = useRef<SVGSVGElement>(null);
+  const [armed, setArmed] = useState(false);
+
+  useEffect(() => {
+    const button = iconRef.current?.closest("button");
+    if (!(button instanceof HTMLButtonElement) || button.closest(".torrent-card-actions") === null) {
+      return;
+    }
+
+    const handleClick = (event: MouseEvent) => {
+      if (armed) {
+        window.setTimeout(() => setArmed(false), 0);
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setArmed(true);
+    };
+    const handleBlur = () => setArmed(false);
+
+    button.setAttribute("aria-pressed", armed ? "true" : "false");
+    button.addEventListener("click", handleClick, true);
+    button.addEventListener("blur", handleBlur);
+    return () => {
+      button.removeEventListener("click", handleClick, true);
+      button.removeEventListener("blur", handleBlur);
+      button.removeAttribute("aria-pressed");
+    };
+  }, [armed]);
+
+  return armed
+    ? <Check ref={iconRef} {...decorative} {...props} />
+    : <Trash2 ref={iconRef} {...decorative} {...props} />;
 }
 
 export function OpenIcon(props: AppIconProps) {
@@ -125,6 +160,10 @@ export function RefreshIcon(props: AppIconProps) {
 
 export function SettingsIcon(props: AppIconProps) {
   return <Settings2 {...decorative} {...props} />;
+}
+
+export function AdminIcon(props: AppIconProps) {
+  return <ShieldCheck {...decorative} {...props} />;
 }
 
 export function SaveIcon(props: AppIconProps) {

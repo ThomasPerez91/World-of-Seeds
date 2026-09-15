@@ -4,58 +4,52 @@ import { describe, expect, it, vi } from "vitest";
 import { auditAccessibility } from "../../test/accessibility";
 import { AdminStoragePage } from "./AdminStoragePage";
 
-function response(body: unknown): Response {
+function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { "Content-Type": "application/json" },
   });
 }
 
 describe("AdminStoragePage", () => {
-  it("affiche l’inventaire borné et signale les torrents externes en lecture seule", async () => {
+  it("affiche la capacité sans présenter une réconciliation partielle", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/admin/storage") {
+        return response({
+          total: 1000,
+          used: 400,
+          available: 600,
+          active_users: 1,
+          suspended_users: 0,
+          trash_entries: 0,
+          known_trash_bytes: 0,
+        });
+      }
+      throw new Error(`Requête inattendue : ${url}`);
+    });
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url === "/api/v1/admin/storage") {
-          return response({
-            total: 1000,
-            used: 400,
-            available: 600,
-            active_users: 1,
-            suspended_users: 0,
-            trash_entries: 0,
-            known_trash_bytes: 0,
-          });
-        }
-        if (url === "/api/v2/admin/reconciliation?limit=100") {
-          return response({
-            database_scanned: 2,
-            qbittorrent_scanned: 3,
-            storage_scanned: 2,
-            external_torrents: 1,
-            anomalies: [
-              {
-                code: "external_torrents_read_only",
-                severity: "info",
-                resource_id: null,
-                action: "none",
-              },
-            ],
-            truncated: false,
-          });
-        }
-        throw new Error(`Requête inattendue : ${url}`);
-      }),
+      fetchMock,
     );
 
     const view = render(
       <AdminStoragePage onBack={vi.fn()} onNavigate={vi.fn()} onSessionExpired={vi.fn()} />,
     );
 
-    await screen.findByRole("heading", { name: "Réconciliation V2" });
-    expect(screen.getByText("1 torrent externe observé, toujours en lecture seule.")).toBeTruthy();
-    expect(screen.getByText("Aucune action")).toBeTruthy();
+    expect(await screen.findByText("600 o")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Intégrité du stockage" })).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/v2/admin/reconciliation?limit=100");
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+  });
+
+  it("signale une erreur si les métriques de capacité sont indisponibles", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/v1/admin/storage") return response({ detail: "offline" }, 503);
+      throw new Error(`Requête inattendue : ${String(input)}`);
+    }));
+
+    render(<AdminStoragePage onBack={vi.fn()} onNavigate={vi.fn()} onSessionExpired={vi.fn()} />);
+    expect(await screen.findByText(/impossible de charger les données/i)).toBeTruthy();
   });
 });

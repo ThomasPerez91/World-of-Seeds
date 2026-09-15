@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -165,11 +165,12 @@ describe("App", () => {
     const user = userEvent.setup();
     const view = render(<App />);
     await screen.findByRole("heading", { name: "Dashboard" });
+    expect(screen.getByRole("button", { name: "Administration" })).toBeTruthy();
     expect((await screen.findAllByText("1 KB available")).length).toBeGreaterThan(0);
     expect(document.documentElement.lang).toBe("en");
 
     await user.click(screen.getByRole("button", { name: "Open account menu" }));
-    expect(screen.queryByRole("button", { name: "Administration" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Administration" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Account settings" })).toBeNull();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
@@ -247,13 +248,22 @@ describe("App", () => {
     expect(screen.getAllByText(`v${UI_VERSION}`).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Mes fichiers" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Corbeille" })).toBeNull();
-    expect(new URL(window.location.href).searchParams.has("path")).toBe(false);
+    await waitFor(() => {
+      expect(new URL(window.location.href).searchParams.has("path")).toBe(false);
+    });
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
-    await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
-    expect(screen.queryByRole("button", { name: "Administration" })).toBeNull();
+    const accountTrigger = screen.getByRole("button", { name: "Ouvrir le menu du compte" });
+    expect(accountTrigger.classList).toContain("account-trigger");
+    expect(accountTrigger.getAttribute("style")).toBeNull();
+    await user.click(accountTrigger);
+    expect(accountTrigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getAllByRole("button", { name: "Administration" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Paramètres du compte" })).toBeNull();
     expect(screen.getByRole("button", { name: "Déconnexion" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Administration" }));
+    await screen.findByRole("heading", { name: "Comptes utilisateurs" });
   });
 
   it("rend les informations légales accessibles avant la connexion", async () => {
@@ -376,6 +386,22 @@ describe("App", () => {
     await screen.findByRole("heading", { name: "Dashboard" });
     await user.click(screen.getByRole("button", { name: "Paramètres" }));
 
+    expect(screen.queryByText("COMPTE")).toBeNull();
+    expect(screen.queryByText("Thème")).toBeNull();
+    expect(screen.queryByText("Clair")).toBeNull();
+    expect(screen.queryByText("Sombre")).toBeNull();
+    expect(screen.queryByText("Système")).toBeNull();
+    expect(screen.getByRole("button", { name: "Général" }).getAttribute("aria-current")).toBe("page");
+    expect(view.container.querySelector(".settings-shell.wos-glass-panel")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retour au Dashboard" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sécurité" }).getAttribute("aria-current")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Langue" })).toBeTruthy();
+    expect(screen.queryByLabelText("Mot de passe actuel")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Retour au Dashboard" }));
+    await screen.findByRole("heading", { name: "Dashboard" });
+    await user.click(screen.getByRole("button", { name: "Paramètres" }));
+
     const usernameInput = screen.getByRole("textbox", { name: "Nom d’utilisateur" });
     await user.clear(usernameInput);
     await user.type(usernameInput, "Shadowsun");
@@ -385,6 +411,10 @@ describe("App", () => {
       "Shadowsun",
     );
 
+    await user.click(screen.getByRole("button", { name: "Sécurité" }));
+    expect(screen.getByRole("button", { name: "Sécurité" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByRole("textbox", { name: "Nom d’utilisateur" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Langue" })).toBeNull();
     await user.type(screen.getByLabelText("Mot de passe actuel"), "current-password-long");
     await user.type(screen.getByLabelText("Nouveau mot de passe"), "new-password-long");
     await user.type(screen.getByLabelText("Confirmer le mot de passe"), "new-password-long");
@@ -398,6 +428,49 @@ describe("App", () => {
     );
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/password",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
+  it("conserve le changement de langue depuis la section Général", async () => {
+    let currentUser = {
+      id: "bc68aa7c-d753-4db7-8698-acf8d09045a3",
+      username: "thomas",
+      is_admin: false,
+      is_active: true,
+      must_change_credentials: false,
+      preferred_locale: "fr",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      if (url === "/api/v1/auth/me") return response({ user: currentUser }, 200);
+      if (url === "/api/v1/auth/locale" && init?.method === "PATCH") {
+        currentUser = { ...currentUser, preferred_locale: "en" };
+        return response({ user: currentUser }, 200);
+      }
+      if (url === "/api/v1/health/status") {
+        return response({ status: "ok", checked_at: "2026-09-09T12:00:00Z" }, 200);
+      }
+      if (url === "/api/v2/storage") return storageResponse(1000, 0, 1000);
+      const torrentListing = emptyTorrentListing(url);
+      if (torrentListing !== null) return torrentListing;
+      throw new Error(`Requête inattendue : ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Dashboard" });
+    expect(screen.queryByRole("button", { name: "Administration" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Paramètres" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
+
+    await screen.findByRole("heading", { name: "Account settings" });
+    expect(await screen.findByText("Language preference saved.")).toBeTruthy();
+    expect(screen.queryByText("Préférence de langue enregistrée.")).toBeNull();
+    expect(screen.getByRole("button", { name: "General" }).getAttribute("aria-current")).toBe("page");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/auth/locale",
       expect.objectContaining({ method: "PATCH" }),
     );
   });

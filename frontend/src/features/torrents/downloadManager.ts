@@ -39,13 +39,14 @@ export interface BrowserDownloadJobSnapshot {
 
 export interface BrowserDownloadManagerSnapshot {
   activeStreams: number;
-  maxConcurrentStreams: number;
+  maxConcurrentStreams: number | null;
   waitingJobs: number;
   jobs: readonly BrowserDownloadJobSnapshot[];
 }
 
 export interface BrowserDownloadPolicy {
-  max_concurrent_streams: number;
+  max_concurrent_streams: number | null;
+  unlimited: boolean;
 }
 
 export class DownloadPolicyRequestError extends Error {
@@ -92,12 +93,12 @@ interface PermitWaiter {
 }
 
 class DownloadPermitPool {
-  private limit: number;
+  private limit: number | null;
   private active = 0;
   private readonly activeByJob = new Map<string, number>();
   private readonly waiters: PermitWaiter[] = [];
 
-  constructor(limit: number, private readonly onChange: () => void) {
+  constructor(limit: number | null, private readonly onChange: () => void) {
     this.limit = limit;
   }
 
@@ -113,7 +114,7 @@ class DownloadPermitPool {
     return this.waiters.filter((waiter) => waiter.jobId === jobId).length;
   }
 
-  setLimit(limit: number): void {
+  setLimit(limit: number | null): void {
     this.limit = limit;
     this.drain();
     this.onChange();
@@ -143,7 +144,7 @@ class DownloadPermitPool {
   }
 
   private drain(): void {
-    while (this.active < this.limit && this.waiters.length > 0) {
+    while ((this.limit === null || this.active < this.limit) && this.waiters.length > 0) {
       const waiter = this.waiters.shift();
       if (waiter === undefined) break;
       waiter.signal.removeEventListener("abort", waiter.onAbort);
@@ -177,11 +178,12 @@ export async function loadBrowserDownloadPolicy(signal?: AbortSignal): Promise<B
   });
   if (!response.ok) throw new DownloadPolicyRequestError(response.status);
   const policy = (await response.json()) as Partial<BrowserDownloadPolicy>;
-  if (
-    !Number.isInteger(policy.max_concurrent_streams)
-    || (policy.max_concurrent_streams ?? 0) < 1
-    || (policy.max_concurrent_streams ?? 0) > 20
-  ) {
+  const standardPolicy = policy.unlimited === false
+    && Number.isInteger(policy.max_concurrent_streams)
+    && (policy.max_concurrent_streams ?? 0) >= 1
+    && (policy.max_concurrent_streams ?? 0) <= 20;
+  const unlimitedPolicy = policy.unlimited === true && policy.max_concurrent_streams === null;
+  if (!standardPolicy && !unlimitedPolicy) {
     throw new Error("download_policy_invalid");
   }
   return policy as BrowserDownloadPolicy;
@@ -215,7 +217,7 @@ class SingleTargetDirectory implements LocalDirectoryHandle {
 export class BrowserDownloadManager {
   private readonly jobs = new Map<string, ManagedJob>();
   private readonly order: string[] = [];
-  private maxConcurrentStreams: number;
+  private maxConcurrentStreams: number | null;
   private readonly permits: DownloadPermitPool;
 
   constructor(
@@ -227,7 +229,7 @@ export class BrowserDownloadManager {
     this.permits = new DownloadPermitPool(CONSERVATIVE_INITIAL_STREAM_LIMIT, () => this.emit());
   }
 
-  setMaxConcurrentStreams(value: number): void {
+  setMaxConcurrentStreams(value: number | null): void {
     this.assertConcurrency(value);
     this.maxConcurrentStreams = value;
     this.permits.setLimit(value);
@@ -433,8 +435,8 @@ export class BrowserDownloadManager {
     });
   }
 
-  private assertConcurrency(value: number): void {
-    if (!Number.isInteger(value) || value < 1 || value > 20) {
+  private assertConcurrency(value: number | null): void {
+    if (value !== null && (!Number.isInteger(value) || value < 1 || value > 20)) {
       throw new Error("download_manager_concurrency_invalid");
     }
   }

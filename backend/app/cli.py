@@ -4,12 +4,10 @@ import getpass
 import uuid
 from pathlib import Path
 
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
-
-from app.auth.security import canonical_username, hash_password, normalize_username
+from app.auth.security import normalize_username
 from app.core.database import session_factory
-from app.models import User
+from app.users import UserAccountQuotaReachedError, UserProvisioningService
+from app.users.provisioning import UserProvisioningConflictError
 from app.v1_import import (
     V1ImportConflictError,
     V1ImportError,
@@ -31,24 +29,21 @@ async def create_admin(username_input: str) -> None:
         raise SystemExit("Les mots de passe ne correspondent pas.")
 
     async with session_factory() as db:
-        existing = await db.scalar(
-            select(User).where(func.lower(User.username) == canonical_username(username))
-        )
-        if existing is not None:
-            raise SystemExit("Ce nom d’utilisateur existe déjà.")
-        db.add(
-            User(
-                username=username,
-                password_hash=hash_password(password),
-                is_admin=True,
-                must_change_credentials=False,
-            )
-        )
         try:
+            await UserProvisioningService().provision(
+                db,
+                username=username,
+                password=password,
+                is_admin=True,
+                source="cli",
+            )
             await db.commit()
-        except IntegrityError as exc:
+        except UserProvisioningConflictError as exc:
             await db.rollback()
             raise SystemExit("Ce nom d’utilisateur existe déjà.") from exc
+        except UserAccountQuotaReachedError as exc:
+            await db.rollback()
+            raise SystemExit("Le quota global de comptes est atteint.") from exc
     print(f"Administrateur {username!r} créé.")
 
 

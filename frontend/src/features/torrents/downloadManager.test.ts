@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TorrentDownloadManifestPageV2 } from "../../api/client";
 import {
   BrowserDownloadManager,
+  loadBrowserDownloadPolicy,
   type BrowserDownloadManagerSnapshot,
 } from "./downloadManager";
 import type { LocalFileHandle } from "./recursiveDownload";
@@ -59,6 +60,28 @@ afterEach(() => {
 });
 
 describe("BrowserDownloadManager", () => {
+  it("parses explicit standard and unlimited server policies", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        max_concurrent_streams: 2,
+        unlimited: false,
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        max_concurrent_streams: null,
+        unlimited: true,
+      })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(loadBrowserDownloadPolicy()).resolves.toEqual({
+      max_concurrent_streams: 2,
+      unlimited: false,
+    });
+    await expect(loadBrowserDownloadPolicy()).resolves.toEqual({
+      max_concurrent_streams: null,
+      unlimited: true,
+    });
+  });
+
   it("starts conservatively until the server policy is applied and queues overflow jobs", async () => {
     const gates = [deferred(), deferred(), deferred()];
     let call = 0;
@@ -150,6 +173,46 @@ describe("BrowserDownloadManager", () => {
     expect(current.maxConcurrentStreams).toBe(20);
     expect(current.activeStreams).toBe(5);
     expect(current.waitingJobs).toBe(0);
+
+    gates.forEach((gate) => gate.resolve());
+    await vi.waitFor(() => expect(current.activeStreams).toBe(0));
+  });
+
+  it("starts ten administrator jobs without a per-user permit queue", async () => {
+    const gates = Array.from({ length: 10 }, deferred);
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      const index = call++;
+      await gates[index].promise;
+      return validResponse();
+    }));
+    let current: BrowserDownloadManagerSnapshot = {
+      activeStreams: 0,
+      maxConcurrentStreams: 1,
+      waitingJobs: 0,
+      jobs: [],
+    };
+    const manager = new BrowserDownloadManager(1, (next) => {
+      current = next;
+    });
+    manager.setMaxConcurrentStreams(null);
+
+    for (let index = 0; index < 10; index += 1) {
+      const page = snapshot(`admin-${index}`);
+      manager.enqueueFile({
+        torrentId: `torrent-admin-${index}`,
+        name: `admin-${index}.bin`,
+        snapshot: page,
+        file: page.items[0],
+        target: target(),
+      });
+    }
+
+    await vi.waitFor(() => expect(call).toBe(10));
+    expect(current.maxConcurrentStreams).toBeNull();
+    expect(current.activeStreams).toBe(10);
+    expect(current.waitingJobs).toBe(0);
+    expect(current.jobs.every((job) => job.status === "running")).toBe(true);
 
     gates.forEach((gate) => gate.resolve());
     await vi.waitFor(() => expect(current.activeStreams).toBe(0));

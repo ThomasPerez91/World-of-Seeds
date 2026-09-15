@@ -39,11 +39,13 @@ export function Tooltip({
   children,
   className = "",
   content,
+  focusable = true,
   overflowOnly = false,
 }: {
   children: ReactNode;
   className?: string;
   content: string;
+  focusable?: boolean;
   overflowOnly?: boolean;
 }) {
   const anchorRef = useRef<HTMLSpanElement>(null);
@@ -71,7 +73,7 @@ export function Tooltip({
       className={`ui-tooltip-anchor ${overflowOnly ? "ui-tooltip-overflow" : ""} ${className}`}
       aria-label={overflowOnly ? content : undefined}
       aria-describedby={overflowing ? tooltipId : undefined}
-      tabIndex={overflowOnly && overflowing ? 0 : undefined}
+      tabIndex={overflowOnly && overflowing && focusable ? 0 : undefined}
       onFocus={measure}
       onMouseEnter={measure}
     >

@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.0.0` ;
+- version stable : `2.2.3` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -227,7 +227,9 @@ Etat du dernier déploiement :
 - Refuser chemins absolus, `..`, évasions de racine et traversées de symlinks lors de toute résolution filesystem.
 - Les ouvertures sensibles utilisent des résolutions sûres/descripteurs et `O_NOFOLLOW` lorsque prévu par les primitives de téléchargement.
 - Ne jamais résoudre un problème de permissions avec `chmod 777`.
+- Les téléchargements READY privilégient la File System Access API pour reconstruire localement les dossiers ; le ZIP reste un fallback de compatibilité pour les navigateurs sans `showDirectoryPicker()`.
 - Les téléchargements READY doivent conserver les contrôles Range, leases, limites de concurrence et validation du manifeste.
+- Le plafond de flux simultanés par utilisateur s'applique aux comptes standards. Les administrateurs en sont exemptés, mais conservent une lease par flux et restent soumis aux rate limits et protections globales.
 - Les noms longs et chemins imbriqués ne doivent pas provoquer de débordement horizontal mobile.
 
 ## Torrent et sécurité tracker
@@ -289,19 +291,17 @@ Les `TorrentRequest` représentent les droits utilisateurs.
 - Les opérations de purge sont idempotentes et attendent les leases de téléchargement.
 - Le stockage observé et le ledger applicatif sont des notions distinctes.
 
-## Rétention READY
+## Abonnements READY et rétention physique
 
-Chaque torrent physique READY possède une date de première disponibilité et une échéance durable.
+Chaque `TorrentRequest` READY est un abonnement utilisateur distinct. Son délai commence à
+`ready_at` et se termine à `unsubscribe_at`, selon `WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS`.
+À cette échéance, seul cet abonnement expire et disparaît du listing actif de son propriétaire.
 
-La rétention dépend de la popularité historique et peut être prolongée par de nouvelles demandes avant expiration, jamais raccourcie.
-
-A l'échéance :
-
-- les droits actifs sont expirés atomiquement ;
-- le torrent passe vers `PURGE_PENDING` ;
-- un stop scheduler durable est enregistré ;
-- une purge worker idempotente est créée ;
-- les leases existants peuvent terminer, mais aucun nouveau droit expiré n'est accordé.
+Le `ManagedTorrent` reste le contenu physique partagé. Tant qu'un autre abonnement actif existe,
+il reste disponible sans purge. Après le dernier désabonnement, la grâce physique configurée par
+`WOS_TORRENT_RETENTION_HOURS` commence : la purge est planifiée et idempotente, mais le contenu
+n'est pas supprimé immédiatement. Les leases déjà engagés peuvent terminer ; aucun nouveau droit
+expiré n'est accordé.
 
 ## Temps réel et transferts navigateur
 
@@ -312,6 +312,8 @@ L'interface torrent charge un état PostgreSQL autoritaire puis reçoit des év�
 - un WebSocket idle ne doit pas maintenir de session SQL.
 
 Les téléchargements récursifs utilisent un manifeste paginé/progressif et une concurrence bornée. Ne pas attendre un manifeste énorme complet avant de démarrer les premiers fichiers.
+
+La taille des lots `.torrent` reste limitée côté interface pour les comptes standards. Un administrateur peut déposer un lot de taille quelconque, mais le pipeline conserve une concurrence technique d'upload bornée afin de ne pas ouvrir une requête par fichier simultanément.
 
 Conserver ces mécanismes dans le Dashboard/les accordéons au lieu de créer un second système de suivi parallèle.
 

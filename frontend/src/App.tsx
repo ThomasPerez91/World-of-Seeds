@@ -13,9 +13,9 @@ import { AdminServicesPage } from "./features/admin/AdminServicesPage";
 import { AdminSettingsPage } from "./features/admin/AdminSettingsPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
-import { AccountMenuIcon, BackIcon, HomeIcon, SettingsIcon } from "./components/icons";
+import { AccountMenuIcon, AdminIcon, BackIcon, HomeIcon, SettingsIcon } from "./components/icons";
 import { LanguageSelector } from "./components/LanguageSelector";
-import { ThemeSelector } from "./components/ThemeSelector";
+import { SettingsShell } from "./components/SettingsShell";
 import {
   LegalLinks,
   LegalPage,
@@ -26,8 +26,8 @@ import { Button, Card, Badge, StateMessage } from "./components/ui";
 import { UI_VERSION } from "./uiVersion";
 import { FeedbackProvider } from "./components/Feedback";
 import { useFeedback } from "./components/Feedback";
-import { I18nProvider, useI18n, type Locale } from "./i18n";
-import { Eye, EyeOff, LockKeyhole, LogOut, UserRound } from "lucide-react";
+import { I18nProvider, translate, useI18n, type Locale } from "./i18n";
+import { Copy, Eye, EyeOff, LockKeyhole, LogOut, UserRound } from "lucide-react";
 
 type AuthState =
   | { status: "loading" }
@@ -431,6 +431,7 @@ function AccountSettingsPage({
     setLocaleSaving(true);
     try {
       onChanged(await api.changeLocale(locale));
+      feedback.toast({ tone: "success", message: translate(locale, "language.saved") });
     } catch {
       setLocale(user.preferred_locale ?? "fr");
       feedback.toast({ tone: "error", message: t("language.saveFailed") });
@@ -443,6 +444,44 @@ function AccountSettingsPage({
   const [passwordError, setPasswordError] = useState("");
   const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const [username, setUsername] = useState(user.username);
+  const [activeSection, setActiveSection] = useState<"general" | "security" | "secrets">("general");
+  const [authSeed, setAuthSeed] = useState<string | null>(null);
+  const [authSeedLoading, setAuthSeedLoading] = useState(false);
+
+  useEffect(() => {
+    if (activeSection !== "secrets" || authSeed !== null) return;
+    let active = true;
+    setAuthSeedLoading(true);
+    void api
+      .getAuthSeed()
+      .then((seed) => {
+        if (active) setAuthSeed(seed);
+      })
+      .catch((caught: unknown) => {
+        if (!active) return;
+        if (caught instanceof ApiError && caught.status === 401) {
+          onSessionExpired();
+          return;
+        }
+        feedback.toast({ tone: "error", message: t("account.authSeedLoadFailed") });
+      })
+      .finally(() => {
+        if (active) setAuthSeedLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeSection, authSeed, feedback, onSessionExpired, t]);
+
+  async function copyAuthSeed() {
+    if (authSeed === null) return;
+    try {
+      await navigator.clipboard.writeText(authSeed);
+      feedback.toast({ tone: "success", message: t("account.authSeedCopied") });
+    } catch {
+      feedback.toast({ tone: "error", message: t("admin.copyFailed") });
+    }
+  }
 
   async function submitUsername(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -495,87 +534,132 @@ function AccountSettingsPage({
   return (
     <section className="settings-page" aria-labelledby="account-settings-title">
       <Button type="button" className="back-button" onClick={onBack}>
-        <BackIcon /> {t("common.backDashboard")}
+        <BackIcon />
+        <span>{t("common.backDashboard")}</span>
       </Button>
       <div className="settings-header">
-        <p className="eyebrow">{t("account.eyebrow")}</p>
         <h1 id="account-settings-title">{t("account.title")}</h1>
-        <p className="settings-intro">
-          {t("account.intro")}
-        </p>
+        <p className="settings-intro">{t("account.intro")}</p>
       </div>
-      <Card className="preferences-card" aria-labelledby="preferences-title">
-        <h2 id="preferences-title">{t("preferences.title")}</h2>
-        <p className="settings-section-intro">{t("preferences.intro")}</p>
-        <div className="preferences-grid">
-          <LanguageSelector disabled={localeSaving} onChange={changeLocale} />
-          <div><p className="preference-label">{t("theme.label")}</p><ThemeSelector /></div>
-        </div>
-      </Card>
-      <div className="settings-grid">
-        <Card className="settings-card" aria-labelledby="username-settings-title">
-          <h2 id="username-settings-title">{t("account.username")}</h2>
-          <form onSubmit={(event) => void submitUsername(event)}>
-            <label htmlFor="settings-username">{t("account.username")}</label>
-            <input
-              id="settings-username"
-              name="username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}"
-              autoComplete="username"
-              required
-            />
-            <p className="field-hint">
-              {t("account.usernameHint")}
-            </p>
-            <Button type="submit" disabled={usernameSubmitting || username === user.username}>
-              {usernameSubmitting ? t("credentials.submitting") : t("account.updateName")}
-            </Button>
-          </form>
-        </Card>
-
-        <Card className="settings-card" aria-labelledby="password-settings-title">
-          <h2 id="password-settings-title">{t("account.passwordTitle")}</h2>
-          <p className="settings-section-intro">
-            {t("account.passwordHint")}
-          </p>
-          <form onSubmit={(event) => void submitPassword(event)}>
-            <label htmlFor="settings-current-password">{t("account.currentPassword")}</label>
-            <input
-              id="settings-current-password"
-              name="current-password"
-              type="password"
-              autoComplete="current-password"
-              required
-            />
-            <label htmlFor="settings-new-password">{t("credentials.newPassword")}</label>
-            <input
-              id="settings-new-password"
-              name="new-password"
-              type="password"
-              minLength={12}
-              autoComplete="new-password"
-              required
-            />
-            <label htmlFor="settings-password-confirmation">{t("credentials.confirmPassword")}</label>
-            <input
-              id="settings-password-confirmation"
-              name="password-confirmation"
-              type="password"
-              minLength={12}
-              autoComplete="new-password"
-              required
-            />
-            <p className="form-message error-message" role="alert">
-              {passwordError}
-            </p>
-            <Button type="submit" disabled={passwordSubmitting}>
-              {passwordSubmitting ? t("common.processing") : t("account.updatePassword")}
-            </Button>
-          </form>
-        </Card>
-      </div>
+      <SettingsShell
+        activeView={activeSection}
+        navigation={[
+          { view: "general", label: t("settings.general") },
+          { view: "security", label: t("settings.security") },
+          { view: "secrets", label: t("settings.secrets") },
+        ]}
+        navigationLabel={t("settings.navigation")}
+        onNavigate={setActiveSection}
+      >
+          {activeSection === "general" ? (
+            <section className="settings-panel" aria-labelledby="settings-general-title">
+              <header className="settings-panel-header">
+                <h2 id="settings-general-title">{t("settings.general")}</h2>
+                <p>{t("settings.generalIntro")}</p>
+              </header>
+              <div className="settings-subsection">
+                <h3 id="preferences-title">{t("preferences.title")}</h3>
+                <p className="settings-section-intro">{t("preferences.intro")}</p>
+                <div className="settings-language-control">
+                  <LanguageSelector disabled={localeSaving} onChange={changeLocale} />
+                </div>
+              </div>
+              <div className="settings-subsection">
+                <h3 id="username-settings-title">{t("account.username")}</h3>
+                <form onSubmit={(event) => void submitUsername(event)}>
+                  <label htmlFor="settings-username">{t("account.username")}</label>
+                  <input
+                    id="settings-username"
+                    name="username"
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value)}
+                    pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}"
+                    autoComplete="username"
+                    required
+                  />
+                  <p className="field-hint">{t("account.usernameHint")}</p>
+                  <Button type="submit" disabled={usernameSubmitting || username === user.username}>
+                    {usernameSubmitting ? t("credentials.submitting") : t("account.updateName")}
+                  </Button>
+                </form>
+              </div>
+            </section>
+          ) : activeSection === "security" ? (
+            <section className="settings-panel" aria-labelledby="settings-security-title">
+              <header className="settings-panel-header">
+                <h2 id="settings-security-title">{t("settings.security")}</h2>
+                <p>{t("settings.securityIntro")}</p>
+              </header>
+              <div className="settings-subsection">
+                <h3 id="password-settings-title">{t("account.passwordTitle")}</h3>
+                <p className="settings-section-intro">{t("account.passwordHint")}</p>
+                <form onSubmit={(event) => void submitPassword(event)}>
+                  <label htmlFor="settings-current-password">{t("account.currentPassword")}</label>
+                  <input
+                    id="settings-current-password"
+                    name="current-password"
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                  />
+                  <label htmlFor="settings-new-password">{t("credentials.newPassword")}</label>
+                  <input
+                    id="settings-new-password"
+                    name="new-password"
+                    type="password"
+                    minLength={12}
+                    autoComplete="new-password"
+                    required
+                  />
+                  <label htmlFor="settings-password-confirmation">{t("credentials.confirmPassword")}</label>
+                  <input
+                    id="settings-password-confirmation"
+                    name="password-confirmation"
+                    type="password"
+                    minLength={12}
+                    autoComplete="new-password"
+                    required
+                  />
+                  <p className="form-message error-message" role="alert">{passwordError}</p>
+                  <Button type="submit" disabled={passwordSubmitting}>
+                    {passwordSubmitting ? t("common.processing") : t("account.updatePassword")}
+                  </Button>
+                </form>
+              </div>
+            </section>
+          ) : (
+            <section className="settings-panel" aria-labelledby="settings-secrets-title">
+              <header className="settings-panel-header">
+                <h2 id="settings-secrets-title">{t("settings.secrets")}</h2>
+                <p>{t("settings.secretsIntro")}</p>
+              </header>
+              <div className="settings-subsection auth-seed-section">
+                <label htmlFor="account-auth-seed">{t("account.authSeed")}</label>
+                <p className="settings-section-intro">{t("account.authSeedHint")}</p>
+                <div className="auth-seed-input">
+                  <input
+                    id="account-auth-seed"
+                    type="text"
+                    value={authSeed ?? ""}
+                    placeholder={authSeedLoading ? t("common.loading") : ""}
+                    readOnly
+                    aria-busy={authSeedLoading}
+                  />
+                  <button
+                    type="button"
+                    className="auth-seed-copy"
+                    aria-label={t("account.copyAuthSeed")}
+                    title={t("account.copyAuthSeed")}
+                    disabled={authSeed === null}
+                    onClick={() => void copyAuthSeed()}
+                  >
+                    <Copy aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+      </SettingsShell>
     </section>
   );
 }
@@ -626,6 +710,16 @@ function Dashboard({
             <HomeIcon />
             <span>{t("dashboard.title")}</span>
           </Button>
+          {user.is_admin && (
+            <Button
+              variant="ghost"
+              aria-current={view.startsWith("admin-") ? "page" : undefined}
+              onClick={() => setView("admin-users")}
+            >
+              <AdminIcon />
+              <span>{t("dashboard.admin")}</span>
+            </Button>
+          )}
           <Button
             variant="ghost"
             aria-current={view === "settings" ? "page" : undefined}
@@ -647,7 +741,7 @@ function Dashboard({
       </header>
       <div id="dashboard-content" className="dashboard-content" tabIndex={-1}>
         <div hidden={view !== "dashboard"}>
-          <UserDashboardPage onSessionExpired={onSessionExpired} />
+          <UserDashboardPage isAdmin={user.is_admin} onSessionExpired={onSessionExpired} />
         </div>
         {view === "settings" ? (
           <AccountSettingsPage
