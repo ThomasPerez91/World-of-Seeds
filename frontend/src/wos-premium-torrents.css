@@ -621,7 +621,8 @@
   font-size: 0.72rem;
 }
 
-.retention-warning-indicator {
+.retention-warning-indicator,
+.subscription-expiry-indicator {
   display: inline-grid !important;
   width: 26px !important;
   min-width: 26px !important;
@@ -632,7 +633,8 @@
   line-height: 1 !important;
 }
 
-.retention-warning-focus {
+.retention-warning-focus,
+.subscription-expiry-focus {
   display: inline-grid;
   width: 100%;
   height: 100%;
@@ -640,12 +642,14 @@
   border-radius: inherit;
 }
 
-.retention-warning-focus svg {
+.retention-warning-focus svg,
+.subscription-expiry-focus svg {
   width: 15px;
   height: 15px;
 }
 
-.retention-warning-focus:focus-visible {
+.retention-warning-focus:focus-visible,
+.subscription-expiry-focus:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }

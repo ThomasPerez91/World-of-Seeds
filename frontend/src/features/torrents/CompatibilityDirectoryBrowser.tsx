@@ -383,7 +383,6 @@ export function CompatibilityDirectoryBrowser({
                 onClick={() => onNativeDownload(`${directory.name}.zip`, "archive")}
               >
                 <Archive aria-hidden="true" />
-                <span>ZIP</span>
               </a>
             </Tooltip>
           ) : null}

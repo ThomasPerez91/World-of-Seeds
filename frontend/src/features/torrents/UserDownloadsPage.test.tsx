@@ -684,7 +684,7 @@ describe("UserDownloadsPage", () => {
     await user.click(await within(content).findByRole("button", { name: "Détails — Folder" }));
     expect(within(content).getByText("one.mkv")).toBeTruthy();
     expect(within(content).getByText("two.srt")).toBeTruthy();
-    expect(within(content).getByRole("link", { name: "Télécharger le contenu en ZIP" })).toBeTruthy();
+    expect(within(content).getByRole("link", { name: "Télécharger le ZIP" })).toBeTruthy();
     expect(within(article).queryByRole("button", { name: "Télécharger" })).toBeNull();
   });
 
@@ -1224,7 +1224,7 @@ describe("UserDownloadsPage", () => {
     const article = await screen.findByRole("article", { name: "Film.mkv" });
     await user.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
     await user.click(await within(article).findByRole("button", { name: "Tout télécharger" }));
-    expect(within(article).queryByRole("link", { name: "Télécharger le contenu en ZIP" })).toBeNull();
+    expect(within(article).queryByRole("link", { name: "Télécharger le ZIP" })).toBeNull();
     const otherArticle = screen.getByRole("article", { name: "Autre READY" });
     await user.click(within(otherArticle).getByRole("button", { name: "Afficher les détails de Autre READY" }));
     expect(await within(otherArticle).findByText("Other/consultable.bin")).toBeTruthy();
@@ -1318,7 +1318,7 @@ describe("UserDownloadsPage", () => {
     await user.click(await screen.findByRole("button", { name: "Afficher les détails de Film.mkv" }));
 
     const archive = await screen.findByRole("link", {
-      name: "Télécharger le contenu en ZIP",
+      name: "Télécharger le ZIP",
     });
     await user.click(await screen.findByRole("button", { name: "Détails — The.Cleaning.Lady" }));
     await user.click(await screen.findByRole("button", { name: "Détails — Saison.02" }));
