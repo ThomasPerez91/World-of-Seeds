@@ -45,6 +45,8 @@ export interface TorrentRequestV2 {
   state: TorrentRequestV2State;
   progress: number;
   error_code: string | null;
+  ready_at?: string | null;
+  unsubscribe_at?: string | null;
   retention_expires_at: string | null;
   queue_position_estimate: number | null;
   queue_total_estimate: number | null;
@@ -58,6 +60,18 @@ export interface TorrentRequestV2Listing {
   offset: number;
   limit: number;
   total: number;
+  status_counts?: Record<"all" | "downloading" | "ready" | "waiting" | "blocked", number>;
+  retention_counts?: Record<"green" | "orange" | "red", number>;
+}
+
+export interface TorrentListQueryV2 {
+  offset: number;
+  limit: number;
+  search?: string;
+  status?: "downloading" | "ready" | "waiting" | "blocked";
+  sort_by?: "name" | "state" | "queue" | "size";
+  sort_order?: "asc" | "desc";
+  retention_bucket?: "green" | "orange" | "red";
 }
 
 export interface TorrentRequestV2CreateResult extends TorrentRequestV2 {
@@ -645,8 +659,14 @@ export const api = {
     offset: number,
     limit: number,
     signal?: AbortSignal,
+    filters: Omit<TorrentListQueryV2, "offset" | "limit"> = {},
   ): Promise<TorrentRequestV2Listing> {
     const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (filters.search) search.set("search", filters.search);
+    if (filters.status) search.set("status", filters.status);
+    if (filters.sort_by) search.set("sort_by", filters.sort_by);
+    if (filters.sort_order) search.set("sort_order", filters.sort_order);
+    if (filters.retention_bucket) search.set("retention_bucket", filters.retention_bucket);
     return requestV2<TorrentRequestV2Listing>(`/torrents?${search.toString()}`, { signal });
   },
 
@@ -659,6 +679,15 @@ export const api = {
     return requestV2<void>(`/torrents/${encodeURIComponent(torrentRequestId)}`, {
       method: "DELETE",
     });
+  },
+
+  getAuthSeed(): Promise<string> {
+    return request<{ auth_seed: string }>("/auth/auth-seed").then((result) => result.auth_seed);
+  },
+
+  rotateAuthSeed(): Promise<string> {
+    return request<{ auth_seed: string }>("/auth/auth-seed/rotate", { method: "POST" })
+      .then((result) => result.auth_seed);
   },
 
   getTorrentDownloadManifestPageV2(

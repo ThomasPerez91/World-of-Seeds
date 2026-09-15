@@ -26,7 +26,7 @@ import { UI_VERSION } from "./uiVersion";
 import { FeedbackProvider } from "./components/Feedback";
 import { useFeedback } from "./components/Feedback";
 import { I18nProvider, useI18n, type Locale } from "./i18n";
-import { Eye, EyeOff, LockKeyhole, LogOut, UserRound } from "lucide-react";
+import { Clipboard, ClipboardCheck, Eye, EyeOff, LockKeyhole, LogOut, RotateCw, UserRound } from "lucide-react";
 
 type AuthState =
   | { status: "loading" }
@@ -442,7 +442,53 @@ function AccountSettingsPage({
   const [passwordError, setPasswordError] = useState("");
   const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const [username, setUsername] = useState(user.username);
-  const [activeSection, setActiveSection] = useState<"general" | "security">("general");
+  const [activeSection, setActiveSection] = useState<"general" | "security" | "secrets">("general");
+  const [authSeed, setAuthSeed] = useState<string | null>(null);
+  const [authSeedLoading, setAuthSeedLoading] = useState(false);
+  const [authSeedCopied, setAuthSeedCopied] = useState(false);
+  const [authSeedRotating, setAuthSeedRotating] = useState(false);
+  const [confirmSeedRotation, setConfirmSeedRotation] = useState(false);
+
+  useEffect(() => {
+    if (activeSection !== "secrets" || authSeed !== null) return;
+    let active = true;
+    setAuthSeedLoading(true);
+    void api.getAuthSeed().then((seed) => {
+      if (active) setAuthSeed(seed);
+    }).catch((caught: unknown) => {
+      if (caught instanceof ApiError && caught.status === 401) return onSessionExpired();
+      feedback.toast({ tone: "error", message: t("account.authSeedLoadFailed") });
+    }).finally(() => { if (active) setAuthSeedLoading(false); });
+    return () => { active = false; };
+  }, [activeSection, authSeed, feedback, onSessionExpired, t]);
+
+  async function copyAuthSeed() {
+    if (authSeed === null) return;
+    try {
+      await navigator.clipboard.writeText(authSeed);
+      setAuthSeedCopied(true);
+      window.setTimeout(() => setAuthSeedCopied(false), 1500);
+      feedback.toast({ tone: "success", message: t("account.authSeedCopied") });
+    } catch {
+      feedback.toast({ tone: "error", message: t("admin.copyFailed") });
+    }
+  }
+
+  async function rotateAuthSeed() {
+    setAuthSeedRotating(true);
+    try {
+      const nextSeed = await api.rotateAuthSeed();
+      setAuthSeed(nextSeed);
+      setAuthSeedCopied(false);
+      setConfirmSeedRotation(false);
+      feedback.toast({ tone: "success", message: t("account.authSeedRotated") });
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) return onSessionExpired();
+      feedback.toast({ tone: "error", message: apiError(caught, "account.authSeedRotateFailed") });
+    } finally {
+      setAuthSeedRotating(false);
+    }
+  }
 
   async function submitUsername(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -520,6 +566,14 @@ function AccountSettingsPage({
           >
             {t("settings.security")}
           </button>
+          <button
+            type="button"
+            className={`settings-navigation-item${activeSection === "secrets" ? " is-active" : ""}`}
+            aria-current={activeSection === "secrets" ? "page" : undefined}
+            onClick={() => setActiveSection("secrets")}
+          >
+            {t("settings.secrets")}
+          </button>
         </nav>
 
         <div className="settings-content">
@@ -556,7 +610,7 @@ function AccountSettingsPage({
                 </form>
               </div>
             </section>
-          ) : (
+          ) : activeSection === "security" ? (
             <section className="settings-panel" aria-labelledby="settings-security-title">
               <header className="settings-panel-header">
                 <h2 id="settings-security-title">{t("settings.security")}</h2>
@@ -597,6 +651,34 @@ function AccountSettingsPage({
                     {passwordSubmitting ? t("common.processing") : t("account.updatePassword")}
                   </Button>
                 </form>
+              </div>
+            </section>
+          ) : (
+            <section className="settings-panel" aria-labelledby="settings-secrets-title">
+              <header className="settings-panel-header">
+                <h2 id="settings-secrets-title">{t("settings.secrets")}</h2>
+                <p>{t("settings.secretsIntro")}</p>
+              </header>
+              <div className="settings-subsection auth-seed-section">
+                <label htmlFor="account-auth-seed">{t("account.authSeed")}</label>
+                <p className="settings-section-intro">{t("account.authSeedHint")}</p>
+                <div className="auth-seed-controls">
+                  <input id="account-auth-seed" value={authSeed ?? ""} placeholder={authSeedLoading ? t("common.loading") : ""} readOnly aria-busy={authSeedLoading} />
+                  <Button type="button" variant="secondary" disabled={authSeed === null} title={t(authSeedCopied ? "account.authSeedCopiedShort" : "account.copyAuthSeed")} onClick={() => void copyAuthSeed()}>
+                    {authSeedCopied ? <ClipboardCheck aria-hidden="true" /> : <Clipboard aria-hidden="true" />}
+                    <span>{t(authSeedCopied ? "account.copied" : "account.copy")}</span>
+                  </Button>
+                  <Button type="button" variant="danger" disabled={authSeed === null} onClick={() => setConfirmSeedRotation(true)}>
+                    <RotateCw aria-hidden="true" /><span>{t("account.regenerate")}</span>
+                  </Button>
+                </div>
+                {confirmSeedRotation && (
+                  <div className="auth-seed-confirmation" role="alertdialog" aria-labelledby="rotate-seed-title" aria-describedby="rotate-seed-description">
+                    <strong id="rotate-seed-title">{t("account.rotateSeedTitle")}</strong>
+                    <p id="rotate-seed-description">{t("account.rotateSeedWarning")}</p>
+                    <div><Button type="button" variant="secondary" disabled={authSeedRotating} onClick={() => setConfirmSeedRotation(false)}>{t("common.cancel")}</Button><Button type="button" variant="danger" disabled={authSeedRotating} onClick={() => void rotateAuthSeed()}>{authSeedRotating ? t("common.processing") : t("account.regenerate")}</Button></div>
+                  </div>
+                )}
               </div>
             </section>
           )}

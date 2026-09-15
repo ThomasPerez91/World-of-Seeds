@@ -110,3 +110,17 @@ Administration was not reintroduced into `AccountMenu`; that dropdown remains li
 - Re-run the authenticated dashboard visual matrix after the combined branch is reachable. The cloud browser used by this work rejected the local-only preview with `ERR_BLOCKED_BY_CLIENT`; DOM, responsive CSS, accessibility, behavior, and production build were validated locally, but no claim of an authenticated browser screenshot is made here.
 - When synthesizing the parallel frontend/backend work, preserve the 2.1.2 version mirrors and resolve any version-only overlap mechanically; do not take unrelated backend changes from this frontend branch.
 - No deployment workflow is expected from this integration branch.
+# 2.2.4 torrent controls, direct actions and Secrets
+
+- Name, UX state, queue and numeric size headers now select one global backend sort at a time and
+  alternate ASC/DESC; progress remains unsorted.
+- Green/orange/red subscription filters are an independent dimension with backend facet counts,
+  translated tooltips, toggle-off behavior, and preserved realtime/search/status/sort state.
+- The primary-row Download action never opens details. It is shown only after the manifest proves
+  a direct single file, a native folder recovery, or an available ZIP; otherwise Details remains.
+- Native folders use feature detection (`showDirectoryPicker`) and secure-context detection only,
+  never Brave/user-agent sniffing. The picker is invoked directly from the click before transfer
+  network work. In insecure contexts the UI reports the HTTPS cause; ZIP remains the fallback.
+- Account settings include a dedicated Secrets section with a selectable read-only seed, aligned
+  Clipboard/ClipboardCheck control, and a separate confirmed Rotate action. Successful rotation
+  updates the field without reloading; errors preserve the previous value.

@@ -94,7 +94,8 @@ class TransferFailure extends Error {
 }
 
 export function supportsRecursiveDirectoryDownload(target: Window = window): boolean {
-  return typeof (target as DirectoryPickerWindow).showDirectoryPicker === "function";
+  return target.isSecureContext !== false
+    && typeof (target as DirectoryPickerWindow).showDirectoryPicker === "function";
 }
 
 export function pickDownloadDirectory(target: Window = window): Promise<LocalDirectoryHandle> {
