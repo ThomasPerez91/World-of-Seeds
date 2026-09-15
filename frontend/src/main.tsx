@@ -8,6 +8,7 @@ import premiumTorrentStylesheetUrl from "./wos-premium-torrents.css?url";
 import premiumReviewFixesStylesheetUrl from "./wos-premium-review-fixes.css?url";
 import wos21StylesheetUrl from "./wos-2-1.css?url";
 import wos21FinalStylesheetUrl from "./wos-2-1-final.css?url";
+import hotfix225StylesheetUrl from "./hotfix-2-2-5.css?url";
 import "./styles.css";
 import "./features/admin/admin.css";
 import toastSystemStylesheetUrl from "./toast-system.css?url";
@@ -27,6 +28,7 @@ appendStylesheet(premiumReviewFixesStylesheetUrl, "premium-review-fixes");
 appendStylesheet(wos21StylesheetUrl, "wos-2-1-branding");
 appendStylesheet(wos21FinalStylesheetUrl, "wos-2-1-final-polish");
 appendStylesheet(toastSystemStylesheetUrl, "toast-system");
+appendStylesheet(hotfix225StylesheetUrl, "hotfix-2-2-5");
 
 const root = document.getElementById("root");
 
