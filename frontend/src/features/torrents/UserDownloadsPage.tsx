@@ -407,7 +407,7 @@ function ReadyTorrentContent({
         <>
           <header className="ready-content-heading">
             <div>
-              <h3>{t("downloads.content")}</h3>
+              <h3><span className="ready-directory-root-label">{t("downloads.content")}</span></h3>
               <span>{t(snapshot.file_count === 1 ? "downloads.contentSummaryOne" : "downloads.contentSummaryMany", { count: snapshot.file_count, size: formatBytes(snapshot.total_size) })}</span>
             </div>
             {snapshot.file_count > 1 && !compatible && (
