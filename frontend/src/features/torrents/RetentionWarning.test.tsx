@@ -58,8 +58,9 @@ describe("RetentionWarning", () => {
     const view = render(
       <I18nProvider>
         <article className="torrent-accordion-card">
-          <span className="torrent-summary-status" data-testid="status-cell" />
-          <RetentionWarning retentionExpiresAt={deadline(47 * 60 * 60 * 1_000)} compact />
+          <span className="torrent-summary-status" data-testid="status-cell">
+            <RetentionWarning retentionExpiresAt={deadline(47 * 60 * 60 * 1_000)} compact />
+          </span>
         </article>
       </I18nProvider>,
     );
@@ -67,8 +68,8 @@ describe("RetentionWarning", () => {
     const statusCell = screen.getByTestId("status-cell");
     const warning = within(statusCell).getByTestId("retention-warning");
     expect(warning.classList.contains("compact")).toBe(true);
-    expect(view.container.querySelector(".torrent-accordion-card > .retention-warning.compact")).toBeNull();
-    expect(view.container.querySelector(".retention-warning-anchor")).toBeTruthy();
+    expect(statusCell.contains(warning)).toBe(true);
+    expect(view.container.querySelector(".retention-warning-anchor")).toBeNull();
     vi.useRealTimers();
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });

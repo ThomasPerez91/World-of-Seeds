@@ -1073,6 +1073,7 @@ body {
   min-height: 0 !important;
   display: flex !important;
   align-items: flex-start !important;
+  overflow: visible !important;
   padding: 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
@@ -1080,9 +1081,14 @@ body {
   box-shadow: none !important;
 }
 .user-dashboard-header::after { content: none !important; }
-.user-dashboard-header h1 { margin: 0 !important; font-size: clamp(2.85rem, 4.5vw, 3.6rem) !important; }
+.user-dashboard-header h1 {
+  margin: 0 !important;
+  padding-block: 0.06em;
+  font-size: clamp(2.85rem, 4.5vw, 3.6rem) !important;
+  line-height: 1.08 !important;
+}
 
-.dashboard-summary-grid { position: relative; z-index: 2; gap: 1rem !important; }
+.dashboard-summary-grid { position: relative; z-index: 2; gap: 1rem !important; margin-top: 0 !important; }
 .dashboard-summary-card {
   position: relative;
   min-height: 0;
