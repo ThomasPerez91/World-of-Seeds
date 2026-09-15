@@ -14,6 +14,7 @@ import {
 import { Badge, Button, Card, StateMessage } from "../../components/ui";
 import { type MessageKey, useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
+import { ExternalApiClientsPanel } from "./ExternalApiClientsPanel";
 import { NewGreedyControlPanel } from "./NewGreedyControlPanel";
 import { TorrentMonitoringPanel } from "./TorrentMonitoringPanel";
 
@@ -21,6 +22,11 @@ const statusCopy: Record<ExternalServiceHealth["status"], MessageKey> = {
   healthy: "admin.serviceHealthy",
   unavailable: "admin.serviceUnavailable",
   unconfigured: "admin.serviceUnconfigured",
+} as const;
+
+export const EXPECTED_SERVICE_VERSIONS = {
+  newgreedy: "1.7.5",
+  qbittorrent: "5.2.3",
 } as const;
 
 function serviceMessage(service: ExternalServiceHealth): MessageKey {
@@ -43,11 +49,13 @@ function ServiceCard({
   description,
   health,
   name,
+  fallbackVersion,
 }: {
   children: ReactNode;
   description: string;
   health: ExternalServiceHealth;
   name: string;
+  fallbackVersion: string;
 }) {
   const { formatNumber, t } = useI18n();
   return (
@@ -75,7 +83,7 @@ function ServiceCard({
         </div>
         <div>
           <dt>{t("admin.version")}</dt>
-          <dd>{health.version ?? "—"}</dd>
+          <dd>{health.version ?? fallbackVersion}</dd>
         </div>
       </dl>
     </Card>
@@ -159,6 +167,7 @@ export function AdminServicesPage({
                 name="NewGreedy"
                 description={t("admin.newgreedyDescription")}
                 health={health.newgreedy}
+                fallbackVersion={EXPECTED_SERVICE_VERSIONS.newgreedy}
               >
                 <NewGreedyServiceIcon />
               </ServiceCard>
@@ -166,6 +175,7 @@ export function AdminServicesPage({
                 name="qBittorrent"
                 description={t("admin.qbittorrentDescription")}
                 health={health.qbittorrent}
+                fallbackVersion={EXPECTED_SERVICE_VERSIONS.qbittorrent}
               >
                 <QBittorrentServiceIcon />
               </ServiceCard>
@@ -188,6 +198,7 @@ export function AdminServicesPage({
           </div>
         )}
       </section>
+      <ExternalApiClientsPanel onSessionExpired={onSessionExpired} />
     </AdminPageShell>
   );
 }

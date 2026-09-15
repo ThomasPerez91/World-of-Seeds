@@ -120,11 +120,20 @@ async def test_directory_listing_uses_manifest_summaries_and_supports_nested_par
         f"/api/v2/torrents/{request.id}/download-directories",
         params={"parent": "Extras"},
     )
-
+    season_first = await client.get(
+        f"/api/v2/torrents/{request.id}/download-directories",
+        params={"parent": "Saison 1", "limit": 1},
+    )
+    season_second = await client.get(
+        f"/api/v2/torrents/{request.id}/download-directories",
+        params={"parent": "Saison 1", "offset": 1, "limit": 1},
+    )
     assert root.status_code == 200
     payload = root.json()
     assert len(payload["snapshot_id"]) == 64
     assert payload["path"] == ""
+    assert payload["direct_file_count"] == 0
+    assert payload["files"] == []
     assert [item["name"] for item in payload["directories"]] == [
         "Bonus %_Été",
         "Docs",
@@ -144,6 +153,8 @@ async def test_directory_listing_uses_manifest_summaries_and_supports_nested_par
         "archive_available": True,
     }
     assert nested.status_code == 200
+    assert nested.json()["direct_file_count"] == 0
+    assert nested.json()["files"] == []
     assert nested.json()["directories"] == [
         {
             "name": "Sub",
@@ -153,6 +164,69 @@ async def test_directory_listing_uses_manifest_summaries_and_supports_nested_par
             "archive_available": True,
         }
     ]
+    assert season_first.status_code == 200
+    assert season_first.json()["direct_file_count"] == 2
+    assert season_first.json()["offset"] == 0
+    assert season_first.json()["limit"] == 1
+    assert [item["relative_path"] for item in season_first.json()["files"]] == [
+        "Saison 1/Episode 1.mkv"
+    ]
+    assert season_second.status_code == 200
+    assert season_second.json()["direct_file_count"] == 2
+    assert [item["relative_path"] for item in season_second.json()["files"]] == [
+        "Saison 1/Épisode 2 %.mkv"
+    ]
+    assert season_first.json()["directories"] == []
+
+
+@pytest.mark.asyncio
+async def test_subfolder_manifest_is_paginated_and_rebases_only_the_selected_subtree(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    request, _ = await _folder_torrent(db_session, data_root)
+    await _login(client)
+    base = f"/api/v2/torrents/{request.id}/download-manifest"
+    root = (await client.get(base)).json()
+
+    first = await client.get(
+        base,
+        params={
+            "path": "Saison 1",
+            "offset": 0,
+            "limit": 1,
+            "snapshot": root["snapshot_id"],
+        },
+    )
+    second = await client.get(
+        base,
+        params={
+            "path": "Saison 1",
+            "offset": 1,
+            "limit": 1,
+            "snapshot": root["snapshot_id"],
+        },
+    )
+    escaped_prefix = await client.get(
+        base,
+        params={
+            "path": "Bonus %_Été",
+            "snapshot": root["snapshot_id"],
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["file_count"] == 2
+    assert first.json()["total_size"] == 6
+    assert first.json()["items"][0]["relative_path"] == "Saison 1/Episode 1.mkv"
+    assert second.json()["items"][0]["relative_path"] == "Saison 1/Épisode 2 %.mkv"
+    assert escaped_prefix.status_code == 200
+    assert escaped_prefix.json()["file_count"] == 1
+    assert escaped_prefix.json()["total_size"] == 1
+    assert escaped_prefix.json()["items"][0]["relative_path"] == "Bonus %_Été/A.txt"
+    assert first.json()["snapshot_id"] == root["snapshot_id"]
 
 
 @pytest.mark.asyncio

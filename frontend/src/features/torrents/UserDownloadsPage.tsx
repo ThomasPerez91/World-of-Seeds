@@ -112,6 +112,7 @@ export function loadNativeDownloadStarts(
 }
 
 interface UserDownloadsPageProps {
+  isAdmin?: boolean;
   onActivityChanged?: () => void;
   onLocalTransferChanged?: (summary: LocalDownloadSummary) => void;
   onSessionExpired: () => void;
@@ -171,7 +172,7 @@ export function summarizeDownloadManager(
   return {
     active: manager.activeStreams,
     additionalCount: Math.max(0, visibleCount - (primaryName === null ? 0 : 1)),
-    maximum: manager.maxConcurrentStreams,
+    maximum: manager.maxConcurrentStreams ?? DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
     status,
     waiting,
     name: primaryName,

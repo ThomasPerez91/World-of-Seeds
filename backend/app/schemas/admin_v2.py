@@ -11,7 +11,7 @@ class AdminV2OptionField(BaseModel):
     key: str
     label: str
     description: str
-    input_type: Literal["boolean", "integer", "select"]
+    input_type: Literal["boolean", "integer", "select", "text", "secret"]
     value: AdminOptionValue
     default: AdminOptionValue
     unit: str | None
@@ -70,7 +70,7 @@ class AdminV2Overview(BaseModel):
 class AdminV2OptionsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    changes: Annotated[dict[str, AdminOptionRequestValue], Field(min_length=1, max_length=64)]
+    changes: Annotated[dict[str, AdminOptionRequestValue], Field(min_length=1, max_length=128)]
 
 
 class AdminV2ReconciliationAnomaly(BaseModel):

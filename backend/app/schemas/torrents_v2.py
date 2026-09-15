@@ -12,11 +12,13 @@ class TorrentRequestV2Response(BaseModel):
     state: Literal["requested", "active", "ready", "cancelled", "expired", "error"]
     progress: float = Field(ge=0, le=1)
     error_code: str | None
+    ready_at: datetime | None
     unsubscribe_at: datetime | None
     retention_expires_at: datetime | None
     queue_position_estimate: int | None = Field(default=None, ge=1)
     queue_total_estimate: int | None = Field(default=None, ge=1)
     queue_status: Literal["waiting", "downloading", "stalled", "cooldown"] | None = None
+    scheduler_retry_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -31,10 +33,13 @@ class TorrentRequestV2ListingResponse(BaseModel):
     offset: int
     limit: int
     total: int
+    status_counts: dict[Literal["all", "downloading", "ready", "waiting", "blocked"], int]
+    retention_counts: dict[Literal["green", "orange", "red"], int]
 
 
 class TorrentDownloadPolicyResponse(BaseModel):
-    max_concurrent_streams: int = Field(ge=1, le=20)
+    max_concurrent_streams: int | None = Field(default=None, ge=1, le=20)
+    unlimited: bool
 
 
 class TorrentDownloadFileResponse(BaseModel):
@@ -68,3 +73,7 @@ class TorrentDownloadDirectoriesResponse(BaseModel):
     snapshot_id: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     path: str
     directories: list[TorrentDownloadDirectoryResponse]
+    direct_file_count: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1, le=500)
+    files: list[TorrentDownloadFileResponse]

@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DatabaseOption, DatabaseOptionAudit, User
 from app.options.registry import (
-    OPTION_SPECS,
-    OPTION_SPECS_BY_KEY,
+    DATABASE_OPTION_SPECS,
+    DATABASE_OPTION_SPECS_BY_KEY,
     OptionSpec,
     OptionValue,
     is_sensitive_option_key,
@@ -43,7 +43,7 @@ class PostgresOptionsRegistry:
         rows = await self._load_rows(session, lock=True)
         self._reject_unknown_rows(rows)
 
-        for spec in OPTION_SPECS:
+        for spec in DATABASE_OPTION_SPECS:
             row = rows.get(spec.key)
             if row is None:
                 row = self._new_row(spec, changed_at)
@@ -53,7 +53,7 @@ class PostgresOptionsRegistry:
                         option=row,
                         version=1,
                         old_value=None,
-                        new_value=spec.default,
+                        new_value=_audit_value(spec, spec.default),
                         actor_user_id=None,
                         change_source="bootstrap",
                         changed_at=changed_at,
@@ -91,7 +91,7 @@ class PostgresOptionsRegistry:
         values = self._validated_values(rows)
         normalized_changes: dict[str, OptionValue] = {}
         for key, candidate in changes.items():
-            spec = OPTION_SPECS_BY_KEY.get(key)
+            spec = DATABASE_OPTION_SPECS_BY_KEY.get(key)
             if spec is None:
                 code = (
                     "secret_option_forbidden" if is_sensitive_option_key(key) else "unknown_option"
@@ -120,7 +120,7 @@ class PostgresOptionsRegistry:
             if row.value == normalized:
                 continue
             old_value = row.value
-            spec = OPTION_SPECS_BY_KEY[key]
+            spec = DATABASE_OPTION_SPECS_BY_KEY[key]
             row.set_value(spec, normalized)
             row.version += 1
             row.updated_by_user_id = actor_user_id
@@ -129,8 +129,8 @@ class PostgresOptionsRegistry:
                 DatabaseOptionAudit(
                     option_key=key,
                     version=row.version,
-                    old_value=old_value,
-                    new_value=normalized,
+                    old_value=_audit_value(spec, old_value),
+                    new_value=_audit_value(spec, normalized),
                     actor_user_id=actor_user_id,
                     change_source="admin",
                     changed_at=changed_at,
@@ -144,7 +144,9 @@ class PostgresOptionsRegistry:
             values=values,
             changed_keys=tuple(changed_keys),
             versions=versions,
-            restart_required=any(OPTION_SPECS_BY_KEY[key].restart_required for key in changed_keys),
+            restart_required=any(
+                DATABASE_OPTION_SPECS_BY_KEY[key].restart_required for key in changed_keys
+            ),
         )
 
     @staticmethod
@@ -163,13 +165,13 @@ class PostgresOptionsRegistry:
         rows: Mapping[str, DatabaseOption],
     ) -> dict[str, OptionValue]:
         self._reject_unknown_rows(rows)
-        missing = set(OPTION_SPECS_BY_KEY).difference(rows)
+        missing = set(DATABASE_OPTION_SPECS_BY_KEY).difference(rows)
         if missing:
             raise DatabaseOptionsDriftError(
                 f"Database option registry is missing {len(missing)} required entries"
             )
         values: dict[str, OptionValue] = {}
-        for spec in OPTION_SPECS:
+        for spec in DATABASE_OPTION_SPECS:
             row = rows[spec.key]
             self._validate_row_metadata(row, spec)
             values[spec.key] = normalize_option_value(spec, row.value)
@@ -178,7 +180,7 @@ class PostgresOptionsRegistry:
 
     @staticmethod
     def _reject_unknown_rows(rows: Mapping[str, DatabaseOption]) -> None:
-        unknown = set(rows).difference(OPTION_SPECS_BY_KEY)
+        unknown = set(rows).difference(DATABASE_OPTION_SPECS_BY_KEY)
         if unknown:
             raise DatabaseOptionsDriftError(
                 f"Database option registry contains {len(unknown)} unknown entries"
@@ -214,3 +216,7 @@ class PostgresOptionsRegistry:
         )
         row.set_value(spec, spec.default)
         return row
+
+
+def _audit_value(spec: OptionSpec, value: OptionValue) -> OptionValue:
+    return "[secret updated]" if spec.sensitive and value else "" if spec.sensitive else value

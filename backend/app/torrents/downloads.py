@@ -338,9 +338,9 @@ class DownloadLeaseManager:
         managed_torrent_id: uuid.UUID,
         torrent_request_id: uuid.UUID,
         torrent_file_id: uuid.UUID,
-        max_concurrent: int,
+        max_concurrent: int | None,
     ) -> DownloadLease:
-        if not 1 <= max_concurrent <= 20:
+        if max_concurrent is not None and not 1 <= max_concurrent <= 20:
             raise ValueError("download concurrency limit is invalid")
         now = self._clock()
         async with self._session.begin():
@@ -374,16 +374,17 @@ class DownloadLeaseManager:
                     DownloadLease.expires_at <= now,
                 )
             )
-            active = await self._session.scalar(
-                select(func.count())
-                .select_from(DownloadLease)
-                .where(
-                    DownloadLease.user_id == user_id,
-                    DownloadLease.expires_at > now,
+            if max_concurrent is not None:
+                active = await self._session.scalar(
+                    select(func.count())
+                    .select_from(DownloadLease)
+                    .where(
+                        DownloadLease.user_id == user_id,
+                        DownloadLease.expires_at > now,
+                    )
                 )
-            )
-            if active is None or active >= max_concurrent:
-                raise DownloadConcurrencyError("download concurrency limit reached")
+                if active is None or active >= max_concurrent:
+                    raise DownloadConcurrencyError("download concurrency limit reached")
             lease = DownloadLease(
                 user_id=user_id,
                 managed_torrent_id=managed_torrent_id,

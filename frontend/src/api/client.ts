@@ -28,6 +28,29 @@ export interface LivenessHealth {
 export interface GeneratedCredentials {
   user: User;
   initial_password: string;
+  auth_seed: string;
+}
+
+export interface UserQuota {
+  used: number;
+  maximum: number;
+  reached: boolean;
+}
+
+export interface ExternalApiClient {
+  id: string;
+  name: string;
+  key_prefix: string;
+  is_active: boolean;
+  scopes: Array<"users:create" | "downloads:read">;
+  created_at: string;
+  updated_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface CreatedExternalApiClient extends ExternalApiClient {
+  api_key: string;
 }
 
 export type TorrentRequestV2State =
@@ -45,12 +68,13 @@ export interface TorrentRequestV2 {
   state: TorrentRequestV2State;
   progress: number;
   error_code: string | null;
-  ready_at?: string | null;
-  unsubscribe_at?: string | null;
+  ready_at: string | null;
+  unsubscribe_at: string | null;
   retention_expires_at: string | null;
   queue_position_estimate: number | null;
   queue_total_estimate: number | null;
   queue_status: "waiting" | "downloading" | "stalled" | "cooldown" | null;
+  scheduler_retry_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -65,8 +89,6 @@ export interface TorrentRequestV2Listing {
 }
 
 export interface TorrentListQueryV2 {
-  offset: number;
-  limit: number;
   search?: string;
   status?: "downloading" | "ready" | "waiting" | "blocked";
   sort_by?: "name" | "state" | "queue" | "size";
@@ -167,6 +189,24 @@ export interface TorrentDownloadManifestPageV2 {
   items: TorrentDownloadFileV2[];
 }
 
+export interface TorrentDownloadDirectoryV2 {
+  name: string;
+  relative_path: string;
+  file_count: number;
+  total_size: number;
+  archive_available: boolean;
+}
+
+export interface TorrentDownloadDirectoriesV2 {
+  snapshot_id: string;
+  path: string;
+  directories: TorrentDownloadDirectoryV2[];
+  direct_file_count: number;
+  offset: number;
+  limit: number;
+  files: TorrentDownloadFileV2[];
+}
+
 /** A recursively consumed manifest may span pages; the compatibility UI stores one page only. */
 export type TorrentDownloadSnapshotV2 = TorrentDownloadManifestPageV2;
 
@@ -174,6 +214,24 @@ export interface SharedStorageCapacity {
   total_bytes: number;
   used_bytes: number;
   available_bytes: number;
+}
+
+export interface NetworkThroughputSample {
+  timestamp: string;
+  value_bytes_per_second: number;
+}
+
+export interface NetworkThroughputDirection {
+  current_bytes_per_second: number;
+  samples: NetworkThroughputSample[];
+}
+
+export interface NetworkThroughput {
+  status: "ok" | "no_data" | "unavailable";
+  period: "realtime";
+  sample_interval_seconds: number;
+  download: NetworkThroughputDirection | null;
+  upload: NetworkThroughputDirection | null;
 }
 
 export interface AdminStorageOverview {
@@ -304,7 +362,7 @@ export interface OptionField {
   key: string;
   label: string;
   description: string;
-  input_type: "boolean" | "integer" | "select";
+  input_type: "boolean" | "integer" | "select" | "text" | "secret";
   value: OptionValue;
   default: OptionValue;
   unit: string | null;
@@ -534,6 +592,10 @@ export const api = {
     return request<User[]>("/admin/users");
   },
 
+  getUserQuota(): Promise<UserQuota> {
+    return request<UserQuota>("/admin/users/quota");
+  },
+
   createUser(): Promise<GeneratedCredentials> {
     return request<GeneratedCredentials>("/admin/users", {
       method: "POST",
@@ -553,8 +615,41 @@ export const api = {
     });
   },
 
+  getAuthSeed(): Promise<string> {
+    return request<{ auth_seed: string }>("/auth/auth-seed").then((result) => result.auth_seed);
+  },
+
+  rotateAuthSeed(): Promise<string> {
+    return request<{ auth_seed: string }>("/auth/auth-seed/rotate", { method: "POST" })
+      .then((result) => result.auth_seed);
+  },
+
+  listExternalApiClients(): Promise<ExternalApiClient[]> {
+    return request<ExternalApiClient[]>("/admin/external-api-clients");
+  },
+
+  createExternalApiClient(
+    name: string,
+    scopes: ExternalApiClient["scopes"],
+  ): Promise<CreatedExternalApiClient> {
+    return request<CreatedExternalApiClient>("/admin/external-api-clients", {
+      method: "POST",
+      body: JSON.stringify({ name, scopes }),
+    });
+  },
+
+  revokeExternalApiClient(clientId: string): Promise<void> {
+    return request<void>(`/admin/external-api-clients/${encodeURIComponent(clientId)}`, {
+      method: "DELETE",
+    });
+  },
+
   getSharedStorageCapacity(signal?: AbortSignal): Promise<SharedStorageCapacity> {
     return requestV2<SharedStorageCapacity>("/storage", { signal });
+  },
+
+  getNetworkThroughput(signal?: AbortSignal): Promise<NetworkThroughput> {
+    return requestV2<NetworkThroughput>("/dashboard/network-throughput?period=realtime", { signal });
   },
 
   getAdminStorage(): Promise<AdminStorageOverview> {
@@ -659,7 +754,7 @@ export const api = {
     offset: number,
     limit: number,
     signal?: AbortSignal,
-    filters: Omit<TorrentListQueryV2, "offset" | "limit"> = {},
+    filters: TorrentListQueryV2 = {},
   ): Promise<TorrentRequestV2Listing> {
     const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
     if (filters.search) search.set("search", filters.search);
@@ -681,26 +776,36 @@ export const api = {
     });
   },
 
-  getAuthSeed(): Promise<string> {
-    return request<{ auth_seed: string }>("/auth/auth-seed").then((result) => result.auth_seed);
-  },
-
-  rotateAuthSeed(): Promise<string> {
-    return request<{ auth_seed: string }>("/auth/auth-seed/rotate", { method: "POST" })
-      .then((result) => result.auth_seed);
-  },
-
   getTorrentDownloadManifestPageV2(
     torrentRequestId: string,
     offset = 0,
     snapshot: string | null = null,
     signal?: AbortSignal,
     limit = 500,
+    path: string | null = null,
   ): Promise<TorrentDownloadManifestPageV2> {
     const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
     if (snapshot !== null) search.set("snapshot", snapshot);
+    if (path !== null) search.set("path", path);
     return requestV2<TorrentDownloadManifestPageV2>(
       `/torrents/${encodeURIComponent(torrentRequestId)}/download-manifest?${search.toString()}`,
+      { signal },
+    );
+  },
+
+  getTorrentDownloadDirectoriesV2(
+    torrentRequestId: string,
+    parent: string | null = null,
+    signal?: AbortSignal,
+    offset = 0,
+    limit = 500,
+  ): Promise<TorrentDownloadDirectoriesV2> {
+    const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (parent !== null) search.set("parent", parent);
+    const encodedSearch = search.toString();
+    const query = encodedSearch === "" ? "" : `?${encodedSearch}`;
+    return requestV2<TorrentDownloadDirectoriesV2>(
+      `/torrents/${encodeURIComponent(torrentRequestId)}/download-directories${query}`,
       { signal },
     );
   },
@@ -717,6 +822,15 @@ export const api = {
   torrentArchiveDownloadUrlV2(torrentRequestId: string, snapshotId: string): string {
     const snapshot = new URLSearchParams({ snapshot: snapshotId });
     return `/api/v2/torrents/${encodeURIComponent(torrentRequestId)}/download-archive?${snapshot.toString()}`;
+  },
+
+  torrentFolderArchiveDownloadUrlV2(
+    torrentRequestId: string,
+    relativePath: string,
+    snapshotId: string,
+  ): string {
+    const search = new URLSearchParams({ path: relativePath, snapshot: snapshotId });
+    return `/api/v2/torrents/${encodeURIComponent(torrentRequestId)}/download-folder-archive?${search.toString()}`;
   },
 
 };

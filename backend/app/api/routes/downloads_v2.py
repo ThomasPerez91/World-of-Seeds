@@ -12,8 +12,9 @@ router = APIRouter()
 @router.get("/policy", response_model=TorrentDownloadPolicyResponse)
 async def get_download_policy(
     db: DbSession,
-    _context: Annotated[AuthContext, Depends(require_current_credentials)],
+    context: Annotated[AuthContext, Depends(require_current_credentials)],
 ) -> TorrentDownloadPolicyResponse:
+    is_admin = context.user.is_admin
     try:
         options = await PostgresOptionsRegistry().snapshot(db)
         value = options.get("WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER")
@@ -30,4 +31,6 @@ async def get_download_policy(
             },
         ) from exc
     await db.rollback()
-    return TorrentDownloadPolicyResponse(max_concurrent_streams=value)
+    if is_admin:
+        return TorrentDownloadPolicyResponse(max_concurrent_streams=None, unlimited=True)
+    return TorrentDownloadPolicyResponse(max_concurrent_streams=value, unlimited=False)

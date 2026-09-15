@@ -14,6 +14,8 @@ x-wos-environment: &wos-environment
   WOS_POSTGRES_USER: ${WOS_V2_POSTGRES_USER:?set WOS_V2_POSTGRES_USER}
   WOS_POSTGRES_PASSWORD: ${WOS_V2_POSTGRES_PASSWORD:?set WOS_V2_POSTGRES_PASSWORD}
   WOS_REDIS_URL: redis://redis:6379/0
+  WOS_PROMETHEUS_URL: http://prometheus:9090
+  WOS_NETWORK_INTERFACE: ${WOS_V2_NETWORK_INTERFACE:-auto}
 
 x-wos-runtime: &wos-runtime
   image: ${WOS_V2_IMAGE:?set immutable WOS_V2_IMAGE digest}

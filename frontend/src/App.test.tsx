@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -258,7 +258,9 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Mes fichiers" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Corbeille" })).toBeNull();
     expect(screen.getByRole("button", { name: "Administration" })).toBeTruthy();
-    expect(new URL(window.location.href).searchParams.has("path")).toBe(false);
+    await waitFor(() => {
+      expect(new URL(window.location.href).searchParams.has("path")).toBe(false);
+    });
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
     await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
@@ -463,11 +465,11 @@ describe("App", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "Dashboard" });
     await user.click(screen.getByRole("button", { name: "Paramètres" }));
-    expect(document.querySelector('.settings-language-control [data-country-code="FR"] svg')).toBeTruthy();
+    expect(document.querySelector('.settings-language-control [data-language-flag="fr"]')).toBeTruthy();
     await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
 
     await screen.findByRole("heading", { name: "Account settings" });
-    expect(document.querySelector('.settings-language-control [data-country-code="GB"] svg')).toBeTruthy();
+    expect(document.querySelector('.settings-language-control [data-language-flag="en"]')).toBeTruthy();
     expect(screen.getByRole("button", { name: "General" }).getAttribute("aria-current")).toBe("page");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/locale",

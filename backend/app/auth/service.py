@@ -9,8 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.security import (
     DUMMY_PASSWORD_HASH,
     canonical_username,
-    generate_initial_password,
-    generate_initial_username,
     generate_token,
     hash_password,
     hash_token,
@@ -302,31 +300,19 @@ async def revoke_session(db: AsyncSession, user_session: UserSession) -> None:
 
 
 async def create_managed_user(db: AsyncSession) -> tuple[User, str]:
-    for _ in range(10):
-        username = generate_initial_username()
-        exists = await db.scalar(
-            select(User.id).where(func.lower(User.username) == canonical_username(username))
-        )
-        if exists is not None:
-            continue
+    # Compatibility wrapper. Runtime routes use UserProvisioningService directly so the
+    # actor and audit source are explicit.
+    from app.users import UserProvisioningService
+    from app.users.provisioning import UserProvisioningConflictError
 
-        initial_password = generate_initial_password()
-        user = User(
-            username=username,
-            password_hash=hash_password(initial_password),
-            must_change_credentials=True,
-        )
-        db.add(user)
-        try:
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()
-            continue
-
-        await db.refresh(user)
-        return user, initial_password
-
-    raise UsernameUnavailableError
+    try:
+        result = await UserProvisioningService().provision(db, source="admin")
+        await db.commit()
+        await db.refresh(result.user)
+        return result.user, result.initial_password
+    except UserProvisioningConflictError as exc:
+        await db.rollback()
+        raise UsernameUnavailableError from exc
 
 
 async def set_managed_user_active(

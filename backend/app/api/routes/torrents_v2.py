@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from typing import Annotated, Literal, Never, cast
+from typing import Annotated, Any, Literal, Never, cast
 
 from fastapi import (
     APIRouter,
@@ -19,7 +19,7 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
-from sqlalchemy import func, select
+from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
@@ -109,6 +109,10 @@ ACTIVE_REQUEST_STATES = (
 )
 RequestState = Literal["requested", "active", "ready", "cancelled", "expired", "error"]
 PressureState = Literal["normal", "warning", "critical"]
+TorrentSort = Literal["name", "state", "queue", "size"]
+SortOrder = Literal["asc", "desc"]
+TorrentStatusFilter = Literal["downloading", "ready", "waiting", "blocked"]
+RetentionBucket = Literal["green", "orange", "red"]
 
 
 def _utc_datetime(value: datetime | None) -> datetime | None:
@@ -214,6 +218,7 @@ def _response(
         state=state,
         progress=torrent.progress,
         error_code=(error_code or "torrent_failed") if state == "error" else None,
+        ready_at=(_utc_datetime(request.ready_at) if state == "ready" else None),
         unsubscribe_at=(_utc_datetime(request.unsubscribe_at) if state == "ready" else None),
         retention_expires_at=(_utc_datetime(request.unsubscribe_at) if state == "ready" else None),
         queue_position_estimate=(
@@ -221,6 +226,11 @@ def _response(
         ),
         queue_total_estimate=(visible_queue.total_estimate if visible_queue is not None else None),
         queue_status=visible_queue.status if visible_queue is not None else None,
+        scheduler_retry_at=(
+            _utc_datetime(torrent.scheduler_retry_at)
+            if visible_queue is not None and visible_queue.status == "cooldown"
+            else None
+        ),
         created_at=request.created_at,
         updated_at=max(
             _required_utc_datetime(request.updated_at),
@@ -268,7 +278,9 @@ async def get_torrent_download_manifest(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=MAX_MANIFEST_PAGE_SIZE)] = MAX_MANIFEST_PAGE_SIZE,
     snapshot: Annotated[str | None, Query(min_length=64, max_length=64)] = None,
+    path: Annotated[str | None, Query(max_length=4096)] = None,
 ) -> TorrentDownloadManifestResponse:
+    path_parts = _directory_parts(path, allow_root=True)
     now = datetime.now(UTC)
     row = (
         await db.execute(
@@ -321,33 +333,84 @@ async def get_torrent_download_manifest(
             "download_options_unavailable",
             "Le téléchargement est momentanément indisponible.",
         )
-    files = tuple(
-        (
-            await db.scalars(
-                select(TorrentFile)
-                .where(TorrentFile.managed_torrent_id == managed_torrent.id)
-                .order_by(TorrentFile.file_index)
-                .offset(offset)
-                .limit(limit)
-            )
-        ).all()
-    )
-    expected_count = min(limit, max(0, managed_torrent.manifest_file_count - offset))
-    if len(files) != expected_count:
-        await db.rollback()
-        _fail(
-            status.HTTP_409_CONFLICT,
-            "download_snapshot_changed",
-            "Le contenu a changé. Relance le téléchargement.",
+    if path_parts:
+        subtree_prefix = f"{'/'.join(path_parts)}/"
+        subtree_filter = (
+            TorrentFile.managed_torrent_id == managed_torrent.id,
+            TorrentFile.relative_path.startswith(subtree_prefix, autoescape=True),
         )
+        selected_count, selected_size = (
+            await db.execute(
+                select(
+                    func.count(TorrentFile.id), func.coalesce(func.sum(TorrentFile.size), 0)
+                ).where(*subtree_filter)
+            )
+        ).one()
+        if selected_count == 0:
+            await db.rollback()
+            _fail(
+                status.HTTP_404_NOT_FOUND,
+                "download_directory_not_found",
+                "Ce dossier est introuvable ou vide.",
+                "path",
+            )
+        page_files = tuple(
+            (
+                await db.scalars(
+                    select(TorrentFile)
+                    .where(*subtree_filter)
+                    .order_by(TorrentFile.file_index)
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ).all()
+        )
+        expected_count = min(limit, max(0, selected_count - offset))
+        if len(page_files) != expected_count:
+            await db.rollback()
+            _fail(
+                status.HTTP_409_CONFLICT,
+                "download_snapshot_changed",
+                "Le contenu a changé. Relance le téléchargement.",
+            )
+        root_name = path_parts[-1]
+        response_files = tuple(
+            (
+                item,
+                f"{root_name}/{item.relative_path[len(subtree_prefix) :]}",
+            )
+            for item in page_files
+        )
+    else:
+        files = tuple(
+            (
+                await db.scalars(
+                    select(TorrentFile)
+                    .where(TorrentFile.managed_torrent_id == managed_torrent.id)
+                    .order_by(TorrentFile.file_index)
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ).all()
+        )
+        expected_count = min(limit, max(0, managed_torrent.manifest_file_count - offset))
+        if len(files) != expected_count:
+            await db.rollback()
+            _fail(
+                status.HTTP_409_CONFLICT,
+                "download_snapshot_changed",
+                "Le contenu a changé. Relance le téléchargement.",
+            )
+        response_files = tuple((item, item.relative_path) for item in files)
+        selected_count = managed_torrent.manifest_file_count
+        selected_size = managed_torrent.manifest_total_size
     response = TorrentDownloadManifestResponse(
         snapshot_id=snapshot_id,
         manifest_version=managed_torrent.manifest_version,
-        file_count=managed_torrent.manifest_file_count,
-        total_size=managed_torrent.manifest_total_size,
+        file_count=selected_count,
+        total_size=selected_size,
         archive_available=(
-            managed_torrent.manifest_total_size <= archive_max_bytes
-            and managed_torrent.manifest_file_count <= MAX_MANAGED_ARCHIVE_ENTRIES
+            selected_size <= archive_max_bytes and selected_count <= MAX_MANAGED_ARCHIVE_ENTRIES
         ),
         retention_expires_at=_utc_datetime(torrent_request.unsubscribe_at),
         offset=offset,
@@ -356,10 +419,10 @@ async def get_torrent_download_manifest(
             TorrentDownloadFileResponse(
                 id=item.id,
                 file_index=item.file_index,
-                relative_path=item.relative_path,
+                relative_path=relative_path,
                 size=item.size,
             )
-            for item in files
+            for item, relative_path in response_files
         ],
     )
     await db.rollback()
@@ -375,6 +438,8 @@ async def get_torrent_download_directories(
     context: Annotated[AuthContext, Depends(require_current_credentials)],
     torrent_request_id: uuid.UUID,
     parent: Annotated[str | None, Query(max_length=4096)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=MAX_MANIFEST_PAGE_SIZE)] = MAX_MANIFEST_PAGE_SIZE,
 ) -> TorrentDownloadDirectoriesResponse:
     parent_parts = _directory_parts(parent, allow_root=True)
     now = datetime.now(UTC)
@@ -435,6 +500,7 @@ async def get_torrent_download_directories(
             "Le contenu a changé. Relance le téléchargement.",
         )
     directories: dict[str, tuple[int, int]] = {}
+    direct_files: list[TorrentFile] = []
     parent_exists = not parent_parts
     for item in files:
         parts = PurePosixPath(item.relative_path).parts
@@ -442,6 +508,7 @@ async def get_torrent_download_directories(
             continue
         parent_exists = True
         if len(parts) == len(parent_parts) + 1:
+            direct_files.append(item)
             continue
         child_parts = parts[: len(parent_parts) + 1]
         relative_path = "/".join(child_parts)
@@ -474,6 +541,18 @@ async def get_torrent_download_directories(
             )
             for relative_path, (file_count, total_size) in sorted(directories.items())
         ],
+        direct_file_count=len(direct_files),
+        offset=offset,
+        limit=limit,
+        files=[
+            TorrentDownloadFileResponse(
+                id=item.id,
+                file_index=item.file_index,
+                relative_path=item.relative_path,
+                size=item.size,
+            )
+            for item in direct_files[offset : offset + limit]
+        ],
     )
     await db.rollback()
     return response
@@ -495,6 +574,7 @@ async def download_torrent_folder_archive(
 ) -> Response:
     path_parts = _directory_parts(path, allow_root=False)
     owner_id = context.user.id
+    is_admin = context.user.is_admin
     now = datetime.now(UTC)
     row = (
         await db.execute(
@@ -628,7 +708,7 @@ async def download_torrent_folder_archive(
             managed_torrent_id=managed_torrent_id,
             torrent_request_id=torrent_request_id,
             torrent_file_id=first_file_id,
-            max_concurrent=max_concurrent,
+            max_concurrent=None if is_admin else max_concurrent,
         )
     except DownloadConcurrencyError:
         _fail(
@@ -686,6 +766,7 @@ async def download_torrent_archive(
     snapshot: Annotated[str, Query(min_length=64, max_length=64)],
 ) -> Response:
     owner_id = context.user.id
+    is_admin = context.user.is_admin
     now = datetime.now(UTC)
     row = (
         await db.execute(
@@ -792,7 +873,7 @@ async def download_torrent_archive(
             managed_torrent_id=managed_torrent_id,
             torrent_request_id=torrent_request_id,
             torrent_file_id=first_file_id,
-            max_concurrent=max_concurrent,
+            max_concurrent=None if is_admin else max_concurrent,
         )
     except DownloadConcurrencyError:
         _fail(
@@ -857,6 +938,7 @@ async def download_torrent_file(
     snapshot: Annotated[str | None, Query(min_length=64, max_length=64)] = None,
 ) -> Response:
     owner_id = context.user.id
+    is_admin = context.user.is_admin
     now = datetime.now(UTC)
     row = (
         await db.execute(
@@ -941,7 +1023,7 @@ async def download_torrent_file(
                 managed_torrent_id=managed_torrent_id,
                 torrent_request_id=torrent_request_id,
                 torrent_file_id=torrent_file_id,
-                max_concurrent=max_concurrent,
+                max_concurrent=None if is_admin else max_concurrent,
             )
         except DownloadConcurrencyError:
             _fail(
@@ -1246,27 +1328,123 @@ async def list_torrent_requests(
     context: Annotated[AuthContext, Depends(require_current_credentials)],
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 25,
+    search: Annotated[str | None, Query(max_length=200)] = None,
+    status_filter: Annotated[TorrentStatusFilter | None, Query(alias="status")] = None,
+    sort_by: TorrentSort | None = None,
+    sort_order: SortOrder = "asc",
+    retention_bucket: RetentionBucket | None = None,
 ) -> TorrentRequestV2ListingResponse:
     now = datetime.now(UTC)
     visible_request = TorrentRequest.state.in_(ACTIVE_REQUEST_STATES) & (
         (TorrentRequest.state != TorrentRequestState.READY)
         | (TorrentRequest.unsubscribe_at.is_not(None) & (TorrentRequest.unsubscribe_at > now))
     )
-    total = await db.scalar(
-        select(func.count())
-        .select_from(TorrentRequest)
-        .where(TorrentRequest.user_id == context.user.id, visible_request)
+    filters = [TorrentRequest.user_id == context.user.id, visible_request]
+    if search and (normalized_search := search.strip()):
+        filters.append(func.lower(ManagedTorrent.name).contains(normalized_search.casefold()))
+
+    ux_state = case(
+        (ManagedTorrent.state == ManagedTorrentState.ERROR, literal(3)),
+        (TorrentRequest.state == TorrentRequestState.READY, literal(2)),
+        (ManagedTorrent.desired_active.is_(True), literal(0)),
+        else_=literal(1),
     )
-    rows = (
+    status_counts_row = (
         await db.execute(
-            select(TorrentRequest, ManagedTorrent)
+            select(
+                func.count().label("all"),
+                *[
+                    func.count().filter(ux_state == rank).label(bucket)
+                    for bucket, rank in {
+                        "downloading": 0,
+                        "waiting": 1,
+                        "ready": 2,
+                        "blocked": 3,
+                    }.items()
+                ],
+            )
+            .select_from(TorrentRequest)
             .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
-            .where(TorrentRequest.user_id == context.user.id, visible_request)
-            .order_by(TorrentRequest.created_at.desc(), TorrentRequest.id.desc())
-            .offset(offset)
-            .limit(limit)
+            .where(*filters)
         )
-    ).all()
+    ).one()
+    if status_filter is not None:
+        filters.append(
+            ux_state == {"downloading": 0, "waiting": 1, "ready": 2, "blocked": 3}[status_filter]
+        )
+
+    if db.get_bind().dialect.name == "sqlite":
+        elapsed = func.julianday(now) - func.julianday(TorrentRequest.ready_at)
+        duration = func.julianday(TorrentRequest.unsubscribe_at) - func.julianday(
+            TorrentRequest.ready_at
+        )
+    else:
+        elapsed = func.extract("epoch", now - TorrentRequest.ready_at)
+        duration = func.extract("epoch", TorrentRequest.unsubscribe_at - TorrentRequest.ready_at)
+    retention_base = (
+        (TorrentRequest.state == TorrentRequestState.READY)
+        & TorrentRequest.ready_at.is_not(None)
+        & TorrentRequest.unsubscribe_at.is_not(None)
+        & (TorrentRequest.unsubscribe_at > now)
+        & (duration > 0)
+    )
+    bucket_conditions = {
+        "green": retention_base & (elapsed < duration / 3),
+        "orange": retention_base & (elapsed >= duration / 3) & (elapsed < duration * 2 / 3),
+        "red": retention_base & (elapsed >= duration * 2 / 3),
+    }
+    base_query = (
+        select(TorrentRequest, ManagedTorrent)
+        .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
+        .where(*filters)
+    )
+    retention_counts_row = (
+        await db.execute(
+            select(
+                *[
+                    func.count().filter(condition).label(bucket)
+                    for bucket, condition in bucket_conditions.items()
+                ]
+            )
+            .select_from(TorrentRequest)
+            .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
+            .where(*filters)
+        )
+    ).one()
+    if retention_bucket is not None:
+        base_query = base_query.where(bucket_conditions[retention_bucket])
+    total = await db.scalar(select(func.count()).select_from(base_query.subquery()))
+
+    direction = "desc" if sort_order == "desc" else "asc"
+    stable_order = (
+        getattr(TorrentRequest.created_at, direction)(),
+        getattr(TorrentRequest.id, direction)(),
+    )
+    order: tuple[Any, ...]
+    if sort_by == "name":
+        order = (getattr(func.lower(ManagedTorrent.name), direction)(), *stable_order)
+    elif sort_by == "state":
+        order = (getattr(ux_state, direction)(), *stable_order)
+    elif sort_by == "size":
+        order = (getattr(ManagedTorrent.total_size, direction)(), *stable_order)
+    elif sort_by == "queue":
+        database_now = now.replace(tzinfo=None) if db.get_bind().dialect.name == "sqlite" else now
+        is_ranked = (
+            ManagedTorrent.state.in_((ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED))
+            & ManagedTorrent.desired_active.is_(False)
+            & or_(
+                ManagedTorrent.scheduler_retry_at.is_(None),
+                ManagedTorrent.scheduler_retry_at <= database_now,
+            )
+        )
+        order = (
+            case((is_ranked, literal(0)), else_=literal(1)).asc(),
+            getattr(ManagedTorrent.created_at, direction)(),
+            getattr(ManagedTorrent.id, direction)(),
+        )
+    else:
+        order = (TorrentRequest.created_at.desc(), TorrentRequest.id.desc())
+    rows = (await db.execute(base_query.order_by(*order).offset(offset).limit(limit))).all()
     queue_visibility = await load_torrent_queue_visibility(
         db,
         tuple(managed for _, managed in rows),
@@ -1284,6 +1462,18 @@ async def list_torrent_requests(
         offset=offset,
         limit=limit,
         total=total or 0,
+        status_counts={
+            "all": int(status_counts_row.all or 0),
+            "downloading": int(status_counts_row.downloading or 0),
+            "ready": int(status_counts_row.ready or 0),
+            "waiting": int(status_counts_row.waiting or 0),
+            "blocked": int(status_counts_row.blocked or 0),
+        },
+        retention_counts={
+            "green": int(retention_counts_row.green or 0),
+            "orange": int(retention_counts_row.orange or 0),
+            "red": int(retention_counts_row.red or 0),
+        },
     )
 
 

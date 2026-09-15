@@ -82,13 +82,15 @@ La suppression d'un accès administré révoque les sessions, désactive le comp
 
 ## Trackers, qBittorrent et NewGreedy
 
-Les métainfo torrent sont parsés strictement et l'infohash est calculé depuis les octets bruts exacts du dictionnaire `info`. Les trackers sont allowlistés. Les passkeys et credentials restent dans les secrets d'infrastructure et ne sont jamais persistés dans les tables métier, logs, métriques ou réponses frontend.
+Les métainfo torrent sont parsés strictement et l'infohash est calculé depuis les octets bruts exacts du dictionnaire `info`. Les trackers sont allowlistés. Un à seize comptes C411 peuvent être configurés dans les options PostgreSQL réservées aux administrateurs. Chaque emplacement contient un numéro de compte et une passkey ; une paire vide est inactive. Les audits remplacent toujours la valeur d'une passkey par un marqueur expurgé et les passkeys ne sont jamais écrites dans les tables métier, logs ou métriques.
+
+Un nouveau torrent choisit aléatoirement un emplacement C411 actif sous verrou SQL. Seule la référence opaque et stable de cet emplacement est persistée sur le torrent, afin que les retries conservent le même compte. La passkey courante est injectée en mémoire dans les URL `announce` juste avant l'ajout au qBittorrent unique. Les identifiants qBittorrent restent des secrets de déploiement.
 
 qBittorrent et NewGreedy sont internes à Rise2. Le scheduler est l'autorité des décisions start/stop WOS et les effets destructifs qB sont bornés aux torrents portant l'identité WOS. V2-32D reste bloqué tant que NewGreedy ne fournit pas une suppression exacte et durable par SHA-1 complet ; aucun contournement par préfixe/reset global/édition directe n'est autorisé.
 
 ## Configuration, observabilité et sécurité
 
-Les options fonctionnelles sûres sont typées, bornées, auditées et stockées en PostgreSQL. Secrets, URLs internes, chemins hôte, ports, UID/GID et clés restent dans le déploiement.
+Les options sont typées, bornées, auditées et stockées en PostgreSQL. Les passkeys C411 constituent la seule catégorie secrète administrable : elles utilisent des champs dédiés et leurs valeurs d'audit sont expurgées. Les autres secrets, URLs internes, chemins hôte, ports, UID/GID et clés restent dans le déploiement.
 
 Prometheus/Grafana couvrent API, workers, scheduler, PostgreSQL, Redis, qBittorrent, stockage, hôte et conteneurs. Les métriques et logs ne portent ni passkey, ni chemin hôte utilisateur, ni infohash complet comme label.
 

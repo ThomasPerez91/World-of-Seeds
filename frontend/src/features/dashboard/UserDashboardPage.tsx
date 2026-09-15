@@ -3,24 +3,22 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import {
   api,
   ApiError,
+  type NetworkThroughput,
+  type NetworkThroughputSample,
   type SharedStorageCapacity,
   type TorrentRequestV2,
 } from "../../api/client";
 import {
   ActivityIcon,
-  LocalDownloadIcon,
   StorageIcon,
 } from "../../components/icons";
-import { ArrowRight, Check, Clock3, Download, HardDrive } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Check, Clock3, Download, Gauge, HardDrive } from "lucide-react";
 import { Button, Card, Progress, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
-import {
-  type LocalDownloadSummary,
-  UserDownloadsPage,
-} from "../torrents/UserDownloadsPage";
-import { DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY } from "../torrents/recursiveDownload";
+import { UserDownloadsPage } from "../torrents/UserDownloadsPage";
 
 const ACTIVITY_PAGE_SIZE = 100;
+export const NETWORK_REFRESH_MS = 15_000;
 
 export interface TorrentActivitySummary {
   active: number;
@@ -81,81 +79,110 @@ function SummaryHeading({
   );
 }
 
-export function LocalDownloadCard({ local }: { local: LocalDownloadSummary }) {
-  const { formatBytes, t } = useI18n();
-  const content = local.status === "idle" || local.status === "completed" || local.status === "cancelled"
-    ? <p className="dashboard-summary-empty">{t("dashboard.localIdle")}</p>
-    : local.status === "paused"
-      ? <p className="dashboard-summary-value">{t("downloads.localPaused")}</p>
-      : local.status === "error"
-        ? <StateMessage tone="error">{t("downloads.localError")}</StateMessage>
-        : local.name !== null && local.status === "started" ? (
-          <div className="local-download-progress local-download-started">
-            <strong title={local.name}>{local.name}</strong>
-            <span>{t("downloads.localStatus.started")}</span>
-            {local.additionalCount > 0 && (
-              <span>{t(
-                local.additionalCount === 1 ? "downloads.localAdditionalOne" : "downloads.localAdditionalMany",
-                { count: local.additionalCount },
-              )}</span>
-            )}
-          </div>
-        ) : local.name !== null && local.totalBytes > 0 ? (
-          <div className="local-download-progress">
-            <strong title={local.name}>{local.name}</strong>
-            <Progress
-              label={t("downloads.localProgress", { value: local.percent.toFixed(0) })}
-              value={local.percent}
-            />
-            <span>{formatBytes(local.downloadedBytes)} / {formatBytes(local.totalBytes)}</span>
-            {local.additionalCount > 0 && (
-              <span>{t(
-                local.additionalCount === 1 ? "downloads.localAdditionalOne" : "downloads.localAdditionalMany",
-                { count: local.additionalCount },
-              )}</span>
-            )}
-          </div>
-        ) : (
-          <>
-            <p className="dashboard-summary-value">
-              {t("dashboard.localActive", { active: local.active, maximum: local.maximum })}
-            </p>
-            <p>{t("dashboard.localWaiting", { waiting: local.waiting })}</p>
-          </>
-        );
+function Sparkline({
+  label,
+  samples,
+  tone,
+}: {
+  label: string;
+  samples: NetworkThroughputSample[];
+  tone: "download" | "upload";
+}) {
+  const values = samples.map((sample) => sample.value_bytes_per_second);
+  const maximum = Math.max(...values, 1);
+  const points = values.map((value, index) => {
+    const x = values.length <= 1 ? 50 : (index / (values.length - 1)) * 100;
+    const y = 29 - (Math.max(0, value) / maximum) * 25;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(" ");
   return (
-    <Card className="dashboard-summary-card" aria-labelledby="local-card-title">
-      <SummaryHeading
-        icon={<LocalDownloadIcon />}
-        title={t("dashboard.local")}
-        titleId="local-card-title"
-      />
-      <a className="summary-link" href="#user-downloads-title">{t("dashboard.open")} <ArrowRight aria-hidden="true" /></a>
-      {content}
-      <p className="dashboard-summary-note">{t("dashboard.localNote")}</p>
+    <svg
+      className={`network-sparkline ${tone}`}
+      viewBox="0 0 100 32"
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={label}
+    >
+      <polyline points={points} vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+export function NetworkThroughputCard({ onSessionExpired }: { onSessionExpired: () => void }) {
+  const { formatBytes, t } = useI18n();
+  const [network, setNetwork] = useState<NetworkThroughput | null>(null);
+  const [networkError, setNetworkError] = useState(false);
+  const controller = useRef<AbortController | null>(null);
+
+  const refresh = useCallback(() => {
+    controller.current?.abort();
+    const nextController = new AbortController();
+    controller.current = nextController;
+    void api.getNetworkThroughput(nextController.signal)
+      .then((next) => {
+        setNetwork(next);
+        setNetworkError(false);
+      })
+      .catch((caught: unknown) => {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        if (caught instanceof ApiError && caught.status === 401) {
+          onSessionExpired();
+          return;
+        }
+        setNetworkError(true);
+      });
+  }, [onSessionExpired]);
+
+  useEffect(() => {
+    refresh();
+    const interval = window.setInterval(refresh, NETWORK_REFRESH_MS);
+    return () => {
+      window.clearInterval(interval);
+      controller.current?.abort();
+    };
+  }, [refresh]);
+
+  const ready = network?.status === "ok" && network.download !== null && network.upload !== null;
+  return (
+    <Card className="dashboard-summary-card network-throughput-card" aria-labelledby="network-card-title">
+      <SummaryHeading icon={<Gauge />} title={t("dashboard.network")} titleId="network-card-title" />
+      <span className="network-period-control">{t("dashboard.networkRealtime")}</span>
+      {networkError || network?.status === "unavailable" ? (
+        <p className="network-throughput-state is-error" role="status">{t("dashboard.networkUnavailable")}</p>
+      ) : network?.status === "no_data" ? (
+        <p className="network-throughput-state" role="status">{t("dashboard.networkNoData")}</p>
+      ) : !ready ? (
+        <StateMessage tone="loading">{t("dashboard.networkLoading")}</StateMessage>
+      ) : (
+        <div className="network-throughput-grid">
+          <section className="network-throughput-direction download" aria-label={t("dashboard.networkDownload")}>
+            <div className="network-throughput-label"><ArrowDown aria-hidden="true" /><span>{t("dashboard.networkDownload")}</span></div>
+            <strong>{formatBytes(network.download!.current_bytes_per_second)}/s</strong>
+            <Sparkline label={t("dashboard.networkDownloadChart")} samples={network.download!.samples} tone="download" />
+          </section>
+          <section className="network-throughput-direction upload" aria-label={t("dashboard.networkUpload")}>
+            <div className="network-throughput-label"><ArrowUp aria-hidden="true" /><span>{t("dashboard.networkUpload")}</span></div>
+            <strong>{formatBytes(network.upload!.current_bytes_per_second)}/s</strong>
+            <Sparkline label={t("dashboard.networkUploadChart")} samples={network.upload!.samples} tone="upload" />
+          </section>
+        </div>
+      )}
     </Card>
   );
 }
 
-const idleLocalSummary: LocalDownloadSummary = {
-  active: 0,
-  additionalCount: 0,
-  maximum: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
-  status: "idle",
-  waiting: 0,
-  name: null,
-  downloadedBytes: 0,
-  totalBytes: 0,
-  percent: 0,
-};
-
-export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () => void }) {
+export function UserDashboardPage({
+  isAdmin = false,
+  onSessionExpired,
+}: {
+  isAdmin?: boolean;
+  onSessionExpired: () => void;
+}) {
   const { apiError, formatBytes, t } = useI18n();
   const [activity, setActivity] = useState<TorrentActivitySummary | null>(null);
   const [activityError, setActivityError] = useState("");
   const [storage, setStorage] = useState<SharedStorageCapacity | null>(null);
   const [storageError, setStorageError] = useState("");
-  const [local, setLocal] = useState<LocalDownloadSummary>(idleLocalSummary);
   const activityController = useRef<AbortController | null>(null);
   const storageController = useRef<AbortController | null>(null);
   const activityRunning = useRef(false);
@@ -258,7 +285,7 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
           )}
         </Card>
 
-        <LocalDownloadCard local={local} />
+        <NetworkThroughputCard onSessionExpired={onSessionExpired} />
 
         <Card className="dashboard-summary-card" aria-labelledby="storage-card-title">
           <SummaryHeading
@@ -297,8 +324,8 @@ export function UserDashboardPage({ onSessionExpired }: { onSessionExpired: () =
       </div>
 
       <UserDownloadsPage
+        isAdmin={isAdmin}
         onActivityChanged={refreshActivity}
-        onLocalTransferChanged={setLocal}
         onSessionExpired={onSessionExpired}
       />
     </section>

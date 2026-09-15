@@ -1,10 +1,22 @@
 # World of Seeds — Progress
 
-## Etat courant — 9 septembre 2026
+## Etat courant — 14 septembre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative stable : `2.0.0`.
+- Version applicative cible : `2.2.3`.
+
+## Release 2.2.3 — quota, auth seeds et API externe
+
+- quota global dynamique `WOS_MAX_USER_ACCOUNTS`, appliqué par un provisioning transactionnel
+  sérialisé sous PostgreSQL ;
+- seed base62 de 25 caractères pour chaque compte, backfill migratoire et consultation propriétaire
+  non cacheable ;
+- API tierce stable `/api/external/v1` avec clients hashés, scopes, idempotence, rate limiting,
+  création d’utilisateur et téléchargements isolés par seed ;
+- gestion des clients API et du quota dans l’administration, seed masquée dans les paramètres du
+  compte ;
+- contrat documenté dans `docs/external-api-v1.md`.
 - Production : Rise2.
 - Branche de production : `master`.
 - Branche d'intégration : `develop`.
@@ -255,6 +267,15 @@ Validation du HEAD fonctionnel UX-06 `dad0ff8a09a2029f557fd135ffd8896629e854b5` 
 Une passe de cohérence post-refonte retire les derniers contrats morts du filesystem utilisateur : namespace backend `app.files`, schémas V1 Files/Torrents non montés, client HTTP stockage dupliqué, traductions et styles de l'ancienne corbeille. La documentation publique/légale est réalignée sur le stockage partagé. La suppression d'un compte admin exige désormais une confirmation qui décrit les vrais effets sur les `TorrentRequest` et le lifecycle partagé.
 
 Cette consolidation ne modifie ni le schéma PostgreSQL, ni `UserTorrent` historique, ni le stockage physique, ni qBittorrent/NewGreedy, ni le lifecycle torrent.
+
+## Release 2.2.2 — récupération native et privilèges administrateur
+
+- La File System Access API devient le mode principal pour récupérer un torrent multi-fichiers ou un sous-dossier : le manifeste READY est streamé fichier par fichier et l'arborescence est reconstruite dans la destination choisie.
+- Le ZIP reste disponible uniquement comme fallback lorsque `showDirectoryPicker()` est absent et lorsque les limites d'archive existantes l'autorisent.
+- Les torrents mono-fichier conservent `showSaveFilePicker()` ou le téléchargement HTTP standard selon les capacités du navigateur.
+- Les comptes administrateurs n'ont plus de plafond applicatif sur la taille d'un lot `.torrent`; la concurrence du pipeline d'upload reste fixée à trois requêtes.
+- La policy de récupération expose explicitement `unlimited: true` et une limite `null` pour les administrateurs. Chaque flux conserve sa lease et tous les rate limits/protections globales restent actifs.
+- Les comptes standards conservent les plafonds existants de lot et de flux simultanés.
 
 ## Prochaine tâche
 

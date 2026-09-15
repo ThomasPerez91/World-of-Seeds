@@ -10,7 +10,7 @@ class OptionFieldResponse(BaseModel):
     key: str
     label: str
     description: str
-    input_type: Literal["boolean", "integer", "select"]
+    input_type: Literal["boolean", "integer", "select", "text", "secret"]
     value: OptionResponseValue
     default: OptionResponseValue
     unit: str | None

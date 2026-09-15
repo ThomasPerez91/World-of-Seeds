@@ -33,7 +33,7 @@ class DatabaseOption(Base):
             name="ck_database_options_key",
         ),
         CheckConstraint(
-            "value_type IN ('boolean', 'integer', 'select')",
+            "value_type IN ('boolean', 'integer', 'select', 'text', 'secret')",
             name="ck_database_options_type",
         ),
         CheckConstraint("version >= 1", name="ck_database_options_version"),
@@ -42,7 +42,7 @@ class DatabaseOption(Base):
             "AND integer_value IS NULL AND string_value IS NULL) "
             "OR (value_type = 'integer' AND boolean_value IS NULL "
             "AND integer_value IS NOT NULL AND string_value IS NULL) "
-            "OR (value_type = 'select' AND boolean_value IS NULL "
+            "OR (value_type IN ('select', 'text', 'secret') AND boolean_value IS NULL "
             "AND integer_value IS NULL AND string_value IS NOT NULL)",
             name="ck_database_options_typed_value",
         ),
@@ -58,7 +58,7 @@ class DatabaseOption(Base):
     value_type: Mapped[str] = mapped_column(String(16), nullable=False)
     boolean_value: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     integer_value: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    string_value: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    string_value: Mapped[str | None] = mapped_column(String(512), nullable=True)
     minimum_value: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     maximum_value: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     choices: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
@@ -85,7 +85,7 @@ class DatabaseOption(Base):
             return self.boolean_value
         if self.value_type == "integer" and self.integer_value is not None:
             return self.integer_value
-        if self.value_type == "select" and self.string_value is not None:
+        if self.value_type in {"select", "text", "secret"} and self.string_value is not None:
             return self.string_value
         raise RuntimeError(f"Database option {self.key} has an inconsistent typed value")
 

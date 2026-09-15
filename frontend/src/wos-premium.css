@@ -1460,6 +1460,55 @@ input::placeholder {
   font-weight: 760;
 }
 
+.auth-seed-input {
+  position: relative;
+  width: min(100%, 42rem);
+}
+
+.auth-seed-input input {
+  width: 100%;
+  min-height: 48px;
+  padding-right: 3.25rem;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.auth-seed-copy {
+  position: absolute;
+  top: 50%;
+  right: 0.4rem;
+  display: grid;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  place-items: center;
+  color: var(--wos-muted);
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+.auth-seed-copy:hover:not(:disabled) {
+  color: var(--wos-accent);
+  background: var(--wos-accent-dim);
+}
+
+.auth-seed-copy:focus-visible {
+  outline: 2px solid var(--wos-accent);
+  outline-offset: 1px;
+}
+
+.auth-seed-copy:disabled {
+  cursor: progress;
+  opacity: 0.45;
+}
+
+.auth-seed-copy svg {
+  width: 18px;
+  height: 18px;
+}
+
 .settings-section-intro {
   margin: 0.35rem 0 0.9rem !important;
   color: var(--wos-muted) !important;

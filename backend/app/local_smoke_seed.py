@@ -25,14 +25,24 @@ async def seed() -> dict[str, str]:
         await PostgresOptionsRegistry().initialize(session)
         user = await session.scalar(select(User).where(func.lower(User.username) == USERNAME))
         if user is None:
-            user = User(username=USERNAME, password_hash=hash_password(password))
+            user = User(username=USERNAME, password_hash=hash_password(password), is_admin=True)
             session.add(user)
+            await session.flush()
         else:
             user.password_hash = hash_password(password)
-            user.is_admin = False
             user.is_active = True
             user.must_change_credentials = False
             user.deleted_at = None
+            user.is_admin = True
+        await PostgresOptionsRegistry().update(
+            session,
+            {
+                "WOS_C411_ACCOUNT_01_NUMBER": "1",
+                "WOS_C411_ACCOUNT_01_PASSKEY": "local-test-passkey",
+            },
+            actor_user_id=user.id,
+        )
+        user.is_admin = False
     return {"username": USERNAME, "password": password}
 
 

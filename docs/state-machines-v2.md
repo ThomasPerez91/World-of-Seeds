@@ -62,7 +62,8 @@ stateDiagram-v2
 - `ACTIVE` : téléchargement ou traitement en cours.
 - `READY` : accès utilisateur disponible ; `ready_at` est défini.
 - `CANCELLED` : référence retirée par l’utilisateur ou un admin ; `cancelled_at` est défini.
-- `EXPIRED` : accès arrivé à échéance selon la politique de rétention.
+- `EXPIRED` : abonnement utilisateur arrivé à `unsubscribe_at`; cet état terminal n'apparaît plus
+  dans le listing actif. Il ne déclenche la grâce physique que s'il s'agissait du dernier abonnement.
 
 Une demande ne peut viser qu’un seul `ManagedTorrent` et appartient à un seul utilisateur.
 Annuler une demande ne pause ni ne supprime le torrent tant qu’une autre demande active ou

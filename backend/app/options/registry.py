@@ -4,8 +4,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 type OptionValue = bool | int | str
-type OptionInputType = Literal["boolean", "integer", "select"]
+type OptionInputType = Literal["boolean", "integer", "select", "text", "secret"]
 type OptionCategory = Literal[
+    "c411_accounts",
     "downloads",
     "torrents",
     "storage",
@@ -17,6 +18,7 @@ type OptionCategory = Literal[
 ]
 
 CATEGORY_LABELS: dict[OptionCategory, str] = {
+    "c411_accounts": "Comptes C411",
     "downloads": "Téléchargements",
     "torrents": "Torrents",
     "storage": "Stockage",
@@ -86,7 +88,36 @@ def _integer(
     )
 
 
+def _text(
+    key: str,
+    label: str,
+    description: str,
+    category: OptionCategory,
+    *,
+    secret: bool = False,
+) -> OptionSpec:
+    return OptionSpec(
+        key=key,
+        label=label,
+        description=description,
+        input_type="secret" if secret else "text",
+        default="",
+        category=category,
+        sensitive=secret,
+    )
+
+
 OPTION_SPECS: tuple[OptionSpec, ...] = (
+    _integer(
+        "WOS_MAX_USER_ACCOUNTS",
+        "Nombre maximal de comptes",
+        "Nombre maximal de comptes utilisateurs pouvant exister simultanément dans World of Seeds.",
+        100,
+        "security",
+        minimum=1,
+        maximum=100_000,
+        unit="count",
+    ),
     _integer(
         "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
         "Débit maximal par utilisateur",
@@ -475,7 +506,40 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
 
 OPTION_SPECS_BY_KEY = {spec.key: spec for spec in OPTION_SPECS}
 
+MAX_C411_ACCOUNTS = 16
+C411_ACCOUNT_SPECS: tuple[OptionSpec, ...] = tuple(
+    spec
+    for slot in range(1, MAX_C411_ACCOUNTS + 1)
+    for spec in (
+        _text(
+            f"WOS_C411_ACCOUNT_{slot:02d}_USERNAME",
+            f"Compte C411 {slot} — nom d’utilisateur",
+            "Nom d’utilisateur facultatif, utilisé uniquement pour identifier ce compte "
+            "dans l’administration.",
+            "c411_accounts",
+        ),
+        _text(
+            f"WOS_C411_ACCOUNT_{slot:02d}_NUMBER",
+            f"Compte C411 {slot} — numéro",
+            "Numéro du compte C411. Laissez le numéro et la passkey vides pour "
+            "désactiver cet emplacement.",
+            "c411_accounts",
+        ),
+        _text(
+            f"WOS_C411_ACCOUNT_{slot:02d}_PASSKEY",
+            f"Compte C411 {slot} — passkey",
+            "Passkey injectée dans les URL tracker des torrents affectés à ce compte.",
+            "c411_accounts",
+            secret=True,
+        ),
+    )
+)
+DATABASE_OPTION_SPECS = (*OPTION_SPECS, *C411_ACCOUNT_SPECS)
+DATABASE_OPTION_SPECS_BY_KEY = {spec.key: spec for spec in DATABASE_OPTION_SPECS}
+
 if len(OPTION_SPECS_BY_KEY) != len(OPTION_SPECS):
     raise RuntimeError("Option registry contains duplicate keys")
 if any(spec.sensitive for spec in OPTION_SPECS):
     raise RuntimeError("Functional options must never be marked sensitive")
+if len(DATABASE_OPTION_SPECS_BY_KEY) != len(DATABASE_OPTION_SPECS):
+    raise RuntimeError("Database option registry contains duplicate keys")

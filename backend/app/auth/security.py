@@ -2,12 +2,15 @@ import hashlib
 import hmac
 import re
 import secrets
+import string
 
 from pwdlib import PasswordHash
 
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$")
 MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_LENGTH = 256
+AUTH_SEED_LENGTH = 25
+AUTH_SEED_ALPHABET = string.ascii_letters + string.digits
 
 password_hash = PasswordHash.recommended()
 DUMMY_PASSWORD_HASH = password_hash.hash(secrets.token_urlsafe(24))
@@ -71,3 +74,9 @@ def generate_initial_username() -> str:
 
 def generate_initial_password() -> str:
     return secrets.token_urlsafe(18)
+
+
+def generate_auth_seed() -> str:
+    """Generate the stable, URL-neutral external identity secret for one account."""
+
+    return "".join(secrets.choice(AUTH_SEED_ALPHABET) for _ in range(AUTH_SEED_LENGTH))

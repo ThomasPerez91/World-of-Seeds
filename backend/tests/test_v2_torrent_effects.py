@@ -24,7 +24,11 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2MissingError,
     QBittorrentV2TorrentSnapshot,
 )
-from app.jobs.torrent_effects import TorrentEffectHandlers, TorrentSyncEnqueuer
+from app.jobs.torrent_effects import (
+    TorrentEffectHandlers,
+    TorrentRetentionReaper,
+    TorrentSyncEnqueuer,
+)
 from app.jobs.torrent_payloads import TorrentPayloadStore, TorrentPayloadStoreError
 from app.jobs.worker import PermanentTorrentJobError, TorrentJobSnapshot, TransientTorrentJobError
 from app.models import (
@@ -225,6 +229,11 @@ class RecordingRedis:
     def __init__(self) -> None:
         self.events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
         self.queue_events: list[datetime] = []
+        self.signals = 0
+
+    async def signal_job_available(self) -> bool:
+        self.signals += 1
+        return True
 
     async def publish_torrent_event(
         self,
@@ -237,6 +246,41 @@ class RecordingRedis:
     async def publish_torrent_queue_changed(self, occurred_at: datetime) -> bool:
         self.queue_events.append(occurred_at)
         return True
+
+
+@pytest.mark.asyncio
+async def test_retention_reaper_publishes_owner_expiration_for_immediate_resync(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    torrent_id, request_id = await _create_domain(sessions, state=ManagedTorrentState.READY)
+    async with sessions() as session, session.begin():
+        torrent = await session.get(ManagedTorrent, torrent_id)
+        request = await session.get(TorrentRequest, request_id)
+        assert torrent is not None and request is not None
+        torrent.progress = 1
+        request.state = TorrentRequestState.READY
+        request.ready_at = NOW - timedelta(hours=1)
+        request.unsubscribe_at = NOW
+        owner_id = request.user_id
+
+    redis = RecordingRedis()
+    reaper = TorrentRetentionReaper(
+        sessions,
+        redis,  # type: ignore[arg-type]
+        clock=lambda: NOW,
+    )
+
+    assert await reaper.expire_once() == 1
+    async with sessions() as session:
+        request = await session.get(TorrentRequest, request_id)
+        assert request is not None and request.state is TorrentRequestState.EXPIRED
+    assert redis.signals == 1
+    assert redis.events == [
+        (
+            owner_id,
+            TorrentRealtimeEvent(TorrentEventType.EXPIRED, request_id, NOW),
+        )
+    ]
 
 
 def _router(
