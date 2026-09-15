@@ -133,7 +133,7 @@
 }
 
 .settings-page .back-button,
-.admin-back-button {
+.admin-page .back-button {
   min-height: 0 !important;
   padding: 0.35rem 0 !important;
   border-color: transparent !important;
@@ -143,8 +143,8 @@
 
 .settings-page .back-button:hover,
 .settings-page .back-button:focus-visible,
-.admin-back-button:hover,
-.admin-back-button:focus-visible {
+.admin-page .back-button:hover,
+.admin-page .back-button:focus-visible {
   color: var(--wos-accent) !important;
   border-color: transparent !important;
   background: transparent !important;

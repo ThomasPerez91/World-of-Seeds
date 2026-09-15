@@ -32,14 +32,11 @@ export function AdminPageShell({
   const { t } = useI18n();
   return (
     <section className="admin-page" aria-labelledby="administration-title">
-      <Button variant="ghost" className="back-button admin-back-button" onClick={onBack}>
+      <Button className="back-button" onClick={onBack}>
         <BackIcon /> {t("common.backDashboard")}
       </Button>
-      <header className="admin-page-header">
-        <div className="admin-page-heading-copy">
-          <p className="eyebrow">{t("admin.adminEyebrow")}</p>
-          <h1 id="administration-title">{t("admin.title")}</h1>
-        </div>
+      <header className="settings-header">
+        <h1 id="administration-title">{t("admin.title")}</h1>
       </header>
       <SettingsShell
         activeView={activeView}
