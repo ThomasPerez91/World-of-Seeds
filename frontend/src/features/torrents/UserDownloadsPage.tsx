@@ -676,6 +676,23 @@ export function UserDownloadsPage({
     onLocalTransferChanged?.(summarizeDownloadManager(managerSnapshot, nativeDownloads));
   }, [managerSnapshot, nativeDownloads, onLocalTransferChanged]);
 
+  useEffect(() => {
+    if (nativeDownloads.length === 0) return;
+    const nextExpiry = Math.min(...nativeDownloads.map((entry) => entry.startedAt + NATIVE_DOWNLOAD_MAX_AGE_MS));
+    const timeout = window.setTimeout(() => {
+      setNativeDownloads((current) => {
+        const next = pruneNativeDownloadStarts(current);
+        try {
+          window.localStorage.setItem(NATIVE_DOWNLOAD_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // Expiry still updates the current session when browser storage is unavailable.
+        }
+        return next;
+      });
+    }, Math.max(0, nextExpiry - Date.now()));
+    return () => window.clearTimeout(timeout);
+  }, [nativeDownloads]);
+
   const recordNativeDownload = useCallback((name: string, kind: NativeDownloadStart["kind"]) => {
     const startedAt = Date.now();
     const entry: NativeDownloadStart = {
