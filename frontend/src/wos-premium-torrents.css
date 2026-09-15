@@ -500,6 +500,7 @@
   transition: background-color 140ms ease;
 }
 
+.ready-directory-row:hover,
 .ready-tree-file-row:hover {
   background: rgba(102, 234, 157, 0.04);
 }
