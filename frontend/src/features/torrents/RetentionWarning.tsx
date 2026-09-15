@@ -130,11 +130,13 @@ export function RetentionWarning({
       <Tooltip content={tooltip} className="retention-warning-tooltip">
         <Badge
           tone={presentation.tier === "danger" ? "danger" : "warning"}
-          className={`retention-warning-indicator ${presentation.tier}`}
-          data-testid="retention-warning-indicator"
+          className={`retention-warning compact retention-warning-indicator ${presentation.tier}`}
+          data-testid="retention-warning"
         >
           <span className="retention-warning-focus" role="img" aria-label={tooltip} tabIndex={0}>
             <WarningIcon />
+            <span className="sr-only">{remaining}</span>
+            <span className="sr-only">{absolute}</span>
           </span>
         </Badge>
       </Tooltip>
