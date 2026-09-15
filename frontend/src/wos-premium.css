@@ -1330,7 +1330,8 @@ input::placeholder {
   padding: 1.25rem 0 2rem !important;
 }
 
-.settings-page > .back-button {
+.settings-page > .back-button,
+.admin-page > .back-button {
   display: inline-flex !important;
   width: fit-content;
   min-height: 36px;
@@ -1344,12 +1345,14 @@ input::placeholder {
   background: transparent !important;
 }
 
-.settings-page > .back-button:hover:not(:disabled) {
+.settings-page > .back-button:hover:not(:disabled),
+.admin-page > .back-button:hover:not(:disabled) {
   color: var(--wos-text) !important;
   background: rgba(120, 241, 173, 0.055) !important;
 }
 
-.settings-page > .back-button svg {
+.settings-page > .back-button svg,
+.admin-page > .back-button svg {
   width: 16px;
   height: 16px;
   flex: 0 0 auto;
