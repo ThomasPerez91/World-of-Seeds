@@ -500,7 +500,6 @@
   transition: background-color 140ms ease;
 }
 
-.ready-directory-row:hover,
 .ready-tree-file-row:hover {
   background: rgba(102, 234, 157, 0.04);
 }
@@ -517,6 +516,11 @@
   background: transparent;
   text-align: left;
   cursor: pointer;
+}
+
+.user-downloads .ready-directory-toggle:hover:not(:disabled) {
+  background: transparent;
+  transform: none;
 }
 
 .ready-directory-toggle > svg {

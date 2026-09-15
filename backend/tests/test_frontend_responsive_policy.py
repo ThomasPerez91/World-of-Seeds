@@ -37,12 +37,24 @@ def test_dashboard_title_uses_normal_page_background_in_every_theme() -> None:
     rule = styles[rule_start : styles.index("}", rule_start) + 1]
 
     assert "min-height: 0 !important" in rule
+    assert "margin: 0 !important" in rule
     assert "padding: 0 !important" in rule
     assert "background: none !important" in rule
     assert "url(" not in rule
     assert "linear-gradient" not in rule
     assert ".dashboard-summary-grid { margin-top: -" not in styles
     assert ".user-dashboard-header" not in review_fixes
+
+
+def test_directory_rows_do_not_inherit_the_global_button_hover_effect() -> None:
+    styles = (REPOSITORY / "frontend/src/wos-premium-torrents.css").read_text()
+    rule_start = styles.index(".user-downloads .ready-directory-toggle:hover:not(:disabled) {")
+    rule = styles[rule_start : styles.index("}", rule_start) + 1]
+
+    assert "background: transparent" in rule
+    assert "transform: none" in rule
+    assert ".ready-directory-row:hover" not in styles
+    assert ".ready-tree-file-row:hover" in styles
 
 
 def test_dashboard_network_card_is_green_responsive_and_replaces_only_the_summary_card() -> None:
