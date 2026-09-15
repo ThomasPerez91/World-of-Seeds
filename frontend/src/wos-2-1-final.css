@@ -204,12 +204,37 @@
 
 .settings-shell-content,
 .settings-shell-content > .admin-section,
-.settings-shell-content > .settings-panel,
 .settings-shell-content .settings-subsection {
   min-width: 0;
   border-color: transparent !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+
+.settings-navigation {
+  padding: 0.75rem !important;
+  border: 1px solid rgba(157, 220, 184, 0.16) !important;
+  border-radius: 16px !important;
+  background: rgba(3, 18, 12, 0.38) !important;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.16);
+}
+
+.settings-panel,
+.settings-shell-content > .settings-panel {
+  min-width: 0;
+  padding: 1.25rem 1.35rem !important;
+  border: 1px solid rgba(157, 220, 184, 0.16) !important;
+  border-radius: 18px !important;
+  background: rgba(3, 18, 12, 0.38) !important;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18) !important;
+}
+
+.settings-panel-header {
+  padding-top: 0 !important;
 }
 
 .settings-shell-content > .admin-section {
@@ -779,5 +804,16 @@
 @media (max-width: 900px) {
   .torrent-ready-overview {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 820px) {
+  .settings-navigation {
+    padding: 0.45rem !important;
+  }
+
+  .settings-panel,
+  .settings-shell-content > .settings-panel {
+    padding: 1rem !important;
   }
 }

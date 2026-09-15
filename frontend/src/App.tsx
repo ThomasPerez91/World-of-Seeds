@@ -21,7 +21,7 @@ import {
   type LegalDocument,
 } from "./components/LegalPage";
 import { ThemeProvider } from "./theme";
-import { Button, Card, Badge, StateMessage } from "./components/ui";
+import { Button, Card, Badge, StateMessage, Tooltip } from "./components/ui";
 import { UI_VERSION } from "./uiVersion";
 import { FeedbackProvider } from "./components/Feedback";
 import { useFeedback } from "./components/Feedback";
@@ -664,13 +664,30 @@ function AccountSettingsPage({
                 <p className="settings-section-intro">{t("account.authSeedHint")}</p>
                 <div className="auth-seed-controls">
                   <input id="account-auth-seed" value={authSeed ?? ""} placeholder={authSeedLoading ? t("common.loading") : ""} readOnly aria-busy={authSeedLoading} />
-                  <Button type="button" variant="secondary" disabled={authSeed === null} title={t(authSeedCopied ? "account.authSeedCopiedShort" : "account.copyAuthSeed")} onClick={() => void copyAuthSeed()}>
-                    {authSeedCopied ? <ClipboardCheck aria-hidden="true" /> : <Clipboard aria-hidden="true" />}
-                    <span>{t(authSeedCopied ? "account.copied" : "account.copy")}</span>
-                  </Button>
-                  <Button type="button" variant="danger" disabled={authSeed === null} onClick={() => setConfirmSeedRotation(true)}>
-                    <RotateCw aria-hidden="true" /><span>{t("account.regenerate")}</span>
-                  </Button>
+                  <Tooltip content={t("account.copyAuthSeed")}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="auth-seed-action"
+                      aria-label={t("account.copyAuthSeed")}
+                      disabled={authSeed === null}
+                      onClick={() => void copyAuthSeed()}
+                    >
+                      {authSeedCopied ? <ClipboardCheck aria-hidden="true" /> : <Clipboard aria-hidden="true" />}
+                    </Button>
+                  </Tooltip>
+                  <Tooltip content={t("account.regenerateAuthSeed")}>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      className="auth-seed-action"
+                      aria-label={t("account.regenerateAuthSeed")}
+                      disabled={authSeed === null}
+                      onClick={() => setConfirmSeedRotation(true)}
+                    >
+                      <RotateCw aria-hidden="true" />
+                    </Button>
+                  </Tooltip>
                 </div>
                 {confirmSeedRotation && (
                   <div className="auth-seed-confirmation" role="alertdialog" aria-labelledby="rotate-seed-title" aria-describedby="rotate-seed-description">

@@ -997,7 +997,7 @@ input::placeholder {
 
 .auth-seed-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) repeat(2, 44px);
   gap: 0.65rem;
   align-items: center;
 }
@@ -1009,13 +1009,26 @@ input::placeholder {
   user-select: all;
 }
 
-.auth-seed-controls .ui-button {
+.auth-seed-controls > .ui-tooltip-anchor {
+  display: inline-flex;
+  width: 44px;
   height: 44px;
-  margin: 0;
-  white-space: nowrap;
 }
 
-.auth-seed-controls svg { width: 17px; height: 17px; }
+.auth-seed-controls .auth-seed-action {
+  display: inline-flex;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 10px;
+}
+
+.auth-seed-controls .auth-seed-action svg { width: 17px; height: 17px; }
 
 .auth-seed-confirmation {
   margin-top: 1rem;
@@ -1029,11 +1042,6 @@ input::placeholder {
   display: flex;
   gap: 0.6rem;
   justify-content: flex-end;
-}
-
-@media (max-width: 680px) {
-  .auth-seed-controls { grid-template-columns: 1fr 1fr; }
-  .auth-seed-controls input { grid-column: 1 / -1; }
 }
 
 .torrent-accordion-list {

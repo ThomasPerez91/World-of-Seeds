@@ -137,7 +137,12 @@ describe("UserDownloadsPage", () => {
 
     const article = await screen.findByRole("article", { name: "Film.mkv" });
     const heading = view.container.querySelector(".torrent-list-heading") as HTMLElement;
+    const row = article.querySelector(".torrent-row-grid") as HTMLElement;
     expect(view.container.querySelector(".torrent-list-heading + .torrent-accordion-list")).toBeTruthy();
+    expect(heading.classList).toContain("torrent-column-grid");
+    expect(row.classList).toContain("torrent-column-grid");
+    expect(heading.children).toHaveLength(6);
+    expect(row.children).toHaveLength(6);
     expect(Array.from(heading.children).map((cell) => cell.textContent)).toEqual([
       "Nom", "État", "File", "Progression", "Taille", "",
     ]);
@@ -670,13 +675,17 @@ describe("UserDownloadsPage", () => {
     }));
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: `Afficher les détails de ${torrent().name}` }));
+    const article = await screen.findByRole("article", { name: torrent().name });
+    await user.click(within(article).getByRole("button", { name: `Afficher les détails de ${torrent().name}` }));
     const content = await screen.findByRole("region", { name: `Contenu de ${torrent().name}` });
     expect(screen.getAllByTestId("retention-warning")).toHaveLength(1);
     expect(screen.getByText("Suppression imminente dans 45 min")).toBeTruthy();
     expect(within(content).getByText("root.mkv")).toBeTruthy();
-    expect(within(content).getByText("Folder/one.mkv")).toBeTruthy();
-    expect(within(content).getByText("Folder/two.srt")).toBeTruthy();
+    await user.click(await within(content).findByRole("button", { name: "Détails — Folder" }));
+    expect(within(content).getByText("one.mkv")).toBeTruthy();
+    expect(within(content).getByText("two.srt")).toBeTruthy();
+    expect(within(content).getByRole("link", { name: "Télécharger le contenu en ZIP" })).toBeTruthy();
+    expect(within(article).queryByRole("button", { name: "Télécharger" })).toBeNull();
   });
 
   it("charge uniquement le manifeste du READY ouvert et affiche son chargement", async () => {
@@ -872,17 +881,18 @@ describe("UserDownloadsPage", () => {
     const article = await screen.findByRole("article", { name: "Film.mkv" });
     await user.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
     const content = await screen.findByRole("region", { name: "Contenu de Film.mkv" });
-    expect(await within(content).findByText("Folder/0.bin")).toBeTruthy();
+    await user.click(await within(content).findByRole("button", { name: "Détails — Folder" }));
+    expect(await within(content).findByText("0.bin")).toBeTruthy();
     expect(within(content).queryByRole("link", { name: /ZIP/ })).toBeNull();
     await user.click(within(content).getByRole("button", { name: "Suivant" }));
-    expect(await within(content).findByText("Folder/50.bin")).toBeTruthy();
+    expect(await within(content).findByText("50.bin")).toBeTruthy();
     expect(within(content).getByText("2 / 3")).toBeTruthy();
     await user.click(within(content).getByRole("button", { name: "Suivant" }));
-    expect(await within(content).findByText("Folder/100.bin")).toBeTruthy();
+    expect(await within(content).findByText("100.bin")).toBeTruthy();
     expect(within(content).getByText("3 / 3")).toBeTruthy();
     expect((within(content).getByRole("button", { name: "Suivant" }) as HTMLButtonElement).disabled).toBe(true);
     await user.click(within(content).getByRole("button", { name: "Précédent" }));
-    expect(await within(content).findByText("Folder/50.bin")).toBeTruthy();
+    expect(await within(content).findByText("50.bin")).toBeTruthy();
     expect(manifestUrls[0]).not.toContain("snapshot=");
     expect(manifestUrls.slice(1).every((url) => url.includes(`snapshot=${snapshot}`))).toBe(true);
     expect(manifestUrls.map((url) => new URL(url, "https://wos.test").searchParams.get("offset")))
@@ -978,7 +988,7 @@ describe("UserDownloadsPage", () => {
             manifest_version: 1,
             file_count: 2,
             total_size: 3,
-            archive_available: true,
+            archive_available: false,
             retention_expires_at: null,
             offset: 0,
             limit: 500,
@@ -1051,7 +1061,7 @@ describe("UserDownloadsPage", () => {
           manifest_version: 1,
           file_count: items.length,
           total_size: items.length,
-          archive_available: true,
+          archive_available: false,
           retention_expires_at: null,
           offset: 0,
           limit: 500,
@@ -1117,7 +1127,7 @@ describe("UserDownloadsPage", () => {
           manifest_version: 1,
           file_count: 2,
           total_size: 2,
-          archive_available: true,
+          archive_available: false,
           retention_expires_at: null,
           offset: 0,
           limit: 500,
@@ -1310,6 +1320,8 @@ describe("UserDownloadsPage", () => {
     const archive = await screen.findByRole("link", {
       name: "Télécharger le contenu en ZIP",
     });
+    await user.click(await screen.findByRole("button", { name: "Détails — The.Cleaning.Lady" }));
+    await user.click(await screen.findByRole("button", { name: "Détails — Saison.02" }));
     const individual = screen.getByRole("link", { name: `Télécharger « ${longPath} »` });
     expect(archive.getAttribute("href")).toContain("download-archive?snapshot=");
     expect(individual.getAttribute("href")).toContain("/files/file-id/download?snapshot=");
@@ -1319,7 +1331,7 @@ describe("UserDownloadsPage", () => {
       longPath.split("/").at(-1),
       "Film.mkv.zip",
     ]);
-    const filePath = screen.getByText(longPath).closest(".ready-file-path");
+    const filePath = screen.getByText(longPath.split("/").at(-1) as string).closest(".ready-file-path");
     expect(filePath?.getAttribute("aria-label")).toBe(longPath);
     expect(screen.getByText("1 / 1000")).toBeTruthy();
     expect(manifestRequests).toBe(1);
