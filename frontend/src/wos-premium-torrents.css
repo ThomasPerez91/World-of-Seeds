@@ -84,13 +84,41 @@
   text-align: left;
 }
 
-.torrent-list-heading > span {
+.torrent-list-heading > span,
+.torrent-list-heading > button {
   min-width: 0;
   text-align: left;
 }
 
-.torrent-list-heading > span:nth-child(n + 2):nth-child(-n + 5) {
-  text-align: center;
+.torrent-list-heading > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.torrent-list-heading > button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.torrent-retention-filter.green > svg { color: #62dc91; }
+.torrent-retention-filter.orange > svg { color: #f3a847; }
+.torrent-retention-filter.red > svg { color: #ff6570; }
+
+.torrent-card-actions .torrent-action-download:hover:not(:disabled),
+.ready-file-download-button:hover {
+  color: #d8ffe7 !important;
+  background: rgba(55, 190, 111, 0.25) !important;
+  box-shadow: 0 0 12px rgba(55, 190, 111, 0.14) !important;
+  filter: none !important;
 }
 
 .user-downloads .torrent-accordion-list {
@@ -166,7 +194,6 @@
   display: flex !important;
   min-width: 0;
   align-items: center;
-  justify-content: center;
 }
 
 .torrent-primary-state {
@@ -182,9 +209,9 @@
 }
 
 .torrent-primary-state.downloading {
-  color: #8ff0b7 !important;
-  border-color: rgba(67, 213, 129, 0.3) !important;
-  background: rgba(41, 164, 94, 0.16) !important;
+  color: #83cfff !important;
+  border-color: rgba(79, 175, 237, 0.3) !important;
+  background: rgba(45, 128, 190, 0.16) !important;
 }
 
 .torrent-primary-state.waiting {
@@ -193,64 +220,10 @@
   background: rgba(170, 122, 26, 0.15) !important;
 }
 
-.torrent-primary-state.stalled,
-.torrent-primary-state.cooldown {
-  color: #ffbf67 !important;
-  border-color: rgba(244, 159, 51, 0.32) !important;
-  background: rgba(176, 97, 19, 0.17) !important;
-}
-
-.torrent-status-tooltip,
-.torrent-status-tooltip-trigger {
-  display: inline-flex;
-  min-width: 0;
-}
-
-.torrent-status-tooltip-trigger:focus-visible {
-  border-radius: 999px;
-  outline: 2px solid var(--wos-focus);
-  outline-offset: 2px;
-}
-
-.torrent-primary-state.error {
+.torrent-primary-state.blocked {
   color: #ff8992 !important;
   border-color: rgba(239, 80, 92, 0.28) !important;
   background: rgba(171, 42, 53, 0.15) !important;
-}
-
-.subscription-expiry-tooltip {
-  display: inline-flex;
-  flex: 0 0 auto;
-}
-
-.subscription-expiry-indicator {
-  width: 27px;
-  height: 27px;
-  min-height: 27px;
-  align-items: center;
-  justify-content: center;
-  padding: 0 !important;
-  border: 1px solid currentcolor;
-}
-
-.subscription-expiry-focus {
-  display: inline-flex;
-  width: 100%;
-  height: 100%;
-  align-items: center;
-  justify-content: center;
-  border-radius: inherit;
-  outline: 0;
-}
-
-.subscription-expiry-focus:focus-visible {
-  outline: 2px solid currentcolor;
-  outline-offset: 2px;
-}
-
-.subscription-expiry-indicator svg {
-  width: 13px;
-  height: 13px;
 }
 
 .torrent-summary-queue,
@@ -261,7 +234,7 @@
   font-size: 0.75rem;
   font-weight: 680;
   line-height: 1;
-  text-align: center;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -295,18 +268,14 @@
   white-space: nowrap;
 }
 
-.torrent-summary-progress.downloading .torrent-row-progress::-webkit-progress-value { background: #43d581; }
+.torrent-summary-progress.downloading .torrent-row-progress::-webkit-progress-value { background: #4eaee9; }
 .torrent-summary-progress.ready .torrent-row-progress::-webkit-progress-value { background: #43d581; }
-.torrent-summary-progress.waiting .torrent-row-progress::-webkit-progress-value,
-.torrent-summary-progress.stalled .torrent-row-progress::-webkit-progress-value,
-.torrent-summary-progress.cooldown .torrent-row-progress::-webkit-progress-value { background: #efb943; }
-.torrent-summary-progress.error .torrent-row-progress::-webkit-progress-value { background: #e85b67; }
-.torrent-summary-progress.downloading .torrent-row-progress::-moz-progress-bar { background: #43d581; }
+.torrent-summary-progress.waiting .torrent-row-progress::-webkit-progress-value { background: #efb943; }
+.torrent-summary-progress.blocked .torrent-row-progress::-webkit-progress-value { background: #e85b67; }
+.torrent-summary-progress.downloading .torrent-row-progress::-moz-progress-bar { background: #4eaee9; }
 .torrent-summary-progress.ready .torrent-row-progress::-moz-progress-bar { background: #43d581; }
-.torrent-summary-progress.waiting .torrent-row-progress::-moz-progress-bar,
-.torrent-summary-progress.stalled .torrent-row-progress::-moz-progress-bar,
-.torrent-summary-progress.cooldown .torrent-row-progress::-moz-progress-bar { background: #efb943; }
-.torrent-summary-progress.error .torrent-row-progress::-moz-progress-bar { background: #e85b67; }
+.torrent-summary-progress.waiting .torrent-row-progress::-moz-progress-bar { background: #efb943; }
+.torrent-summary-progress.blocked .torrent-row-progress::-moz-progress-bar { background: #e85b67; }
 
 .torrent-card-actions {
   display: flex !important;
@@ -366,7 +335,7 @@
 }
 
 .torrent-accordion-content {
-  margin: 0.875rem 0.75rem 0.75rem !important;
+  margin: 0 0.75rem 0.75rem !important;
   padding: 0.9rem !important;
   border: 1px solid rgba(102, 234, 157, 0.14) !important;
   border-radius: 12px;
@@ -402,9 +371,9 @@
 
 .ready-content {
   gap: 0.75rem;
-  margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid rgba(157, 220, 184, 0.1);
 }
 
 .ready-content-heading {
@@ -449,245 +418,6 @@
   list-style: none;
 }
 
-.ready-directory-browser {
-  display: grid;
-  gap: 0.55rem;
-}
-
-.ready-directory-browser > header,
-.ready-files-heading {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--wos-text);
-}
-
-.ready-directory-browser > header > svg,
-.ready-files-heading > svg {
-  width: 17px;
-  height: 17px;
-  color: var(--wos-accent);
-}
-
-.ready-directory-browser h4,
-.ready-files-heading {
-  margin: 0;
-  font-size: 0.78rem;
-}
-
-.ready-directory-browser header span {
-  display: block;
-  margin-top: 0.12rem;
-  color: var(--wos-muted);
-  font-size: 0.68rem;
-}
-
-.ready-directory-list,
-.ready-directory-children ul {
-  display: grid;
-  gap: 0;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ready-directory-list {
-  overflow: visible;
-  border: 1px solid rgba(157, 220, 184, 0.12);
-  border-radius: 11px;
-  background: rgba(12, 43, 30, 0.35);
-}
-
-.ready-directory-item {
-  min-width: 0;
-}
-
-.ready-tree-depth-0 { --directory-indent: 0rem; }
-.ready-tree-depth-1 { --directory-indent: 1rem; }
-.ready-tree-depth-2 { --directory-indent: 2rem; }
-.ready-tree-depth-3 { --directory-indent: 3rem; }
-.ready-tree-depth-4 { --directory-indent: 4rem; }
-.ready-tree-depth-5 { --directory-indent: 5rem; }
-.ready-tree-depth-6 { --directory-indent: 6rem; }
-
-.ready-directory-row {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.65rem;
-  align-items: center;
-  padding: 0.52rem 0.6rem 0.52rem calc(0.6rem + var(--directory-indent));
-  border-bottom: 1px solid rgba(157, 220, 184, 0.08);
-  background: transparent;
-  transition: background-color 140ms ease;
-}
-
-.ready-directory-row:hover,
-.ready-tree-file-row:hover {
-  background: rgba(102, 234, 157, 0.04);
-}
-
-.ready-directory-toggle {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: 15px 20px minmax(0, 1fr);
-  gap: 0.45rem;
-  align-items: center;
-  padding: 0;
-  color: inherit;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.ready-directory-toggle:hover,
-.ready-directory-toggle:focus,
-.ready-directory-toggle:focus-visible,
-.ready-directory-toggle:active {
-  color: inherit !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  filter: none !important;
-  transform: none !important;
-}
-
-.ready-directory-toggle:focus-visible {
-  outline: 2px solid rgba(102, 234, 157, 0.42);
-  outline-offset: 3px;
-}
-
-.ready-directory-toggle > svg:first-child {
-  width: 14px;
-  height: 14px;
-  color: var(--wos-muted);
-}
-
-.ready-directory-toggle > svg:nth-child(2) {
-  width: 18px;
-  height: 18px;
-  color: var(--wos-accent);
-}
-
-.ready-directory-copy {
-  display: grid;
-  min-width: 0;
-  gap: 0.12rem;
-}
-
-.ready-directory-name,
-.ready-file-path {
-  display: block;
-  min-width: 0;
-}
-
-.ready-directory-name > strong,
-.ready-file-path > strong,
-.ready-directory-copy small {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ready-directory-name > strong,
-.ready-file-path > strong {
-  color: var(--wos-text);
-  font-size: 0.74rem;
-}
-
-.ready-directory-copy small {
-  color: var(--wos-muted);
-  font-size: 0.65rem;
-  font-weight: 500;
-}
-
-.ready-folder-download-button {
-  display: inline-flex;
-  min-width: 54px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  gap: 0.28rem;
-  padding: 0 0.5rem;
-  color: #bff6d3;
-  border: 1px solid rgba(67, 213, 129, 0.28);
-  border-radius: 9px;
-  background: rgba(43, 163, 95, 0.14);
-  font-size: 0.66rem;
-  font-weight: 760;
-  text-decoration: none;
-}
-
-.ready-folder-download-button svg {
-  width: 14px;
-  height: 14px;
-}
-
-.ready-folder-download-button:hover {
-  color: #d8ffe6;
-  background: rgba(43, 163, 95, 0.24);
-}
-
-.ready-directory-loading {
-  display: block;
-  padding: 0.55rem 0.7rem 0.55rem 3.3rem;
-  color: var(--wos-muted);
-  font-size: 0.68rem;
-}
-
-.ready-directory-error,
-.ready-directories-state {
-  margin: 0;
-}
-
-.ready-directory-error,
-.ready-directories-error {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.65rem;
-  padding: 0.55rem 0.65rem;
-  color: #ffc1c6;
-  border: 1px solid rgba(239, 80, 92, 0.18);
-  border-radius: 9px;
-  background: rgba(171, 42, 53, 0.09);
-  font-size: 0.68rem;
-}
-
-.ready-files-heading {
-  margin-top: 0.15rem;
-}
-
-.ready-tree-file-row {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto 38px;
-  gap: 0.7rem;
-  align-items: center;
-  padding: 0.48rem 0.6rem 0.48rem calc(2.65rem + var(--directory-indent));
-  border-bottom: 1px solid rgba(157, 220, 184, 0.08);
-  background: transparent;
-  transition: background-color 140ms ease;
-}
-
-.ready-tree-file-size {
-  color: var(--wos-muted);
-  white-space: nowrap;
-}
-
-.ready-tree-file-row > .ui-tooltip-anchor:last-child {
-  justify-self: end;
-}
-
-.ready-tree-load-more {
-  display: flex;
-  justify-content: center;
-  padding: 0.55rem;
-  border-bottom: 1px solid rgba(157, 220, 184, 0.08);
-}
-
 .ready-file-list li {
   display: grid !important;
   min-width: 0;
@@ -705,24 +435,6 @@
 .ready-file-list li:hover { background: rgba(102, 234, 157, 0.04); }
 .ready-file-list li > span:nth-child(2) { color: var(--wos-muted); white-space: nowrap; }
 .ready-file-list .ui-tooltip-anchor:last-child { justify-self: end; }
-
-.ready-file-label {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: 20px minmax(0, 1fr);
-  gap: 0.7rem;
-  align-items: center;
-}
-
-.ready-tree-file-row .ready-file-label {
-  grid-template-columns: 20px minmax(0, 1fr);
-}
-
-.ready-file-label > svg {
-  width: 18px;
-  height: 18px;
-  color: var(--wos-accent);
-}
 
 .ready-file-download-button {
   display: inline-flex;
@@ -764,8 +476,7 @@
 
 .ui-tooltip-anchor:hover > .ui-tooltip-content,
 .ui-tooltip-anchor:focus > .ui-tooltip-content,
-.ui-tooltip-anchor:focus-within > .ui-tooltip-content,
-.ready-directory-toggle:focus-visible .ready-directory-name > .ui-tooltip-content {
+.ui-tooltip-anchor:focus-within > .ui-tooltip-content {
   opacity: 1;
   transform: translate(-50%, 0);
 }
@@ -784,8 +495,7 @@
 }
 
 .torrent-card-actions .ui-tooltip-content,
-.ready-file-list li > .ui-tooltip-anchor:last-child .ui-tooltip-content,
-.ready-tree-file-row > .ui-tooltip-anchor:last-child .ui-tooltip-content {
+.ready-file-list li > .ui-tooltip-anchor:last-child .ui-tooltip-content {
   right: 0;
   left: auto;
   transform: translateY(4px);
@@ -794,9 +504,7 @@
 .torrent-card-actions .ui-tooltip-anchor:hover > .ui-tooltip-content,
 .torrent-card-actions .ui-tooltip-anchor:focus-within > .ui-tooltip-content,
 .ready-file-list li > .ui-tooltip-anchor:last-child:hover .ui-tooltip-content,
-.ready-file-list li > .ui-tooltip-anchor:last-child:focus-within .ui-tooltip-content,
-.ready-tree-file-row > .ui-tooltip-anchor:last-child:hover .ui-tooltip-content,
-.ready-tree-file-row > .ui-tooltip-anchor:last-child:focus-within .ui-tooltip-content {
+.ready-file-list li > .ui-tooltip-anchor:last-child:focus-within .ui-tooltip-content {
   transform: translateY(0);
 }
 
@@ -808,8 +516,6 @@
 @media (prefers-reduced-motion: reduce) {
   .torrent-row-grid,
   .ready-file-list li,
-  .ready-directory-row,
-  .ready-tree-file-row,
   .ui-tooltip-content { transition: none; }
   .torrent-accordion-content { animation: none; }
 }
@@ -831,7 +537,7 @@
 
   .torrent-summary-heading { grid-area: name; }
   .torrent-summary-status { grid-area: status; }
-  .torrent-summary-queue { grid-area: queue; text-align: center; }
+  .torrent-summary-queue { grid-area: queue; text-align: right; }
   .torrent-summary-progress { grid-area: progress; }
   .torrent-summary-size { grid-area: size; }
   .torrent-card-actions { grid-area: actions; }

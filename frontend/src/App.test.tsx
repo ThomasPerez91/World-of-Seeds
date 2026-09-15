@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -102,6 +102,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
     await screen.findByRole("heading", { name: "Dashboard" });
+    expect(screen.queryByRole("button", { name: "Administration" })).toBeNull();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/locale",
       expect.objectContaining({ method: "PATCH" }),
@@ -165,14 +166,22 @@ describe("App", () => {
     const user = userEvent.setup();
     const view = render(<App />);
     await screen.findByRole("heading", { name: "Dashboard" });
-    expect(screen.getByRole("button", { name: "Administration" })).toBeTruthy();
     expect((await screen.findAllByText("1 KB available")).length).toBeGreaterThan(0);
     expect(document.documentElement.lang).toBe("en");
 
+    const adminNavigation = screen.getByRole("button", { name: "Administration" });
+    expect(adminNavigation.getAttribute("aria-current")).toBeNull();
+
     await user.click(screen.getByRole("button", { name: "Open account menu" }));
-    expect(screen.getAllByRole("button", { name: "Administration" })).toHaveLength(1);
+    const dropdown = document.querySelector("#account-dropdown");
+    expect(dropdown).toBeTruthy();
+    expect(within(dropdown as HTMLElement).queryByRole("button", { name: "Administration" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Account settings" })).toBeNull();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
+
+    await user.click(adminNavigation);
+    await screen.findByRole("heading", { name: "User accounts" });
+    expect(adminNavigation.getAttribute("aria-current")).toBe("page");
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
@@ -248,22 +257,18 @@ describe("App", () => {
     expect(screen.getAllByText(`v${UI_VERSION}`).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Mes fichiers" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Corbeille" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Administration" })).toBeTruthy();
     await waitFor(() => {
       expect(new URL(window.location.href).searchParams.has("path")).toBe(false);
     });
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
 
-    const accountTrigger = screen.getByRole("button", { name: "Ouvrir le menu du compte" });
-    expect(accountTrigger.classList).toContain("account-trigger");
-    expect(accountTrigger.getAttribute("style")).toBeNull();
-    await user.click(accountTrigger);
-    expect(accountTrigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getAllByRole("button", { name: "Administration" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Ouvrir le menu du compte" }));
+    const accountDropdown = document.querySelector("#account-dropdown");
+    expect(accountDropdown).toBeTruthy();
+    expect(within(accountDropdown as HTMLElement).queryByRole("button", { name: "Administration" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Paramètres du compte" })).toBeNull();
     expect(screen.getByRole("button", { name: "Déconnexion" })).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: "Administration" }));
-    await screen.findByRole("heading", { name: "Comptes utilisateurs" });
   });
 
   it("rend les informations légales accessibles avant la connexion", async () => {
@@ -392,8 +397,6 @@ describe("App", () => {
     expect(screen.queryByText("Sombre")).toBeNull();
     expect(screen.queryByText("Système")).toBeNull();
     expect(screen.getByRole("button", { name: "Général" }).getAttribute("aria-current")).toBe("page");
-    expect(view.container.querySelector(".settings-shell.wos-glass-panel")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Retour au Dashboard" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sécurité" }).getAttribute("aria-current")).toBeNull();
     expect(screen.getByRole("combobox", { name: "Langue" })).toBeTruthy();
     expect(screen.queryByLabelText("Mot de passe actuel")).toBeNull();
@@ -461,13 +464,12 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByRole("heading", { name: "Dashboard" });
-    expect(screen.queryByRole("button", { name: "Administration" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Paramètres" }));
+    expect(document.querySelector('.settings-language-control [data-language-flag="fr"]')).toBeTruthy();
     await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
 
     await screen.findByRole("heading", { name: "Account settings" });
-    expect(await screen.findByText("Language preference saved.")).toBeTruthy();
-    expect(screen.queryByText("Préférence de langue enregistrée.")).toBeNull();
+    expect(document.querySelector('.settings-language-control [data-language-flag="en"]')).toBeTruthy();
     expect(screen.getByRole("button", { name: "General" }).getAttribute("aria-current")).toBe("page");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/locale",
