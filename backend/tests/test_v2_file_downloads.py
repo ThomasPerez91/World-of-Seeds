@@ -258,6 +258,35 @@ async def test_download_lease_limit_reclaims_expired_entries(
 
 
 @pytest.mark.asyncio
+async def test_download_lease_global_limit_also_applies_without_a_per_user_ceiling(
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    owner, torrent, request, torrent_file, _ = await _ready_file(db_session, data_root)
+    manager = DownloadLeaseManager(db_session, lease_seconds=60)
+
+    for _ in range(2):
+        await manager.acquire(
+            user_id=owner.id,
+            managed_torrent_id=torrent.id,
+            torrent_request_id=request.id,
+            torrent_file_id=torrent_file.id,
+            max_concurrent=None,
+            max_concurrent_global=2,
+        )
+
+    with pytest.raises(DownloadConcurrencyError):
+        await manager.acquire(
+            user_id=owner.id,
+            managed_torrent_id=torrent.id,
+            torrent_request_id=request.id,
+            torrent_file_id=torrent_file.id,
+            max_concurrent=None,
+            max_concurrent_global=2,
+        )
+
+
+@pytest.mark.asyncio
 async def test_admin_file_download_bypasses_only_the_per_user_lease_ceiling(
     client: AsyncClient,
     db_session: AsyncSession,

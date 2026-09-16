@@ -182,7 +182,14 @@ export async function loadBrowserDownloadPolicy(signal?: AbortSignal): Promise<B
     && Number.isInteger(policy.max_concurrent_streams)
     && (policy.max_concurrent_streams ?? 0) >= 1
     && (policy.max_concurrent_streams ?? 0) <= 20;
-  const unlimitedPolicy = policy.unlimited === true && policy.max_concurrent_streams === null;
+  const unlimitedPolicy = policy.unlimited === true && (
+    policy.max_concurrent_streams === null
+    || (
+      Number.isInteger(policy.max_concurrent_streams)
+      && (policy.max_concurrent_streams ?? 0) >= 1
+      && (policy.max_concurrent_streams ?? 0) <= 20
+    )
+  );
   if (!standardPolicy && !unlimitedPolicy) {
     throw new Error("download_policy_invalid");
   }

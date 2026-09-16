@@ -40,12 +40,13 @@ async def create_job(
     torrent: ManagedTorrent,
     *,
     key: str,
+    job_type: str = "ADD_TORRENT",
     available_at: datetime = NOW,
     max_attempts: int = 3,
 ) -> TorrentJob:
     job = TorrentJob(
         managed_torrent=torrent,
-        job_type="ADD_TORRENT",
+        job_type=job_type,
         idempotency_key=key,
         available_at=available_at,
         max_attempts=max_attempts,
@@ -105,6 +106,41 @@ async def test_claim_selects_oldest_available_job_and_sets_deadlines(
     assert claimed.claimed_by == "worker-1"
     assert claimed.claim_expires_at == NOW + CLAIM_TTL
     assert claimed.timeout_at == NOW + EXECUTION_TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_claim_prioritizes_lifecycle_and_user_jobs_over_background_sync(
+    db_session: AsyncSession,
+) -> None:
+    torrent = await create_torrent(db_session)
+    await create_job(
+        db_session,
+        torrent,
+        key="old-sync",
+        job_type="SYNC_TORRENT",
+        available_at=NOW - timedelta(minutes=5),
+    )
+    added = await create_job(db_session, torrent, key="new-add", job_type="ADD_TORRENT")
+    purge = await create_job(db_session, torrent, key="new-purge", job_type="PURGE_TORRENT")
+
+    first = await claim_next_torrent_job(
+        db_session,
+        worker_id="worker-priority",
+        now=NOW,
+        claim_ttl=CLAIM_TTL,
+        execution_timeout=EXECUTION_TIMEOUT,
+    )
+    assert first is purge
+    await complete_torrent_job(db_session, first, worker_id="worker-priority", now=NOW)
+
+    second = await claim_next_torrent_job(
+        db_session,
+        worker_id="worker-priority",
+        now=NOW,
+        claim_ttl=CLAIM_TTL,
+        execution_timeout=EXECUTION_TIMEOUT,
+    )
+    assert second is added
 
 
 @pytest.mark.asyncio

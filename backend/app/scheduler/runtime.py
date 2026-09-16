@@ -260,7 +260,7 @@ class SchedulerRuntime:
             if result.leader:
                 async with self._session_factory() as session:
                     options = await self._options.snapshot(session)
-                configured = options["WOS_QB_SYNC_INTERVAL_SECONDS"]
+                configured = options["WOS_SCHEDULER_CONTROL_INTERVAL_SECONDS"]
                 if type(configured) is int:
                     interval = float(configured)
         except Exception:

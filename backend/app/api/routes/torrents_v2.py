@@ -86,7 +86,6 @@ from app.torrents.downloads import (
     DownloadConcurrencyError,
     DownloadLeaseManager,
     DownloadRateLimiter,
-    ManagedArchiveBusyError,
     ManagedArchiveEntry,
     ManagedArchiveStreamingResponse,
     ManagedDownloadError,
@@ -483,37 +482,39 @@ async def get_torrent_download_directories(
             "download_options_unavailable",
             "Le téléchargement est momentanément indisponible.",
         )
-    files = tuple(
-        (
-            await db.scalars(
-                select(TorrentFile)
-                .where(TorrentFile.managed_torrent_id == managed_torrent.id)
-                .order_by(TorrentFile.file_index)
-            )
-        ).all()
+    directories: dict[str, tuple[int, int]] = {}
+    direct_files: list[TorrentFile] = []
+    direct_file_count = 0
+    manifest_file_count = 0
+    parent_exists = not parent_parts
+    files = await db.stream_scalars(
+        select(TorrentFile)
+        .where(TorrentFile.managed_torrent_id == managed_torrent.id)
+        .order_by(TorrentFile.file_index)
+        .execution_options(yield_per=1000)
     )
-    if len(files) != managed_torrent.manifest_file_count:
+    async for item in files:
+        manifest_file_count += 1
+        parts = PurePosixPath(item.relative_path).parts
+        if len(parts) <= len(parent_parts) or parts[: len(parent_parts)] != parent_parts:
+            continue
+        parent_exists = True
+        if len(parts) == len(parent_parts) + 1:
+            if offset <= direct_file_count < offset + limit:
+                direct_files.append(item)
+            direct_file_count += 1
+            continue
+        child_parts = parts[: len(parent_parts) + 1]
+        relative_path = "/".join(child_parts)
+        file_count, total_size = directories.get(relative_path, (0, 0))
+        directories[relative_path] = (file_count + 1, total_size + item.size)
+    if manifest_file_count != managed_torrent.manifest_file_count:
         await db.rollback()
         _fail(
             status.HTTP_409_CONFLICT,
             "download_snapshot_changed",
             "Le contenu a changé. Relance le téléchargement.",
         )
-    directories: dict[str, tuple[int, int]] = {}
-    direct_files: list[TorrentFile] = []
-    parent_exists = not parent_parts
-    for item in files:
-        parts = PurePosixPath(item.relative_path).parts
-        if len(parts) <= len(parent_parts) or parts[: len(parent_parts)] != parent_parts:
-            continue
-        parent_exists = True
-        if len(parts) == len(parent_parts) + 1:
-            direct_files.append(item)
-            continue
-        child_parts = parts[: len(parent_parts) + 1]
-        relative_path = "/".join(child_parts)
-        file_count, total_size = directories.get(relative_path, (0, 0))
-        directories[relative_path] = (file_count + 1, total_size + item.size)
     if not parent_exists:
         await db.rollback()
         _fail(
@@ -541,7 +542,7 @@ async def get_torrent_download_directories(
             )
             for relative_path, (file_count, total_size) in sorted(directories.items())
         ],
-        direct_file_count=len(direct_files),
+        direct_file_count=direct_file_count,
         offset=offset,
         limit=limit,
         files=[
@@ -551,7 +552,7 @@ async def get_torrent_download_directories(
                 relative_path=item.relative_path,
                 size=item.size,
             )
-            for item in direct_files[offset : offset + limit]
+            for item in direct_files
         ],
     )
     await db.rollback()
@@ -628,6 +629,7 @@ async def download_torrent_folder_archive(
         chunk_size = _integer_option(options, "WOS_HTTP_STREAM_CHUNK_BYTES")
         lease_seconds = _integer_option(options, "WOS_DOWNLOAD_LEASE_SECONDS")
         max_concurrent = _integer_option(options, "WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER")
+        max_concurrent_global = _integer_option(options, "WOS_DOWNLOAD_MAX_CONCURRENT_GLOBAL")
         per_user_rate = _integer_option(
             options,
             "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
@@ -640,27 +642,30 @@ async def download_torrent_folder_archive(
             "download_options_unavailable",
             "Le téléchargement est momentanément indisponible.",
         )
-    all_files = tuple(
-        (
-            await db.scalars(
-                select(TorrentFile)
-                .where(TorrentFile.managed_torrent_id == managed_torrent.id)
-                .order_by(TorrentFile.file_index)
-            )
-        ).all()
+    stored_file_count = await db.scalar(
+        select(func.count(TorrentFile.id)).where(
+            TorrentFile.managed_torrent_id == managed_torrent.id
+        )
     )
-    if len(all_files) != managed_torrent.manifest_file_count:
+    if stored_file_count != managed_torrent.manifest_file_count:
         await db.rollback()
         _fail(
             status.HTTP_409_CONFLICT,
             "download_snapshot_changed",
             "Le contenu a changé. Relance le téléchargement.",
         )
+    directory_prefix = f"{'/'.join(path_parts)}/"
     files = tuple(
-        item
-        for item in all_files
-        if (parts := PurePosixPath(item.relative_path).parts)[: len(path_parts)] == path_parts
-        and len(parts) > len(path_parts)
+        (
+            await db.scalars(
+                select(TorrentFile)
+                .where(
+                    TorrentFile.managed_torrent_id == managed_torrent.id,
+                    TorrentFile.relative_path.startswith(directory_prefix, autoescape=True),
+                )
+                .order_by(TorrentFile.file_index)
+            )
+        ).all()
     )
     if not files:
         await db.rollback()
@@ -709,6 +714,7 @@ async def download_torrent_folder_archive(
             torrent_request_id=torrent_request_id,
             torrent_file_id=first_file_id,
             max_concurrent=None if is_admin else max_concurrent,
+            max_concurrent_global=max_concurrent_global,
         )
     except DownloadConcurrencyError:
         _fail(
@@ -732,14 +738,10 @@ async def download_torrent_folder_archive(
         max_concurrent_global=archive_concurrency,
     )
     try:
-        archiver.acquire()
-    except ManagedArchiveBusyError:
+        await archiver.acquire()
+    except BaseException:
         await leases.release(lease.id)
-        _fail(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "folder_archive_busy",
-            "Trop d’archives ZIP sont déjà en cours.",
-        )
+        raise
     return ManagedArchiveStreamingResponse(
         archiver,
         chunk_size=chunk_size,
@@ -818,6 +820,7 @@ async def download_torrent_archive(
         chunk_size = _integer_option(options, "WOS_HTTP_STREAM_CHUNK_BYTES")
         lease_seconds = _integer_option(options, "WOS_DOWNLOAD_LEASE_SECONDS")
         max_concurrent = _integer_option(options, "WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER")
+        max_concurrent_global = _integer_option(options, "WOS_DOWNLOAD_MAX_CONCURRENT_GLOBAL")
         per_user_rate = _integer_option(
             options,
             "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
@@ -874,6 +877,7 @@ async def download_torrent_archive(
             torrent_request_id=torrent_request_id,
             torrent_file_id=first_file_id,
             max_concurrent=None if is_admin else max_concurrent,
+            max_concurrent_global=max_concurrent_global,
         )
     except DownloadConcurrencyError:
         _fail(
@@ -897,14 +901,10 @@ async def download_torrent_archive(
         max_concurrent_global=archive_concurrency,
     )
     try:
-        archiver.acquire()
-    except ManagedArchiveBusyError:
+        await archiver.acquire()
+    except BaseException:
         await leases.release(lease.id)
-        _fail(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "torrent_archive_busy",
-            "Un autre fallback ZIP est déjà en cours.",
-        )
+        raise
     return ManagedArchiveStreamingResponse(
         archiver,
         chunk_size=chunk_size,
@@ -1000,6 +1000,7 @@ async def download_torrent_file(
         chunk_size = _integer_option(options, "WOS_HTTP_STREAM_CHUNK_BYTES")
         lease_seconds = _integer_option(options, "WOS_DOWNLOAD_LEASE_SECONDS")
         max_concurrent = _integer_option(options, "WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER")
+        max_concurrent_global = _integer_option(options, "WOS_DOWNLOAD_MAX_CONCURRENT_GLOBAL")
         per_user_rate = _integer_option(
             options,
             "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
@@ -1024,6 +1025,7 @@ async def download_torrent_file(
                 torrent_request_id=torrent_request_id,
                 torrent_file_id=torrent_file_id,
                 max_concurrent=None if is_admin else max_concurrent,
+                max_concurrent_global=max_concurrent_global,
             )
         except DownloadConcurrencyError:
             _fail(

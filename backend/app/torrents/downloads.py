@@ -13,7 +13,6 @@ from collections.abc import AsyncGenerator, Callable, Generator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from threading import Lock
 from typing import IO, cast
 from urllib.parse import quote
 
@@ -25,6 +24,7 @@ from starlette.types import Receive, Scope, Send
 
 from app.http_downloads import OpenedDownload
 from app.models import (
+    DatabaseOption,
     DownloadLease,
     ManagedTorrent,
     ManagedTorrentState,
@@ -41,23 +41,35 @@ _DIRECTORY_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_D
 
 class _ManagedArchiveConcurrency:
     def __init__(self) -> None:
-        self._lock = Lock()
+        self._condition = asyncio.Condition()
         self._active = 0
+        self._waiters: list[object] = []
 
-    def acquire(self, limit: int) -> bool:
+    async def acquire(self, limit: int) -> None:
         if not 1 <= limit <= 16:
             raise ValueError("managed archive concurrency is invalid")
-        with self._lock:
-            if self._active >= limit:
-                return False
+        ticket = object()
+        async with self._condition:
+            self._waiters.append(ticket)
+            try:
+                await self._condition.wait_for(
+                    lambda: self._waiters[0] is ticket and self._active < limit
+                )
+            except BaseException:
+                if ticket in self._waiters:
+                    self._waiters.remove(ticket)
+                self._condition.notify_all()
+                raise
+            self._waiters.pop(0)
             self._active += 1
-            return True
+            self._condition.notify_all()
 
-    def release(self) -> None:
-        with self._lock:
+    async def release(self) -> None:
+        async with self._condition:
             if self._active <= 0:
                 raise RuntimeError("managed archive concurrency underflow")
             self._active -= 1
+            self._condition.notify_all()
 
 
 _managed_archive_concurrency = _ManagedArchiveConcurrency()
@@ -69,10 +81,6 @@ class ManagedDownloadError(RuntimeError):
 
 class DownloadConcurrencyError(RuntimeError):
     """The durable per-user concurrent download limit was reached."""
-
-
-class ManagedArchiveBusyError(RuntimeError):
-    """The bounded managed ZIP slot is already in use."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,18 +246,17 @@ class ManagedFolderArchiver:
         self._max_concurrent_global = max_concurrent_global
         self._acquired = False
 
-    def acquire(self) -> None:
+    async def acquire(self) -> None:
         if self._acquired:
             return
-        if not _managed_archive_concurrency.acquire(self._max_concurrent_global):
-            raise ManagedArchiveBusyError("managed archive concurrency limit reached")
+        await _managed_archive_concurrency.acquire(self._max_concurrent_global)
         self._acquired = True
 
-    def release(self) -> None:
+    async def release(self) -> None:
         if not self._acquired:
             return
         self._acquired = False
-        _managed_archive_concurrency.release()
+        await _managed_archive_concurrency.release()
 
     @property
     def content_disposition(self) -> str:
@@ -271,46 +278,43 @@ class ManagedFolderArchiver:
 
     def _iter_chunks(self, *, chunk_size: int) -> Generator[bytes, None, None]:
         writer = _StreamingZipBuffer()
-        try:
-            with zipfile.ZipFile(
-                cast("IO[bytes]", writer),
-                mode="w",
-                compression=zipfile.ZIP_STORED,
-                allowZip64=True,
-            ) as archive:
-                for entry in self._entries:
-                    opened = self._downloader.open(
-                        self._storage_key,
-                        entry.relative_path,
-                        expected_size=entry.size,
-                        manifest_checksum=self._manifest_checksum,
-                        manifest_version=self._manifest_version,
-                        file_index=entry.file_index,
+        with zipfile.ZipFile(
+            cast("IO[bytes]", writer),
+            mode="w",
+            compression=zipfile.ZIP_STORED,
+            allowZip64=True,
+        ) as archive:
+            for entry in self._entries:
+                opened = self._downloader.open(
+                    self._storage_key,
+                    entry.relative_path,
+                    expected_size=entry.size,
+                    manifest_checksum=self._manifest_checksum,
+                    manifest_version=self._manifest_version,
+                    file_index=entry.file_index,
+                )
+                try:
+                    info = zipfile.ZipInfo(
+                        entry.archive_path or entry.relative_path,
+                        opened.modified_at.timetuple()[:6],
                     )
-                    try:
-                        info = zipfile.ZipInfo(
-                            entry.archive_path or entry.relative_path,
-                            opened.modified_at.timetuple()[:6],
-                        )
-                        info.compress_type = zipfile.ZIP_STORED
-                        info.external_attr = 0o100640 << 16
-                        remaining = entry.size
-                        with archive.open(info, mode="w", force_zip64=True) as target:
-                            while remaining > 0:
-                                chunk = os.read(opened.file_descriptor, min(chunk_size, remaining))
-                                if not chunk:
-                                    raise ManagedDownloadError(
-                                        "managed archive file ended before manifest size"
-                                    )
-                                target.write(chunk)
-                                remaining -= len(chunk)
-                                yield from writer.drain()
-                        yield from writer.drain()
-                    finally:
-                        opened.close()
-            yield from writer.drain()
-        finally:
-            self.release()
+                    info.compress_type = zipfile.ZIP_STORED
+                    info.external_attr = 0o100640 << 16
+                    remaining = entry.size
+                    with archive.open(info, mode="w", force_zip64=True) as target:
+                        while remaining > 0:
+                            chunk = os.read(opened.file_descriptor, min(chunk_size, remaining))
+                            if not chunk:
+                                raise ManagedDownloadError(
+                                    "managed archive file ended before manifest size"
+                                )
+                            target.write(chunk)
+                            remaining -= len(chunk)
+                            yield from writer.drain()
+                    yield from writer.drain()
+                finally:
+                    opened.close()
+        yield from writer.drain()
 
 
 class DownloadLeaseManager:
@@ -339,11 +343,21 @@ class DownloadLeaseManager:
         torrent_request_id: uuid.UUID,
         torrent_file_id: uuid.UUID,
         max_concurrent: int | None,
+        max_concurrent_global: int = 20,
     ) -> DownloadLease:
         if max_concurrent is not None and not 1 <= max_concurrent <= 20:
             raise ValueError("download concurrency limit is invalid")
+        if not 1 <= max_concurrent_global <= 20:
+            raise ValueError("global download concurrency limit is invalid")
         now = self._clock()
         async with self._session.begin():
+            global_lock = await self._session.scalar(
+                select(DatabaseOption)
+                .where(DatabaseOption.key == "WOS_DOWNLOAD_MAX_CONCURRENT_GLOBAL")
+                .with_for_update()
+            )
+            if global_lock is None:
+                raise ManagedDownloadError("global download concurrency option is missing")
             locked_user_id = await self._session.scalar(
                 select(User.id).where(User.id == user_id).with_for_update()
             )
@@ -370,10 +384,16 @@ class DownloadLeaseManager:
                 raise ManagedDownloadError("download right is no longer ready")
             await self._session.execute(
                 delete(DownloadLease).where(
-                    DownloadLease.user_id == user_id,
                     DownloadLease.expires_at <= now,
                 )
             )
+            active_global = await self._session.scalar(
+                select(func.count())
+                .select_from(DownloadLease)
+                .where(DownloadLease.expires_at > now)
+            )
+            if active_global is None or active_global >= max_concurrent_global:
+                raise DownloadConcurrencyError("global download concurrency limit reached")
             if max_concurrent is not None:
                 active = await self._session.scalar(
                     select(func.count())
@@ -601,7 +621,6 @@ async def stream_managed_archive(
             yield chunk
     finally:
         await run_in_threadpool(chunks.close)
-        archiver.release()
 
 
 class ManagedDownloadStreamingResponse(StreamingResponse):
@@ -687,5 +706,5 @@ class ManagedArchiveStreamingResponse(StreamingResponse):
         try:
             await super().__call__(scope, receive, send)
         finally:
-            self._archiver.release()
+            await self._archiver.release()
             await self._leases.release(self._lease.id)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import uuid
 import zipfile
@@ -26,7 +27,6 @@ from app.models import (
 from app.options import PostgresOptionsRegistry
 from app.storage import SharedContentStore
 from app.torrents.downloads import (
-    ManagedArchiveBusyError,
     ManagedArchiveEntry,
     ManagedFileDownloader,
     ManagedFolderArchiver,
@@ -430,7 +430,8 @@ async def test_another_user_cannot_list_or_archive_owned_folders(
     assert archive.status_code == 404
 
 
-def test_archive_concurrency_guard_honors_dynamic_global_limit(data_root: Path) -> None:
+@pytest.mark.asyncio
+async def test_archive_concurrency_guard_honors_dynamic_global_limit(data_root: Path) -> None:
     store = SharedContentStore(data_root)
     archivers = [
         ManagedFolderArchiver(
@@ -444,11 +445,13 @@ def test_archive_concurrency_guard_honors_dynamic_global_limit(data_root: Path) 
         )
         for _ in range(3)
     ]
-    try:
-        archivers[0].acquire()
-        archivers[1].acquire()
-        with pytest.raises(ManagedArchiveBusyError):
-            archivers[2].acquire()
-    finally:
-        for archiver in archivers:
-            archiver.release()
+    await archivers[0].acquire()
+    await archivers[1].acquire()
+    waiting = asyncio.create_task(archivers[2].acquire())
+    await asyncio.sleep(0)
+    assert waiting.done() is False
+
+    await archivers[0].release()
+    await asyncio.wait_for(waiting, timeout=1)
+    await archivers[1].release()
+    await archivers[2].release()
