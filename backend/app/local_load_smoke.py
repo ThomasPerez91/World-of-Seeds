@@ -46,6 +46,7 @@ ACCOUNT_COUNT = 100
 SCALES = (1, 10, 25, 50, 100)
 PREFIX = "load-v2-32-"
 CONTENT = b"World of Seeds V2 bounded load smoke\n"
+DOWNLOAD_RETRY_LIMIT = 10
 STORAGE_KEY = uuid.UUID("32323232-3232-4232-8232-323232323232")
 
 
@@ -217,7 +218,7 @@ async def _request_batch(
                 f"/api/v2/torrents/{identity.request_id}/files/{identity.file_id}/download",
                 headers={**headers, "Range": "bytes=0-0"},
             )
-            if download.status_code != 429 or retries >= 5:
+            if download.status_code != 429 or retries >= DOWNLOAD_RETRY_LIMIT:
                 break
             retries += 1
             await asyncio.sleep(0.05 * retries)

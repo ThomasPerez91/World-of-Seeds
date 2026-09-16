@@ -56,6 +56,16 @@ Principes de scope :
 - l'annulation d'un torrent conserve le modèle V2 : désabonnement d'un utilisateur lorsqu'il reste d'autres droits actifs, puis lifecycle de purge seulement lorsqu'il ne reste plus de demande active ;
 - V2-32D reste bloquée : ne pas prétendre supprimer précisément les statistiques NewGreedy lors d'une dernière annulation tant que NewGreedy n'offre pas le contrat full-hash requis.
 
+Principes de récupération locale :
+
+- la File System Access API est le chemin direct privilégié lorsqu'elle est disponible ; le ZIP
+  reste une solution de repli indépendante et ne doit jamais masquer ce chemin ;
+- les flux HTTP sont bornés par utilisateur et globalement ; un administrateur n'est pas soumis au
+  plafond individuel mais reste soumis au plafond global de protection du serveur ;
+- les ZIP complets et de dossiers partagent la même file FIFO globale ;
+- le scheduler conserve une cadence de synchronisation rapide, mais ses décisions de rotation qB
+  utilisent un quantum séparé afin de préserver l'équité sans provoquer de churn excessif.
+
 Le découpage de référence est `UX-01` à `UX-06` dans `docs/roadmap-v2.md`. `PROGRESS.md` indique la tâche courante.
 
 ## Repository et branches

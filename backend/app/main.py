@@ -15,7 +15,6 @@ from app.api.external.middleware import ExternalRequestIdMiddleware
 from app.api.external.rate_limit import ExternalApiRateLimiter
 from app.api.router import api_v2_router, build_api_router, external_v1_router
 from app.coordination import RedisCoordinator
-from app.core.archive_queue import ArchiveDownloadQueueMiddleware
 from app.core.config import Settings, get_settings
 from app.core.database import engine
 from app.core.http_security import SecurityHeadersMiddleware
@@ -67,7 +66,6 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
         SecurityHeadersMiddleware,
         enable_hsts=settings.cookie_secure,
     )
-    application.add_middleware(ArchiveDownloadQueueMiddleware)
     application.add_middleware(
         RequestMetricsMiddleware,
         registry=application.state.metrics_registry,

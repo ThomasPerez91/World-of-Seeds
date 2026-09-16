@@ -24,7 +24,8 @@ from app.jobs.torrent_effects import (
     TorrentSyncEnqueuer,
 )
 from app.jobs.torrent_payloads import MAX_MANAGED_TORRENT_BYTES, TorrentPayloadStore
-from app.jobs.worker import TorrentWorker
+from app.jobs.worker import TorrentWorker, TorrentWorkerConfig
+from app.options import PostgresOptionsRegistry
 from app.storage import SharedContentStore
 
 
@@ -62,8 +63,22 @@ async def main() -> None:
     settings = get_settings()
     validate_worker_runtime(settings)
     redis = RedisCoordinator.from_settings(settings)
+    async with session_factory() as session, session.begin():
+        registry = PostgresOptionsRegistry()
+        await registry.initialize(session)
+        runtime_options = await registry.snapshot(session)
+    configured_concurrency = runtime_options.get("WOS_WORKER_CONCURRENCY")
+    if type(configured_concurrency) is not int or not 1 <= configured_concurrency <= 16:
+        raise RuntimeError("worker_concurrency_option_invalid")
+    worker_config = TorrentWorkerConfig(concurrency=configured_concurrency)
     if settings.integration_accounts_json is None:
-        worker = TorrentWorker(session_factory, redis, {}, worker_id=_worker_id())
+        worker = TorrentWorker(
+            session_factory,
+            redis,
+            {},
+            worker_id=_worker_id(),
+            config=worker_config,
+        )
         retention_reaper = TorrentRetentionReaper(session_factory, redis)
         loop = asyncio.get_running_loop()
 
@@ -111,6 +126,7 @@ async def main() -> None:
             redis,
             effects.handlers,
             worker_id=_worker_id(),
+            config=worker_config,
         )
         sync_enqueuer = TorrentSyncEnqueuer(session_factory, redis)
         retention_reaper = TorrentRetentionReaper(session_factory, redis)

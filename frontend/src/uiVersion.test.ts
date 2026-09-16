@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { UI_VERSION } from "./uiVersion";
 
 describe("UI_VERSION", () => {
-  it("expose la version visuelle World of Seeds 2.2.4", () => {
-    expect(UI_VERSION).toBe("2.2.4");
+  it("expose la version visuelle World of Seeds 2.2.5", () => {
+    expect(UI_VERSION).toBe("2.2.5");
   });
 });

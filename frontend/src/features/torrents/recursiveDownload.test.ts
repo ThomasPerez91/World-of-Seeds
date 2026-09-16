@@ -121,6 +121,46 @@ describe("RecursiveDownloadController", () => {
     }));
   });
 
+  it("réessaie automatiquement lorsqu’un slot serveur global est occupé", async () => {
+    vi.useFakeTimers();
+    try {
+      const directory = new MemoryDirectory();
+      const oneFile = {
+        ...snapshot(),
+        file_count: 1,
+        total_size: 3,
+        items: [snapshot().items[0]],
+      };
+      const fetcher = vi.fn()
+        .mockResolvedValueOnce(new Response(null, { status: 429 }))
+        .mockResolvedValueOnce(new Response(null, { status: 429 }))
+        .mockResolvedValueOnce(fileResponse(new Uint8Array([1, 2, 3])));
+      const updates: RecursiveTransferProgress[] = [];
+      const controller = new RecursiveDownloadController({
+        torrentRequestId: "request",
+        firstPage: oneFile,
+        directory,
+        loadManifestPage: vi.fn(),
+        concurrency: 1,
+        fetcher,
+        onProgress: (progress) => updates.push(progress),
+      });
+
+      const running = controller.start();
+      await vi.runAllTimersAsync();
+      await running;
+
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      expect(updates.at(-1)).toMatchObject({
+        status: "completed",
+        downloadedBytes: 3,
+        error: null,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("publie la file locale exacte avec actifs et positions d’attente", async () => {
     const items = Array.from({ length: 5 }, (_, index) => ({
       id: `file-${index}`,
