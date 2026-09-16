@@ -6,7 +6,27 @@ import type {
 const MAX_MANIFEST_PAGE_SIZE = 500;
 const MAX_BUFFERED_MANIFEST_PAGES = 2;
 const MAX_VISIBLE_QUEUE_ITEMS = 8;
+const MAX_DOWNLOAD_BUSY_RETRIES = 6;
 export const DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY = 2;
+
+function waitForDownloadSlot(attempt: number, signal: AbortSignal): Promise<void> {
+  const delayMs = Math.min(2_000, 100 * (2 ** attempt));
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("transfer stopped", "AbortError"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("transfer stopped", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 export interface WritableFileHandle {
   write(data: Uint8Array): Promise<void>;
@@ -305,13 +325,18 @@ export class RecursiveDownloadController {
     try {
       const headers = new Headers({ "X-WOS-Download-Snapshot": this.snapshot.snapshot_id });
       if (offset > 0) headers.set("Range", `bytes=${offset}-`);
-      const response = await this.fetcher(
-        `/api/v2/torrents/${encodeURIComponent(this.torrentRequestId)}/files/${encodeURIComponent(file.id)}/download`,
-        { headers, credentials: "same-origin", signal: controller.signal },
-      );
-      if (response.status === 429) {
+      let response: Response;
+      for (let attempt = 0; ; attempt += 1) {
+        response = await this.fetcher(
+          `/api/v2/torrents/${encodeURIComponent(this.torrentRequestId)}/files/${encodeURIComponent(file.id)}/download`,
+          { headers, credentials: "same-origin", signal: controller.signal },
+        );
+        if (response.status !== 429) break;
         await response.body?.cancel().catch(() => undefined);
-        throw new TransferFailure("download_busy");
+        if (attempt >= MAX_DOWNLOAD_BUSY_RETRIES) {
+          throw new TransferFailure("download_busy");
+        }
+        await waitForDownloadSlot(attempt, controller.signal);
       }
       if (response.status === 404 || response.status === 410) {
         await response.body?.cancel().catch(() => undefined);
