@@ -37,6 +37,66 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Rebuild the legacy physical-retention deadline before restoring its check
+    # constraint. Torrents that became READY after this revision have a
+    # per-subscription deadline but deliberately no managed-torrent deadline.
+    op.execute(
+        sa.text(
+            """
+            WITH subscription_deadlines AS (
+                SELECT
+                    managed_torrent_id,
+                    min(ready_at) FILTER (WHERE ready_at IS NOT NULL) AS ready_at,
+                    max(unsubscribe_at) FILTER (WHERE unsubscribe_at IS NOT NULL)
+                        AS unsubscribe_at
+                FROM torrent_requests
+                WHERE state = 'READY'
+                GROUP BY managed_torrent_id
+            )
+            UPDATE managed_torrents AS mt
+            SET ready_at = COALESCE(
+                    mt.ready_at,
+                    deadlines.ready_at,
+                    deadlines.unsubscribe_at,
+                    mt.updated_at
+                ),
+                retention_expires_at = GREATEST(
+                    COALESCE(
+                        mt.ready_at,
+                        deadlines.ready_at,
+                        deadlines.unsubscribe_at,
+                        mt.updated_at
+                    ),
+                    COALESCE(
+                        mt.retention_expires_at,
+                        mt.ready_at,
+                        deadlines.ready_at,
+                        deadlines.unsubscribe_at,
+                        mt.updated_at
+                    ),
+                    COALESCE(
+                        deadlines.unsubscribe_at,
+                        mt.retention_expires_at,
+                        mt.ready_at,
+                        deadlines.ready_at,
+                        mt.updated_at
+                    )
+                )
+            FROM subscription_deadlines AS deadlines
+            WHERE deadlines.managed_torrent_id = mt.id
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            UPDATE managed_torrents
+            SET ready_at = COALESCE(ready_at, retention_expires_at),
+                retention_expires_at = COALESCE(retention_expires_at, ready_at)
+            WHERE ready_at IS NOT NULL OR retention_expires_at IS NOT NULL
+            """
+        )
+    )
     op.create_check_constraint(
         "ck_managed_torrents_ready_retention",
         "managed_torrents",
