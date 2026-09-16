@@ -5,7 +5,7 @@ import uuid
 from collections.abc import Collection
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import TorrentJob, TorrentJobState
@@ -95,8 +95,19 @@ async def claim_next_torrent_job(
     if accepted_job_types is not None:
         statement = statement.where(TorrentJob.job_type.in_(accepted_job_types))
 
+    priority = case(
+        (
+            TorrentJob.job_type.in_(
+                ("PURGE_TORRENT", "RECOVER_CANCEL_REQUESTS", "RECOVER_PURGE_METADATA")
+            ),
+            0,
+        ),
+        (TorrentJob.job_type == "ADD_TORRENT", 1),
+        (TorrentJob.job_type == "SYNC_TORRENT", 3),
+        else_=2,
+    )
     job = await session.scalar(
-        statement.order_by(TorrentJob.available_at, TorrentJob.created_at, TorrentJob.id)
+        statement.order_by(priority, TorrentJob.available_at, TorrentJob.created_at, TorrentJob.id)
         .with_for_update(skip_locked=True)
         .limit(1)
     )

@@ -20,6 +20,7 @@ from app.torrents.downloads import DownloadLeaseManager, ManagedDownloadError
 async def test_engaged_download_can_finish_after_unsubscribe_but_no_new_lease_starts(
     db_session: AsyncSession,
 ) -> None:
+    await PostgresOptionsRegistry().initialize(db_session)
     now = datetime(2026, 9, 9, 20, 0, tzinfo=UTC)
     owner = User(username="lease-owner", password_hash="not-used")
     torrent = ManagedTorrent(
@@ -54,7 +55,6 @@ async def test_engaged_download_can_finish_after_unsubscribe_but_no_new_lease_st
     managed_torrent_id = torrent.id
     torrent_request_id = request.id
     torrent_file_id = torrent_file.id
-
     manager = DownloadLeaseManager(db_session, lease_seconds=60, clock=lambda: now)
     lease = await manager.acquire(
         user_id=owner_id,

@@ -1,10 +1,26 @@
 # World of Seeds — Progress
 
-## Etat courant — 14 septembre 2026
+## Etat courant — 16 septembre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.2.3`.
+- Version applicative cible : `2.2.5`.
+
+## Release 2.2.5 — équité et fiabilité des transferts
+
+- cadence de décision du scheduler qBittorrent séparée de la synchronisation, avec un quantum de
+  contrôle configurable à 120 secondes par défaut pour éviter les rotations toutes les 5 secondes ;
+- jobs durables ordonnés par priorité explicite : purge/récupération, ajout, jobs inconnus, puis
+  synchronisation, sans perdre l'ordre FIFO à priorité égale ;
+- `WOS_WORKER_CONCURRENCY` réellement appliquée au démarrage des workers ;
+- limite globale durable des flux HTTP en plus de la limite par utilisateur, y compris pour les
+  administrateurs ;
+- une file FIFO commune et configurable pour les ZIP complets et les ZIP de dossiers ;
+- erreurs de saturation et d'indisponibilité distinguées dans le Download Manager ;
+- téléchargement direct vers un dossier proposé avec la File System Access API même lorsqu'un ZIP
+  de secours est disponible, notamment sous Brave ;
+- parcours des gros manifests effectué en flux pour l'arborescence et limité au sous-arbre demandé
+  pour la création d'un ZIP de dossier.
 
 ## Release 2.2.3 — quota, auth seeds et API externe
 

@@ -257,6 +257,8 @@ const transferErrorKeys: Record<RecursiveTransferErrorCode, MessageKey> = {
   local_disk_full: "downloads.localDiskFull",
   local_write_denied: "downloads.localWriteDenied",
   local_destination_missing: "downloads.localDestinationMissing",
+  download_busy: "downloads.busy",
+  download_unavailable: "downloads.unavailable",
   download_interrupted: "downloads.interrupted",
   local_transfer_failed: "downloads.failed",
 };
@@ -420,6 +422,11 @@ function ReadyTorrentContent({
               <span>{t(snapshot.file_count === 1 ? "downloads.contentSummaryOne" : "downloads.contentSummaryMany", { count: snapshot.file_count, size: formatBytes(snapshot.total_size) })}</span>
             )}
           </div>
+          {snapshot !== null && snapshot.file_count > 1 && !compatible && (
+            <Button disabled={folderBusy} onClick={onDownloadAll}>
+              <DownloadIcon /> {t("downloads.downloadAll")}
+            </Button>
+          )}
           {snapshot !== null && snapshot.file_count > 1 && snapshot.archive_available && (
             <a
               className="download-fallback-archive"
@@ -429,11 +436,6 @@ function ReadyTorrentContent({
             >
               <Archive aria-hidden="true" /> {t("downloads.archive")}
             </a>
-          )}
-          {snapshot !== null && snapshot.file_count > 1 && !snapshot.archive_available && !compatible && (
-            <Button disabled={folderBusy} onClick={onDownloadAll}>
-              <DownloadIcon /> {t("downloads.downloadAll")}
-            </Button>
           )}
         </div>
       </div>

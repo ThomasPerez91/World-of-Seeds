@@ -988,7 +988,7 @@ describe("UserDownloadsPage", () => {
             manifest_version: 1,
             file_count: 2,
             total_size: 3,
-            archive_available: false,
+            archive_available: true,
             retention_expires_at: null,
             offset: 0,
             limit: 500,
@@ -1019,6 +1019,7 @@ describe("UserDownloadsPage", () => {
     const view = renderPage();
 
     await user.click(await screen.findByRole("button", { name: "Afficher les détails de Film.mkv" }));
+    expect(screen.getByRole("link", { name: "Télécharger le ZIP" })).toBeTruthy();
     await user.click(await screen.findByRole("button", { name: "Tout télécharger" }));
 
     expect(await screen.findByText("« Film.mkv » a été téléchargé.")).toBeTruthy();

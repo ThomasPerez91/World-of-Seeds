@@ -61,4 +61,4 @@ async def test_download_policy_exposes_unlimited_concurrency_for_active_admin(
     response = await client.get("/api/v2/downloads/policy")
 
     assert response.status_code == 200
-    assert response.json() == {"max_concurrent_streams": None, "unlimited": True}
+    assert response.json() == {"max_concurrent_streams": 8, "unlimited": True}

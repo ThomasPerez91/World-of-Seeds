@@ -149,6 +149,16 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         unit="count",
     ),
     _integer(
+        "WOS_DOWNLOAD_MAX_CONCURRENT_GLOBAL",
+        "Téléchargements simultanés globaux",
+        "Nombre maximal de flux HTTP ouverts sur l’ensemble des API, administrateurs inclus.",
+        8,
+        "downloads",
+        minimum=1,
+        maximum=20,
+        unit="count",
+    ),
+    _integer(
         "WOS_DOWNLOAD_LEASE_SECONDS",
         "Durée d’une lease",
         "Durée de protection d’un contenu pendant son téléchargement.",
@@ -170,8 +180,9 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     ),
     _integer(
         "WOS_FOLDER_ARCHIVE_MAX_CONCURRENT_GLOBAL",
-        "Archives dossier simultanées",
-        "Nombre maximal d’archives ZIP de dossier produites simultanément par processus API.",
+        "Archives ZIP simultanées",
+        "Nombre maximal d’archives ZIP complètes ou de dossier produites simultanément "
+        "par processus API.",
         4,
         "downloads",
         minimum=1,
@@ -296,6 +307,16 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         "torrents",
         minimum=2,
         maximum=300,
+        unit="seconds",
+    ),
+    _integer(
+        "WOS_SCHEDULER_CONTROL_INTERVAL_SECONDS",
+        "Quantum du scheduler",
+        "Durée minimale entre deux redistributions équitables des slots qBittorrent.",
+        120,
+        "torrents",
+        minimum=30,
+        maximum=1800,
         unit="seconds",
     ),
     _integer(

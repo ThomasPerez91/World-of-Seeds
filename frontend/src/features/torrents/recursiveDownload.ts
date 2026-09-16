@@ -45,6 +45,8 @@ export type RecursiveTransferErrorCode =
   | "local_disk_full"
   | "local_write_denied"
   | "local_destination_missing"
+  | "download_busy"
+  | "download_unavailable"
   | "download_interrupted"
   | "local_transfer_failed";
 
@@ -307,6 +309,18 @@ export class RecursiveDownloadController {
         `/api/v2/torrents/${encodeURIComponent(this.torrentRequestId)}/files/${encodeURIComponent(file.id)}/download`,
         { headers, credentials: "same-origin", signal: controller.signal },
       );
+      if (response.status === 429) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new TransferFailure("download_busy");
+      }
+      if (response.status === 404 || response.status === 410) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new TransferFailure("download_unavailable");
+      }
+      if (response.status >= 500) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new TransferFailure("download_interrupted");
+      }
       if (!this.responseMatchesSnapshot(response, file, offset) || response.body === null) {
         if (response.body !== null) {
           await response.body.cancel().catch(() => undefined);
