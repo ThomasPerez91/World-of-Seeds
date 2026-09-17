@@ -233,6 +233,107 @@
   gap: 0.75rem;
 }
 
+.admin-runtime-heading .ui-tooltip-anchor {
+  align-self: flex-start;
+}
+
+.admin-runtime-refresh.ui-icon-button {
+  width: 2.75rem;
+  min-width: 2.75rem;
+  height: 2.75rem;
+  margin: 0;
+  padding: 0.65rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+}
+
+.admin-runtime-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.admin-runtime-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.admin-runtime-table {
+  width: 100%;
+  min-width: 44rem;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: var(--color-surface);
+}
+
+.admin-newgreedy-table {
+  min-width: 58rem;
+}
+
+.admin-runtime-table th,
+.admin-runtime-table td {
+  padding: 0.8rem 0.9rem;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.admin-runtime-table th {
+  color: var(--color-text-muted);
+  background: var(--color-background-secondary);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-runtime-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-qb-table th:first-child { width: 42%; }
+.admin-qb-table th:nth-child(2) { width: 16%; }
+.admin-qb-table th:nth-child(3) { width: 18%; }
+.admin-qb-table th:nth-child(4) { width: 24%; }
+.admin-newgreedy-table th:first-child { width: 18%; }
+.admin-newgreedy-table th:nth-child(2) { width: 27%; }
+.admin-newgreedy-table th:nth-child(3) { width: 16%; }
+
+.admin-runtime-name {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-runtime-name > span:first-child {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-runtime-table code {
+  display: block;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-runtime-progress {
+  display: grid;
+  grid-template-columns: minmax(5rem, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.admin-runtime-progress .ui-progress { width: 100%; }
+.admin-runtime-progress span { font-variant-numeric: tabular-nums; }
+.admin-runtime-note { color: var(--color-warning); }
+.admin-runtime-updated { margin: 0.75rem 0 0; color: var(--color-text-muted); font-size: 0.85rem; }
+
 .admin-storage-usage.ui-card,
 .admin-metric-card.ui-card,
 .reconciliation-panel.ui-card,

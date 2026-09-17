@@ -1,10 +1,20 @@
 # World of Seeds — Progress
 
-## Etat courant — 16 septembre 2026
+## Etat courant — 17 septembre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.2.5`.
+- Version applicative cible : `2.2.6`.
+
+## Release 2.2.6 — supervision qBittorrent et NewGreedy
+
+- deux vues dédiées ajoutées à l’administration pour superviser qBittorrent et NewGreedy ;
+- inventaire qBittorrent global en lecture seule avec nom, taille, statut, progression et débits
+  download/upload agrégés ;
+- statistiques NewGreedy exposées avec hash, nom qBittorrent corrélé, statut, DL, UL et ratio ;
+- noms longs tronqués avec tooltip et tableaux responsives alignés sur le design du dashboard ;
+- rafraîchissement exclusivement manuel, sans polling automatique sur ces deux écrans ;
+- endpoints V2 réservés aux administrateurs, bornés et sans exposition des secrets d’intégration.
 
 ## Release 2.2.5 — équité et fiabilité des transferts
 

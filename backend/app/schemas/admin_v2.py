@@ -102,3 +102,33 @@ class AdminV2RecoveryResult(BaseModel):
     state: str
     action: Literal["cancel_requests", "purge_metadata"]
     error_code: str | None = None
+
+
+class AdminV2QBittorrentTorrent(BaseModel):
+    hash: str
+    name: str
+    size_bytes: int
+    state: str
+    progress: float
+
+
+class AdminV2QBittorrentRuntime(BaseModel):
+    checked_at: datetime
+    download_speed_bytes: int
+    upload_speed_bytes: int
+    truncated: bool
+    torrents: list[AdminV2QBittorrentTorrent]
+
+
+class AdminV2NewGreedyTorrent(BaseModel):
+    hash: str
+    name: str | None
+    status: Literal["downloading", "seeding", "stalled", "target_reached"]
+    downloaded_bytes: int
+    uploaded_bytes: int
+    ratio: float | None
+
+
+class AdminV2NewGreedyRuntime(BaseModel):
+    checked_at: datetime
+    torrents: list[AdminV2NewGreedyTorrent]
