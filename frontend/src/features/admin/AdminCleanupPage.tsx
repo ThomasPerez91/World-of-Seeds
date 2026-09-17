@@ -16,6 +16,7 @@ import { AdminPageShell, type AdminView } from "./AdminPageShell";
 type SortKey = "name" | "size" | "subscribers" | "deletion";
 type SortOrder = "asc" | "desc";
 type SubscriberFilter = "all" | "none" | "active";
+const PAGE_SIZE = 15;
 
 function compareItems(left: AdminCleanupItem, right: AdminCleanupItem, key: SortKey): number {
   if (key === "name") return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
@@ -41,6 +42,7 @@ export function AdminCleanupPage({ onBack, onNavigate, onSessionExpired }: {
   const [subscriberFilter, setSubscriberFilter] = useState<SubscriberFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
+  const [requestedPage, setRequestedPage] = useState(1);
   const [purgeSelection, setPurgeSelection] = useState<AdminCleanupItem[] | null>(null);
   const [purging, setPurging] = useState(false);
 
@@ -74,7 +76,14 @@ export function AdminCleanupPage({ onBack, onNavigate, onSessionExpired }: {
       });
   }, [listing, search, sortKey, sortOrder, subscriberFilter]);
 
+  const pageCount = Math.max(1, Math.ceil(visibleItems.length / PAGE_SIZE));
+  const page = Math.min(requestedPage, pageCount);
+  const pageItems = visibleItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const filteredSize = visibleItems.reduce((total, item) => total + item.size_bytes, 0);
+  const withoutSubscribers = visibleItems.filter((item) => item.subscriber_count === 0).length;
+
   function changeSort(key: SortKey) {
+    setRequestedPage(1);
     if (sortKey === key) {
       setSortOrder((current) => current === "asc" ? "desc" : "asc");
       return;
@@ -145,12 +154,18 @@ export function AdminCleanupPage({ onBack, onNavigate, onSessionExpired }: {
               type="search"
               value={search}
               placeholder={t("admin.cleanupSearchPlaceholder")}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setRequestedPage(1);
+              }}
             />
           </label>
           <label>
             <span>{t("admin.cleanupSubscribersFilter")}</span>
-            <select value={subscriberFilter} onChange={(event) => setSubscriberFilter(event.target.value as SubscriberFilter)}>
+            <select value={subscriberFilter} onChange={(event) => {
+              setSubscriberFilter(event.target.value as SubscriberFilter);
+              setRequestedPage(1);
+            }}>
               <option value="all">{t("admin.cleanupSubscribersAll")}</option>
               <option value="none">{t("admin.cleanupSubscribersNone")}</option>
               <option value="active">{t("admin.cleanupSubscribersActive")}</option>
@@ -166,6 +181,23 @@ export function AdminCleanupPage({ onBack, onNavigate, onSessionExpired }: {
             {t("admin.cleanupPurgeFiltered", { count: formatNumber(visibleItems.length) })}
           </Button>
         </div>
+
+        {listing !== null && listing.items.length > 0 ? (
+          <div className="admin-cleanup-summary" aria-label={t("admin.cleanupSummary")}>
+            <div>
+              <span>{t("admin.cleanupFilteredContent")}</span>
+              <strong>{formatNumber(visibleItems.length)}</strong>
+            </div>
+            <div>
+              <span>{t("admin.cleanupFilteredSize")}</span>
+              <strong>{formatBytes(filteredSize)}</strong>
+            </div>
+            <div>
+              <span>{t("admin.cleanupWithoutSubscribers")}</span>
+              <strong>{formatNumber(withoutSubscribers)}</strong>
+            </div>
+          </div>
+        ) : null}
 
         {loading && listing === null ? <StateMessage tone="loading">{t("admin.cleanupLoading")}</StateMessage> : null}
         {error !== "" ? <StateMessage tone="error">{error}</StateMessage> : null}
@@ -185,7 +217,7 @@ export function AdminCleanupPage({ onBack, onNavigate, onSessionExpired }: {
                 </tr>
               </thead>
               <tbody>
-                {visibleItems.map((item) => (
+                {pageItems.map((item) => (
                   <tr key={item.id}>
                     <td data-label={t("admin.cleanupName")}>
                       <Tooltip content={item.name} overflowOnly className="admin-runtime-name">
@@ -197,23 +229,45 @@ export function AdminCleanupPage({ onBack, onNavigate, onSessionExpired }: {
                     <td data-label={t("admin.cleanupDeletionAt")}>
                       {item.deletion_at === null ? t("admin.cleanupNotScheduled") : formatDate(new Date(item.deletion_at))}
                     </td>
-                    <td data-label={t("admin.actions")}>
-                      <Button
-                        variant="danger"
-                        className="admin-cleanup-row-purge"
-                        disabled={purging}
-                        aria-label={t("admin.cleanupPurgeNamed", { name: item.name })}
-                        onClick={() => setPurgeSelection([item])}
-                      >
-                        <Trash2 aria-hidden="true" />
-                        {t("admin.cleanupPurge")}
-                      </Button>
+                    <td className="admin-cleanup-actions" data-label={t("admin.actions")}>
+                      <Tooltip content={t("admin.cleanupPurgeNamed", { name: item.name })} focusable={false}>
+                        <IconButton
+                          variant="danger"
+                          className="admin-cleanup-row-purge"
+                          disabled={purging}
+                          label={t("admin.cleanupPurgeNamed", { name: item.name })}
+                          onClick={() => setPurgeSelection([item])}
+                        >
+                          <Trash2 aria-hidden="true" />
+                        </IconButton>
+                      </Tooltip>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        ) : null}
+        {visibleItems.length > PAGE_SIZE ? (
+          <nav className="admin-cleanup-pagination" aria-label={t("admin.cleanupPagination")}>
+            <Button
+              variant="secondary"
+              disabled={page === 1 || loading || purging}
+              onClick={() => setRequestedPage(Math.max(1, page - 1))}
+            >
+              {t("common.previous")}
+            </Button>
+            <span aria-live="polite">
+              {t("admin.cleanupPage", { page, pages: pageCount, total: visibleItems.length })}
+            </span>
+            <Button
+              variant="secondary"
+              disabled={page === pageCount || loading || purging}
+              onClick={() => setRequestedPage(Math.min(pageCount, page + 1))}
+            >
+              {t("common.next")}
+            </Button>
+          </nav>
         ) : null}
         {listing !== null ? <p className="admin-runtime-updated">{t("admin.lastCheck", { date: formatDate(new Date(listing.checked_at)) })}</p> : null}
       </section>
