@@ -106,4 +106,39 @@ describe("AdminCleanupPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Actualiser" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
   });
+
+  it("pagine l’affichage sans réduire la purge aux éléments de la page", async () => {
+    const items = Array.from({ length: 16 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      name: `Contenu ${String(index + 1).padStart(2, "0")}`,
+      size_bytes: 1_024,
+      subscriber_count: 0,
+      deletion_at: "2026-09-18T10:00:00Z",
+    }));
+    let purgeIds: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/v2/admin/cleanup/purge" && init?.method === "POST") {
+        purgeIds = (JSON.parse(String(init.body)) as { torrent_ids: string[] }).torrent_ids;
+        return response({
+          requested: purgeIds.length,
+          scheduled: purgeIds.length,
+          scheduled_ids: purgeIds,
+          skipped_ids: [],
+        });
+      }
+      return response({ checked_at: "2026-09-17T12:00:00Z", items });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AdminCleanupPage onBack={vi.fn()} onNavigate={vi.fn()} onSessionExpired={vi.fn()} />);
+
+    expect(await screen.findByText("Contenu 01")).toBeTruthy();
+    expect(screen.queryByText("Contenu 16")).toBeNull();
+    expect(screen.getByText("Page 1 sur 2 · 16 contenus")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Suivant" }));
+    expect(screen.getByText("Contenu 16")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Purger les résultats filtrés (16)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirmer la purge" }));
+    await waitFor(() => expect(purgeIds).toEqual(items.map((item) => item.id)));
+  });
 });
