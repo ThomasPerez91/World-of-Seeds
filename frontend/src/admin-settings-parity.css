@@ -1,7 +1,7 @@
-/* Administration visual parity with the account settings page.
- * Loaded after the existing 2.1 polish so the admin shell inherits the same
- * desktop spacing and translucent, blurred panel treatment without changing
- * the shared mobile-first admin composition.
+/* Administration visual parity with the premium dashboard/settings surfaces.
+ * This stylesheet is loaded after the historical 2.1 layers, so it owns the
+ * final desktop composition of the administration area. Runtime views
+ * (qBittorrent, NewGreedy and Nettoyage) deliberately share one visual system.
  */
 
 .admin-page {
@@ -10,6 +10,12 @@
   gap: 1rem !important;
   margin: 0 auto !important;
   padding: 1.25rem 0 2rem !important;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"],
+.admin-page[data-admin-view="admin-newgreedy"],
+.admin-page[data-admin-view="admin-cleanup"] {
+  width: min(100%, var(--wos-content, 1660px)) !important;
 }
 
 @media (min-width: 900px) {
@@ -33,12 +39,12 @@
     gap: 0.25rem !important;
     overflow: visible !important;
     padding: 0.75rem !important;
-    border: 1px solid rgba(157, 220, 184, 0.16) !important;
+    border: 1px solid var(--wos-line, rgba(157, 220, 184, 0.16)) !important;
     border-radius: 16px !important;
-    background: rgba(3, 18, 12, 0.38) !important;
+    background: var(--wos-surface, rgba(3, 18, 12, 0.38)) !important;
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
-    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.16) !important;
+    box-shadow: var(--wos-shadow-soft, 0 16px 42px rgba(0, 0, 0, 0.16)) !important;
   }
 
   .admin-page .settings-shell-navigation-item {
@@ -49,12 +55,12 @@
   .admin-page .settings-shell-content {
     min-width: 0;
     padding: 1.25rem 1.35rem !important;
-    border: 1px solid rgba(157, 220, 184, 0.16) !important;
+    border: 1px solid var(--wos-line, rgba(157, 220, 184, 0.16)) !important;
     border-radius: 18px !important;
-    background: rgba(3, 18, 12, 0.38) !important;
+    background: var(--wos-surface, rgba(3, 18, 12, 0.38)) !important;
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18) !important;
+    box-shadow: var(--wos-shadow-soft, 0 18px 48px rgba(0, 0, 0, 0.18)) !important;
   }
 
   .admin-page .settings-shell-content > .admin-section {
@@ -62,5 +68,416 @@
     border: 0 !important;
     background: transparent !important;
     box-shadow: none !important;
+  }
+
+  .admin-page[data-admin-view="admin-qbittorrent"] .settings-shell,
+  .admin-page[data-admin-view="admin-newgreedy"] .settings-shell,
+  .admin-page[data-admin-view="admin-cleanup"] .settings-shell {
+    grid-template-columns: 220px minmax(0, 1fr) !important;
+    gap: 1.25rem !important;
+  }
+}
+
+/* Runtime admin pages: use the same clear hierarchy and card treatment as the dashboard. */
+.admin-page[data-admin-view="admin-qbittorrent"] .settings-shell-content,
+.admin-page[data-admin-view="admin-newgreedy"] .settings-shell-content,
+.admin-page[data-admin-view="admin-cleanup"] .settings-shell-content {
+  min-width: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime {
+  min-width: 0;
+  padding: clamp(1rem, 2vw, 1.35rem) !important;
+  border: 1px solid var(--wos-line, var(--color-border)) !important;
+  border-radius: var(--wos-radius, 20px) !important;
+  background: var(--wos-surface, var(--color-surface)) !important;
+  box-shadow: var(--wos-shadow-soft, var(--shadow-card)) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  backdrop-filter: blur(18px) saturate(125%);
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-heading,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-heading,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-heading {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 1rem !important;
+  padding: 0 0 1rem;
+  border-bottom: 1px solid var(--wos-line, var(--color-border));
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-heading > div,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-heading > div,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-heading > div {
+  min-width: 0;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-heading .eyebrow,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-heading .eyebrow,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-heading .eyebrow {
+  margin: 0 0 0.35rem;
+  color: var(--wos-accent, var(--color-primary));
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-heading h2,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-heading h2,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-heading h2 {
+  margin: 0 0 0.35rem !important;
+  color: var(--wos-text, var(--color-text));
+  font-size: clamp(1.35rem, 2vw, 1.7rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-heading .section-intro,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-heading .section-intro,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-heading .section-intro {
+  max-width: 72rem;
+  margin: 0;
+  color: var(--wos-muted, var(--color-text-muted));
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-refresh.ui-icon-button,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-refresh.ui-icon-button,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-refresh.ui-icon-button {
+  width: 2.6rem;
+  min-width: 2.6rem;
+  height: 2.6rem;
+  min-height: 2.6rem;
+  flex: 0 0 2.6rem;
+  margin: 0 !important;
+  padding: 0.6rem !important;
+  border: 1px solid var(--wos-line, var(--color-border)) !important;
+  border-radius: var(--wos-radius-sm, 13px) !important;
+  color: var(--wos-text, var(--color-text)) !important;
+  background: var(--wos-surface-soft, var(--color-surface-elevated)) !important;
+  box-shadow: none !important;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-refresh.ui-icon-button:hover:not(:disabled),
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-refresh.ui-icon-button:hover:not(:disabled),
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-refresh.ui-icon-button:hover:not(:disabled) {
+  border-color: var(--wos-line-strong, var(--color-border-strong)) !important;
+  background: var(--wos-accent-dim, var(--color-background-secondary)) !important;
+  transform: none !important;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-summary,
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-summary {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0 0 1rem;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-metric-card.ui-card,
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-summary > div {
+  display: grid;
+  min-height: 5.25rem;
+  align-content: center;
+  gap: 0.25rem;
+  padding: 0.85rem 1rem !important;
+  border: 1px solid var(--wos-line, var(--color-border)) !important;
+  border-radius: var(--wos-radius-sm, 13px) !important;
+  background: var(--wos-surface-soft, var(--color-surface-elevated)) !important;
+  box-shadow: none !important;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-metric-card span,
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-summary span {
+  color: var(--wos-muted, var(--color-text-muted));
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-metric-card strong,
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-summary strong {
+  margin: 0;
+  color: var(--wos-text, var(--color-text));
+  font-size: 1.25rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-table-wrap,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-table-wrap,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--wos-line, var(--color-border)) !important;
+  border-radius: var(--wos-radius-sm, 13px) !important;
+  background: var(--wos-surface-strong, var(--color-surface)) !important;
+  box-shadow: none !important;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-table,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-table,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-table {
+  margin: 0;
+  border-collapse: collapse;
+  background: transparent !important;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-table th,
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-table td,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-table th,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-table td,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-table th,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-table td {
+  padding: 0.72rem 0.85rem;
+  border-bottom: 1px solid var(--wos-line, var(--color-border));
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-table th,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-table th,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-table th {
+  color: var(--wos-muted-2, var(--color-text-muted));
+  background: var(--wos-surface-soft, var(--color-background-secondary));
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-table td,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-table td,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-table td {
+  color: var(--wos-text, var(--color-text));
+  font-size: 0.84rem;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-table tbody tr,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-table tbody tr,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-table tbody tr {
+  transition: background-color 140ms ease;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-table tbody tr:hover,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-table tbody tr:hover,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-table tbody tr:hover {
+  background: color-mix(in srgb, var(--wos-accent, var(--color-primary)) 6%, transparent) !important;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-table tbody tr:last-child td,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-table tbody tr:last-child td,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:first-child { width: 46%; }
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(2) { width: 14%; }
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(3) { width: 16%; }
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(4) { width: 24%; }
+
+.admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table th:first-child { width: 16%; }
+.admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table th:nth-child(2) { width: 34%; }
+.admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table th:nth-child(3) { width: 14%; }
+.admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table th:nth-child(4) { width: 12%; }
+.admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table th:nth-child(5) { width: 12%; }
+.admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table th:nth-child(6) { width: 12%; }
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table th:first-child { width: 44%; }
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table th:nth-child(2) { width: 12%; }
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table th:nth-child(3) { width: 12%; }
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table th:nth-child(4) { width: 22%; }
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table th:nth-child(5) { width: 10%; }
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-name,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-name,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-name {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-table code {
+  color: var(--wos-muted-2, var(--color-text-muted));
+  font-size: 0.76rem;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-progress {
+  grid-template-columns: minmax(5rem, 1fr) auto;
+  gap: 0.55rem;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-progress .ui-progress {
+  height: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wos-muted, var(--color-text-muted)) 18%, transparent);
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-progress span {
+  min-width: 3.25rem;
+  color: var(--wos-muted, var(--color-text-muted));
+  text-align: right;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-updated,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-updated,
+.admin-page[data-admin-view="admin-cleanup"] .admin-runtime-updated {
+  margin: 0.75rem 0 0;
+  color: var(--wos-muted-2, var(--color-text-muted));
+  font-size: 0.76rem;
+  text-align: right;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-toolbar {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1fr) minmax(12rem, 0.38fr) auto;
+  gap: 0.7rem;
+  align-items: end;
+  margin: 0 0 1rem;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-toolbar label {
+  display: grid;
+  min-width: 0;
+  gap: 0.35rem;
+  margin: 0;
+  color: var(--wos-muted, var(--color-text-muted));
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-toolbar input,
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-toolbar select {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.6rem;
+  margin: 0;
+  border: 1px solid var(--wos-line, var(--color-border)) !important;
+  border-radius: var(--wos-radius-sm, 13px) !important;
+  color: var(--wos-text, var(--color-text));
+  background: var(--wos-surface-strong, var(--color-surface)) !important;
+  box-shadow: none !important;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-toolbar input:focus-visible,
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-toolbar select:focus-visible {
+  border-color: var(--wos-accent, var(--color-focus)) !important;
+  outline: 2px solid color-mix(in srgb, var(--wos-accent, var(--color-focus)) 28%, transparent);
+  outline-offset: 1px;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-purge-filtered.ui-button {
+  min-height: 2.6rem;
+  margin: 0 !important;
+  white-space: nowrap;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table thead .admin-cleanup-sort {
+  gap: 0.32rem;
+  color: inherit !important;
+  background: transparent !important;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table thead .admin-cleanup-sort:hover:not(:disabled) {
+  color: var(--wos-text, var(--color-text)) !important;
+  background: transparent !important;
+  transform: none !important;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-actions {
+  text-align: right !important;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-actions .ui-tooltip-anchor {
+  display: inline-flex;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-row-purge.ui-icon-button {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  min-height: 2.25rem;
+  margin: 0 !important;
+  padding: 0.48rem !important;
+  border-radius: 10px !important;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-pagination {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.8rem;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-pagination .ui-button {
+  min-height: 2.35rem;
+  margin: 0;
+  padding: 0.5rem 0.8rem;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-pagination span {
+  color: var(--wos-muted-2, var(--color-text-muted));
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+@media (max-width: 899px) {
+  .admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime,
+  .admin-page[data-admin-view="admin-newgreedy"] .admin-runtime,
+  .admin-page[data-admin-view="admin-cleanup"] .admin-runtime {
+    border-radius: 16px !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-heading,
+  .admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-heading,
+  .admin-page[data-admin-view="admin-cleanup"] .admin-runtime-heading {
+    align-items: flex-start;
+  }
+
+  .admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-summary,
+  .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-summary,
+  .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-purge-filtered.ui-button {
+    width: 100%;
+  }
+
+  .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-pagination {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-pagination span {
+    grid-column: 1 / -1;
+    grid-row: 1;
   }
 }

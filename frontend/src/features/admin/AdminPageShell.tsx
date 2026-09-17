@@ -37,7 +37,7 @@ export function AdminPageShell({
 }) {
   const { t } = useI18n();
   return (
-    <section className="admin-page" aria-labelledby="administration-title">
+    <section className="admin-page" data-admin-view={activeView} aria-labelledby="administration-title">
       <Button className="back-button" onClick={onBack}>
         <BackIcon /> {t("common.backDashboard")}
       </Button>
