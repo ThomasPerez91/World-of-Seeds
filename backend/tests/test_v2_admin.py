@@ -8,7 +8,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.security import hash_password
 from app.integrations.types import NewGreedyTorrent, QBittorrentTorrent
 from app.main import app
-from app.models import DatabaseOptionAudit, SchedulerState, StorageLedger, User, UserStorageUsage
+from app.models import (
+    DatabaseOptionAudit,
+    ManagedTorrent,
+    ManagedTorrentState,
+    SchedulerState,
+    StorageLedger,
+    TorrentJob,
+    TorrentJobState,
+    TorrentRequest,
+    TorrentRequestState,
+    User,
+    UserStorageUsage,
+)
 from app.options import PostgresOptionsRegistry
 
 
@@ -217,3 +229,113 @@ async def test_admin_runtime_views_are_read_only_and_aggregate_service_data(
         "uploaded_bytes": 2_000,
         "ratio": 2.0,
     }
+
+
+@pytest.mark.asyncio
+async def test_admin_cleanup_lists_downloads_and_purges_only_explicit_filtered_ids(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    admin = await _admin(db_session)
+    now = datetime.now(UTC).replace(microsecond=0)
+    subscribed = ManagedTorrent(
+        info_hash="b" * 40,
+        name="Subscribed content",
+        total_size=100,
+        state=ManagedTorrentState.READY,
+        progress=1,
+        ready_at=now,
+    )
+    orphan = ManagedTorrent(
+        info_hash="c" * 40,
+        name="Orphan content",
+        total_size=200,
+        state=ManagedTorrentState.READY,
+        progress=1,
+        ready_at=now,
+        purge_after=now + timedelta(hours=4),
+    )
+    downloading = ManagedTorrent(
+        info_hash="d" * 40,
+        name="Still downloading",
+        total_size=300,
+        state=ManagedTorrentState.DOWNLOADING,
+        progress=0.5,
+    )
+    db_session.add_all([subscribed, orphan, downloading])
+    await db_session.flush()
+    subscription = TorrentRequest(
+        user_id=admin.id,
+        managed_torrent_id=subscribed.id,
+        state=TorrentRequestState.READY,
+        ready_at=now,
+        unsubscribe_at=now + timedelta(hours=10),
+    )
+    db_session.add(subscription)
+    usage = await db_session.get(UserStorageUsage, admin.id)
+    assert usage is not None
+    usage.logical_bytes = 1_000
+    await db_session.commit()
+
+    anonymous = await client.get("/api/v2/admin/cleanup")
+    assert anonymous.status_code == 401
+    headers = await _login(client)
+
+    listing = await client.get("/api/v2/admin/cleanup")
+
+    assert listing.status_code == 200
+    items = {item["id"]: item for item in listing.json()["items"]}
+    assert set(items) == {str(subscribed.id), str(orphan.id)}
+    assert items[str(subscribed.id)]["subscriber_count"] == 1
+    assert items[str(subscribed.id)]["size_bytes"] == 100
+    expected_deletion = now + timedelta(hours=58)
+    assert datetime.fromisoformat(items[str(subscribed.id)]["deletion_at"]) == expected_deletion
+    assert items[str(orphan.id)]["subscriber_count"] == 0
+    assert datetime.fromisoformat(items[str(orphan.id)]["deletion_at"]) == now + timedelta(hours=4)
+
+    rejected = await client.post(
+        "/api/v2/admin/cleanup/purge",
+        json={"torrent_ids": [str(orphan.id)]},
+    )
+    assert rejected.status_code == 403
+
+    filtered_purge = await client.post(
+        "/api/v2/admin/cleanup/purge",
+        json={"torrent_ids": [str(orphan.id)]},
+        headers=headers,
+    )
+
+    assert filtered_purge.status_code == 200
+    assert filtered_purge.json() == {
+        "requested": 1,
+        "scheduled": 1,
+        "scheduled_ids": [str(orphan.id)],
+        "skipped_ids": [],
+    }
+    await db_session.refresh(orphan)
+    await db_session.refresh(subscribed)
+    await db_session.refresh(subscription)
+    assert orphan.purge_after is not None
+    assert subscribed.purge_after is None
+    assert subscription.state is TorrentRequestState.READY
+    orphan_job = await db_session.scalar(
+        select(TorrentJob).where(
+            TorrentJob.managed_torrent_id == orphan.id,
+            TorrentJob.job_type == "PURGE_TORRENT",
+        )
+    )
+    assert orphan_job is not None
+    assert orphan_job.state is TorrentJobState.QUEUED
+
+    individual_purge = await client.post(
+        "/api/v2/admin/cleanup/purge",
+        json={"torrent_ids": [str(subscribed.id)]},
+        headers=headers,
+    )
+
+    assert individual_purge.status_code == 200
+    reloaded_subscription = await db_session.get(TorrentRequest, subscription.id)
+    await db_session.refresh(usage)
+    assert reloaded_subscription is not None
+    assert reloaded_subscription.state is TorrentRequestState.CANCELLED
+    assert usage.logical_bytes == 900

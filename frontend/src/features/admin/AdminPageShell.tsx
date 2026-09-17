@@ -10,6 +10,7 @@ export type AdminView =
   | "admin-services"
   | "admin-qbittorrent"
   | "admin-newgreedy"
+  | "admin-cleanup"
   | "admin-settings"
   | "admin-storage";
 
@@ -18,6 +19,7 @@ const navigation: { view: AdminView; label: MessageKey }[] = [
   { view: "admin-services", label: "admin.services" },
   { view: "admin-qbittorrent", label: "admin.qbittorrent" },
   { view: "admin-newgreedy", label: "admin.newgreedy" },
+  { view: "admin-cleanup", label: "admin.cleanup" },
   { view: "admin-settings", label: "admin.settings" },
   { view: "admin-storage", label: "admin.storage" },
 ];

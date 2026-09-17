@@ -14,7 +14,9 @@ from app.admin import (
     ReconciliationCursor,
     ReconciliationCursorError,
     ReconciliationRecoveryError,
+    list_downloaded_content,
     recovery_snapshot,
+    schedule_admin_purge,
     serialize_recovery_snapshot,
 )
 from app.auth.dependencies import (
@@ -24,6 +26,7 @@ from app.auth.dependencies import (
     require_admin_csrf,
     require_current_admin,
 )
+from app.coordination.dependencies import RedisCoordinatorDependency
 from app.integrations.dependencies import AdminRuntimeMonitorDependency
 from app.integrations.http import IntegrationRequestError
 from app.models import (
@@ -50,6 +53,10 @@ from app.options import (
     PostgresOptionsRegistry,
 )
 from app.schemas.admin_v2 import (
+    AdminV2CleanupItem,
+    AdminV2CleanupListing,
+    AdminV2CleanupPurgeRequest,
+    AdminV2CleanupPurgeResult,
     AdminV2NewGreedyRuntime,
     AdminV2NewGreedyTorrent,
     AdminV2OptionAudit,
@@ -69,6 +76,58 @@ from app.schemas.admin_v2 import (
 from app.storage import SharedContentStore, SharedContentStoreError
 
 router = APIRouter()
+
+
+@router.get("/cleanup", response_model=AdminV2CleanupListing)
+async def get_admin_cleanup(
+    db: DbSession,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> AdminV2CleanupListing:
+    retention_hours = await db.scalar(
+        select(DatabaseOption.integer_value).where(
+            DatabaseOption.key == "WOS_TORRENT_RETENTION_HOURS"
+        )
+    )
+    items = await list_downloaded_content(
+        db,
+        retention_hours=48 if retention_hours is None else retention_hours,
+    )
+    return AdminV2CleanupListing(
+        checked_at=datetime.now(UTC),
+        items=[
+            AdminV2CleanupItem(
+                id=item.id,
+                name=item.name,
+                size_bytes=item.size_bytes,
+                subscriber_count=item.subscriber_count,
+                deletion_at=item.deletion_at,
+            )
+            for item in items
+        ],
+    )
+
+
+@router.post("/cleanup/purge", response_model=AdminV2CleanupPurgeResult)
+async def purge_admin_cleanup(
+    payload: AdminV2CleanupPurgeRequest,
+    db: DbSession,
+    redis: RedisCoordinatorDependency,
+    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+) -> AdminV2CleanupPurgeResult:
+    try:
+        result = await schedule_admin_purge(db, tuple(payload.torrent_ids))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    if result.scheduled_ids:
+        await redis.signal_job_available()
+    return AdminV2CleanupPurgeResult(
+        requested=result.requested,
+        scheduled=len(result.scheduled_ids),
+        scheduled_ids=list(result.scheduled_ids),
+        skipped_ids=list(result.skipped_ids),
+    )
 
 
 @router.get("/runtime/qbittorrent", response_model=AdminV2QBittorrentRuntime)

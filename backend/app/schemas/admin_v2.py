@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
@@ -132,3 +133,29 @@ class AdminV2NewGreedyTorrent(BaseModel):
 class AdminV2NewGreedyRuntime(BaseModel):
     checked_at: datetime
     torrents: list[AdminV2NewGreedyTorrent]
+
+
+class AdminV2CleanupItem(BaseModel):
+    id: UUID
+    name: str
+    size_bytes: int
+    subscriber_count: int
+    deletion_at: datetime | None
+
+
+class AdminV2CleanupListing(BaseModel):
+    checked_at: datetime
+    items: list[AdminV2CleanupItem]
+
+
+class AdminV2CleanupPurgeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    torrent_ids: Annotated[list[UUID], Field(min_length=1, max_length=5000)]
+
+
+class AdminV2CleanupPurgeResult(BaseModel):
+    requested: int
+    scheduled: int
+    scheduled_ids: list[UUID]
+    skipped_ids: list[UUID]
