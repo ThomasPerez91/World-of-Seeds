@@ -76,6 +76,7 @@ services:
       <<: *wos-environment
       UVICORN_LOG_LEVEL: ${WOS_V2_LOG_LEVEL:-info}
       FORWARDED_ALLOW_IPS: 172.30.0.2
+      WOS_INTEGRATION_ACCOUNTS_FILE: /run/secrets/integration_registry
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -85,9 +86,15 @@ services:
       - type: bind
         source: ${WOS_V2_STORAGE_HOST_PATH:?set isolated WOS_V2_STORAGE_HOST_PATH}
         target: /data
+      - type: bind
+        source: ${WOS_V2_QBITTORRENT_CONFIG_PATH:?set WOS_V2_QBITTORRENT_CONFIG_PATH}.runtime/wos
+        target: /run/secrets
+        read_only: true
+        bind: {create_host_path: false}
     networks:
       edge: {ipv4_address: 172.30.0.3}
       backend:
+      torrent:
     pids_limit: 256
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=2)"]

@@ -15,6 +15,8 @@ World of Seeds V2 est désormais la ligne de production active.
 - noms longs tronqués avec tooltip et tableaux responsives alignés sur le design du dashboard ;
 - rafraîchissement exclusivement manuel, sans polling automatique sur ces deux écrans ;
 - endpoints V2 réservés aux administrateurs, bornés et sans exposition des secrets d’intégration.
+- API de production raccordée au registre privé en lecture seule et au réseau interne `torrent`
+  afin que les vues qBittorrent/NewGreedy puissent joindre leurs services sans secret inline.
 
 ## Release 2.2.5 — équité et fiabilité des transferts
 
