@@ -40,7 +40,7 @@ def _valid_config() -> dict[str, Any]:
             "cap_add": ["NET_BIND_SERVICE"],
         },
         "migrate": _runtime(digest, {"backend"}),
-        "api": _runtime(digest, {"edge", "backend"}),
+        "api": _runtime(digest, {"edge", "backend", "torrent"}),
         "worker": _runtime(digest, {"backend", "torrent"}),
         "scheduler": _runtime(digest, {"backend", "torrent"}),
         "postgres": {"image": "postgres:17.11-alpine3.24", "networks": {"backend": None}},
@@ -192,6 +192,18 @@ def _valid_config() -> dict[str, Any]:
     }
     services["api"]["networks"]["edge"] = {"ipv4_address": "172.30.0.3"}
     services["api"]["environment"]["FORWARDED_ALLOW_IPS"] = "172.30.0.2"
+    services["api"]["environment"]["WOS_INTEGRATION_ACCOUNTS_FILE"] = (
+        "/run/secrets/integration_registry"
+    )
+    services["api"]["volumes"] = [
+        {
+            "type": "bind",
+            "source": "/bootstrap/qBittorrent.conf.runtime/wos",
+            "target": "/run/secrets",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
+    ]
     for name, module in (("worker", "app.worker"), ("scheduler", "app.scheduler_service")):
         services[name]["command"] = ["python", "/bootstrap/integration-entrypoint.py", module]
         services[name]["volumes"] = [
@@ -323,6 +335,11 @@ def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
             {"command": ["cat /private/mitmproxy-ca.pem > /public/ca.pem PRIVATE KEY"]}
         ),
         lambda config: config["services"]["api"].update({"command": ["uvicorn", "--workers", "2"]}),
+        lambda config: config["services"]["api"]["networks"].pop("torrent"),
+        lambda config: config["services"]["api"]["environment"].update(
+            {"WOS_INTEGRATION_ACCOUNTS_FILE": "/tmp/integration_registry"}
+        ),
+        lambda config: config["services"]["api"]["volumes"][0].update({"read_only": False}),
         lambda config: config["services"]["newgreedy"].update({"privileged": True}),
         lambda config: config["services"]["newgreedy"].update({"user": "10003:10003"}),
         lambda config: config["services"]["newgreedy"].update({"security_opt": []}),

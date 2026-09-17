@@ -14,6 +14,7 @@ import { AdminSettingsPage } from "./features/admin/AdminSettingsPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
 import { AdminQBittorrentPage } from "./features/admin/AdminQBittorrentPage";
 import { AdminNewGreedyPage } from "./features/admin/AdminNewGreedyPage";
+import { AdminCleanupPage } from "./features/admin/AdminCleanupPage";
 import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
 import { AccountMenuIcon, AdminIcon, BackIcon, HomeIcon, SettingsIcon } from "./components/icons";
 import { LanguageSelector } from "./components/LanguageSelector";
@@ -820,6 +821,12 @@ function Dashboard({
           />
         ) : view === "admin-newgreedy" && user.is_admin ? (
           <AdminNewGreedyPage
+            onBack={openDashboard}
+            onNavigate={setView}
+            onSessionExpired={onSessionExpired}
+          />
+        ) : view === "admin-cleanup" && user.is_admin ? (
+          <AdminCleanupPage
             onBack={openDashboard}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}
