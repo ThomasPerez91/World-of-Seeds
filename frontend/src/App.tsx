@@ -12,6 +12,8 @@ import { AdminStoragePage } from "./features/admin/AdminStoragePage";
 import { AdminServicesPage } from "./features/admin/AdminServicesPage";
 import { AdminSettingsPage } from "./features/admin/AdminSettingsPage";
 import { AdminUsersPage } from "./features/admin/AdminUsersPage";
+import { AdminQBittorrentPage } from "./features/admin/AdminQBittorrentPage";
+import { AdminNewGreedyPage } from "./features/admin/AdminNewGreedyPage";
 import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
 import { AccountMenuIcon, AdminIcon, BackIcon, HomeIcon, SettingsIcon } from "./components/icons";
 import { LanguageSelector } from "./components/LanguageSelector";
@@ -806,6 +808,18 @@ function Dashboard({
           />
         ) : view === "admin-services" && user.is_admin ? (
           <AdminServicesPage
+            onBack={openDashboard}
+            onNavigate={setView}
+            onSessionExpired={onSessionExpired}
+          />
+        ) : view === "admin-qbittorrent" && user.is_admin ? (
+          <AdminQBittorrentPage
+            onBack={openDashboard}
+            onNavigate={setView}
+            onSessionExpired={onSessionExpired}
+          />
+        ) : view === "admin-newgreedy" && user.is_admin ? (
+          <AdminNewGreedyPage
             onBack={openDashboard}
             onNavigate={setView}
             onSessionExpired={onSessionExpired}

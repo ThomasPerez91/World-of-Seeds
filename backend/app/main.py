@@ -19,6 +19,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import engine
 from app.core.http_security import SecurityHeadersMiddleware
 from app.integrations import ExternalServicesMonitor
+from app.integrations.admin_runtime import AdminRuntimeMonitor
 from app.integrations.newgreedy_config import NewGreedyConfigStore
 from app.integrations.newgreedy_restart import NewGreedyRestartStore
 from app.integrations.wos_restart import WosRestartStore
@@ -48,6 +49,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.external_services_monitor = ExternalServicesMonitor(settings)
+    application.state.admin_runtime_monitor = AdminRuntimeMonitor(settings)
     application.state.redis_coordinator = RedisCoordinator.from_settings(settings)
     application.state.newgreedy_config_store = NewGreedyConfigStore(
         settings.data_root,

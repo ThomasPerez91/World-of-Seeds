@@ -8,12 +8,16 @@ import { useI18n, type MessageKey } from "../../i18n";
 export type AdminView =
   | "admin-users"
   | "admin-services"
+  | "admin-qbittorrent"
+  | "admin-newgreedy"
   | "admin-settings"
   | "admin-storage";
 
 const navigation: { view: AdminView; label: MessageKey }[] = [
   { view: "admin-users", label: "admin.users" },
   { view: "admin-services", label: "admin.services" },
+  { view: "admin-qbittorrent", label: "admin.qbittorrent" },
+  { view: "admin-newgreedy", label: "admin.newgreedy" },
   { view: "admin-settings", label: "admin.settings" },
   { view: "admin-storage", label: "admin.storage" },
 ];
