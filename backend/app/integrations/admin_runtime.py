@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx
+from pydantic import SecretStr
 
 from app import __version__
 from app.core.config import Settings
 from app.integrations.account_routing import (
+    MAX_DEPLOYMENT_ACCOUNT_JSON_BYTES,
     AccountRoutingError,
     DeploymentAccountSpec,
     parse_deployment_account_specs,
@@ -83,11 +86,27 @@ class AdminRuntimeMonitor:
     def _specs(self) -> tuple[DeploymentAccountSpec, ...]:
         secret = self._settings.integration_accounts_json
         if secret is None:
-            raise IntegrationRequestError("Runtime integrations are not configured")
+            secret = self._registry_file(self._settings.integration_accounts_file)
         try:
             return parse_deployment_account_specs(secret)
         except AccountRoutingError as exc:
             raise IntegrationRequestError("Runtime integration configuration is invalid") from exc
+
+    @staticmethod
+    def _registry_file(path: Path | None) -> SecretStr:
+        if path is None:
+            raise IntegrationRequestError("Runtime integrations are not configured")
+        try:
+            if not path.is_file() or path.is_symlink():
+                raise OSError
+            with path.open("rb") as registry:
+                content = registry.read(MAX_DEPLOYMENT_ACCOUNT_JSON_BYTES + 1)
+            raw = content.decode("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise IntegrationRequestError("Runtime integration registry is unavailable") from exc
+        if not raw or len(content) > MAX_DEPLOYMENT_ACCOUNT_JSON_BYTES:
+            raise IntegrationRequestError("Runtime integration registry is invalid")
+        return SecretStr(raw)
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(

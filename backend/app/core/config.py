@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     qbittorrent_data_root: Path = Path("/data")
     c411_passkey: SecretStr | None = Field(default=None, repr=False)
     integration_accounts_json: SecretStr | None = Field(default=None, repr=False)
+    integration_accounts_file: Path | None = Field(default=None, repr=False)
     c411_tracker_hosts: list[AllowedHost] = Field(
         default_factory=lambda: ["c411.org", "tk.c411.tw"],
         min_length=1,
@@ -107,9 +108,16 @@ class Settings(BaseSettings):
         pattern=r"^(auto|[A-Za-z0-9_.:-]+)$",
     )
 
-    @field_validator("data_root", "static_root", "qbittorrent_data_root")
+    @field_validator(
+        "data_root",
+        "static_root",
+        "qbittorrent_data_root",
+        "integration_accounts_file",
+    )
     @classmethod
-    def require_absolute_container_path(cls, value: Path) -> Path:
+    def require_absolute_container_path(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return value
         if not value.is_absolute():
             raise ValueError("Container paths must be absolute")
         return value
