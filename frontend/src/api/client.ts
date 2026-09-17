@@ -340,6 +340,32 @@ export interface QBittorrentTorrentListing {
   truncated: boolean;
 }
 
+export interface AdminQBittorrentRuntime {
+  checked_at: string;
+  download_speed_bytes: number;
+  upload_speed_bytes: number;
+  truncated: boolean;
+  torrents: Array<{
+    hash: string;
+    name: string;
+    size_bytes: number;
+    state: string;
+    progress: number;
+  }>;
+}
+
+export interface AdminNewGreedyRuntime {
+  checked_at: string;
+  torrents: Array<{
+    hash: string;
+    name: string | null;
+    status: "downloading" | "seeding" | "stalled" | "target_reached";
+    downloaded_bytes: number;
+    uploaded_bytes: number;
+    ratio: number | null;
+  }>;
+}
+
 export interface NewGreedyRestartStatus {
   state: "idle" | "pending" | "restarting" | "healthy" | "failed" | "rejected";
   request_id: string | null;
@@ -714,6 +740,14 @@ export const api = {
 
   getCentralAdminOverview(): Promise<CentralAdminOverview> {
     return requestV2<CentralAdminOverview>("/admin/overview");
+  },
+
+  getAdminQBittorrentRuntime(): Promise<AdminQBittorrentRuntime> {
+    return requestV2<AdminQBittorrentRuntime>("/admin/runtime/qbittorrent");
+  },
+
+  getAdminNewGreedyRuntime(): Promise<AdminNewGreedyRuntime> {
+    return requestV2<AdminNewGreedyRuntime>("/admin/runtime/newgreedy");
   },
 
   updateCentralAdminOptions(

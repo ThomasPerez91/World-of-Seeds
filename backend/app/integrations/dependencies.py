@@ -2,10 +2,21 @@ from typing import Annotated, cast
 
 from fastapi import Depends, Request
 
+from app.integrations.admin_runtime import AdminRuntimeMonitor
 from app.integrations.monitor import ExternalServicesMonitor
 from app.integrations.newgreedy_config import NewGreedyConfigStore
 from app.integrations.newgreedy_restart import NewGreedyRestartStore
 from app.integrations.wos_restart import WosRestartStore
+
+
+def get_admin_runtime_monitor(request: Request) -> AdminRuntimeMonitor:
+    return cast(AdminRuntimeMonitor, request.app.state.admin_runtime_monitor)
+
+
+AdminRuntimeMonitorDependency = Annotated[
+    AdminRuntimeMonitor,
+    Depends(get_admin_runtime_monitor),
+]
 
 
 def get_external_services_monitor(request: Request) -> ExternalServicesMonitor:

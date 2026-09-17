@@ -24,6 +24,8 @@ from app.auth.dependencies import (
     require_admin_csrf,
     require_current_admin,
 )
+from app.integrations.dependencies import AdminRuntimeMonitorDependency
+from app.integrations.http import IntegrationRequestError
 from app.models import (
     DatabaseOption,
     DatabaseOptionAudit,
@@ -48,11 +50,15 @@ from app.options import (
     PostgresOptionsRegistry,
 )
 from app.schemas.admin_v2 import (
+    AdminV2NewGreedyRuntime,
+    AdminV2NewGreedyTorrent,
     AdminV2OptionAudit,
     AdminV2OptionField,
     AdminV2OptionSection,
     AdminV2OptionsUpdate,
     AdminV2Overview,
+    AdminV2QBittorrentRuntime,
+    AdminV2QBittorrentTorrent,
     AdminV2ReconciliationAnomaly,
     AdminV2ReconciliationReport,
     AdminV2RecoveryRequest,
@@ -63,6 +69,78 @@ from app.schemas.admin_v2 import (
 from app.storage import SharedContentStore, SharedContentStoreError
 
 router = APIRouter()
+
+
+@router.get("/runtime/qbittorrent", response_model=AdminV2QBittorrentRuntime)
+async def get_admin_qbittorrent_runtime(
+    monitor: AdminRuntimeMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> AdminV2QBittorrentRuntime:
+    try:
+        checked_at, torrents, truncated = await monitor.qbittorrent_torrents()
+    except IntegrationRequestError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_business_detail(
+                "qbittorrent_runtime_unavailable",
+                "Les informations qBittorrent sont temporairement indisponibles.",
+            ),
+        ) from exc
+    return AdminV2QBittorrentRuntime(
+        checked_at=checked_at,
+        download_speed_bytes=sum(item.download_speed_bytes for item in torrents),
+        upload_speed_bytes=sum(item.upload_speed_bytes for item in torrents),
+        truncated=truncated,
+        torrents=[
+            AdminV2QBittorrentTorrent(
+                hash=item.id,
+                name=item.name,
+                size_bytes=item.size_bytes,
+                state=item.state,
+                progress=item.progress,
+            )
+            for item in torrents
+        ],
+    )
+
+
+@router.get("/runtime/newgreedy", response_model=AdminV2NewGreedyRuntime)
+async def get_admin_newgreedy_runtime(
+    monitor: AdminRuntimeMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_current_admin)],
+) -> AdminV2NewGreedyRuntime:
+    try:
+        checked_at, torrents = await monitor.newgreedy_torrents()
+    except IntegrationRequestError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_business_detail(
+                "newgreedy_runtime_unavailable",
+                "Les informations NewGreedy sont temporairement indisponibles.",
+            ),
+        ) from exc
+    return AdminV2NewGreedyRuntime(
+        checked_at=checked_at,
+        torrents=[
+            AdminV2NewGreedyTorrent(
+                hash=item.id,
+                name=name,
+                status=(
+                    "stalled"
+                    if item.stalled
+                    else "target_reached"
+                    if item.target_reached
+                    else "downloading"
+                    if item.mode == "down"
+                    else "seeding"
+                ),
+                downloaded_bytes=item.downloaded_bytes,
+                uploaded_bytes=item.reported_uploaded_bytes,
+                ratio=item.ratio,
+            )
+            for item, name in torrents
+        ],
+    )
 
 
 def _business_detail(code: str, message: str, field: str | None = None) -> dict[str, str | None]:

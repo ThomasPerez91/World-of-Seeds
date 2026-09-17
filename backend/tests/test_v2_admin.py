@@ -6,6 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.security import hash_password
+from app.integrations.types import NewGreedyTorrent, QBittorrentTorrent
+from app.main import app
 from app.models import DatabaseOptionAudit, SchedulerState, StorageLedger, User, UserStorageUsage
 from app.options import PostgresOptionsRegistry
 
@@ -136,3 +138,82 @@ async def test_admin_can_configure_c411_pair_without_exposing_passkey_in_audit(
     assert fields["WOS_C411_ACCOUNT_01_NUMBER"]["value"] == "1001"
     assert fields["WOS_C411_ACCOUNT_01_PASSKEY"]["value"] == "admin-passkey-123"
     assert all("admin-passkey-123" not in repr(event) for event in body["audit"])
+
+
+class _RuntimeMonitor:
+    async def qbittorrent_torrents(
+        self,
+    ) -> tuple[datetime, list[QBittorrentTorrent], bool]:
+        return (
+            datetime(2026, 1, 1, tzinfo=UTC),
+            [
+                QBittorrentTorrent(
+                    id="a" * 40,
+                    name="Linux distribution",
+                    state="downloading",
+                    progress=0.5,
+                    size_bytes=1_000,
+                    downloaded_bytes=500,
+                    uploaded_bytes=25,
+                    download_speed_bytes=120,
+                    upload_speed_bytes=30,
+                    ratio=0.05,
+                    eta_seconds=60,
+                    category=None,
+                    tracker_host=None,
+                )
+            ],
+            False,
+        )
+
+    async def newgreedy_torrents(
+        self,
+    ) -> tuple[datetime, list[tuple[NewGreedyTorrent, str | None]]]:
+        return (
+            datetime(2026, 1, 1, tzinfo=UTC),
+            [
+                (
+                    NewGreedyTorrent(
+                        id="a" * 40,
+                        mode="seed",
+                        downloaded_bytes=1_000,
+                        reported_uploaded_bytes=2_000,
+                        fake_uploaded_bytes=1_500,
+                        ratio=2.0,
+                        announce_count=3,
+                        stalled=False,
+                        target_reached=True,
+                        last_announce_at=None,
+                    ),
+                    "Linux distribution",
+                )
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_admin_runtime_views_are_read_only_and_aggregate_service_data(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _admin(db_session)
+    await _login(client)
+    monkeypatch.setattr(app.state, "admin_runtime_monitor", _RuntimeMonitor())
+
+    qb_response = await client.get("/api/v2/admin/runtime/qbittorrent")
+    ng_response = await client.get("/api/v2/admin/runtime/newgreedy")
+
+    assert qb_response.status_code == 200
+    assert qb_response.json()["download_speed_bytes"] == 120
+    assert qb_response.json()["upload_speed_bytes"] == 30
+    assert qb_response.json()["torrents"][0]["name"] == "Linux distribution"
+    assert ng_response.status_code == 200
+    assert ng_response.json()["torrents"][0] == {
+        "hash": "a" * 40,
+        "name": "Linux distribution",
+        "status": "target_reached",
+        "downloaded_bytes": 1_000,
+        "uploaded_bytes": 2_000,
+        "ratio": 2.0,
+    }
