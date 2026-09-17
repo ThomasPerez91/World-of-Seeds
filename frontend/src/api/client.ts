@@ -366,6 +366,26 @@ export interface AdminNewGreedyRuntime {
   }>;
 }
 
+export interface AdminCleanupItem {
+  id: string;
+  name: string;
+  size_bytes: number;
+  subscriber_count: number;
+  deletion_at: string | null;
+}
+
+export interface AdminCleanupListing {
+  checked_at: string;
+  items: AdminCleanupItem[];
+}
+
+export interface AdminCleanupPurgeResult {
+  requested: number;
+  scheduled: number;
+  scheduled_ids: string[];
+  skipped_ids: string[];
+}
+
 export interface NewGreedyRestartStatus {
   state: "idle" | "pending" | "restarting" | "healthy" | "failed" | "rejected";
   request_id: string | null;
@@ -748,6 +768,17 @@ export const api = {
 
   getAdminNewGreedyRuntime(): Promise<AdminNewGreedyRuntime> {
     return requestV2<AdminNewGreedyRuntime>("/admin/runtime/newgreedy");
+  },
+
+  getAdminCleanup(): Promise<AdminCleanupListing> {
+    return requestV2<AdminCleanupListing>("/admin/cleanup");
+  },
+
+  purgeAdminCleanup(torrentIds: string[]): Promise<AdminCleanupPurgeResult> {
+    return requestV2<AdminCleanupPurgeResult>("/admin/cleanup/purge", {
+      method: "POST",
+      body: JSON.stringify({ torrent_ids: torrentIds }),
+    });
   },
 
   updateCentralAdminOptions(

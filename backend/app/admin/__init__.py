@@ -1,3 +1,9 @@
+from app.admin.cleanup import (
+    AdminCleanupItem,
+    AdminCleanupPurgeResult,
+    list_downloaded_content,
+    schedule_admin_purge,
+)
 from app.admin.reconciliation import (
     RECOVER_CANCEL_REQUESTS_JOB,
     RECOVER_PURGE_METADATA_JOB,
@@ -17,6 +23,8 @@ from app.admin.reconciliation import (
 from app.admin.storage import AdminStorageError, AdminStorageInspector
 
 __all__ = [
+    "AdminCleanupItem",
+    "AdminCleanupPurgeResult",
     "AdminStorageError",
     "AdminStorageInspector",
     "ReconciliationAnomaly",
@@ -29,8 +37,10 @@ __all__ = [
     "ReconciliationRecoverySnapshot",
     "ReconciliationReport",
     "deserialize_recovery_snapshot",
+    "list_downloaded_content",
     "reconcile_inventory",
     "recover_orphaned_torrent",
     "recovery_snapshot",
     "serialize_recovery_snapshot",
+    "schedule_admin_purge",
 ]

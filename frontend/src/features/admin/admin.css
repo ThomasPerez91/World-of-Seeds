@@ -334,6 +334,101 @@
 .admin-runtime-note { color: var(--color-warning); }
 .admin-runtime-updated { margin: 0.75rem 0 0; color: var(--color-text-muted); font-size: 0.85rem; }
 
+.admin-cleanup-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+.admin-cleanup-toolbar label {
+  display: grid;
+  min-width: 0;
+  gap: 0.35rem;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.admin-cleanup-toolbar input,
+.admin-cleanup-toolbar select {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  margin: 0;
+}
+
+.admin-cleanup-purge-filtered.ui-button {
+  width: 100%;
+  min-height: 2.75rem;
+  margin: 0;
+}
+
+.admin-cleanup-purge-filtered svg,
+.admin-cleanup-row-purge svg,
+.admin-cleanup-sort svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+
+.admin-cleanup-table {
+  min-width: 60rem;
+}
+
+.admin-cleanup-table th:first-child { width: 34%; }
+.admin-cleanup-table th:nth-child(2) { width: 13%; }
+.admin-cleanup-table th:nth-child(3) { width: 13%; }
+.admin-cleanup-table th:nth-child(4) { width: 22%; }
+.admin-cleanup-table th:nth-child(5) { width: 18%; }
+
+.admin-cleanup-table tbody tr {
+  transition: background-color 140ms ease;
+}
+
+.admin-cleanup-table tbody tr:hover {
+  background: rgba(102, 234, 157, 0.04);
+}
+
+.admin-cleanup-sort {
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.admin-page .admin-cleanup-sort:hover:not(:disabled) {
+  color: var(--color-text);
+  background: transparent;
+  transform: none;
+}
+
+.admin-cleanup-row-purge.ui-button {
+  min-height: 2.35rem;
+  margin: 0;
+  padding: 0.45rem 0.65rem;
+  white-space: nowrap;
+}
+
+.admin-cleanup-message {
+  margin: 0 0 0.75rem;
+  color: var(--color-success);
+  font-weight: 700;
+}
+
 .admin-storage-usage.ui-card,
 .admin-metric-card.ui-card,
 .reconciliation-panel.ui-card,
@@ -506,6 +601,16 @@
   .integration-card-heading .integration-status {
     grid-column: auto;
   }
+
+  .admin-cleanup-toolbar {
+    grid-template-columns: minmax(12rem, 1fr) minmax(11rem, 0.55fr);
+  }
+
+  .admin-cleanup-purge-filtered.ui-button {
+    grid-column: 1 / -1;
+    width: fit-content;
+    justify-self: end;
+  }
 }
 
 @media (min-width: 900px) {
@@ -547,6 +652,14 @@
 
   .integration-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-cleanup-toolbar {
+    grid-template-columns: minmax(15rem, 1fr) minmax(11rem, 0.55fr) auto;
+  }
+
+  .admin-cleanup-purge-filtered.ui-button {
+    grid-column: auto;
   }
 }
 
