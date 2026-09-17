@@ -99,10 +99,12 @@ class AdminRuntimeMonitor:
         try:
             if not path.is_file() or path.is_symlink():
                 raise OSError
-            raw = path.read_text(encoding="utf-8")
+            with path.open("rb") as registry:
+                content = registry.read(MAX_DEPLOYMENT_ACCOUNT_JSON_BYTES + 1)
+            raw = content.decode("utf-8")
         except (OSError, UnicodeError) as exc:
             raise IntegrationRequestError("Runtime integration registry is unavailable") from exc
-        if not raw or len(raw.encode("utf-8")) > MAX_DEPLOYMENT_ACCOUNT_JSON_BYTES:
+        if not raw or len(content) > MAX_DEPLOYMENT_ACCOUNT_JSON_BYTES:
             raise IntegrationRequestError("Runtime integration registry is invalid")
         return SecretStr(raw)
 

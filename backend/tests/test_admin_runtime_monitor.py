@@ -99,3 +99,12 @@ def test_runtime_monitor_rejects_symlinked_registry(tmp_path: Path) -> None:
 
     with pytest.raises(IntegrationRequestError, match="registry is unavailable"):
         monitor._specs()
+
+
+def test_runtime_monitor_bounds_registry_read_before_decoding(tmp_path: Path) -> None:
+    registry = tmp_path / "integration_registry"
+    registry.write_bytes(b"{" + b"x" * (64 * 1024))
+    monitor = AdminRuntimeMonitor(Settings(integration_accounts_file=registry))
+
+    with pytest.raises(IntegrationRequestError, match="registry is invalid"):
+        monitor._specs()
