@@ -25,8 +25,10 @@ from app.integrations.account_routing import (
     parse_deployment_account_specs,
 )
 from app.integrations.qbittorrent_v2 import (
+    QBittorrentV2DesiredControl,
     QBittorrentV2Gateway,
     QBittorrentV2ManagedIdentity,
+    QBittorrentV2RunState,
     QBittorrentV2TransientError,
 )
 from app.models import (
@@ -103,6 +105,20 @@ async def _prepare_qbittorrent_fixture(
             metainfo,
             expected_info_hash=info_hash,
             storage_key=STORAGE_KEY,
+        )
+        # Production adds are deliberately stopped. This disposable fixture
+        # has no scheduler record yet, so exercise the same explicit control
+        # path before waiting for qBittorrent's verification.
+        await gateway.apply_managed_controls(
+            (
+                QBittorrentV2DesiredControl(
+                    info_hash=info_hash,
+                    storage_key=STORAGE_KEY,
+                    run_state=QBittorrentV2RunState.RUNNING,
+                    download_limit_bytes_per_second=0,
+                    qbittorrent_account_ref=spec.qbittorrent_account_ref,
+                ),
+            )
         )
         identity = QBittorrentV2ManagedIdentity(info_hash, STORAGE_KEY)
         for _ in range(100):
