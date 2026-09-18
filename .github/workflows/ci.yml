@@ -297,7 +297,7 @@ jobs:
           api_id=$("${compose[@]}" ps --quiet --status running api)
           test -n "$api_id"
           docker inspect "$api_id" | jq -e '
-            .[0].NetworkSettings.Ports["8000/tcp"]
+            .[0].HostConfig.PortBindings["8000/tcp"]
               == [{"HostIp":"127.0.0.1","HostPort":"28081"}]
           ' >/dev/null
           if "${compose[@]}" port postgres 5432 >/tmp/v2-postgres-port 2>/dev/null; then
