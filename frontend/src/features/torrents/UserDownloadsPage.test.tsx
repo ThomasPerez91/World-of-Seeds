@@ -1549,6 +1549,25 @@ describe("UserDownloadsPage", () => {
     expect(screen.getByRole("alert").textContent).toContain("intervention");
   });
 
+  it.each([
+    ["torrent_file_type_not_allowed", "Le torrent contient un type de fichier non autorisé."],
+    ["qbittorrent_add_conflict", "Le torrent existe déjà mais appartient à une autre ressource."],
+    ["torrent_add_rejected", "Le fichier torrent a été refusé par le client de téléchargement."],
+  ])("traduit la cause fonctionnelle bornée %s", async (errorCode, expectedMessage) => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({
+      items: [torrent({ state: "error", error_code: errorCode })],
+      offset: 0,
+      limit: 10,
+      total: 1,
+    })));
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", {
+      name: "Afficher les détails de Film.mkv",
+    }));
+    expect(screen.getByRole("alert").textContent).toContain(expectedMessage);
+  });
+
   it("annule directement une demande via l’API V2", async () => {
     const user = userEvent.setup();
     let cancelled = false;

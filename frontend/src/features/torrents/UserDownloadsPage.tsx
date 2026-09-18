@@ -58,6 +58,20 @@ export const MAX_TORRENT_BATCH_FILES = 50;
 export const TORRENT_UPLOAD_CONCURRENCY = 3;
 export const NATIVE_DOWNLOAD_STORAGE_KEY = "wos.local-download-starts";
 export const NATIVE_DOWNLOAD_MAX_AGE_MS = 30 * 60 * 1_000;
+
+const TORRENT_ERROR_MESSAGES: Readonly<Record<string, MessageKey>> = {
+  torrent_file_type_not_allowed: "downloads.error.fileType",
+  torrent_unsafe_file_attribute: "downloads.error.unsafeAttribute",
+  torrent_add_rejected: "downloads.error.qbRejected",
+  qbittorrent_metainfo_invalid: "downloads.error.qbInvalid",
+  qbittorrent_add_conflict: "downloads.error.qbConflict",
+  qbittorrent_ownership_conflict: "downloads.error.qbConflict",
+};
+
+function torrentErrorMessage(errorCode: string): MessageKey {
+  if (errorCode === "torrent_failed") return "downloads.needsAttention";
+  return TORRENT_ERROR_MESSAGES[errorCode] ?? "downloads.stateError";
+}
 const MAX_NATIVE_DOWNLOAD_STARTS = 10;
 
 export interface NativeDownloadStart {
@@ -575,7 +589,7 @@ function TorrentItem({
   const percent = rowStatus === "ready" ? 100 : Math.round(torrent.progress * 100);
   const error = torrent.error_code === null
     ? null
-    : t(torrent.error_code === "torrent_failed" ? "downloads.needsAttention" : "downloads.stateError");
+    : t(torrentErrorMessage(torrent.error_code));
   return (
     <li className="torrent-accordion-item">
       <article className="torrent-accordion-card" aria-label={torrent.name}>

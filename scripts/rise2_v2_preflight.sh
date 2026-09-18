@@ -45,6 +45,14 @@ esac
 [ -d "$storage" ] || fail "storage directory not found"
 [ ! -L "$storage" ] || fail "storage directory must not be a symlink"
 mountpoint -q -- "$storage" || fail "storage directory must be an active mountpoint"
+mount_options=$(findmnt -n -o OPTIONS --target "$storage") \
+  || fail "storage mount options cannot be inspected"
+for required_option in noexec nosuid nodev; do
+  case ",$mount_options," in
+    *",$required_option,"*) ;;
+    *) fail "storage mount must include noexec,nosuid,nodev (missing $required_option)" ;;
+  esac
+done
 [ "$qbittorrent_uid" = "$app_uid" ] \
   || fail "qBittorrent UID must equal the WOS application UID for shared 0750 workspaces"
 [ "$(stat -c '%u' "$storage")" = "$app_uid" ] \

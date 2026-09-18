@@ -1,18 +1,108 @@
 from __future__ import annotations
 
 import hashlib
+import re
+import unicodedata
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from urllib.parse import quote, urlsplit, urlunsplit
 
 MAX_BENCODE_DEPTH = 64
 MAX_BENCODE_ITEMS = 200_000
 MAX_TORRENT_FILES = 100_000
+MAX_PATH_COMPONENT_BYTES = 255
+MAX_TORRENT_PATH_BYTES = 4096
+
+# WOS is a media delivery service. Keeping this list explicit prevents a new
+# executable/script format from becoming downloadable merely because it was
+# not present in a denylist. Additions require a reviewed code change.
+ALLOWED_CONTENT_EXTENSIONS = frozenset(
+    {
+        # Video and optical-disc metadata.
+        "3g2",
+        "3gp",
+        "avi",
+        "bdmv",
+        "bup",
+        "clpi",
+        "divx",
+        "flv",
+        "ifo",
+        "m2ts",
+        "m4v",
+        "mkv",
+        "mov",
+        "mp4",
+        "mpeg",
+        "mpg",
+        "mpls",
+        "mts",
+        "ogv",
+        "ts",
+        "vob",
+        "webm",
+        "wmv",
+        # Audio.
+        "aac",
+        "ac3",
+        "aif",
+        "aiff",
+        "alac",
+        "ape",
+        "dts",
+        "flac",
+        "m4a",
+        "mka",
+        "mp3",
+        "oga",
+        "ogg",
+        "opus",
+        "wav",
+        "wma",
+        # Subtitles.
+        "ass",
+        "dfxp",
+        "idx",
+        "smi",
+        "smil",
+        "srt",
+        "ssa",
+        "sub",
+        "sup",
+        "ttml",
+        "vtt",
+        # Images and benign release metadata.
+        "avif",
+        "bmp",
+        "cue",
+        "gif",
+        "heic",
+        "heif",
+        "jpeg",
+        "jpg",
+        "json",
+        "md5",
+        "nfo",
+        "png",
+        "sfv",
+        "sha1",
+        "sha256",
+        "tif",
+        "tiff",
+        "txt",
+        "webp",
+        "xml",
+    }
+)
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:$")
 
 BValue = int | bytes | list["BValue"] | dict[bytes, "BValue"]
 
 
 class TorrentValidationError(ValueError):
-    pass
+    def __init__(self, message: str, *, code: str = "torrent_invalid") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,23 +284,103 @@ def _required_dictionary(value: BValue | None, field: str) -> dict[bytes, BValue
     return value
 
 
-def _torrent_name(info: dict[bytes, BValue]) -> str:
-    raw_name = info.get(b"name.utf-8", info.get(b"name"))
-    if not isinstance(raw_name, bytes):
-        raise TorrentValidationError("Le torrent ne contient pas de nom valide.")
+def _decode_utf8(raw: bytes, *, error_message: str) -> str:
     try:
-        name = raw_name.decode("utf-8")
+        return raw.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise TorrentValidationError("Le nom du torrent n’est pas en UTF-8.") from exc
+        raise TorrentValidationError(error_message) from exc
+
+
+def _select_utf8_bytes(
+    value: dict[bytes, BValue],
+    field: bytes,
+    *,
+    error_message: str,
+) -> bytes:
+    raw = value.get(field)
+    raw_utf8 = value.get(field + b".utf-8")
+    if raw_utf8 is not None:
+        if not isinstance(raw_utf8, bytes):
+            raise TorrentValidationError(error_message)
+        if raw is not None:
+            if not isinstance(raw, bytes):
+                raise TorrentValidationError(error_message)
+            decoded = _decode_utf8(raw, error_message=error_message)
+            decoded_utf8 = _decode_utf8(raw_utf8, error_message=error_message)
+            if unicodedata.normalize("NFC", decoded) != unicodedata.normalize("NFC", decoded_utf8):
+                raise TorrentValidationError(error_message)
+        return raw_utf8
+    if not isinstance(raw, bytes):
+        raise TorrentValidationError(error_message)
+    return raw
+
+
+def _validate_attributes(entry: dict[bytes, BValue], *, field: str) -> frozenset[str]:
+    raw_attributes = entry.get(b"attr")
+    attributes: frozenset[str]
+    if raw_attributes is None:
+        attributes = frozenset()
+    elif isinstance(raw_attributes, bytes):
+        try:
+            attributes = frozenset(raw_attributes.decode("ascii"))
+        except UnicodeDecodeError as exc:
+            raise TorrentValidationError(f"Les attributs torrent {field} sont invalides.") from exc
+    else:
+        raise TorrentValidationError(f"Les attributs torrent {field} sont invalides.")
+
+    # BEP/libtorrent use `l` for symlinks and `x` for executable files. Only
+    # padding and hidden markers are harmless for WOS; fail closed on future
+    # or unknown file types instead of letting qBittorrent interpret them.
+    if b"symlink path" in entry or not attributes.issubset({"p", "h"}):
+        raise TorrentValidationError(
+            "Le torrent contient un lien symbolique ou un attribut de fichier dangereux.",
+            code="torrent_unsafe_file_attribute",
+        )
+    return attributes
+
+
+def _validate_component(component: str, *, first: bool = False) -> None:
+    encoded = component.encode("utf-8")
     if (
-        not name
-        or len(name) > 4096
-        or name in {".", ".."}
-        or "/" in name
-        or "\\" in name
-        or "\x00" in name
+        not component
+        or component in {".", ".."}
+        or "/" in component
+        or "\\" in component
+        or "\x00" in component
+        or len(encoded) > MAX_PATH_COMPONENT_BYTES
+        or component.endswith((" ", "."))
+        or any(unicodedata.category(character) == "Cc" for character in component)
+        or (first and _WINDOWS_DRIVE_RE.fullmatch(component) is not None)
     ):
-        raise TorrentValidationError("Le nom du torrent est invalide.")
+        raise TorrentValidationError("Un chemin du torrent est invalide.")
+
+
+def _path_collision_key(parts: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(unicodedata.normalize("NFC", part).casefold() for part in parts)
+
+
+def _require_allowed_file_type(filename: str, *, padding: bool = False) -> None:
+    if padding:
+        return
+    _, separator, extension = filename.rpartition(".")
+    if not separator or extension.casefold() not in ALLOWED_CONTENT_EXTENSIONS:
+        raise TorrentValidationError(
+            "Le torrent contient un type de fichier non autorisé.",
+            code="torrent_file_type_not_allowed",
+        )
+
+
+def _torrent_name(info: dict[bytes, BValue]) -> str:
+    raw_name = _select_utf8_bytes(
+        info,
+        b"name",
+        error_message="Le torrent ne contient pas de nom UTF-8 valide.",
+    )
+    name = _decode_utf8(raw_name, error_message="Le nom du torrent n’est pas en UTF-8.")
+    try:
+        _validate_component(name, first=True)
+    except TorrentValidationError as exc:
+        raise TorrentValidationError("Le nom du torrent est invalide.") from exc
     return name
 
 
@@ -219,43 +389,80 @@ def _torrent_files(
     *,
     torrent_name: str,
 ) -> tuple[TorrentContentFile, ...]:
+    _validate_attributes(info, field="info")
     single_length = info.get(b"length")
     files = info.get(b"files")
     if isinstance(single_length, int) and single_length >= 0 and files is None:
+        _require_allowed_file_type(torrent_name)
         return (TorrentContentFile(0, torrent_name, single_length),)
     elif isinstance(files, list) and single_length is None and files:
         if len(files) > MAX_TORRENT_FILES:
             raise TorrentValidationError("Le torrent contient trop de fichiers.")
         entries: list[TorrentContentFile] = []
-        paths: set[str] = set()
+        collision_paths: set[tuple[str, ...]] = set()
         for file_index, raw_file in enumerate(files):
             file_entry = _required_dictionary(raw_file, "files")
             length = file_entry.get(b"length")
-            path = file_entry.get(b"path.utf-8", file_entry.get(b"path"))
-            if not isinstance(length, int) or length < 0 or not isinstance(path, list) or not path:
+            attributes = _validate_attributes(file_entry, field="files")
+            path = file_entry.get(b"path")
+            path_utf8 = file_entry.get(b"path.utf-8")
+            if (
+                not isinstance(length, int)
+                or length < 0
+                or not isinstance(path, list)
+                or not path
+                or (path_utf8 is not None and not isinstance(path_utf8, list))
+                or path_utf8 == []
+            ):
                 raise TorrentValidationError("La liste des fichiers du torrent est invalide.")
+            selected_path = path_utf8 if isinstance(path_utf8, list) else path
             components: list[str] = []
-            for component in path:
-                if (
-                    not isinstance(component, bytes)
-                    or component in {b"", b".", b".."}
-                    or b"/" in component
-                    or b"\\" in component
-                    or b"\x00" in component
-                ):
+            for component_index, component in enumerate(selected_path):
+                if not isinstance(component, bytes):
                     raise TorrentValidationError("Un chemin du torrent est invalide.")
-                try:
-                    components.append(component.decode("utf-8"))
-                except UnicodeDecodeError as exc:
-                    raise TorrentValidationError(
-                        "Un chemin du torrent n’est pas en UTF-8."
-                    ) from exc
-            if any(component in {"", ".", ".."} for component in components):
+                decoded = _decode_utf8(
+                    component,
+                    error_message="Un chemin du torrent n’est pas en UTF-8.",
+                )
+                _validate_component(decoded, first=component_index == 0)
+                components.append(decoded)
+            if isinstance(path_utf8, list):
+                if len(path) != len(path_utf8):
+                    raise TorrentValidationError("Un chemin du torrent est invalide.")
+                fallback_components: list[str] = []
+                for component in path:
+                    if not isinstance(component, bytes):
+                        raise TorrentValidationError("Un chemin du torrent est invalide.")
+                    fallback_components.append(
+                        _decode_utf8(
+                            component,
+                            error_message="Un chemin du torrent n’est pas en UTF-8.",
+                        )
+                    )
+                if tuple(
+                    unicodedata.normalize("NFC", value) for value in fallback_components
+                ) != tuple(unicodedata.normalize("NFC", value) for value in components):
+                    raise TorrentValidationError("Un chemin du torrent est invalide.")
+
+            full_parts = (torrent_name, *components)
+            relative_path = PurePosixPath(*full_parts).as_posix()
+            collision_key = _path_collision_key(full_parts)
+            if (
+                relative_path.startswith("/")
+                or len(relative_path.encode("utf-8")) > MAX_TORRENT_PATH_BYTES
+                or collision_key in collision_paths
+                or any(
+                    existing == collision_key[: len(existing)]
+                    or collision_key == existing[: len(collision_key)]
+                    for existing in collision_paths
+                )
+            ):
                 raise TorrentValidationError("Un chemin du torrent est invalide.")
-            relative_path = "/".join((torrent_name, *components))
-            if len(relative_path) > 4096 or relative_path in paths:
-                raise TorrentValidationError("Un chemin du torrent est invalide.")
-            paths.add(relative_path)
+            padding = "p" in attributes
+            if padding and (components[0] != ".pad" or attributes != {"p"}):
+                raise TorrentValidationError("Un fichier de remplissage torrent est invalide.")
+            _require_allowed_file_type(components[-1], padding=padding)
+            collision_paths.add(collision_key)
             entries.append(TorrentContentFile(file_index, relative_path, length))
         return tuple(entries)
     else:
@@ -277,6 +484,13 @@ def _rewrite_torrent(
         raise TorrentValidationError("Le fichier torrent contient des données superflues.")
     metainfo = _required_dictionary(metainfo_value, "racine")
     info = _required_dictionary(metainfo.get(b"info"), "info")
+    if any(field in info for field in (b"file tree", b"meta version", b"pieces root")):
+        # WOS currently computes and owns v1 SHA-1 identities. Accepting BEP 52
+        # here without traversing its separate file tree would let qBittorrent
+        # materialize paths that were never validated by WOS.
+        raise TorrentValidationError(
+            "Cette structure de torrent n’est pas prise en charge de manière sécurisée."
+        )
 
     info_parser = _Parser(content)
     if content[:1] != b"d":

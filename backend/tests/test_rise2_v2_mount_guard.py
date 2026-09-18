@@ -4,6 +4,7 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 PREFLIGHT = REPOSITORY / "scripts" / "rise2_v2_preflight.sh"
 SYSTEMD_UNIT = REPOSITORY / "deploy" / "world-of-seeds-v2-rise2.service"
 NEWGREEDY_SMOKE = REPOSITORY / "scripts" / "rise2_v2_newgreedy_smoke.sh"
+QBITTORRENT_SMOKE = REPOSITORY / "scripts" / "rise2_v2_qb_smoke.py"
 
 
 def test_preflight_checks_mountpoint_before_compose() -> None:
@@ -12,6 +13,9 @@ def test_preflight_checks_mountpoint_before_compose() -> None:
 
     assert guard in script
     assert script.index(guard) < script.index("compose() {")
+    assert 'findmnt -n -o OPTIONS --target "$storage"' in script
+    assert "for required_option in noexec nosuid nodev" in script
+    assert script.index("findmnt -n -o OPTIONS") < script.index("compose() {")
 
 
 def test_systemd_unit_requires_storage_mount_before_compose() -> None:
@@ -50,7 +54,9 @@ def test_systemd_stop_preserves_pilot_state() -> None:
 
 def test_newgreedy_ci_smoke_uses_a_real_temporary_mount() -> None:
     script = NEWGREEDY_SMOKE.read_text(encoding="utf-8")
-    mount_command = "sudo mount -t tmpfs -o size=16m,mode=0750,uid=10001,gid=10001 \\"
+    mount_command = (
+        "sudo mount -t tmpfs -o size=16m,mode=0750,uid=10001,gid=10001,noexec,nosuid,nodev \\"
+    )
     mounted_guard = 'mountpoint -q -- "$smoke_root/data" || fail "CI storage tmpfs mount failed"'
 
     assert mount_command in script
@@ -60,3 +66,11 @@ def test_newgreedy_ci_smoke_uses_a_real_temporary_mount() -> None:
     assert script.index('sudo umount -- "$smoke_root/data"') < script.index(
         'sudo rm -rf -- "$smoke_root"'
     )
+
+
+def test_qbittorrent_ci_smoke_enforces_storage_flags_and_runtime_uid() -> None:
+    script = QBITTORRENT_SMOKE.read_text(encoding="utf-8")
+
+    assert "size=16m,mode=0750,uid=10001,gid=10001,noexec,nosuid,nodev" in script
+    assert "Name:\\tqbittorrent-nox" in script
+    assert 'runtime_uid != values["WOS_V2_QBITTORRENT_UID"]' in script
