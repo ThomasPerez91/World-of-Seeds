@@ -64,7 +64,7 @@ sudo install -d -o 0 -g 0 -m 0755 /srv/world-of-seeds-v2
 sudo install -d -o 0 -g 0 -m 0755 "$smoke_root" "$smoke_root/newgreedy"
 sudo install -d -o 0 -g 0 -m 0700 "$state_dir"
 sudo install -d -o 10001 -g 10001 -m 0750 "$smoke_root/data"
-sudo mount -t tmpfs -o size=16m,mode=0750,uid=10001,gid=10001 \
+sudo mount -t tmpfs -o size=16m,mode=0750,uid=10001,gid=10001,noexec,nosuid,nodev \
     tmpfs "$smoke_root/data"
 mountpoint -q -- "$smoke_root/data" || fail "CI storage tmpfs mount failed"
 

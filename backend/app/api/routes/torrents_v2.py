@@ -1161,7 +1161,7 @@ async def create_torrent_request(
             max_total_size=max_total,
         )
     except TorrentValidationError as exc:
-        _fail(status.HTTP_422_UNPROCESSABLE_CONTENT, "torrent_invalid", str(exc), "torrent")
+        _fail(status.HTTP_422_UNPROCESSABLE_CONTENT, exc.code, str(exc), "torrent")
 
     content_store = SharedContentStore(settings.data_root)
     payload_store = TorrentPayloadStore(
@@ -1395,8 +1395,20 @@ async def list_torrent_requests(
         "orange": retention_base & (elapsed >= duration / 3) & (elapsed < duration * 2 / 3),
         "red": retention_base & (elapsed >= duration * 2 / 3),
     }
+    latest_add_error = (
+        select(TorrentJob.last_error_code)
+        .where(
+            TorrentJob.managed_torrent_id == ManagedTorrent.id,
+            TorrentJob.job_type == ADD_TORRENT_JOB,
+            TorrentJob.state == TorrentJobState.FAILED,
+        )
+        .order_by(TorrentJob.updated_at.desc(), TorrentJob.id.desc())
+        .limit(1)
+        .correlate(ManagedTorrent)
+        .scalar_subquery()
+    )
     base_query = (
-        select(TorrentRequest, ManagedTorrent)
+        select(TorrentRequest, ManagedTorrent, latest_add_error.label("error_code"))
         .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
         .where(*filters)
     )
@@ -1449,7 +1461,7 @@ async def list_torrent_requests(
     rows = (await db.execute(base_query.order_by(*order).offset(offset).limit(limit))).all()
     queue_visibility = await load_torrent_queue_visibility(
         db,
-        tuple(managed for _, managed in rows),
+        tuple(managed for _, managed, _ in rows),
         now=now,
     )
     return TorrentRequestV2ListingResponse(
@@ -1457,9 +1469,10 @@ async def list_torrent_requests(
             _response(
                 request,
                 managed,
+                error_code=error_code,
                 queue_visibility=queue_visibility.get(managed.id),
             )
-            for request, managed in rows
+            for request, managed, error_code in rows
         ],
         offset=offset,
         limit=limit,

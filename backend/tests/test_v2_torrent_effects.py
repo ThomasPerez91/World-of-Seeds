@@ -22,6 +22,8 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2DesiredControl,
     QBittorrentV2ManagedIdentity,
     QBittorrentV2MissingError,
+    QBittorrentV2RejectedError,
+    QBittorrentV2RejectionCause,
     QBittorrentV2TorrentSnapshot,
 )
 from app.jobs.torrent_effects import (
@@ -177,6 +179,21 @@ class FakeAdder:
         assert storage_key == STORAGE_KEY
         self.contents.append(content)
         return object()
+
+
+class RejectingAdder(FakeAdder):
+    def __init__(self, cause: QBittorrentV2RejectionCause) -> None:
+        super().__init__()
+        self.cause = cause
+
+    async def add_torrent(
+        self,
+        content: bytes,
+        *,
+        expected_info_hash: str,
+        storage_key: uuid.UUID,
+    ) -> object:
+        raise QBittorrentV2RejectedError(self.cause, status_code=400)
 
 
 class FakeInspector:
@@ -431,6 +448,43 @@ async def test_add_handler_transitions_requests_and_tolerates_unconfigured_redis
     assert b"private-user-passkey" not in adder.contents[0]
     with pytest.raises(TorrentPayloadStoreError):
         payloads.read(STORAGE_KEY)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cause", "expected_code"),
+    [
+        (QBittorrentV2RejectionCause.INVALID_METAINFO, "qbittorrent_metainfo_invalid"),
+        (QBittorrentV2RejectionCause.CONFLICT, "qbittorrent_add_conflict"),
+        (QBittorrentV2RejectionCause.REJECTED, "torrent_add_rejected"),
+    ],
+)
+async def test_add_handler_persists_only_normalized_qb_rejection_codes(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+    cause: QBittorrentV2RejectionCause,
+    expected_code: str,
+) -> None:
+    torrent_id, request_id = await _create_domain(sessions)
+    payloads = _payloads(tmp_path)
+    payloads.stage(_torrent(), storage_key=STORAGE_KEY)
+    effects = TorrentEffectHandlers(
+        sessions,
+        _router(
+            sessions,
+            RejectingAdder(cause),
+            QBittorrentV2TorrentSnapshot(INFO_HASH, "downloading", 0.2),
+        ),
+        payloads,
+        _content(tmp_path),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(PermanentTorrentJobError) as failure:
+        await effects.add_torrent(_snapshot(torrent_id, request_id, "ADD_TORRENT"))
+
+    assert failure.value.error_code == expected_code
+    assert "private-user-passkey" not in failure.value.error_code
 
 
 @pytest.mark.asyncio

@@ -65,6 +65,7 @@ def _valid_config() -> dict[str, Any]:
             "entrypoint": ["/bin/sh", "-ec"],
             "cap_drop": ["ALL"],
             "cap_add": ["CHOWN", "DAC_OVERRIDE", "KILL", "SETGID", "SETUID"],
+            "security_opt": ["no-new-privileges:true"],
             "command": [
                 "/bin/sh /bootstrap/reconcile.sh /wos-ca/mitmproxy-ca-cert.pem "
                 "/etc/ssl/certs/ca-certificates.crt "
@@ -273,6 +274,16 @@ def test_rise2_policy_accepts_complete_isolated_stack() -> None:
     validate(_valid_config())
 
 
+def test_rise2_policy_accepts_disposable_storage_below_the_dedicated_root() -> None:
+    _, validate = _validator()
+    config = _valid_config()
+    config["services"]["qbittorrent"]["volumes"][1]["source"] = (
+        "/srv/world-of-seeds-v2/ci-qb-123/data"
+    )
+
+    validate(config)
+
+
 def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
     repository = Path(__file__).resolve().parents[2]
     script = (repository / "scripts/rise2_v2_newgreedy_smoke.sh").read_text(encoding="utf-8")
@@ -317,6 +328,16 @@ def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
                 ]
             }
         ),
+        lambda config: config["services"]["qbittorrent"].update({"security_opt": []}),
+        lambda config: config["services"]["qbittorrent"]["environment"].update({"PUID": "0"}),
+        lambda config: config["services"]["qbittorrent"]["volumes"].append(
+            {
+                "type": "bind",
+                "source": "/var/run/docker.sock",
+                "target": "/var/run/docker.sock",
+            }
+        ),
+        lambda config: config["services"]["qbittorrent"]["volumes"][1].update({"source": "/etc"}),
         lambda config: config["services"]["qbittorrent"]["volumes"].append(
             {
                 "type": "volume",

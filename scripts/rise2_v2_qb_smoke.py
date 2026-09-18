@@ -84,7 +84,7 @@ def smoke() -> None:
                 "-t",
                 "tmpfs",
                 "-o",
-                "size=16m,mode=0750,uid=10001,gid=10001",
+                "size=16m,mode=0750,uid=10001,gid=10001,noexec,nosuid,nodev",
                 "tmpfs",
                 str(data),
             ],
@@ -192,6 +192,23 @@ def smoke() -> None:
             "fresh startup",
         )
         qb_id = healthy()
+        runtime_uid = run(
+            compose
+            + [
+                "exec",
+                "-T",
+                "qbittorrent",
+                "/bin/sh",
+                "-ec",
+                "for status in /proc/[0-9]*/status; do "
+                "grep -qx 'Name:\tqbittorrent-nox' \"$status\" || continue; "
+                "sed -n 's/^Uid:[[:space:]]*\\([0-9]*\\).*/\\1/p' \"$status\"; "
+                "exit 0; done; exit 1",
+            ],
+            "qB runtime identity inspection",
+        ).strip()
+        if runtime_uid != values["WOS_V2_QBITTORRENT_UID"]:
+            raise RuntimeError("qB process does not run with the configured non-root UID")
         probe("--set-sentinel")
         logs = run(compose + ["logs", "--no-color", "qbittorrent"], "qB log leak check")
         if password in logs or username in logs or "temporary password" in logs.lower():

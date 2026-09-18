@@ -179,22 +179,16 @@
   transform: none !important;
 }
 
-.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-summary,
 .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-summary {
   display: grid;
   gap: 0.7rem;
   margin: 0 0 1rem;
 }
 
-.admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-summary {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-summary {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.admin-page[data-admin-view="admin-qbittorrent"] .admin-metric-card.ui-card,
 .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-summary > div {
   display: grid;
   min-height: 5.25rem;
@@ -207,7 +201,6 @@
   box-shadow: none !important;
 }
 
-.admin-page[data-admin-view="admin-qbittorrent"] .admin-metric-card span,
 .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-summary span {
   color: var(--wos-muted, var(--color-text-muted));
   font-size: 0.74rem;
@@ -215,7 +208,6 @@
   letter-spacing: 0.02em;
 }
 
-.admin-page[data-admin-view="admin-qbittorrent"] .admin-metric-card strong,
 .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-summary strong {
   margin: 0;
   color: var(--wos-text, var(--color-text));
@@ -223,6 +215,83 @@
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.025em;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-runtime-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 1fr);
+  gap: 0.7rem;
+  margin: 0 0 1rem;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-transfer-card.ui-card,
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-search-card {
+  min-width: 0;
+  min-height: 5.25rem;
+  padding: 0.85rem 1rem !important;
+  border: 1px solid var(--wos-line, var(--color-border)) !important;
+  border-radius: var(--wos-radius-sm, 13px) !important;
+  background: var(--wos-surface-soft, var(--color-surface-elevated)) !important;
+  box-shadow: none !important;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-transfer-card.ui-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: 1rem;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-transfer-card > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-transfer-card > div + div {
+  padding-left: 1rem;
+  border-left: 1px solid var(--wos-line, var(--color-border));
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-transfer-card span,
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-search-card > span {
+  color: var(--wos-muted, var(--color-text-muted));
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-transfer-card strong {
+  color: var(--wos-text, var(--color-text));
+  font-size: 1.25rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-search-card {
+  display: grid;
+  align-content: center;
+  gap: 0.4rem;
+  margin: 0;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-search-card input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.6rem;
+  margin: 0;
+  border: 1px solid var(--wos-line, var(--color-border)) !important;
+  border-radius: 10px !important;
+  color: var(--wos-text, var(--color-text));
+  background: var(--wos-surface-strong, var(--color-surface)) !important;
+  box-shadow: none !important;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-search-card input:focus-visible {
+  border-color: var(--wos-accent, var(--color-focus)) !important;
+  outline: 2px solid color-mix(in srgb, var(--wos-accent, var(--color-focus)) 28%, transparent);
+  outline-offset: 1px;
 }
 
 .admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-table-wrap,
@@ -273,6 +342,66 @@
   font-size: 0.84rem;
 }
 
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-table-sort,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-table-sort,
+.admin-page[data-admin-view="admin-cleanup"] .admin-table-sort {
+  display: inline-flex !important;
+  width: auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.38rem;
+  margin: 0 !important;
+  padding: 0.18rem 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  color: inherit !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: 1.15;
+  text-align: inherit;
+  text-transform: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-table-sort:hover:not(:disabled),
+.admin-page[data-admin-view="admin-newgreedy"] .admin-table-sort:hover:not(:disabled),
+.admin-page[data-admin-view="admin-cleanup"] .admin-table-sort:hover:not(:disabled) {
+  color: var(--wos-text, var(--color-text)) !important;
+  background: transparent !important;
+  transform: none !important;
+}
+
+.admin-page .admin-runtime-table .admin-table-sort svg {
+  width: 0.9rem !important;
+  min-width: 0.9rem;
+  height: 0.9rem !important;
+  flex: 0 0 0.9rem;
+  stroke-width: 2.25;
+}
+
+.admin-page .admin-runtime-table .admin-table-column-center {
+  text-align: center;
+}
+
+.admin-page .admin-runtime-table .admin-table-column-center .admin-table-sort {
+  justify-content: center;
+  margin-inline: auto !important;
+}
+
+.admin-page .admin-runtime-table .admin-table-column-right {
+  text-align: right;
+}
+
+.admin-page .admin-runtime-table .admin-table-column-right .admin-table-sort {
+  justify-content: flex-end;
+  margin-left: auto !important;
+}
+
 .admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-table tbody tr,
 .admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-table tbody tr,
 .admin-page[data-admin-view="admin-cleanup"] .admin-runtime-table tbody tr {
@@ -308,6 +437,38 @@
 .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table th:nth-child(3) { width: 12%; }
 .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table th:nth-child(4) { width: 22%; }
 .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table th:nth-child(5) { width: 10%; }
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th,
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table td {
+  text-align: left;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(2),
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table td:nth-child(2) {
+  text-align: center;
+}
+
+.admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table th,
+.admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table td {
+  text-align: left;
+}
+
+.admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table th:nth-child(5),
+.admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table td:nth-child(5) {
+  text-align: center;
+}
+
+.admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table th:nth-child(6),
+.admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table td:nth-child(6) {
+  text-align: right;
+}
+
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table th:nth-child(2),
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table td:nth-child(2),
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table th:nth-child(3),
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table td:nth-child(3) {
+  text-align: center;
+}
 
 .admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-name,
 .admin-page[data-admin-view="admin-newgreedy"] .admin-runtime-name,
@@ -355,10 +516,11 @@
   grid-template-columns: minmax(16rem, 1fr) minmax(12rem, 0.38fr) auto;
   gap: 0.7rem;
   align-items: end;
-  margin: 0 0 1rem;
-  padding: 0 !important;
-  border: 0 !important;
-  background: transparent !important;
+  margin: 0 0 0.8rem;
+  padding: 0.8rem !important;
+  border: 1px solid var(--wos-line, var(--color-border)) !important;
+  border-radius: var(--wos-radius-sm, 13px) !important;
+  background: var(--wos-surface-soft, var(--color-surface-elevated)) !important;
 }
 
 .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-toolbar label {
@@ -394,19 +556,14 @@
 .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-purge-filtered.ui-button {
   min-height: 2.6rem;
   margin: 0 !important;
+  padding-inline: 0.9rem !important;
   white-space: nowrap;
 }
 
-.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table thead .admin-cleanup-sort {
-  gap: 0.32rem;
-  color: inherit !important;
-  background: transparent !important;
-}
-
-.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-table thead .admin-cleanup-sort:hover:not(:disabled) {
-  color: var(--wos-text, var(--color-text)) !important;
-  background: transparent !important;
-  transform: none !important;
+.admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-purge-filtered svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 1rem;
 }
 
 .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-actions {
@@ -462,7 +619,7 @@
     align-items: flex-start;
   }
 
-  .admin-page[data-admin-view="admin-qbittorrent"] .admin-runtime-summary,
+  .admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-runtime-controls,
   .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-summary,
   .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-toolbar {
     grid-template-columns: 1fr;
@@ -470,6 +627,17 @@
 
   .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-purge-filtered.ui-button {
     width: 100%;
+  }
+
+  .admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-transfer-card.ui-card {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-transfer-card > div + div {
+    padding-top: 0.75rem;
+    padding-left: 0;
+    border-top: 1px solid var(--wos-line, var(--color-border));
+    border-left: 0;
   }
 
   .admin-page[data-admin-view="admin-cleanup"] .admin-cleanup-pagination {
