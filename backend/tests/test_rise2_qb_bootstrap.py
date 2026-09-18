@@ -65,6 +65,32 @@ def test_render_is_idempotent_and_preserves_unrelated_preferences() -> None:
     assert all(ns["settings"](result)[key] == value for key, value in ns["REQUIRED"].items())
 
 
+def test_qb_policy_forces_every_supported_autorun_path_off() -> None:
+    ns = module()
+    user, password = ns["credentials"](registry())
+    existing = (
+        "[Preferences]\n"
+        "AutoRun\\OnTorrentAdded\\Enabled=true\n"
+        "AutoRun\\OnTorrentAdded\\Program=/data/payload.sh secret-passkey\n"
+        "AutoRun\\enabled=true\n"
+        "AutoRun\\program=/data/finished.py secret-token\n"
+        "AutoRun\\ConsoleEnabled=true\n"
+    )
+
+    rendered = ns["render"](existing, user, password)
+    parsed = ns["settings"](rendered)
+
+    assert parsed[("Preferences", r"AutoRun\OnTorrentAdded\Enabled")] == "false"
+    assert parsed[("Preferences", r"AutoRun\OnTorrentAdded\Program")] == ""
+    assert parsed[("Preferences", r"AutoRun\enabled")] == "false"
+    assert parsed[("Preferences", r"AutoRun\program")] == ""
+    assert parsed[("Preferences", r"AutoRun\ConsoleEnabled")] == "false"
+    assert "payload.sh" not in rendered
+    assert "finished.py" not in rendered
+    assert "secret-passkey" not in rendered
+    assert "secret-token" not in rendered
+
+
 @pytest.mark.parametrize(
     "key,value",
     [

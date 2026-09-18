@@ -15,6 +15,7 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2MissingError,
     QBittorrentV2OwnershipError,
     QBittorrentV2RejectedError,
+    QBittorrentV2RejectionCause,
     QBittorrentV2RunState,
     QBittorrentV2TransientError,
 )
@@ -116,8 +117,9 @@ async def test_gateway_adds_with_server_owned_path_category_and_identity() -> No
             assert b"wos-v2" in request.content
             assert b'name="tags"' in request.content
             assert IDENTITY_TAG.encode() in request.content
-            assert b'name="paused"' in request.content
+            assert b'name="stopped"' in request.content
             assert b"true" in request.content
+            assert b'name="paused"' not in request.content
             return httpx.Response(
                 200,
                 json={
@@ -367,6 +369,44 @@ async def test_gateway_does_not_mask_explicit_rejections(status: int, body: str)
         await _run(handler)
 
     assert lookup_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "body", "cause"),
+    [
+        (
+            400,
+            "Invalid metainfo in https://tracker/announce/private-passkey",
+            QBittorrentV2RejectionCause.INVALID_METAINFO,
+        ),
+        (409, "Torrent already exists", QBittorrentV2RejectionCause.CONFLICT),
+        (418, "Rejected token=private-passkey", QBittorrentV2RejectionCause.REJECTED),
+    ],
+)
+async def test_gateway_classifies_4xx_without_exposing_response_secrets(
+    status: int,
+    body: str,
+    cause: QBittorrentV2RejectionCause,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v2/auth/login":
+            return _login_response()
+        if request.url.path == "/api/v2/torrents/info":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v2/torrents/add":
+            return httpx.Response(status, text=body)
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError(request.url.path)
+
+    with pytest.raises(QBittorrentV2RejectedError) as failure:
+        await _run(handler)
+
+    assert failure.value.cause is cause
+    assert failure.value.status_code == status
+    assert "private-passkey" not in str(failure.value)
+    assert "tracker" not in str(failure.value)
 
 
 @pytest.mark.asyncio

@@ -36,6 +36,12 @@ class QBittorrentV2RunState(StrEnum):
     STOPPED = "stopped"
 
 
+class QBittorrentV2RejectionCause(StrEnum):
+    INVALID_METAINFO = "invalid_metainfo"
+    CONFLICT = "conflict"
+    REJECTED = "rejected"
+
+
 @dataclass(frozen=True, slots=True)
 class QBittorrentV2AddResult:
     state: QBittorrentV2AddState
@@ -95,6 +101,19 @@ class QBittorrentV2MissingError(QBittorrentV2TransientError):
 
 class QBittorrentV2RejectedError(IntegrationRequestError):
     """qBittorrent explicitly rejected a V2 managed-torrent operation."""
+
+    def __init__(
+        self,
+        cause: QBittorrentV2RejectionCause = QBittorrentV2RejectionCause.REJECTED,
+        *,
+        status_code: int | None = None,
+    ) -> None:
+        self.cause = cause
+        self.status_code = status_code
+        status = "response" if status_code is None else str(status_code)
+        # This fixed diagnostic is safe for logs and exception chains. Never
+        # retain qBittorrent response bodies: they can reflect tracker URLs.
+        super().__init__(f"qbittorrent_add_{cause.value} status={status}")
 
 
 class QBittorrentV2OwnershipError(IntegrationRequestError):
@@ -449,15 +468,21 @@ class QBittorrentV2Gateway:
                 "savepath": identity.save_path,
                 "category": WOS_V2_CATEGORY,
                 "tags": ",".join(sorted(identity.tags)),
-                "paused": "true",
+                "stopped": "true",
             },
             files={"torrents": ("upload.torrent", content, "application/x-bittorrent")},
             headers=self._browser_headers(),
         ) as response:
-            if response.status_code == 401:
+            if response.status_code in {401, 403}:
                 raise IntegrationAuthenticationError("qBittorrent session expired")
+            if response.status_code in {408, 425, 429}:
+                raise _AmbiguousAdd("qBittorrent returned a transient client response")
             if 400 <= response.status_code < 500:
-                raise QBittorrentV2RejectedError("qBittorrent rejected the managed torrent")
+                response_text = await read_limited_text(response, max_bytes=MAX_ADD_RESPONSE_BYTES)
+                raise QBittorrentV2RejectedError(
+                    _classify_add_rejection(response.status_code, response_text),
+                    status_code=response.status_code,
+                )
             if response.status_code >= 500:
                 raise _AmbiguousAdd("qBittorrent returned an ambiguous server response")
             if not 200 <= response.status_code < 300:
@@ -469,7 +494,7 @@ class QBittorrentV2Gateway:
         if result == "Ok.":
             return
         if result == "Fails.":
-            raise QBittorrentV2RejectedError("qBittorrent rejected the managed torrent")
+            raise QBittorrentV2RejectedError()
         try:
             payload = json.loads(result)
         except json.JSONDecodeError as exc:
@@ -477,7 +502,7 @@ class QBittorrentV2Gateway:
         if _accepted_add_response(payload, expected_info_hash):
             return
         if _explicitly_rejected_add_response(payload):
-            raise QBittorrentV2RejectedError("qBittorrent rejected the managed torrent")
+            raise QBittorrentV2RejectedError()
         raise _AmbiguousAdd("qBittorrent returned an ambiguous add payload")
 
     async def _reconcile_ambiguous(
@@ -547,7 +572,7 @@ class QBittorrentV2Gateway:
             if response.status_code == 401:
                 raise IntegrationAuthenticationError("qBittorrent session expired")
             if 400 <= response.status_code < 500:
-                raise QBittorrentV2RejectedError("qBittorrent rejected a managed torrent control")
+                raise QBittorrentV2RejectedError(status_code=response.status_code)
             response.raise_for_status()
 
     def _identity(self, storage_key: UUID) -> _ManagedIdentity:
@@ -627,6 +652,28 @@ def _explicitly_rejected_add_response(payload: object) -> bool:
         and type(pending_count) is int
         and pending_count == 0
     )
+
+
+def _classify_add_rejection(status_code: int, response_text: str) -> QBittorrentV2RejectionCause:
+    """Reduce an untrusted qB response to a fixed, secret-safe cause."""
+
+    normalized = response_text[:MAX_ADD_RESPONSE_BYTES].casefold()
+    if status_code == 409 or any(
+        marker in normalized for marker in ("already exists", "duplicate torrent", "conflict")
+    ):
+        return QBittorrentV2RejectionCause.CONFLICT
+    if status_code in {400, 422} and any(
+        marker in normalized
+        for marker in (
+            "invalid torrent",
+            "invalid metainfo",
+            "invalid metadata",
+            "bencode",
+            "metainfo",
+        )
+    ):
+        return QBittorrentV2RejectionCause.INVALID_METAINFO
+    return QBittorrentV2RejectionCause.REJECTED
 
 
 def _parse_torrent_record(value: object) -> _TorrentRecord:

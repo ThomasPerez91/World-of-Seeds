@@ -1263,7 +1263,7 @@ wheels = [
 
 [[package]]
 name = "world-of-seeds-backend"
-version = "2.2.7"
+version = "2.2.8"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
@@ -1309,3 +1309,4 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=1.1,<2" },
     { name = "ruff", specifier = ">=0.12,<1" },
 ]
+

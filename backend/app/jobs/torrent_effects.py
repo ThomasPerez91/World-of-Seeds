@@ -35,6 +35,7 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2MissingError,
     QBittorrentV2OwnershipError,
     QBittorrentV2RejectedError,
+    QBittorrentV2RejectionCause,
     QBittorrentV2TorrentSnapshot,
     QBittorrentV2TransientError,
 )
@@ -241,14 +242,29 @@ class TorrentEffectHandlers:
                 "torrent_integration_authentication",
                 torrent_state=ManagedTorrentState.RETRY_WAIT,
             ) from exc
-        except (C411V2PayloadError, TorrentValidationError) as exc:
+        except TorrentValidationError as exc:
+            raise PermanentTorrentJobError(
+                exc.code,
+                torrent_state=ManagedTorrentState.ERROR,
+            ) from exc
+        except C411V2PayloadError as exc:
             raise PermanentTorrentJobError(
                 "torrent_payload_invalid",
                 torrent_state=ManagedTorrentState.ERROR,
             ) from exc
-        except (QBittorrentV2OwnershipError, QBittorrentV2RejectedError) as exc:
+        except QBittorrentV2OwnershipError as exc:
             raise PermanentTorrentJobError(
-                "torrent_add_rejected",
+                "qbittorrent_ownership_conflict",
+                torrent_state=ManagedTorrentState.ERROR,
+            ) from exc
+        except QBittorrentV2RejectedError as exc:
+            error_code = {
+                QBittorrentV2RejectionCause.INVALID_METAINFO: "qbittorrent_metainfo_invalid",
+                QBittorrentV2RejectionCause.CONFLICT: "qbittorrent_add_conflict",
+                QBittorrentV2RejectionCause.REJECTED: "torrent_add_rejected",
+            }[exc.cause]
+            raise PermanentTorrentJobError(
+                error_code,
                 torrent_state=ManagedTorrentState.ERROR,
             ) from exc
 

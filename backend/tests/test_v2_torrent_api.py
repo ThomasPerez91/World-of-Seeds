@@ -377,7 +377,16 @@ async def test_v2_listing_exposes_only_bounded_error_code(
         state=ManagedTorrentState.ERROR,
     )
     request = TorrentRequest(user_id=owner.id, managed_torrent=managed)
-    db_session.add_all([managed, request])
+    job = TorrentJob(
+        managed_torrent=managed,
+        torrent_request=request,
+        job_type="ADD_TORRENT",
+        idempotency_key="add:failed-safe-diagnostic",
+        state=TorrentJobState.FAILED,
+        last_error_code="torrent_file_type_not_allowed",
+        finished_at=datetime.now(UTC),
+    )
+    db_session.add_all([managed, request, job])
     await db_session.commit()
     await login(client)
 
@@ -385,7 +394,7 @@ async def test_v2_listing_exposes_only_bounded_error_code(
 
     assert response.status_code == 200
     assert response.json()["items"][0]["state"] == "error"
-    assert response.json()["items"][0]["error_code"] == "torrent_failed"
+    assert response.json()["items"][0]["error_code"] == "torrent_file_type_not_allowed"
     assert "info_hash" not in response.json()["items"][0]
     assert "storage" not in response.text.lower()
 

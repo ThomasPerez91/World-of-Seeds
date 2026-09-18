@@ -17,7 +17,35 @@ read-only côté V1 et dry-run par défaut, décrite dans [`import-v1-v2.md`](im
    commandes de diagnostic.
 3. Créer `/srv/world-of-seeds-v2/data` sans lien symbolique, avec l'UID/GID WOS V2 dédiés. Ce chemin
    doit être le point de montage actif du filesystem de données ; un simple répertoire présent sur
-   le filesystem racine n'est jamais un stockage V2 valide.
+   le filesystem racine n'est jamais un stockage V2 valide. Le montage hôte doit porter les trois
+   options `noexec,nosuid,nodev`. Docker Compose ne peut pas imposer honnêtement ces drapeaux VFS
+   à un bind mount existant : le préflight Rise2 les contrôle avec `findmnt` et bloque désormais
+   le démarrage si l'un d'eux manque.
+
+   Pour un filesystem dédié, ajouter les options à sa ligne `/etc/fstab`, par exemple :
+
+   ```fstab
+   UUID=<uuid-du-volume> /srv/world-of-seeds-v2/data ext4 defaults,noexec,nosuid,nodev 0 2
+   ```
+
+   Puis appliquer et vérifier :
+
+   ```bash
+   sudo mount -o remount,noexec,nosuid,nodev /srv/world-of-seeds-v2/data
+   findmnt -n -o TARGET,OPTIONS --target /srv/world-of-seeds-v2/data
+   ```
+
+   Si Rise2 ne dispose pas d'un filesystem dédié, arrêter WOS puis créer un bind mount durci vers
+   un répertoire de backing après avoir déplacé les données existantes :
+
+   ```fstab
+   /srv/world-of-seeds-v2/data.backing /srv/world-of-seeds-v2/data none bind 0 0
+   /srv/world-of-seeds-v2/data.backing /srv/world-of-seeds-v2/data none remount,bind,rw,noexec,nosuid,nodev 0 0
+   ```
+
+   Les deux lignes sont intentionnelles pour les noyaux/util-linux qui n'appliquent pas tous les
+   drapeaux VFS lors du premier bind. Ne pas remonter tout `/srv` en `noexec` si d'autres services
+   y exécutent du code.
 4. Conserver le registre `WOS_V2_INTEGRATION_ACCOUNTS_JSON` dans le fichier d'environnement
    privé, avec des quotes simples autour du JSON pour préserver les `$` littéraux. La route
    unique vise l'URL `http://qbittorrent:8080`. Le username utilise 1–128 caractères ASCII alphanumériques ou

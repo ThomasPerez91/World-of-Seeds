@@ -65,6 +65,7 @@ def _valid_config() -> dict[str, Any]:
             "entrypoint": ["/bin/sh", "-ec"],
             "cap_drop": ["ALL"],
             "cap_add": ["CHOWN", "DAC_OVERRIDE", "KILL", "SETGID", "SETUID"],
+            "security_opt": ["no-new-privileges:true"],
             "command": [
                 "/bin/sh /bootstrap/reconcile.sh /wos-ca/mitmproxy-ca-cert.pem "
                 "/etc/ssl/certs/ca-certificates.crt "
@@ -317,6 +318,16 @@ def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
                 ]
             }
         ),
+        lambda config: config["services"]["qbittorrent"].update({"security_opt": []}),
+        lambda config: config["services"]["qbittorrent"]["environment"].update({"PUID": "0"}),
+        lambda config: config["services"]["qbittorrent"]["volumes"].append(
+            {
+                "type": "bind",
+                "source": "/var/run/docker.sock",
+                "target": "/var/run/docker.sock",
+            }
+        ),
+        lambda config: config["services"]["qbittorrent"]["volumes"][1].update({"source": "/etc"}),
         lambda config: config["services"]["qbittorrent"]["volumes"].append(
             {
                 "type": "volume",

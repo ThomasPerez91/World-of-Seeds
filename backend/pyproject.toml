@@ -1,6 +1,6 @@
 [project]
 name = "world-of-seeds-backend"
-version = "2.2.7"
+version = "2.2.8"
 description = "Private seedbox management API"
 requires-python = ">=3.12"
 dependencies = [
@@ -52,3 +52,4 @@ plugins = ["pydantic.mypy", "sqlalchemy.ext.mypy.plugin"]
 init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
+

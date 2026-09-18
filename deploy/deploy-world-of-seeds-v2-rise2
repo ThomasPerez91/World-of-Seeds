@@ -194,7 +194,7 @@ ENV_MODE="$(stat -c '%a' "${ENV_FILE}")"
 [[ "${ENV_MODE}" == "600" || "${ENV_MODE}" == "400" ]] || fail "l'environnement doit être en mode 600 ou 400."
 mountpoint -q "${DATA_MOUNT}" || fail "le stockage V2 n'est pas monté sur ${DATA_MOUNT}."
 
-for command in docker curl git mktemp mountpoint python3 stat; do
+for command in docker curl findmnt git mktemp mountpoint python3 stat; do
   command -v "${command}" >/dev/null || fail "commande requise absente: ${command}"
 done
 docker compose version >/dev/null
