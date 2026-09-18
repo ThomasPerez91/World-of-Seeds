@@ -109,20 +109,20 @@ async def _prepare_qbittorrent_fixture(
         # Production adds are deliberately stopped. This disposable fixture
         # has no scheduler record yet, so exercise the same explicit control
         # path before waiting for qBittorrent's verification.
-        await gateway.apply_managed_controls(
-            (
-                QBittorrentV2DesiredControl(
-                    info_hash=info_hash,
-                    storage_key=STORAGE_KEY,
-                    run_state=QBittorrentV2RunState.RUNNING,
-                    download_limit_bytes_per_second=0,
-                    qbittorrent_account_ref=spec.qbittorrent_account_ref,
-                ),
-            )
+        control = QBittorrentV2DesiredControl(
+            info_hash=info_hash,
+            storage_key=STORAGE_KEY,
+            run_state=QBittorrentV2RunState.RUNNING,
+            download_limit_bytes_per_second=0,
+            qbittorrent_account_ref=spec.qbittorrent_account_ref,
         )
         identity = QBittorrentV2ManagedIdentity(info_hash, STORAGE_KEY)
         for _ in range(100):
             try:
+                # A freshly added torrent can briefly be checking metadata
+                # before it reaches the stopped state. Reconcile the desired
+                # control until qB can apply the explicit start.
+                await gateway.apply_managed_controls((control,))
                 snapshots = await gateway.inspect_managed_torrents((identity,))
             except QBittorrentV2TransientError:
                 snapshots = ()
