@@ -245,9 +245,11 @@ def validate_config(config: Mapping[str, Any]) -> None:
     }:
         raise ComposeRise2PolicyError("qBittorrent must not mount unrelated host state")
     data_mount = qbittorrent_mounts["/data"]
+    data_source = Path(str(data_mount.get("source", "")))
     if (
         data_mount.get("type") != "bind"
-        or data_mount.get("source") != "/srv/world-of-seeds-v2/data"
+        or not data_source.is_relative_to("/srv/world-of-seeds-v2")
+        or data_source == Path("/srv/world-of-seeds-v2")
         or data_mount.get("read_only") is True
     ):
         raise ComposeRise2PolicyError("qBittorrent /data mount violates Rise2 storage policy")

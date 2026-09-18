@@ -274,6 +274,16 @@ def test_rise2_policy_accepts_complete_isolated_stack() -> None:
     validate(_valid_config())
 
 
+def test_rise2_policy_accepts_disposable_storage_below_the_dedicated_root() -> None:
+    _, validate = _validator()
+    config = _valid_config()
+    config["services"]["qbittorrent"]["volumes"][1]["source"] = (
+        "/srv/world-of-seeds-v2/ci-qb-123/data"
+    )
+
+    validate(config)
+
+
 def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
     repository = Path(__file__).resolve().parents[2]
     script = (repository / "scripts/rise2_v2_newgreedy_smoke.sh").read_text(encoding="utf-8")
