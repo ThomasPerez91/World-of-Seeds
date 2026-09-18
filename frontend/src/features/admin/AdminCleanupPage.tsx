@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronsUpDown, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 
 import {
   api,
@@ -12,9 +12,9 @@ import { RefreshIcon } from "../../components/icons";
 import { Button, IconButton, StateMessage, Tooltip } from "../../components/ui";
 import { useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
+import { AdminSortableHeader, type AdminSortOrder } from "./AdminSortableHeader";
 
 type SortKey = "name" | "size" | "subscribers" | "deletion";
-type SortOrder = "asc" | "desc";
 type SubscriberFilter = "all" | "none" | "active";
 const PAGE_SIZE = 15;
 
@@ -41,7 +41,7 @@ export function AdminCleanupPage({ onBack, onNavigate, onSessionExpired }: {
   const [search, setSearch] = useState("");
   const [subscriberFilter, setSubscriberFilter] = useState<SubscriberFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
+  const [sortOrder, setSortOrder] = useState<AdminSortOrder>("asc");
   const [requestedPage, setRequestedPage] = useState(1);
   const [purgeSelection, setPurgeSelection] = useState<AdminCleanupItem[] | null>(null);
   const [purging, setPurging] = useState(false);
@@ -92,13 +92,6 @@ export function AdminCleanupPage({ onBack, onNavigate, onSessionExpired }: {
     setSortOrder("asc");
   }
 
-  function sortIcon(key: SortKey) {
-    if (sortKey !== key) return <ChevronsUpDown aria-hidden="true" />;
-    return sortOrder === "asc"
-      ? <ArrowUp aria-hidden="true" />
-      : <ArrowDown aria-hidden="true" />;
-  }
-
   async function confirmPurge() {
     if (purgeSelection === null || purgeSelection.length === 0) return;
     setPurging(true);
@@ -117,18 +110,15 @@ export function AdminCleanupPage({ onBack, onNavigate, onSessionExpired }: {
     }
   }
 
-  const sortableHeader = (key: SortKey, label: string) => (
-    <th aria-sort={sortKey === key ? (sortOrder === "asc" ? "ascending" : "descending") : "none"}>
-      <button
-        type="button"
-        className="admin-cleanup-sort"
-        onClick={() => changeSort(key)}
-        aria-label={t("admin.cleanupSort", { column: label })}
-      >
-        <span>{label}</span>
-        {sortIcon(key)}
-      </button>
-    </th>
+  const sortableHeader = (key: SortKey, label: string, align: "left" | "center" | "right" = "left") => (
+    <AdminSortableHeader
+      active={sortKey === key}
+      align={align}
+      direction={sortOrder}
+      label={label}
+      onSort={() => changeSort(key)}
+      sortLabel={t("admin.cleanupSort", { column: label })}
+    />
   );
 
   return (
@@ -210,8 +200,8 @@ export function AdminCleanupPage({ onBack, onNavigate, onSessionExpired }: {
               <thead>
                 <tr>
                   {sortableHeader("name", t("admin.cleanupName"))}
-                  {sortableHeader("size", t("admin.size"))}
-                  {sortableHeader("subscribers", t("admin.cleanupSubscribers"))}
+                  {sortableHeader("size", t("admin.size"), "center")}
+                  {sortableHeader("subscribers", t("admin.cleanupSubscribers"), "center")}
                   {sortableHeader("deletion", t("admin.cleanupDeletionAt"))}
                   <th>{t("admin.actions")}</th>
                 </tr>
