@@ -294,7 +294,12 @@ jobs:
           compose=(docker compose --env-file .env.v2.example -f compose.v2.yaml)
           curl --fail --silent --show-error \
             http://127.0.0.1:28081/api/v1/health/live
-          test "$("${compose[@]}" port api 8000)" = "127.0.0.1:28081"
+          api_id=$("${compose[@]}" ps --quiet --status running api)
+          test -n "$api_id"
+          docker inspect "$api_id" | jq -e '
+            .[0].NetworkSettings.Ports["8000/tcp"]
+              == [{"HostIp":"127.0.0.1","HostPort":"28081"}]
+          ' >/dev/null
           if "${compose[@]}" port postgres 5432 >/tmp/v2-postgres-port 2>/dev/null; then
             echo "V2 PostgreSQL must not publish a host port."
             cat /tmp/v2-postgres-port
