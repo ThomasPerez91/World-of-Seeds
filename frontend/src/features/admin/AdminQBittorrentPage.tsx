@@ -13,7 +13,6 @@ type SortKey = "name" | "size" | "status" | "progress";
 function compareTorrents(left: QBittorrentTorrent, right: QBittorrentTorrent, key: SortKey): number {
   if (key === "name") return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
   if (key === "size") return left.size_bytes - right.size_bytes;
-  if (key === "status") return left.state.localeCompare(right.state);
   return left.progress - right.progress;
 }
 
@@ -59,10 +58,22 @@ export function AdminQBittorrentPage({ onBack, onNavigate, onSessionExpired }: {
     return [...(runtime?.torrents ?? [])]
       .filter((torrent) => normalizedSearch === "" || torrent.name.toLocaleLowerCase().includes(normalizedSearch))
       .sort((left, right) => {
-        const compared = compareTorrents(left, right, sortKey);
+        let compared: number;
+        if (sortKey === "status") {
+          const leftPresentation = statePresentation(left.state);
+          const rightPresentation = statePresentation(right.state);
+          const leftLabel = leftPresentation.label === null ? left.state : t(leftPresentation.label);
+          const rightLabel = rightPresentation.label === null ? right.state : t(rightPresentation.label);
+          compared = leftLabel.localeCompare(rightLabel, undefined, { sensitivity: "base" });
+          if (compared === 0) {
+            compared = left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+          }
+        } else {
+          compared = compareTorrents(left, right, sortKey);
+        }
         return sortOrder === "asc" ? compared : -compared;
       });
-  }, [runtime, search, sortKey, sortOrder]);
+  }, [runtime, search, sortKey, sortOrder, t]);
 
   function changeSort(key: SortKey) {
     if (sortKey === key) {
