@@ -1711,9 +1711,7 @@ async def retry_torrent_request(
                 managed_torrent_id=managed.id,
                 torrent_request_id=owned.id,
                 job_type=ADD_TORRENT_JOB,
-                idempotency_key=(
-                    f"add:{managed.id}:retry:{managed.lifecycle_generation}"
-                ),
+                idempotency_key=(f"add:{managed.id}:retry:{managed.lifecycle_generation}"),
                 state=TorrentJobState.QUEUED,
                 available_at=datetime.now(UTC),
             )
