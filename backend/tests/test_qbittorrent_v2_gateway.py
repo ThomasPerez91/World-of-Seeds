@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID
@@ -423,6 +424,46 @@ async def test_gateway_preserves_authentication_error_without_sending_torrent() 
         await _run(handler)
 
     assert requests == ["/api/v2/auth/login"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_serializes_authenticated_operations_on_shared_client() -> None:
+    requests: list[str] = []
+    active_logins = 0
+    maximum_active_logins = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active_logins, maximum_active_logins
+        requests.append(request.url.path)
+        if request.url.path == "/api/v2/auth/login":
+            active_logins += 1
+            maximum_active_logins = max(maximum_active_logins, active_logins)
+            await asyncio.sleep(0.01)
+            active_logins -= 1
+            return _login_response()
+        if request.url.path == "/api/v2/torrents/info":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError(request.url.path)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        gateway = _gateway(client)
+        first, second = await asyncio.gather(
+            gateway.inventory_torrents(),
+            gateway.inventory_torrents(),
+        )
+
+    assert first.items == second.items == ()
+    assert maximum_active_logins == 1
+    assert requests == [
+        "/api/v2/auth/login",
+        "/api/v2/torrents/info",
+        "/api/v2/auth/logout",
+        "/api/v2/auth/login",
+        "/api/v2/torrents/info",
+        "/api/v2/auth/logout",
+    ]
 
 
 @pytest.mark.asyncio

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import math
 import re
@@ -161,8 +162,28 @@ class QBittorrentV2Gateway:
         self._username = username
         self._password = password
         self._data_root = data_root
+        # httpx stores cookies on the shared AsyncClient. A qBittorrent operation spans
+        # login, one or more authenticated requests, and logout, so allowing two such
+        # operations to overlap can replace or invalidate the other operation's SID.
+        # Keep the critical section local to this qBittorrent account; unrelated worker
+        # effects and gateways for other accounts remain concurrent.
+        self._operation_lock = asyncio.Lock()
 
     async def add_managed_torrent(
+        self,
+        content: bytes,
+        *,
+        expected_info_hash: str,
+        storage_key: UUID,
+    ) -> QBittorrentV2AddResult:
+        async with self._operation_lock:
+            return await self._add_managed_torrent(
+                content,
+                expected_info_hash=expected_info_hash,
+                storage_key=storage_key,
+            )
+
+    async def _add_managed_torrent(
         self,
         content: bytes,
         *,
@@ -214,6 +235,18 @@ class QBittorrentV2Gateway:
         allow_missing_stopped: bool = False,
     ) -> QBittorrentV2ControlResult:
         """Reconcile bounded, explicitly-owned torrents against a scheduler decision."""
+        async with self._operation_lock:
+            return await self._apply_managed_controls(
+                controls,
+                allow_missing_stopped=allow_missing_stopped,
+            )
+
+    async def _apply_managed_controls(
+        self,
+        controls: Sequence[QBittorrentV2DesiredControl],
+        *,
+        allow_missing_stopped: bool = False,
+    ) -> QBittorrentV2ControlResult:
         validated = _validate_controls(controls)
         if not validated:
             return QBittorrentV2ControlResult((), (), (), ())
@@ -332,6 +365,13 @@ class QBittorrentV2Gateway:
         self,
         identities: Sequence[QBittorrentV2ManagedIdentity],
     ) -> tuple[QBittorrentV2TorrentSnapshot, ...]:
+        async with self._operation_lock:
+            return await self._inspect_managed_torrents(identities)
+
+    async def _inspect_managed_torrents(
+        self,
+        identities: Sequence[QBittorrentV2ManagedIdentity],
+    ) -> tuple[QBittorrentV2TorrentSnapshot, ...]:
         """Read a bounded exact set after validating every WOS ownership marker."""
 
         validated = _validate_identities(identities)
@@ -383,6 +423,16 @@ class QBittorrentV2Gateway:
         offset: int = 0,
     ) -> QBittorrentV2Inventory:
         """Read a bounded inventory; external torrents are classified but never mutated."""
+        async with self._operation_lock:
+            return await self._inventory_torrents(limit=limit, offset=offset)
+
+    async def _inventory_torrents(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> QBittorrentV2Inventory:
+        """Read a bounded inventory while holding the account operation lock."""
         if not 1 <= limit <= MAX_CONTROL_TORRENTS:
             raise ValueError("qBittorrent inventory limit must be between 1 and 200")
         if not 0 <= offset <= 1_000_000:
@@ -433,6 +483,11 @@ class QBittorrentV2Gateway:
 
     async def remove_managed_torrent(self, identity: QBittorrentV2ManagedIdentity) -> None:
         """Remove exactly one WOS-owned torrent and its files, idempotently."""
+        async with self._operation_lock:
+            await self._remove_managed_torrent(identity)
+
+    async def _remove_managed_torrent(self, identity: QBittorrentV2ManagedIdentity) -> None:
+        """Remove one managed torrent while holding the account operation lock."""
         validated = _validate_identities((identity,))[0]
         owned_identity = self._identity(validated.storage_key)
         logged_in = False
