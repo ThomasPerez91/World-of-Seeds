@@ -1568,6 +1568,40 @@ describe("UserDownloadsPage", () => {
     expect(screen.getByRole("alert").textContent).toContain(expectedMessage);
   });
 
+  it("relance réellement un torrent en erreur via l’API V2", async () => {
+    const user = userEvent.setup();
+    let retried = false;
+    const calls: Array<{ method: string; url: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      const url = String(input);
+      calls.push({ method, url });
+      if (method === "POST" && url.endsWith("/retry")) {
+        retried = true;
+        return response(torrent({ state: "requested", error_code: null }));
+      }
+      return response({
+        items: [torrent({
+          state: retried ? "requested" : "error",
+          error_code: retried ? null : "torrent_integration_unavailable",
+        })],
+        offset: 0,
+        limit: 10,
+        total: 1,
+      });
+    }));
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Relancer Film.mkv" }));
+
+    await waitFor(() => expect(retried).toBe(true));
+    expect(calls).toContainEqual({
+      method: "POST",
+      url: "/api/v2/torrents/d86528f5-bc01-4a8b-86a1-74fe3404864b/retry",
+    });
+    expect((await screen.findAllByText("En attente")).length).toBeGreaterThan(0);
+  });
+
   it("annule directement une demande via l’API V2", async () => {
     const user = userEvent.setup();
     let cancelled = false;

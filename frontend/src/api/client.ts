@@ -841,6 +841,13 @@ export const api = {
     });
   },
 
+  retryTorrentRequestV2(torrentRequestId: string): Promise<TorrentRequestV2> {
+    return requestV2<TorrentRequestV2>(
+      `/torrents/${encodeURIComponent(torrentRequestId)}/retry`,
+      { method: "POST" },
+    );
+  },
+
   getTorrentDownloadManifestPageV2(
     torrentRequestId: string,
     offset = 0,

@@ -213,6 +213,8 @@ class FakeInspector:
     async def apply_managed_controls(
         self,
         _controls: Sequence[QBittorrentV2DesiredControl],
+        *,
+        allow_missing_stopped: bool = False,
     ) -> QBittorrentV2ControlResult:
         return QBittorrentV2ControlResult((), (), (), ())
 

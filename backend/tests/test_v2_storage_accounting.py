@@ -105,6 +105,35 @@ async def test_managed_quota_counts_shared_content_once(db_session: AsyncSession
 
 
 @pytest.mark.asyncio
+async def test_cumulative_reservations_cannot_overcommit_the_disk(
+    db_session: AsyncSession,
+) -> None:
+    user = await _user(db_session, "reservation-user")
+    policy = _policy()
+    empty_disk = StorageDiskSnapshot(1_000, 1_000)
+    await _request(
+        db_session,
+        user,
+        info_hash="7" * 40,
+        size=500,
+        policy=policy,
+        disk=empty_disk,
+    )
+
+    with pytest.raises(StorageAdmissionError) as failure:
+        await _request(
+            db_session,
+            user,
+            info_hash="8" * 40,
+            size=400,
+            policy=policy,
+            disk=empty_disk,
+        )
+
+    assert failure.value.code == "managed_capacity_exceeded"
+
+
+@pytest.mark.asyncio
 async def test_warning_allows_new_content_but_projected_critical_blocks_it(
     db_session: AsyncSession,
 ) -> None:
