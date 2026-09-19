@@ -46,7 +46,10 @@ type Clock = Callable[[], datetime]
 
 class ManagedControlGateway(Protocol):
     async def apply_managed_controls(
-        self, controls: Sequence[QBittorrentV2DesiredControl]
+        self,
+        controls: Sequence[QBittorrentV2DesiredControl],
+        *,
+        allow_missing_stopped: bool = False,
     ) -> QBittorrentV2ControlResult: ...
 
 
@@ -204,7 +207,10 @@ class SchedulerRuntime:
             await self._redis.publish_torrent_queue_changed(now)
 
         purge_control_result = (
-            await self._gateway.apply_managed_controls(purge_controls)
+            await self._gateway.apply_managed_controls(
+                purge_controls,
+                allow_missing_stopped=True,
+            )
             if purge_controls
             else QBittorrentV2ControlResult((), (), (), ())
         )

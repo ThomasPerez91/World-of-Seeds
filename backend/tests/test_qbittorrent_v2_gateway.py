@@ -546,6 +546,43 @@ async def test_gateway_replay_skips_state_and_limit_writes_but_reasserts_priorit
 
 
 @pytest.mark.asyncio
+async def test_gateway_treats_missing_stopped_purge_as_already_stopped() -> None:
+    requests: list[str] = []
+    control = QBittorrentV2DesiredControl(
+        info_hash=INFO_HASH_B,
+        storage_key=STORAGE_KEY_B,
+        run_state=QBittorrentV2RunState.STOPPED,
+        download_limit_bytes_per_second=0,
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        if request.url.path == "/api/v2/auth/login":
+            return _login_response()
+        if request.url.path == "/api/v2/torrents/info":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v2/auth/logout":
+            return httpx.Response(200)
+        raise AssertionError("A missing purge target must not receive a mutation")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await _gateway(client).apply_managed_controls(
+            (control,),
+            allow_missing_stopped=True,
+        )
+
+    assert result.started == ()
+    assert result.stopped == (INFO_HASH_B,)
+    assert result.limits_updated == ()
+    assert result.priorities_applied == ()
+    assert requests == [
+        "/api/v2/auth/login",
+        "/api/v2/torrents/info",
+        "/api/v2/auth/logout",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_gateway_validates_entire_batch_ownership_before_mutation() -> None:
     requests: list[str] = []
 

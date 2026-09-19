@@ -89,6 +89,8 @@ class FakeQBittorrent:
     async def apply_managed_controls(
         self,
         controls: Sequence[QBittorrentV2DesiredControl],
+        *,
+        allow_missing_stopped: bool = False,
     ) -> QBittorrentV2ControlResult:
         call = tuple(controls)
         self.control_calls.append(call)

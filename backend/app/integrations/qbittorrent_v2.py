@@ -210,6 +210,8 @@ class QBittorrentV2Gateway:
     async def apply_managed_controls(
         self,
         controls: Sequence[QBittorrentV2DesiredControl],
+        *,
+        allow_missing_stopped: bool = False,
     ) -> QBittorrentV2ControlResult:
         """Reconcile bounded, explicitly-owned torrents against a scheduler decision."""
         validated = _validate_controls(controls)
@@ -229,13 +231,23 @@ class QBittorrentV2Gateway:
                 raise QBittorrentV2TransientError("qBittorrent control preflight failed") from exc
 
             by_hash = {record.info_hash: record for record in records}
-            if set(by_hash) != {control.info_hash for control in validated}:
+            controls_by_hash = {control.info_hash: control for control in validated}
+            missing = set(controls_by_hash) - set(by_hash)
+            if missing and (
+                not allow_missing_stopped
+                or any(
+                    controls_by_hash[info_hash].run_state != QBittorrentV2RunState.STOPPED
+                    for info_hash in missing
+                )
+            ):
                 raise QBittorrentV2TransientError("A managed torrent is not visible in qBittorrent")
 
             # Ownership and snapshot validation are completed for the whole batch before
             # the first mutation. This prevents a mixed batch from touching external torrents.
             try:
                 for control in validated:
+                    if control.info_hash in missing:
+                        continue
                     record = by_hash[control.info_hash]
                     self._require_owned(record, self._identity(control.storage_key))
                     _require_control_snapshot(record)
@@ -246,21 +258,25 @@ class QBittorrentV2Gateway:
                     "qBittorrent control snapshot is invalid"
                 ) from exc
 
-            stopped = tuple(
+            stopped_existing = tuple(
                 control.info_hash
                 for control in validated
+                if control.info_hash not in missing
                 if control.run_state == QBittorrentV2RunState.STOPPED
                 and not _is_stopped(by_hash[control.info_hash].state)
             )
+            stopped = (*stopped_existing, *sorted(missing))
             started = tuple(
                 control.info_hash
                 for control in validated
+                if control.info_hash not in missing
                 if control.run_state == QBittorrentV2RunState.RUNNING
                 and _is_stopped(by_hash[control.info_hash].state)
             )
             limits_updated = tuple(
                 control.info_hash
                 for control in validated
+                if control.info_hash not in missing
                 if _normalized_download_limit(by_hash[control.info_hash].download_limit)
                 != control.download_limit_bytes_per_second
             )
@@ -271,8 +287,8 @@ class QBittorrentV2Gateway:
             )
 
             try:
-                if stopped:
-                    await self._post_control("stop", {"hashes": "|".join(stopped)})
+                if stopped_existing:
+                    await self._post_control("stop", {"hashes": "|".join(stopped_existing)})
                 for limit in sorted(
                     {control.download_limit_bytes_per_second for control in validated}
                 ):

@@ -41,18 +41,39 @@ NOW = datetime(2026, 8, 21, 22, tzinfo=UTC)
 
 
 class FakeGateway:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(self, *, fail: bool = False, missing: set[str] | None = None) -> None:
         self.fail = fail
+        self.missing = missing or set()
         self.calls: list[tuple[QBittorrentV2DesiredControl, ...]] = []
+        self.allow_missing_stopped: list[bool] = []
 
     async def apply_managed_controls(
-        self, controls: Sequence[QBittorrentV2DesiredControl]
+        self,
+        controls: Sequence[QBittorrentV2DesiredControl],
+        *,
+        allow_missing_stopped: bool = False,
     ) -> QBittorrentV2ControlResult:
         self.calls.append(tuple(controls))
+        self.allow_missing_stopped.append(allow_missing_stopped)
         if self.fail:
             raise RuntimeError("qb_unavailable")
+        missing = {control.info_hash for control in controls} & self.missing
+        if missing and (
+            not allow_missing_stopped
+            or any(
+                control.run_state != "stopped"
+                for control in controls
+                if control.info_hash in missing
+            )
+        ):
+            raise RuntimeError("qb_missing")
         running = tuple(control.info_hash for control in controls if control.run_state == "running")
-        return QBittorrentV2ControlResult(running, (), (), running)
+        stopped = tuple(
+            control.info_hash
+            for control in controls
+            if control.run_state == "stopped" and control.info_hash in missing
+        )
+        return QBittorrentV2ControlResult(running, stopped, (), running)
 
 
 class RecordingRedis:
@@ -325,6 +346,51 @@ async def test_purge_pending_download_is_durably_stopped_at_retention_deadline(
         assert stopped is not None
         assert stopped.state is ManagedTorrentState.PURGE_PENDING
         assert stopped.purge_stop_pending is False
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_missing_purge_torrent_does_not_block_selected_downloads(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    selected = await _torrent(
+        sessions,
+        username="selected-after-orphan",
+        info_hash="7" * 40,
+        size=10,
+    )
+    async with sessions() as session, session.begin():
+        orphan = ManagedTorrent(
+            info_hash="6" * 40,
+            name="never-added-orphan",
+            total_size=10,
+            state=ManagedTorrentState.PURGE_PENDING,
+            purge_after=NOW,
+            desired_active=False,
+            purge_stop_pending=True,
+        )
+        session.add(orphan)
+
+    gateway = FakeGateway(missing={orphan.info_hash})
+    result = await SchedulerRuntime(
+        sessions,
+        gateway,
+        scheduler_id="scheduler-missing-purge",
+        clock=lambda: NOW,
+    ).run_once()
+
+    assert result.selected_torrent_ids == (selected.id,)
+    assert gateway.allow_missing_stopped == [True, False]
+    assert gateway.calls[0][0].info_hash == orphan.info_hash
+    assert gateway.calls[1][0].info_hash == selected.info_hash
+    assert result.control_result is not None
+    assert result.control_result.stopped == (orphan.info_hash,)
+    assert result.control_result.started == (selected.info_hash,)
+    async with sessions() as session:
+        stored_orphan = await session.get(ManagedTorrent, orphan.id)
+        scheduler = await session.get(SchedulerState, 1)
+    assert stored_orphan is not None and stored_orphan.purge_stop_pending is False
+    assert scheduler is not None
+    assert scheduler.applied_generation == scheduler.desired_generation
     await engine.dispose()
 
 
