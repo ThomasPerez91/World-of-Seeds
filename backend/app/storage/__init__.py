@@ -4,6 +4,7 @@ from app.storage.accounting import (
     StorageDiskSnapshot,
     StorageReconcileResult,
     classify_storage_pressure,
+    managed_reservation_capacity,
     reconcile_storage_counters,
 )
 from app.storage.shared import SharedContentStore, SharedContentStoreError
@@ -16,5 +17,6 @@ __all__ = [
     "StorageDiskSnapshot",
     "StorageReconcileResult",
     "classify_storage_pressure",
+    "managed_reservation_capacity",
     "reconcile_storage_counters",
 ]

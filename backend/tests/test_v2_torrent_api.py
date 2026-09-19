@@ -400,6 +400,65 @@ async def test_v2_listing_exposes_only_bounded_error_code(
 
 
 @pytest.mark.asyncio
+async def test_failed_add_can_be_retried_without_reuploading_payload(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+    redis = RecordingRedis()
+    app.state.redis_coordinator = redis
+    uploaded = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    managed = await db_session.scalar(select(ManagedTorrent))
+    original_job = await db_session.scalar(select(TorrentJob))
+    assert managed is not None and original_job is not None
+    managed.state = ManagedTorrentState.ERROR
+    original_job.state = TorrentJobState.FAILED
+    original_job.last_error_code = "torrent_integration_unavailable"
+    original_job.finished_at = datetime.now(UTC)
+    await db_session.commit()
+    generation = managed.lifecycle_generation
+    redis.signals = 0
+    redis.events.clear()
+
+    retried = await client.post(
+        f"/api/v2/torrents/{uploaded.json()['id']}/retry",
+        headers=headers,
+    )
+
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["state"] == "requested"
+    await db_session.refresh(managed)
+    assert managed.state is ManagedTorrentState.PENDING
+    assert managed.lifecycle_generation == generation + 1
+    jobs = list(
+        (
+            await db_session.scalars(
+                select(TorrentJob).order_by(TorrentJob.created_at.asc(), TorrentJob.id.asc())
+            )
+        ).all()
+    )
+    assert len(jobs) == 2
+    assert jobs[-1].state is TorrentJobState.QUEUED
+    assert jobs[-1].idempotency_key == f"add:{managed.id}:retry:{generation + 1}"
+    assert redis.signals == 1
+    assert [event.event_type for _, event in redis.events] == [TorrentEventType.REQUESTED]
+
+    duplicate = await client.post(
+        f"/api/v2/torrents/{uploaded.json()['id']}/retry",
+        headers=headers,
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["code"] == "torrent_retry_not_allowed"
+
+
+@pytest.mark.asyncio
 async def test_ready_deadline_is_per_subscription_and_secret_free(
     client: AsyncClient,
     db_session: AsyncSession,

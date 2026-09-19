@@ -74,6 +74,8 @@ class _TorrentInspector(Protocol):
     async def apply_managed_controls(
         self,
         controls: Sequence[QBittorrentV2DesiredControl],
+        *,
+        allow_missing_stopped: bool = False,
     ) -> QBittorrentV2ControlResult: ...
 
 
@@ -300,6 +302,8 @@ class DeploymentAccountRouter:
     async def apply_managed_controls(
         self,
         controls: Sequence[QBittorrentV2DesiredControl],
+        *,
+        allow_missing_stopped: bool = False,
     ) -> QBittorrentV2ControlResult:
         if len(controls) > MAX_CONTROL_TORRENTS:
             raise AccountRoutingError("qbittorrent_control_set_too_large")
@@ -318,7 +322,10 @@ class DeploymentAccountRouter:
         limits_updated: list[str] = []
         priorities_applied: list[str] = []
         for account_ref in sorted(groups, key=lambda value: value.bytes):
-            result = await self._qb_by_ref[account_ref].apply_managed_controls(groups[account_ref])
+            result = await self._qb_by_ref[account_ref].apply_managed_controls(
+                groups[account_ref],
+                allow_missing_stopped=allow_missing_stopped,
+            )
             started.extend(result.started)
             stopped.extend(result.stopped)
             limits_updated.extend(result.limits_updated)

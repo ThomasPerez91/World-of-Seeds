@@ -561,10 +561,12 @@ function ReadyTorrentContent({
 function TorrentItem({
   torrent,
   onRefresh,
+  onRetry,
   onDownload,
   downloadAvailable,
   onCancel,
   cancelBusy,
+  retryBusy,
   downloadBusy,
   details,
   onOpen,
@@ -573,10 +575,12 @@ function TorrentItem({
 }: {
   torrent: TorrentRequestV2;
   onRefresh: () => void;
+  onRetry: () => void;
   onDownload: () => void;
   downloadAvailable: boolean;
   onCancel: () => void;
   cancelBusy: boolean;
+  retryBusy: boolean;
   downloadBusy: boolean;
   details?: ReactNode;
   onOpen?: () => void;
@@ -665,6 +669,16 @@ function TorrentItem({
                     >
                       <DownloadIcon />
                     </Button>
+                  ) : torrent.state === "error" ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      aria-label={t("downloads.retryNamed", { name: torrent.name })}
+                      disabled={retryBusy}
+                      onClick={onRetry}
+                    >
+                      <RefreshIcon />
+                    </Button>
                   ) : torrent.state !== "ready" ? (
                     <Button type="button" variant="secondary" aria-label={t("downloads.refreshNamed", { name: torrent.name })} onClick={onRefresh}>
                       <RefreshIcon />
@@ -710,6 +724,7 @@ export function UserDownloadsPage({
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [pageError, setPageError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TorrentStatusFilter>("all");
@@ -1225,6 +1240,24 @@ export function UserDownloadsPage({
     }
   }
 
+  async function retryTorrentRequest(torrent: TorrentRequestV2) {
+    if (retryingId !== null) return;
+    setRetryingId(torrent.id);
+    try {
+      await api.retryTorrentRequestV2(torrent.id);
+      feedback.toast({ tone: "success", message: t("downloads.retryStarted", { name: torrent.name }) });
+      await load(offset);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      feedback.toast({ tone: "error", message: apiError(caught, "downloads.retryFailed") });
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
   const visibleTorrents = torrents;
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -1412,6 +1445,7 @@ export function UserDownloadsPage({
                     return next;
                   })}
                   onRefresh={() => void load(offset)}
+                  onRetry={() => void retryTorrentRequest(torrent)}
                   onOpen={torrent.state === "ready" && manifest === undefined ? () => void openReadyTorrent(torrent) : undefined}
                   downloadAvailable={manifest?.firstPage?.file_count === 1}
                   onDownload={() => {
@@ -1421,6 +1455,7 @@ export function UserDownloadsPage({
                   }}
                   onCancel={() => void cancelTorrentRequest(torrent)}
                   cancelBusy={cancellingId === torrent.id}
+                  retryBusy={retryingId === torrent.id}
                   downloadBusy={torrent.state === "ready" && manifest?.loading === true && manifest.snapshot === null}
                   details={torrent.state === "ready" ? (
                     <ReadyTorrentContent

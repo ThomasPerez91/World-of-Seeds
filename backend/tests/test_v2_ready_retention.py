@@ -178,6 +178,39 @@ async def test_last_unsubscribe_schedules_physical_grace_once(db_session: AsyncS
 
 
 @pytest.mark.asyncio
+async def test_cancelling_failed_add_schedules_immediate_idempotent_purge(
+    db_session: AsyncSession,
+) -> None:
+    owner = await _user(db_session, "failed-add-owner")
+    result = await create_or_get_torrent_request(
+        db_session,
+        user_id=owner.id,
+        info_hash="9" * 40,
+        name="Failed add",
+        total_size=700,
+        now=NOW,
+    )
+    result.managed_torrent.state = ManagedTorrentState.ERROR
+    cancelled_at = NOW + timedelta(minutes=5)
+
+    cancelled = await cancel_owned_torrent_request(
+        db_session,
+        user_id=owner.id,
+        torrent_request_id=result.request.id,
+        retention_hours=48,
+        now=cancelled_at,
+    )
+
+    assert cancelled is not None and cancelled.purge_scheduled
+    assert cancelled.purge_after == cancelled_at
+    job = await db_session.scalar(
+        select(TorrentJob).where(TorrentJob.managed_torrent_id == result.managed_torrent.id)
+    )
+    assert job is not None
+    assert job.available_at.replace(tzinfo=UTC) == cancelled_at
+
+
+@pytest.mark.asyncio
 async def test_reaper_expires_only_due_owner_and_keeps_other_subscription(
     db_session: AsyncSession,
 ) -> None:

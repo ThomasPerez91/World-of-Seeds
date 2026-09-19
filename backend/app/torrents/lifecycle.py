@@ -297,7 +297,13 @@ async def cancel_owned_torrent_request(
             was_ranked != is_ranked,
         )
 
-    purge_after = timestamp + timedelta(hours=retention_hours)
+    # A failed add has no usable shared content to retain. Delaying its cleanup keeps the
+    # declared size reserved and makes a replacement upload appear blocked for no benefit.
+    purge_after = (
+        timestamp
+        if torrent.state is ManagedTorrentState.ERROR
+        else timestamp + timedelta(hours=retention_hours)
+    )
     await _schedule_deferred_purge(
         session,
         torrent,

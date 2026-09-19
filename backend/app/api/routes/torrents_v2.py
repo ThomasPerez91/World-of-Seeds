@@ -72,6 +72,7 @@ from app.storage import (
     StorageAdmissionError,
     StorageAdmissionPolicy,
     StorageDiskSnapshot,
+    managed_reservation_capacity,
 )
 from app.torrents import (
     TorrentDeduplicationError,
@@ -1263,6 +1264,9 @@ async def create_torrent_request(
         message = {
             "user_quota_exceeded": "Ton quota de stockage est dépassé.",
             "managed_quota_exceeded": "La capacité de stockage gérée est atteinte.",
+            "managed_capacity_exceeded": (
+                "La capacité déjà réservée par les téléchargements atteint la limite du disque."
+            ),
             "disk_pressure_critical": "Le stockage est temporairement sous forte pression.",
         }.get(code, "Le stockage ne peut pas accepter ce torrent.")
         _fail(status.HTTP_507_INSUFFICIENT_STORAGE, code, message)
@@ -1541,3 +1545,194 @@ async def cancel_torrent_request(
     if result.queue_membership_changed:
         await redis.publish_torrent_queue_changed(datetime.now(UTC))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{torrent_request_id}/retry", response_model=TorrentRequestV2Response)
+async def retry_torrent_request(
+    db: DbSession,
+    redis: RedisCoordinatorDependency,
+    settings: Annotated[Settings, Depends(get_settings)],
+    context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
+    torrent_request_id: uuid.UUID,
+) -> TorrentRequestV2Response:
+    user_id = context.user.id
+    try:
+        values = await PostgresOptionsRegistry().snapshot(db)
+        policy = StorageAdmissionPolicy.from_options(values)
+        await db.rollback()
+    except (DatabaseOptionsDriftError, ValueError):
+        await db.rollback()
+        _fail(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "torrent_options_unavailable",
+            "La relance est momentanément indisponible.",
+        )
+
+    content_store = SharedContentStore(settings.data_root)
+    payload_store = TorrentPayloadStore(
+        settings.data_root,
+        allowed_tracker_hosts=settings.c411_tracker_hosts,
+        max_total_size=_integer_option(values, "WOS_TORRENT_MAX_SIZE_BYTES"),
+    )
+    try:
+        total_bytes, free_bytes = await run_in_threadpool(content_store.disk_capacity)
+    except SharedContentStoreError:
+        _fail(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "Le stockage partagé est momentanément indisponible.",
+        )
+    disk = StorageDiskSnapshot(total_bytes, free_bytes)
+
+    try:
+        async with db.begin():
+            owned = await db.scalar(
+                select(TorrentRequest)
+                .where(
+                    TorrentRequest.id == torrent_request_id,
+                    TorrentRequest.user_id == user_id,
+                    TorrentRequest.state.in_(
+                        (TorrentRequestState.REQUESTED, TorrentRequestState.ACTIVE)
+                    ),
+                )
+                .with_for_update()
+            )
+            if owned is None:
+                _fail(
+                    status.HTTP_404_NOT_FOUND,
+                    "torrent_request_not_found",
+                    "Demande introuvable.",
+                )
+            managed = await db.scalar(
+                select(ManagedTorrent)
+                .where(ManagedTorrent.id == owned.managed_torrent_id)
+                .with_for_update()
+            )
+            if managed is None:
+                _fail(
+                    status.HTTP_404_NOT_FOUND,
+                    "torrent_request_not_found",
+                    "Demande introuvable.",
+                )
+            if managed.state is not ManagedTorrentState.ERROR:
+                _fail(
+                    status.HTTP_409_CONFLICT,
+                    "torrent_retry_not_allowed",
+                    "Ce téléchargement n’est pas dans un état relançable.",
+                )
+            failed_add = await db.scalar(
+                select(TorrentJob)
+                .where(
+                    TorrentJob.managed_torrent_id == managed.id,
+                    TorrentJob.job_type == ADD_TORRENT_JOB,
+                    TorrentJob.state == TorrentJobState.FAILED,
+                )
+                .order_by(TorrentJob.updated_at.desc(), TorrentJob.id.desc())
+                .limit(1)
+            )
+            if failed_add is None:
+                _fail(
+                    status.HTTP_409_CONFLICT,
+                    "torrent_retry_not_allowed",
+                    "Cette erreur ne peut pas être relancée automatiquement.",
+                )
+            active_add = await db.scalar(
+                select(func.count())
+                .select_from(TorrentJob)
+                .where(
+                    TorrentJob.managed_torrent_id == managed.id,
+                    TorrentJob.job_type == ADD_TORRENT_JOB,
+                    TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
+                )
+            )
+            if active_add:
+                _fail(
+                    status.HTTP_409_CONFLICT,
+                    "torrent_retry_in_progress",
+                    "Une relance est déjà en cours.",
+                )
+
+            committed_states = (
+                ManagedTorrentState.PENDING,
+                ManagedTorrentState.ADDING,
+                ManagedTorrentState.DOWNLOADING,
+                ManagedTorrentState.PAUSED,
+                ManagedTorrentState.RETRY_WAIT,
+                ManagedTorrentState.READY,
+            )
+            committed_bytes = int(
+                await db.scalar(
+                    select(func.coalesce(func.sum(ManagedTorrent.total_size), 0)).where(
+                        ManagedTorrent.state.in_(committed_states)
+                    )
+                )
+                or 0
+            )
+            if committed_bytes + managed.total_size > managed_reservation_capacity(
+                disk,
+                policy=policy,
+            ):
+                _fail(
+                    status.HTTP_507_INSUFFICIENT_STORAGE,
+                    "managed_capacity_exceeded",
+                    "La capacité réservée ne permet pas encore de relancer ce torrent.",
+                )
+
+            try:
+                parsed = await run_in_threadpool(payload_store.read, managed.storage_key)
+            except TorrentPayloadStoreError:
+                _fail(
+                    status.HTTP_409_CONFLICT,
+                    "torrent_payload_unavailable",
+                    "Le fichier torrent d’origine n’est plus disponible pour la relance.",
+                )
+            if (
+                parsed.info_hash != managed.info_hash
+                or parsed.name != managed.name
+                or parsed.total_size != managed.total_size
+            ):
+                _fail(
+                    status.HTTP_409_CONFLICT,
+                    "torrent_payload_mismatch",
+                    "Le fichier torrent conservé ne correspond plus à cette demande.",
+                )
+
+            managed.lifecycle_generation += 1
+            managed.state = ManagedTorrentState.PENDING
+            managed.qb_state = None
+            managed.progress = 0
+            managed.retry_at = None
+            managed.scheduler_retry_at = None
+            managed.desired_active = False
+            managed.desired_priority = None
+            managed.desired_download_limit = 0
+            managed.updated_at = datetime.now(UTC)
+            retry_job = TorrentJob(
+                managed_torrent_id=managed.id,
+                torrent_request_id=owned.id,
+                job_type=ADD_TORRENT_JOB,
+                idempotency_key=(
+                    f"add:{managed.id}:retry:{managed.lifecycle_generation}"
+                ),
+                state=TorrentJobState.QUEUED,
+                available_at=datetime.now(UTC),
+            )
+            db.add(retry_job)
+            await db.flush()
+            response = _response(owned, managed)
+    except HTTPException:
+        raise
+    except (IntegrityError, SQLAlchemyError):
+        await db.rollback()
+        _fail(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "torrent_retry_unavailable",
+            "La relance n’a pas pu être enregistrée.",
+        )
+
+    await redis.signal_job_available()
+    await redis.publish_torrent_event(
+        user_id,
+        TorrentRealtimeEvent(TorrentEventType.REQUESTED, torrent_request_id, datetime.now(UTC)),
+    )
+    return response

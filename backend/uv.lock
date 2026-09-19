@@ -1263,7 +1263,7 @@ wheels = [
 
 [[package]]
 name = "world-of-seeds-backend"
-version = "2.2.9"
+version = "2.2.10"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

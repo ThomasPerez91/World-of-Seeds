@@ -168,6 +168,11 @@ async def prepare_storage_accounting(
                 raise StorageAdmissionError("managed_quota_exceeded", pressure)
             if disk is None:
                 raise ValueError("disk snapshot is required for storage admission")
+            if ledger.managed_bytes + total_size > managed_reservation_capacity(
+                disk,
+                policy=policy,
+            ):
+                raise StorageAdmissionError("managed_capacity_exceeded", pressure)
             if pressure is StoragePressureState.CRITICAL:
                 raise StorageAdmissionError("disk_pressure_critical", pressure)
 
@@ -176,6 +181,26 @@ async def prepare_storage_accounting(
         ledger=ledger,
         pressure=pressure,
     )
+
+
+def managed_reservation_capacity(
+    disk: StorageDiskSnapshot,
+    *,
+    policy: StorageAdmissionPolicy,
+) -> int:
+    """Return the maximum cumulative declared content safe for one filesystem.
+
+    Physical free space alone is insufficient when several stopped torrents are admitted
+    before qBittorrent materializes their files. Reserve both the configured absolute floor
+    and the strict critical/free-percent boundary, then apply an optional lower managed quota.
+    """
+
+    reserve_percent = max(policy.min_free_percent, 100 - policy.critical_percent)
+    percent_reserve = (disk.total_bytes * reserve_percent + 99) // 100
+    disk_capacity = max(0, disk.total_bytes - max(policy.min_free_bytes, percent_reserve) - 1)
+    if policy.managed_max_bytes:
+        return min(policy.managed_max_bytes, disk_capacity)
+    return disk_capacity
 
 
 def apply_storage_accounting(
