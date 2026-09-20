@@ -120,14 +120,17 @@ class SchedulerRuntime:
             policy = SchedulerPolicy.from_options(options)
             purge_stops = await self._load_purge_stops(session)
             torrents = await self._load_control_set(session, state)
+            forced_torrents = tuple(torrent for torrent in torrents if torrent.admin_forced_active)
+            forced_torrent_ids = {torrent.id for torrent in forced_torrents}
             grace_torrents = tuple(
                 torrent
                 for torrent in torrents
-                if torrent.desired_active
+                if torrent.id not in forced_torrent_ids
+                and torrent.desired_active
                 and torrent.purge_after is not None
                 and _utc(torrent.purge_after) > _utc(now)
             )
-            grace_torrent_ids = {torrent.id for torrent in grace_torrents}
+            grace_torrent_ids = {torrent.id for torrent in (*forced_torrents, *grace_torrents)}
             schedulable_torrents = tuple(
                 torrent for torrent in torrents if torrent.id not in grace_torrent_ids
             )
@@ -147,7 +150,7 @@ class SchedulerRuntime:
                 candidates,
                 policy=policy,
                 now=now,
-                active_global=len(grace_torrents),
+                active_global=len(forced_torrents) + len(grace_torrents),
                 active_by_user={},
                 ledger=ledger,
                 fairness_user_order=fairness_user_order,
@@ -173,7 +176,7 @@ class SchedulerRuntime:
                     download_limit_bytes_per_second=torrent.desired_download_limit,
                     qbittorrent_account_ref=torrent.qbittorrent_account_ref,
                 )
-                for torrent in grace_torrents
+                for torrent in (*forced_torrents, *grace_torrents)
             )
             controls = (*grace_controls, *scheduled_controls)
             purge_controls = tuple(
@@ -320,7 +323,10 @@ class SchedulerRuntime:
                         ManagedTorrent.state.in_(
                             (ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED)
                         ),
-                        ManagedTorrent.desired_active.is_(True),
+                        or_(
+                            ManagedTorrent.desired_active.is_(True),
+                            ManagedTorrent.admin_forced_active.is_(True),
+                        ),
                     )
                     .order_by(ManagedTorrent.desired_priority, ManagedTorrent.id)
                     .with_for_update()
@@ -341,6 +347,7 @@ class SchedulerRuntime:
                     (ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED)
                 ),
                 ManagedTorrent.desired_active.is_(False),
+                ManagedTorrent.admin_forced_active.is_(False),
             )
             .order_by(ManagedTorrent.created_at, ManagedTorrent.id)
             .with_for_update()

@@ -420,10 +420,11 @@
   border-bottom: 0;
 }
 
-.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:first-child { width: 46%; }
-.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(2) { width: 14%; }
-.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(3) { width: 16%; }
-.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(4) { width: 24%; }
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:first-child { width: 40%; }
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(2) { width: 13%; }
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(3) { width: 15%; }
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(4) { width: 22%; }
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(5) { width: 10%; }
 
 .admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table th:first-child { width: 16%; }
 .admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table th:nth-child(2) { width: 34%; }
@@ -446,6 +447,23 @@
 .admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(2),
 .admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table td:nth-child(2) {
   text-align: center;
+}
+
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table th:nth-child(5),
+.admin-page[data-admin-view="admin-qbittorrent"] .admin-qb-table td:nth-child(5) {
+  text-align: right;
+}
+
+.admin-qb-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.admin-runtime-message {
+  color: var(--color-success-text, var(--wos-accent));
+  font-weight: 700;
+  margin: 0 0 1rem;
 }
 
 .admin-page[data-admin-view="admin-newgreedy"] .admin-newgreedy-table th,

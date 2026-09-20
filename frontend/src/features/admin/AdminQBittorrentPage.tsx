@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Trash2 } from "lucide-react";
 
 import { api, ApiError, type AdminQBittorrentRuntime } from "../../api/client";
-import { RefreshIcon } from "../../components/icons";
-import { Badge, Card, IconButton, Progress, StateMessage, Tooltip } from "../../components/ui";
+import { Dialog } from "../../components/Dialog";
+import { RefreshIcon, RestartIcon } from "../../components/icons";
+import { Badge, Button, Card, IconButton, Progress, StateMessage, Tooltip } from "../../components/ui";
 import { type MessageKey, useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 import { AdminSortableHeader, type AdminSortOrder } from "./AdminSortableHeader";
@@ -37,6 +39,9 @@ export function AdminQBittorrentPage({ onBack, onNavigate, onSessionExpired }: {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortOrder, setSortOrder] = useState<AdminSortOrder>("asc");
+  const [actingId, setActingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<QBittorrentTorrent | null>(null);
+  const [message, setMessage] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,6 +57,28 @@ export function AdminQBittorrentPage({ onBack, onNavigate, onSessionExpired }: {
   }, [onSessionExpired, t]);
 
   useEffect(() => { void load(); }, [load]);
+
+  async function runAction(torrent: QBittorrentTorrent, action: "resume" | "delete") {
+    if (torrent.managed_torrent_id === null) return;
+    setActingId(torrent.managed_torrent_id);
+    setError("");
+    setMessage("");
+    try {
+      const result = await api.actOnAdminQBittorrentTorrent(torrent.managed_torrent_id, action);
+      setDeleteTarget(null);
+      setMessage(t(action === "delete"
+        ? "admin.qbDeleteScheduled"
+        : result.status === "applied"
+          ? "admin.qbResumeApplied"
+          : "admin.qbResumeScheduled"));
+      await load();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) return onSessionExpired();
+      setError(t(action === "delete" ? "admin.qbDeleteFailed" : "admin.qbResumeFailed"));
+    } finally {
+      setActingId(null);
+    }
+  }
 
   const visibleTorrents = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase();
@@ -128,6 +155,7 @@ export function AdminQBittorrentPage({ onBack, onNavigate, onSessionExpired }: {
         </div>}
         {loading && runtime === null ? <StateMessage tone="loading">{t("admin.readingTorrents")}</StateMessage> : null}
         {error !== "" ? <StateMessage tone="error">{error}</StateMessage> : null}
+        {message !== "" ? <p className="admin-runtime-message" role="status">{message}</p> : null}
         {runtime !== null && runtime.torrents.length === 0 ? <StateMessage tone="empty">{t("admin.noQbTorrent")}</StateMessage> : null}
         {runtime !== null && runtime.torrents.length > 0 && visibleTorrents.length === 0 ? <StateMessage tone="empty">{t("admin.qbNoSearchResults")}</StateMessage> : null}
         {visibleTorrents.length > 0 ? <div className="admin-runtime-table-wrap">
@@ -137,6 +165,7 @@ export function AdminQBittorrentPage({ onBack, onNavigate, onSessionExpired }: {
               {sortableHeader("size", t("admin.size"), "center")}
               {sortableHeader("status", t("admin.status"))}
               {sortableHeader("progress", t("admin.progress"))}
+              <th>{t("admin.actions")}</th>
             </tr></thead>
             <tbody>{visibleTorrents.map((torrent) => {
               const presentation = statePresentation(torrent.state);
@@ -146,6 +175,27 @@ export function AdminQBittorrentPage({ onBack, onNavigate, onSessionExpired }: {
                 <td data-label={t("admin.size")}>{formatBytes(torrent.size_bytes)}</td>
                 <td data-label={t("admin.status")}><Badge tone={presentation.tone}>{presentation.label === null ? torrent.state : t(presentation.label)}</Badge></td>
                 <td data-label={t("admin.progress")}><div className="admin-runtime-progress"><Progress value={percent} label={`${percent} %`} /><span>{formatNumber(percent)} %</span></div></td>
+                <td className="admin-qb-actions" data-label={t("admin.actions")}>
+                  <Tooltip content={torrent.can_resume ? t("admin.qbResumeNamed", { name: torrent.name }) : t("admin.qbResumeUnavailable")} focusable={false}>
+                    <IconButton
+                      label={t("admin.qbResumeNamed", { name: torrent.name })}
+                      disabled={!torrent.can_resume || actingId !== null}
+                      onClick={() => void runAction(torrent, "resume")}
+                    >
+                      <RestartIcon className={actingId === torrent.managed_torrent_id ? "rotating" : undefined} />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip content={torrent.can_delete ? t("admin.qbDeleteNamed", { name: torrent.name }) : t("admin.qbDeleteUnavailable")} focusable={false}>
+                    <IconButton
+                      variant="danger"
+                      label={t("admin.qbDeleteNamed", { name: torrent.name })}
+                      disabled={!torrent.can_delete || actingId !== null}
+                      onClick={() => setDeleteTarget(torrent)}
+                    >
+                      <Trash2 aria-hidden="true" />
+                    </IconButton>
+                  </Tooltip>
+                </td>
               </tr>;
             })}</tbody>
           </table>
@@ -153,6 +203,25 @@ export function AdminQBittorrentPage({ onBack, onNavigate, onSessionExpired }: {
         {runtime?.truncated ? <p className="admin-runtime-note">{t("admin.torrentsTruncated")}</p> : null}
         {runtime !== null ? <p className="admin-runtime-updated">{t("admin.lastCheck", { date: formatDate(new Date(runtime.checked_at)) })}</p> : null}
       </section>
+      {deleteTarget !== null ? (
+        <Dialog
+          eyebrow={t("admin.qbittorrent")}
+          title={t("admin.qbDeleteTitle")}
+          description={t("admin.qbDeleteDescription", { name: deleteTarget.name })}
+          closeDisabled={actingId !== null}
+          onClose={() => setDeleteTarget(null)}
+        >
+          <p className="dialog-warning">{t("admin.qbDeleteWarning")}</p>
+          <div className="dialog-actions">
+            <Button variant="secondary" data-initial-focus disabled={actingId !== null} onClick={() => setDeleteTarget(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="danger" disabled={actingId !== null} onClick={() => void runAction(deleteTarget, "delete")}>
+              {actingId !== null ? t("admin.cleanupPurging") : t("common.delete")}
+            </Button>
+          </div>
+        </Dialog>
+      ) : null}
     </AdminPageShell>
   );
 }

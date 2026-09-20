@@ -432,6 +432,39 @@ async def test_downloading_torrent_keeps_running_during_purge_grace(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_admin_forced_paused_torrent_stays_running_without_subscriber(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    async with sessions() as session, session.begin():
+        torrent = ManagedTorrent(
+            info_hash="9" * 40,
+            name="admin-forced-orphan",
+            total_size=10,
+            progress=0.4,
+            state=ManagedTorrentState.PAUSED,
+            desired_active=False,
+            admin_forced_active=True,
+            qbittorrent_account_ref=uuid.UUID(int=1),
+        )
+        session.add(torrent)
+    gateway = FakeGateway()
+
+    result = await SchedulerRuntime(
+        sessions, gateway, scheduler_id="scheduler-admin-force", clock=lambda: NOW
+    ).run_once()
+
+    assert result.selected_torrent_ids == ()
+    assert len(gateway.calls) == 1
+    assert gateway.calls[0][0].info_hash == torrent.info_hash
+    assert gateway.calls[0][0].run_state.value == "running"
+    async with sessions() as session:
+        stored = await session.get(ManagedTorrent, torrent.id)
+    assert stored is not None and stored.admin_forced_active is True
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_purge_stop_batch_never_truncates_two_hundred_active_controls(
     tmp_path: Path,
 ) -> None:

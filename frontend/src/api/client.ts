@@ -351,7 +351,16 @@ export interface AdminQBittorrentRuntime {
     size_bytes: number;
     state: string;
     progress: number;
+    managed_torrent_id: string | null;
+    can_resume: boolean;
+    can_delete: boolean;
   }>;
+}
+
+export interface AdminQBittorrentActionResult {
+  torrent_id: string;
+  action: "resume" | "delete";
+  status: "applied" | "scheduled";
 }
 
 export interface AdminNewGreedyRuntime {
@@ -764,6 +773,16 @@ export const api = {
 
   getAdminQBittorrentRuntime(): Promise<AdminQBittorrentRuntime> {
     return requestV2<AdminQBittorrentRuntime>("/admin/runtime/qbittorrent");
+  },
+
+  actOnAdminQBittorrentTorrent(
+    torrentId: string,
+    action: "resume" | "delete",
+  ): Promise<AdminQBittorrentActionResult> {
+    return requestV2<AdminQBittorrentActionResult>(
+      `/admin/runtime/qbittorrent/${encodeURIComponent(torrentId)}/action`,
+      { method: "POST", body: JSON.stringify({ action }) },
+    );
   },
 
   getAdminNewGreedyRuntime(): Promise<AdminNewGreedyRuntime> {

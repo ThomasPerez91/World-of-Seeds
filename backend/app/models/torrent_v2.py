@@ -240,6 +240,7 @@ class ManagedTorrent(Base):
     manifest_file_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     manifest_total_size: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     desired_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    admin_forced_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     desired_priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
     desired_download_limit: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     schedule_generation: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)

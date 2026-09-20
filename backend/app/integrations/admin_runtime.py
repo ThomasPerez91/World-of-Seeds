@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID
 
 import httpx
 from pydantic import SecretStr
@@ -18,11 +19,16 @@ from app.integrations.account_routing import (
 from app.integrations.http import IntegrationRequestError, integration_timeout
 from app.integrations.newgreedy import NewGreedyClient
 from app.integrations.qbittorrent import QBittorrentClient
+from app.integrations.qbittorrent_v2 import (
+    QBittorrentV2DesiredControl,
+    QBittorrentV2Gateway,
+    QBittorrentV2RunState,
+)
 from app.integrations.types import NewGreedyTorrent, QBittorrentTorrent
 
 
 class AdminRuntimeMonitor:
-    """Read-only, uncached view of the integration runtimes for administrators."""
+    """Uncached administrator view plus ownership-checked managed controls."""
 
     def __init__(
         self, settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None
@@ -67,6 +73,44 @@ class AdminRuntimeMonitor:
             (torrent, self._name_for_hash(torrent.id, names)) for torrent in torrents.values()
         ]
         return datetime.now(UTC), correlated
+
+    async def resume_managed_torrent(
+        self,
+        *,
+        qbittorrent_account_ref: UUID,
+        info_hash: str,
+        storage_key: UUID,
+        download_limit_bytes_per_second: int,
+    ) -> None:
+        spec = next(
+            (
+                candidate
+                for candidate in self._specs()
+                if candidate.qbittorrent_account_ref == qbittorrent_account_ref
+            ),
+            None,
+        )
+        if spec is None:
+            raise IntegrationRequestError("Managed qBittorrent account is unavailable")
+        async with self._client() as client:
+            gateway = QBittorrentV2Gateway(
+                client,
+                spec.qbittorrent_url,
+                spec.qbittorrent_username,
+                spec.qbittorrent_password.get_secret_value(),
+                data_root=self._settings.qbittorrent_data_root,
+            )
+            await gateway.apply_managed_controls(
+                (
+                    QBittorrentV2DesiredControl(
+                        info_hash=info_hash,
+                        storage_key=storage_key,
+                        run_state=QBittorrentV2RunState.RUNNING,
+                        download_limit_bytes_per_second=download_limit_bytes_per_second,
+                        qbittorrent_account_ref=qbittorrent_account_ref,
+                    ),
+                )
+            )
 
     async def _qbittorrent(
         self, spec: DeploymentAccountSpec
