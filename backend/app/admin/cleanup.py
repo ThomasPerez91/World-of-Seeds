@@ -126,6 +126,7 @@ async def schedule_admin_purge(
     torrent_ids: tuple[uuid.UUID, ...],
     *,
     now: datetime | None = None,
+    eligible_states: tuple[ManagedTorrentState, ...] = DOWNLOADED_TORRENT_STATES,
 ) -> AdminCleanupPurgeResult:
     timestamp = now or datetime.now(UTC)
     if timestamp.utcoffset() is None:
@@ -150,7 +151,7 @@ async def schedule_admin_purge(
     skipped: list[uuid.UUID] = []
     for torrent_id in unique_ids:
         torrent = torrents.get(torrent_id)
-        if torrent is None or torrent.state not in DOWNLOADED_TORRENT_STATES:
+        if torrent is None or torrent.state not in eligible_states:
             skipped.append(torrent_id)
             continue
 
@@ -203,6 +204,7 @@ async def schedule_admin_purge(
             .with_for_update()
         )
         torrent.lifecycle_generation += 1
+        torrent.admin_forced_active = False
         torrent.purge_after = timestamp
         torrent.updated_at = timestamp
         if active_purge_job is None:

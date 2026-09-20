@@ -111,6 +111,21 @@ class AdminV2QBittorrentTorrent(BaseModel):
     size_bytes: int
     state: str
     progress: float
+    managed_torrent_id: UUID | None = None
+    can_resume: bool = False
+    can_delete: bool = False
+
+
+class AdminV2QBittorrentActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["resume", "delete"]
+
+
+class AdminV2QBittorrentActionResult(BaseModel):
+    torrent_id: UUID
+    action: Literal["resume", "delete"]
+    status: Literal["applied", "scheduled"]
 
 
 class AdminV2QBittorrentRuntime(BaseModel):

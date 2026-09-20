@@ -431,6 +431,7 @@ class TorrentEffectHandlers:
             }:
                 torrent.lifecycle_generation += 1
                 torrent.state = ManagedTorrentState.PURGE_PENDING
+                torrent.admin_forced_active = False
                 torrent.desired_active = False
                 torrent.desired_priority = None
                 torrent.desired_download_limit = 0
@@ -551,6 +552,7 @@ class TorrentEffectHandlers:
             torrent.manifest_file_count = 0
             torrent.manifest_total_size = 0
             torrent.desired_active = False
+            torrent.admin_forced_active = False
             torrent.desired_priority = None
             torrent.last_progress_at = None
             torrent.last_downloaded_bytes = None
@@ -630,6 +632,7 @@ class TorrentEffectHandlers:
             torrent.progress = snapshot.progress
             torrent.retry_at = None
             if state is ManagedTorrentState.READY:
+                torrent.admin_forced_active = False
                 torrent.desired_active = False
                 torrent.desired_priority = None
                 torrent.desired_download_limit = 0

@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -153,6 +154,9 @@ async def test_admin_can_configure_c411_pair_without_exposing_passkey_in_audit(
 
 
 class _RuntimeMonitor:
+    def __init__(self) -> None:
+        self.resumed: list[dict[str, object]] = []
+
     async def qbittorrent_torrents(
         self,
     ) -> tuple[datetime, list[QBittorrentTorrent], bool]:
@@ -202,6 +206,9 @@ class _RuntimeMonitor:
             ],
         )
 
+    async def resume_managed_torrent(self, **values: object) -> None:
+        self.resumed.append(values)
+
 
 @pytest.mark.asyncio
 async def test_admin_runtime_views_are_read_only_and_aggregate_service_data(
@@ -229,6 +236,101 @@ async def test_admin_runtime_views_are_read_only_and_aggregate_service_data(
         "uploaded_bytes": 2_000,
         "ratio": 2.0,
     }
+
+
+@pytest.mark.asyncio
+async def test_admin_can_resume_owned_paused_torrent_with_durable_override(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _admin(db_session)
+    headers = await _login(client)
+    qb_account_ref = uuid.uuid4()
+    torrent = ManagedTorrent(
+        info_hash="a" * 40,
+        name="Retained partial",
+        total_size=1_000,
+        state=ManagedTorrentState.PAUSED,
+        progress=0.5,
+        qb_state="stoppedDL",
+        qbittorrent_account_ref=qb_account_ref,
+    )
+    db_session.add(torrent)
+    await db_session.commit()
+    monitor = _RuntimeMonitor()
+    monkeypatch.setattr(app.state, "admin_runtime_monitor", monitor)
+
+    rejected = await client.post(
+        f"/api/v2/admin/runtime/qbittorrent/{torrent.id}/action",
+        json={"action": "resume"},
+    )
+    response = await client.post(
+        f"/api/v2/admin/runtime/qbittorrent/{torrent.id}/action",
+        json={"action": "resume"},
+        headers=headers,
+    )
+
+    assert rejected.status_code == 403
+    assert response.status_code == 200
+    assert response.json()["status"] == "applied"
+    await db_session.refresh(torrent)
+    assert torrent.admin_forced_active is True
+    assert torrent.purge_after is not None
+    purge = await db_session.scalar(
+        select(TorrentJob).where(
+            TorrentJob.managed_torrent_id == torrent.id,
+            TorrentJob.job_type == "PURGE_TORRENT",
+            TorrentJob.state == TorrentJobState.QUEUED,
+        )
+    )
+    assert purge is not None and purge.available_at == torrent.purge_after
+    assert monitor.resumed[0]["info_hash"] == torrent.info_hash
+
+
+@pytest.mark.asyncio
+async def test_admin_qb_delete_cancels_request_and_schedules_full_purge(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await _admin(db_session)
+    headers = await _login(client)
+    torrent = ManagedTorrent(
+        info_hash="b" * 40,
+        name="Large partial",
+        total_size=2_000,
+        state=ManagedTorrentState.PAUSED,
+        progress=0.25,
+        qb_state="stoppedDL",
+        admin_forced_active=True,
+    )
+    request = TorrentRequest(
+        managed_torrent=torrent,
+        user_id=user.id,
+        state=TorrentRequestState.ACTIVE,
+    )
+    db_session.add_all([torrent, request])
+    await db_session.commit()
+    monkeypatch.setattr(app.state, "admin_runtime_monitor", _RuntimeMonitor())
+
+    response = await client.post(
+        f"/api/v2/admin/runtime/qbittorrent/{torrent.id}/action",
+        json={"action": "delete"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "torrent_id": str(torrent.id),
+        "action": "delete",
+        "status": "scheduled",
+    }
+    await db_session.refresh(torrent)
+    await db_session.refresh(request)
+    assert torrent.admin_forced_active is False
+    assert torrent.purge_after is not None
+    assert request.state is TorrentRequestState.CANCELLED
 
 
 @pytest.mark.asyncio

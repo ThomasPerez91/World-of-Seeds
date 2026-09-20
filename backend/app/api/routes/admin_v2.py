@@ -9,11 +9,14 @@ from sqlalchemy.orm import aliased
 from starlette.concurrency import run_in_threadpool
 
 from app.admin import (
+    ADMIN_PURGE_STATES,
     RECOVER_CANCEL_REQUESTS_JOB,
     RECOVER_PURGE_METADATA_JOB,
+    AdminQBittorrentActionError,
     ReconciliationCursor,
     ReconciliationCursorError,
     ReconciliationRecoveryError,
+    force_resume_admin_torrent,
     list_downloaded_content,
     recovery_snapshot,
     schedule_admin_purge,
@@ -29,6 +32,7 @@ from app.auth.dependencies import (
 from app.coordination.dependencies import RedisCoordinatorDependency
 from app.integrations.dependencies import AdminRuntimeMonitorDependency
 from app.integrations.http import IntegrationRequestError
+from app.integrations.qbittorrent_v2 import QBittorrentV2OwnershipError
 from app.models import (
     DatabaseOption,
     DatabaseOptionAudit,
@@ -64,6 +68,8 @@ from app.schemas.admin_v2 import (
     AdminV2OptionSection,
     AdminV2OptionsUpdate,
     AdminV2Overview,
+    AdminV2QBittorrentActionRequest,
+    AdminV2QBittorrentActionResult,
     AdminV2QBittorrentRuntime,
     AdminV2QBittorrentTorrent,
     AdminV2ReconciliationAnomaly,
@@ -132,6 +138,7 @@ async def purge_admin_cleanup(
 
 @router.get("/runtime/qbittorrent", response_model=AdminV2QBittorrentRuntime)
 async def get_admin_qbittorrent_runtime(
+    db: DbSession,
     monitor: AdminRuntimeMonitorDependency,
     _: Annotated[AuthContext, Depends(require_current_admin)],
 ) -> AdminV2QBittorrentRuntime:
@@ -145,6 +152,17 @@ async def get_admin_qbittorrent_runtime(
                 "Les informations qBittorrent sont temporairement indisponibles.",
             ),
         ) from exc
+    managed = {
+        torrent.info_hash: torrent
+        for torrent in (
+            await db.scalars(
+                select(ManagedTorrent).where(
+                    ManagedTorrent.info_hash.in_(tuple(item.id.lower() for item in torrents))
+                )
+            )
+        ).all()
+    }
+    stopped_states = {"pauseddl", "pausedup", "stoppeddl", "stoppedup"}
     return AdminV2QBittorrentRuntime(
         checked_at=checked_at,
         download_speed_bytes=sum(item.download_speed_bytes for item in torrents),
@@ -157,9 +175,121 @@ async def get_admin_qbittorrent_runtime(
                 size_bytes=item.size_bytes,
                 state=item.state,
                 progress=item.progress,
+                managed_torrent_id=(
+                    managed_item.id if (managed_item := managed.get(item.id.lower())) else None
+                ),
+                can_resume=(
+                    managed_item is not None
+                    and managed_item.state
+                    in (ManagedTorrentState.DOWNLOADING, ManagedTorrentState.PAUSED)
+                    and item.state.lower() in stopped_states
+                ),
+                can_delete=(
+                    managed_item is not None
+                    and managed_item.state
+                    not in (ManagedTorrentState.PURGING, ManagedTorrentState.PURGED)
+                ),
             )
             for item in torrents
         ],
+    )
+
+
+@router.post(
+    "/runtime/qbittorrent/{torrent_id}/action",
+    response_model=AdminV2QBittorrentActionResult,
+)
+async def act_on_admin_qbittorrent_torrent(
+    torrent_id: uuid.UUID,
+    payload: AdminV2QBittorrentActionRequest,
+    db: DbSession,
+    redis: RedisCoordinatorDependency,
+    monitor: AdminRuntimeMonitorDependency,
+    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+) -> AdminV2QBittorrentActionResult:
+    if payload.action == "delete":
+        try:
+            result = await schedule_admin_purge(
+                db,
+                (torrent_id,),
+                eligible_states=ADMIN_PURGE_STATES,
+            )
+            if not result.scheduled_ids:
+                raise AdminQBittorrentActionError("qbittorrent_delete_not_allowed")
+            await db.commit()
+        except AdminQBittorrentActionError as exc:
+            await db.rollback()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=_business_detail(
+                    exc.code,
+                    "Ce torrent ne peut plus être supprimé depuis qBittorrent.",
+                ),
+            ) from exc
+        except Exception:
+            await db.rollback()
+            raise
+        await redis.signal_job_available()
+        await redis.publish_torrent_queue_changed(datetime.now(UTC))
+        return AdminV2QBittorrentActionResult(
+            torrent_id=torrent_id,
+            action="delete",
+            status="scheduled",
+        )
+
+    retention_hours = await db.scalar(
+        select(DatabaseOption.integer_value).where(
+            DatabaseOption.key == "WOS_TORRENT_RETENTION_HOURS"
+        )
+    )
+    try:
+        resume = await force_resume_admin_torrent(
+            db,
+            torrent_id=torrent_id,
+            retention_hours=48 if retention_hours is None else retention_hours,
+        )
+        await db.commit()
+    except AdminQBittorrentActionError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=_business_detail(
+                exc.code,
+                "Ce torrent ne peut pas être relancé dans son état actuel.",
+            ),
+        ) from exc
+    except Exception:
+        await db.rollback()
+        raise
+
+    action_status: Literal["applied", "scheduled"] = "applied"
+    try:
+        await monitor.resume_managed_torrent(
+            qbittorrent_account_ref=resume.qbittorrent_account_ref,
+            info_hash=resume.info_hash,
+            storage_key=resume.storage_key,
+            download_limit_bytes_per_second=resume.download_limit_bytes_per_second,
+        )
+    except QBittorrentV2OwnershipError as exc:
+        owned = await db.get(ManagedTorrent, torrent_id, with_for_update=True)
+        if owned is not None:
+            owned.admin_forced_active = False
+            owned.updated_at = datetime.now(UTC)
+        await db.commit()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=_business_detail(
+                "qbittorrent_ownership_conflict",
+                "Ce torrent n’appartient pas au stockage géré par WOS.",
+            ),
+        ) from exc
+    except IntegrationRequestError:
+        action_status = "scheduled"
+    await redis.publish_torrent_queue_changed(datetime.now(UTC))
+    return AdminV2QBittorrentActionResult(
+        torrent_id=torrent_id,
+        action="resume",
+        status=action_status,
     )
 
 
