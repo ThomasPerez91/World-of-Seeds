@@ -749,6 +749,13 @@ export function UserDownloadsPage({
   const readyManifestsRef = useRef(readyManifests);
   readyManifestsRef.current = readyManifests;
   const manifestRequestsRef = useRef(new Map<string, Promise<TorrentDownloadManifestPageV2 | null>>());
+  const retentionFiltersVisible = statusFilter === "all" || statusFilter === "ready";
+
+  function selectStatusFilter(filter: TorrentStatusFilter) {
+    setStatusFilter(filter);
+    if (filter !== "all" && filter !== "ready") setRetentionFilter(null);
+    setOffset(0);
+  }
 
   useEffect(() => () => managerRef.current?.dispose(), []);
 
@@ -1363,12 +1370,12 @@ export function UserDownloadsPage({
               type="button"
               className={`torrent-filter torrent-filter-${filter}${statusFilter === filter ? " active" : ""}`}
               aria-pressed={statusFilter === filter}
-              onClick={() => { setStatusFilter(filter); setOffset(0); }}
+              onClick={() => selectStatusFilter(filter)}
             >
               {icon}{label}<span className="torrent-filter-count">{counts[filter]}</span>
             </button>
           ))}
-          {(["green", "orange", "red"] as const).map((bucket) => (
+          {retentionFiltersVisible ? (["green", "orange", "red"] as const).map((bucket) => (
             <Tooltip key={bucket} content={t(`downloads.retentionFilter.${bucket}` as MessageKey)}>
               <button
                 type="button"
@@ -1384,7 +1391,7 @@ export function UserDownloadsPage({
                 <span className="torrent-filter-count">{retentionCounts[bucket]}</span>
               </button>
             </Tooltip>
-          ))}
+          )) : null}
         </div>
       </div>
 

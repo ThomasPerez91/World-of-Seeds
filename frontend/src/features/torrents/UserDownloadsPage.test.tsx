@@ -1511,6 +1511,40 @@ describe("UserDownloadsPage", () => {
     ))).toBe(true));
   });
 
+  it("masque et réinitialise les délais restants hors Tous et Prêts", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return response({
+        items: [torrent({ name: "ubuntu.iso", state: "ready", progress: 1 })],
+        offset: 0,
+        limit: 25,
+        total: 1,
+        status_counts: { all: 1, downloading: 0, ready: 1, waiting: 0, blocked: 0 },
+        retention_counts: { green: 0, orange: 0, red: 1 },
+      });
+    }));
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("article", { name: "ubuntu.iso" });
+
+    await user.click(screen.getByRole("button", { name: "Moins d’1/3 du délai restant" }));
+    await waitFor(() => expect(calls.some((url) => url.includes("retention_bucket=red"))).toBe(true));
+    await user.click(screen.getByRole("button", { name: /Téléchargement/ }));
+
+    expect(screen.queryByRole("button", { name: "Moins d’1/3 du délai restant" })).toBeNull();
+    await waitFor(() => expect(calls.some((url) => {
+      const parsed = new URL(url, "http://localhost");
+      return parsed.searchParams.get("status") === "downloading"
+        && parsed.searchParams.get("retention_bucket") === null;
+    })).toBe(true));
+
+    await user.click(screen.getByRole("button", { name: /Prêts/ }));
+    expect(screen.getByRole("button", { name: "Moins d’1/3 du délai restant" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /En attente/ }));
+    expect(screen.queryByRole("button", { name: "Moins d’1/3 du délai restant" })).toBeNull();
+  });
+
   it("supporte le drop, le sélecteur clavier et les erreurs métier bornées", async () => {
     vi.stubGlobal(
       "fetch",

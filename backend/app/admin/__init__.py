@@ -4,6 +4,12 @@ from app.admin.cleanup import (
     list_downloaded_content,
     schedule_admin_purge,
 )
+from app.admin.qbittorrent import (
+    ADMIN_PURGE_STATES,
+    AdminQBittorrentActionError,
+    AdminQBittorrentResumeResult,
+    force_resume_admin_torrent,
+)
 from app.admin.reconciliation import (
     RECOVER_CANCEL_REQUESTS_JOB,
     RECOVER_PURGE_METADATA_JOB,
@@ -27,6 +33,9 @@ __all__ = [
     "AdminCleanupPurgeResult",
     "AdminStorageError",
     "AdminStorageInspector",
+    "ADMIN_PURGE_STATES",
+    "AdminQBittorrentActionError",
+    "AdminQBittorrentResumeResult",
     "ReconciliationAnomaly",
     "ReconciliationCursor",
     "ReconciliationCursorError",
@@ -37,6 +46,7 @@ __all__ = [
     "ReconciliationRecoverySnapshot",
     "ReconciliationReport",
     "deserialize_recovery_snapshot",
+    "force_resume_admin_torrent",
     "list_downloaded_content",
     "reconcile_inventory",
     "recover_orphaned_torrent",
