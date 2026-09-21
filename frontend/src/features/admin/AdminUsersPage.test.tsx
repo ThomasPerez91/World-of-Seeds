@@ -50,7 +50,8 @@ describe("AdminUsersPage", () => {
       expect(screen.getByRole("button", { name: "Utilisateurs" }).getAttribute("aria-current")).toBe("page");
       expect(screen.getByRole("button", { name: `Suspendre ${username}` })).toBeTruthy();
       expect(screen.getByRole("button", { name: `Supprimer l’accès de ${username}` })).toBeTruthy();
-      expect(view.container.querySelector(".user-row > div:nth-child(2) > strong")).toBeTruthy();
+      expect(view.container.querySelector(".user-row-identity-copy > strong")).toBeTruthy();
+      expect(view.container.querySelector(".admin-user-avatar.account-avatar")).toBeTruthy();
       expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
     },
   );
