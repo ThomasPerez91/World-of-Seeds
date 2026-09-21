@@ -246,6 +246,7 @@
 }
 
 .admin-user-avatar.account-avatar {
+  display: grid;
   width: 2.75rem;
   height: 2.75rem;
   border: 1px solid color-mix(in srgb, var(--color-primary) 32%, transparent);
