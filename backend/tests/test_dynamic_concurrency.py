@@ -258,6 +258,7 @@ def test_completion_cooldown_blocks_replacement_then_low_rate_scales() -> None:
         now=NOW + timedelta(seconds=30),
     )
     assert during.active_limit == 3
+    assert during.preserve_active_set is True
     assert state.dynamic_last_decision == DYNAMIC_COMPLETION_COOLDOWN
 
     after = apply_dynamic_concurrency(
@@ -268,6 +269,7 @@ def test_completion_cooldown_blocks_replacement_then_low_rate_scales() -> None:
         now=NOW + timedelta(seconds=60),
     )
     assert after.active_limit == 4
+    assert after.preserve_active_set is False
 
 
 def test_completion_cooldown_keeps_limit_when_target_is_reached() -> None:
