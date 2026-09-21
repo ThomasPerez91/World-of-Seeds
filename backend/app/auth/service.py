@@ -142,10 +142,19 @@ async def authenticate(
     if throttle is not None:
         await db.delete(throttle)
 
-    user.last_login_at = now
-    tokens = issue_session(db, user=user, settings=settings, now=now)
+    locked_user = await db.scalar(
+        select(User)
+        .where(User.id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked_user is None:
+        raise AuthenticationFailedError
+    if locked_user.last_login_at is None or ensure_utc(locked_user.last_login_at) < now:
+        locked_user.last_login_at = now
+    tokens = issue_session(db, user=locked_user, settings=settings, now=now)
     await db.commit()
-    return user, tokens
+    return locked_user, tokens
 
 
 def issue_session(
