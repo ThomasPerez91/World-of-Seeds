@@ -88,6 +88,23 @@ def _integer(
     )
 
 
+def _boolean(
+    key: str,
+    label: str,
+    description: str,
+    default: bool,
+    category: OptionCategory,
+) -> OptionSpec:
+    return OptionSpec(
+        key=key,
+        label=label,
+        description=description,
+        input_type="boolean",
+        default=default,
+        category=category,
+    )
+
+
 def _text(
     key: str,
     label: str,
@@ -214,6 +231,74 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         "Torrents actifs globaux",
         "Nombre maximal de torrents physiques admis simultanément par le scheduler V2.",
         2,
+        "torrents",
+        minimum=1,
+        maximum=200,
+        unit="count",
+    ),
+    _boolean(
+        "WOS_SCHEDULER_DYNAMIC_CONCURRENCY_ENABLED",
+        "Régulation dynamique des téléchargements",
+        "Adapte progressivement le nombre de téléchargements qBittorrent "
+        "au débit réellement observé.",
+        True,
+        "torrents",
+    ),
+    _integer(
+        "WOS_SCHEDULER_DYNAMIC_INITIAL_ACTIVE",
+        "Limite dynamique initiale",
+        "Nombre de téléchargements admis au début de chaque nouvelle série.",
+        2,
+        "torrents",
+        minimum=1,
+        maximum=200,
+        unit="count",
+    ),
+    _integer(
+        "WOS_SCHEDULER_DYNAMIC_MIN_BYTES_PER_SECOND",
+        "Débit minimal dynamique",
+        "Débit moyen sous lequel un téléchargement supplémentaire peut être admis.",
+        235_929_600,
+        "torrents",
+        minimum=1_048_576,
+        maximum=10_000_000_000,
+        unit="bytes_per_second",
+    ),
+    _integer(
+        "WOS_SCHEDULER_DYNAMIC_TARGET_BYTES_PER_SECOND",
+        "Débit cible maximal dynamique",
+        "Borne haute de la plage cible ; son dépassement ne met aucun torrent en pause.",
+        262_144_000,
+        "torrents",
+        minimum=1_048_576,
+        maximum=10_000_000_000,
+        unit="bytes_per_second",
+    ),
+    _integer(
+        "WOS_SCHEDULER_DYNAMIC_EVALUATION_SECONDS",
+        "Période d’évaluation dynamique",
+        "Durée minimale de mesure complète avant une nouvelle décision de capacité.",
+        60,
+        "torrents",
+        minimum=30,
+        maximum=1800,
+        unit="seconds",
+    ),
+    _integer(
+        "WOS_SCHEDULER_DYNAMIC_STEP",
+        "Palier dynamique",
+        "Nombre de téléchargements ajoutés lorsque le débit moyen reste insuffisant.",
+        1,
+        "torrents",
+        minimum=1,
+        maximum=20,
+        unit="count",
+    ),
+    _integer(
+        "WOS_SCHEDULER_DYNAMIC_MAX_ACTIVE",
+        "Plafond dynamique absolu",
+        "Nombre maximal de téléchargements admis par la régulation dynamique.",
+        8,
         "torrents",
         minimum=1,
         maximum=200,

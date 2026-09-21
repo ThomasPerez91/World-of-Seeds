@@ -221,6 +221,20 @@ async def test_noop_update_does_not_create_an_audit_event(db_session: AsyncSessi
             },
             "inconsistent_options",
         ),
+        (
+            {
+                "WOS_SCHEDULER_DYNAMIC_INITIAL_ACTIVE": 9,
+                "WOS_SCHEDULER_DYNAMIC_MAX_ACTIVE": 8,
+            },
+            "inconsistent_options",
+        ),
+        (
+            {
+                "WOS_SCHEDULER_DYNAMIC_MIN_BYTES_PER_SECOND": 300_000_000,
+                "WOS_SCHEDULER_DYNAMIC_TARGET_BYTES_PER_SECOND": 250_000_000,
+            },
+            "inconsistent_options",
+        ),
     ],
 )
 async def test_invalid_changes_are_rejected_without_audit(

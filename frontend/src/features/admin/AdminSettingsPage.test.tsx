@@ -40,6 +40,17 @@ const options = {
     synchronized: false,
     rounds: 9,
     lease_active: true,
+    dynamic_enabled: true,
+    static_active_limit: 2,
+    dynamic_current_active: 3,
+    active_downloads: 3,
+    waiting_candidates: 4,
+    observed_bytes_per_second: 240 * 1024 * 1024,
+    minimum_bytes_per_second: 225 * 1024 * 1024,
+    target_bytes_per_second: 250 * 1024 * 1024,
+    next_evaluation_at: "2026-09-21T10:01:00Z",
+    completion_cooldown_until: null,
+    last_decision: "dynamic_target_reached",
   },
   storage: {
     managed_bytes: 100,
@@ -72,7 +83,7 @@ function response(body: unknown, status = 200): Response {
 
 describe("AdminSettingsPage", () => {
   it("possède une traduction anglaise stable pour chaque option V2", () => {
-    expect(translatedOptionKeys.size).toBe(87);
+    expect(translatedOptionKeys.size).toBe(94);
     expect(translatedOptionKeys.has("WOS_ADMIN_REFRESH_INTERVAL_SECONDS")).toBe(true);
     expect(translatedNewGreedyFieldIds.size).toBe(44);
     expect(translatedNewGreedyFieldIds.has("advanced.inject_hours")).toBe(true);

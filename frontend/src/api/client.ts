@@ -448,6 +448,17 @@ export interface CentralAdminOverview extends OptionsResponse {
     synchronized: boolean;
     rounds: number;
     lease_active: boolean;
+    dynamic_enabled: boolean;
+    static_active_limit: number;
+    dynamic_current_active: number;
+    active_downloads: number;
+    waiting_candidates: number;
+    observed_bytes_per_second: number;
+    minimum_bytes_per_second: number;
+    target_bytes_per_second: number;
+    next_evaluation_at: string | null;
+    completion_cooldown_until: string | null;
+    last_decision: string;
   };
   storage: {
     managed_bytes: number;

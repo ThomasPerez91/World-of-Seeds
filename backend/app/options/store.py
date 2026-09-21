@@ -434,6 +434,22 @@ def validate_cross_options(values: Mapping[str, OptionValue]) -> None:
             code="inconsistent_options",
             field="WOS_SCHEDULER_SMALL_TORRENT_BYTES",
         )
+    dynamic_initial = integer("WOS_SCHEDULER_DYNAMIC_INITIAL_ACTIVE")
+    dynamic_maximum = integer("WOS_SCHEDULER_DYNAMIC_MAX_ACTIVE")
+    if dynamic_initial > dynamic_maximum:
+        raise OptionsValidationError(
+            "La limite dynamique initiale ne peut pas dépasser le plafond dynamique.",
+            code="inconsistent_options",
+            field="WOS_SCHEDULER_DYNAMIC_INITIAL_ACTIVE",
+        )
+    dynamic_minimum_rate = integer("WOS_SCHEDULER_DYNAMIC_MIN_BYTES_PER_SECOND")
+    dynamic_target_rate = integer("WOS_SCHEDULER_DYNAMIC_TARGET_BYTES_PER_SECOND")
+    if dynamic_minimum_rate >= dynamic_target_rate:
+        raise OptionsValidationError(
+            "Le débit dynamique minimal doit être inférieur au débit cible maximal.",
+            code="inconsistent_options",
+            field="WOS_SCHEDULER_DYNAMIC_MIN_BYTES_PER_SECOND",
+        )
 
     account_numbers: set[str] = set()
     passkeys: set[str] = set()
