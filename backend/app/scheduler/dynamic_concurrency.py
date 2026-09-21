@@ -67,6 +67,7 @@ class DynamicConcurrencyDecision:
     active_limit: int
     active_torrent_ids: frozenset[UUID]
     scaled_up: bool = False
+    preserve_active_set: bool = False
 
 
 def apply_dynamic_concurrency(
@@ -118,7 +119,11 @@ def apply_dynamic_concurrency(
         else:
             state.dynamic_next_evaluation_at = cooldown_until
         state.dynamic_last_decision = DYNAMIC_COMPLETION_COOLDOWN
-        return DynamicConcurrencyDecision(state.dynamic_current_active, active_ids)
+        return DynamicConcurrencyDecision(
+            state.dynamic_current_active,
+            active_ids,
+            preserve_active_set=True,
+        )
     if cooldown_until is not None:
         state.dynamic_cooldown_until = None
 
