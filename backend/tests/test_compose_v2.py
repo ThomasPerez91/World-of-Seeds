@@ -36,6 +36,7 @@ def _valid_config() -> dict[str, Any]:
             "worker": {
                 "command": ["python", "-m", "app.worker"],
                 "depends_on": {
+                    "api": {"condition": "service_healthy"},
                     "postgres": {"condition": "service_healthy"},
                     "redis": {"condition": "service_healthy"},
                 },
@@ -104,6 +105,7 @@ def test_v2_compose_policy_accepts_the_isolated_foundation() -> None:
         lambda config: config["services"]["worker"].update(
             {"command": ["uvicorn", "app.main:app"]}
         ),
+        lambda config: config["services"]["worker"]["depends_on"].pop("api"),
         lambda config: config["services"]["worker"]["environment"].pop(
             "WOS_INTEGRATION_ACCOUNTS_JSON"
         ),
