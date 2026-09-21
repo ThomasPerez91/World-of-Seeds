@@ -156,7 +156,7 @@ describe("AdminSettingsPage", () => {
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
-  it("affiche et modifie une passkey C411 comme un champ secret", async () => {
+  it("masque la passkey C411 sans la déclarer comme mot de passe navigateur", async () => {
     const c411Options = {
       ...options,
       sections: [
@@ -241,8 +241,16 @@ describe("AdminSettingsPage", () => {
     expect(passkeyHint.classList.contains("sr-only")).toBe(true);
     expect(username.getAttribute("aria-describedby")).toBe(usernameHint.id);
     const passkey = screen.getByLabelText("Passkey");
-    expect(passkey.getAttribute("type")).toBe("password");
+    expect(passkey.closest("details")?.hasAttribute("open")).toBe(false);
+    expect(passkey.getAttribute("type")).toBe("text");
+    expect(passkey.getAttribute("autocomplete")).toBe("off");
+    expect(passkey.getAttribute("name")).toBe("c411-tracker-token-01");
+    expect(passkey.getAttribute("data-revealed")).toBe("false");
+    expect(passkey.getAttribute("data-1p-ignore")).toBe("true");
     expect(passkey.getAttribute("aria-describedby")).toBe(passkeyHint.id);
+    await user.click(screen.getByRole("button", { name: "Afficher la passkey" }));
+    expect(passkey.getAttribute("data-revealed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Masquer la passkey" })).toBeTruthy();
     await user.clear(passkey);
     await user.type(passkey, "replacement-passkey-456");
     await user.click(screen.getByRole("button", { name: "Enregistrer" }));
