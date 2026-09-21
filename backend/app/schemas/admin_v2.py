@@ -36,6 +36,17 @@ class AdminV2SchedulerStatus(BaseModel):
     synchronized: bool
     rounds: int
     lease_active: bool
+    dynamic_enabled: bool
+    static_active_limit: int
+    dynamic_current_active: int
+    active_downloads: int
+    waiting_candidates: int
+    observed_bytes_per_second: int
+    minimum_bytes_per_second: int
+    target_bytes_per_second: int
+    next_evaluation_at: datetime | None
+    completion_cooldown_until: datetime | None
+    last_decision: str
 
 
 class AdminV2StorageStatus(BaseModel):

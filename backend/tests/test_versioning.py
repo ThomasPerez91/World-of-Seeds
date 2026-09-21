@@ -35,7 +35,7 @@ def test_application_version_sources_match_the_canonical_version() -> None:
     )
 
     assert result.stdout.strip() == version
-    assert version == "2.2.12"
+    assert version == "2.2.13"
 
 
 def test_application_version_rejects_a_mismatched_release_tag() -> None:

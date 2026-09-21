@@ -421,6 +421,31 @@ async def _overview(
                 and scheduler.lease_expires_at is not None
                 and scheduler.lease_expires_at.replace(tzinfo=UTC) > now
             ),
+            dynamic_enabled=bool(rows["WOS_SCHEDULER_DYNAMIC_CONCURRENCY_ENABLED"].value),
+            static_active_limit=int(rows["WOS_SCHEDULER_MAX_ACTIVE_GLOBAL"].value),
+            dynamic_current_active=(
+                scheduler.dynamic_current_active
+                if scheduler is not None
+                else int(rows["WOS_SCHEDULER_DYNAMIC_INITIAL_ACTIVE"].value)
+            ),
+            active_downloads=scheduler.dynamic_active_count if scheduler is not None else 0,
+            waiting_candidates=scheduler.dynamic_waiting_count if scheduler is not None else 0,
+            observed_bytes_per_second=(
+                scheduler.dynamic_observed_bytes_per_second if scheduler is not None else 0
+            ),
+            minimum_bytes_per_second=int(rows["WOS_SCHEDULER_DYNAMIC_MIN_BYTES_PER_SECOND"].value),
+            target_bytes_per_second=int(
+                rows["WOS_SCHEDULER_DYNAMIC_TARGET_BYTES_PER_SECOND"].value
+            ),
+            next_evaluation_at=(
+                scheduler.dynamic_next_evaluation_at if scheduler is not None else None
+            ),
+            completion_cooldown_until=(
+                scheduler.dynamic_cooldown_until if scheduler is not None else None
+            ),
+            last_decision=(
+                scheduler.dynamic_last_decision if scheduler is not None else "dynamic_idle_reset"
+            ),
         ),
         storage=AdminV2StorageStatus(
             managed_bytes=ledger.managed_bytes if ledger is not None else 0,

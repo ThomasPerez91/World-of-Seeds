@@ -337,7 +337,7 @@ async def test_purge_pending_download_is_durably_stopped_at_retention_deadline(
     result = await recovered.run_once()
 
     assert result.selected_torrent_ids == ()
-    assert len(gateway.calls) == 2
+    assert len(gateway.calls) == 1
     assert len(gateway.calls[0]) == 1
     assert gateway.calls[0][0].run_state == "stopped"
     assert gateway.calls[0][0].info_hash == "9" * 40
@@ -534,7 +534,7 @@ async def test_ready_seeding_torrent_is_outside_download_slot_control(tmp_path: 
     ).run_once()
 
     assert result.selected_torrent_ids == ()
-    assert gateway.calls == [()]
+    assert gateway.calls == []
     async with sessions() as session:
         stored = await session.get(ManagedTorrent, torrent.id)
     assert stored is not None
@@ -556,8 +556,11 @@ async def test_global_active_limit_is_reloaded_between_cycles_with_ten_queued(
         )
     async with sessions() as session, session.begin():
         option = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+        dynamic = await session.get(DatabaseOption, "WOS_SCHEDULER_DYNAMIC_CONCURRENCY_ENABLED")
         assert option is not None
+        assert dynamic is not None
         option.integer_value = 1
+        dynamic.boolean_value = False
 
     runtime = SchedulerRuntime(
         sessions, FakeGateway(), scheduler_id="scheduler-dynamic-limit", clock=lambda: NOW
@@ -589,8 +592,11 @@ async def test_selection_change_publishes_one_global_queue_invalidation(
         )
     async with sessions() as session, session.begin():
         option = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+        dynamic = await session.get(DatabaseOption, "WOS_SCHEDULER_DYNAMIC_CONCURRENCY_ENABLED")
         assert option is not None
+        assert dynamic is not None
         option.integer_value = 1
+        dynamic.boolean_value = False
     redis = RecordingRedis()
 
     await SchedulerRuntime(
@@ -700,16 +706,19 @@ async def test_elapsed_waiting_cooldown_invalidates_once_without_selection_chang
             select(TorrentRequest).where(TorrentRequest.managed_torrent_id == cooling.id)
         )
         option = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+        dynamic = await session.get(DatabaseOption, "WOS_SCHEDULER_DYNAMIC_CONCURRENCY_ENABLED")
         assert stored_active is not None
         assert stored_cooling is not None
         assert active_request is not None
         assert cooling_request is not None
         assert option is not None
+        assert dynamic is not None
         stored_active.desired_active = True
         stored_active.desired_priority = 0
         stored_cooling.scheduler_retry_at = NOW + timedelta(minutes=3)
         cooling_request.user_id = active_request.user_id
         option.integer_value = 1
+        dynamic.boolean_value = False
     redis = RecordingRedis()
 
     before = await SchedulerRuntime(
@@ -1045,3 +1054,57 @@ async def test_postgresql_row_lock_allows_only_one_live_scheduler_owner() -> Non
             await session.execute(delete(SchedulerDeficit))
             await session.execute(delete(SchedulerState))
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dynamic_limit_persists_and_two_instances_cannot_double_increase(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    first = await _torrent(sessions, username="dynamic-first", info_hash="d" * 40, size=10)
+    second = await _torrent(sessions, username="dynamic-second", info_hash="e" * 40, size=10)
+    await _torrent(sessions, username="dynamic-waiting", info_hash="f" * 40, size=10)
+    downloaded = 100 * 1024 * 1024 * 60
+    async with sessions() as session, session.begin():
+        stored_first = await session.get(ManagedTorrent, first.id)
+        stored_second = await session.get(ManagedTorrent, second.id)
+        assert stored_first is not None and stored_second is not None
+        for rank, torrent in enumerate((stored_first, stored_second)):
+            torrent.state = ManagedTorrentState.DOWNLOADING
+            torrent.desired_active = True
+            torrent.desired_priority = rank
+            torrent.last_downloaded_bytes = downloaded // 2
+        session.add(
+            SchedulerState(
+                id=1,
+                dynamic_current_active=2,
+                dynamic_sampled_at=NOW,
+                dynamic_sample_baseline={first.info_hash: 0, second.info_hash: 0},
+                dynamic_observed_bytes_per_second=0,
+                dynamic_active_count=2,
+                dynamic_waiting_count=1,
+                dynamic_last_decision="dynamic_observation_started",
+            )
+        )
+
+    first_result = await SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="dynamic-leader",
+        clock=lambda: NOW + timedelta(seconds=60),
+    ).run_once()
+    competing_result = await SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="dynamic-competitor",
+        clock=lambda: NOW + timedelta(seconds=60),
+    ).run_once()
+
+    assert len(first_result.selected_torrent_ids) == 3
+    assert competing_result.leader is False
+    async with sessions() as session:
+        state = await session.get(SchedulerState, 1)
+        assert state is not None
+        assert state.dynamic_current_active == 3
+        assert state.dynamic_last_decision == "dynamic_below_target_scaled_up"
+    await engine.dispose()

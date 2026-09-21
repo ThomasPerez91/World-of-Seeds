@@ -85,6 +85,17 @@ async def test_admin_overview_exposes_options_scheduler_storage_and_bounded_audi
         "synchronized": False,
         "rounds": 9,
         "lease_active": True,
+        "dynamic_enabled": True,
+        "static_active_limit": 2,
+        "dynamic_current_active": 2,
+        "active_downloads": 0,
+        "waiting_candidates": 0,
+        "observed_bytes_per_second": 0,
+        "minimum_bytes_per_second": 235_929_600,
+        "target_bytes_per_second": 262_144_000,
+        "next_evaluation_at": None,
+        "completion_cooldown_until": None,
+        "last_decision": "dynamic_idle_reset",
     }
     assert body["storage"]["managed_bytes"] == 100
     assert body["storage"]["logical_bytes"] == 150
