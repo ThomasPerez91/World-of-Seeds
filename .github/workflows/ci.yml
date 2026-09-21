@@ -294,12 +294,29 @@ jobs:
           compose=(docker compose --env-file .env.v2.example -f compose.v2.yaml)
           curl --fail --silent --show-error \
             http://127.0.0.1:28081/api/v1/health/live
-          api_id=$("${compose[@]}" ps --quiet --status running api)
-          test -n "$api_id"
-          docker inspect "$api_id" | jq -e '
-            .[0].HostConfig.PortBindings["8000/tcp"]
-              == [{"HostIp":"127.0.0.1","HostPort":"28081"}]
-          ' >/dev/null
+          api_id=""
+          for attempt in 1 2 3 4 5; do
+            api_id=$("${compose[@]}" ps --quiet --status running api)
+            test -n "$api_id" && break
+            sleep 1
+          done
+          if test -z "$api_id"; then
+            echo "V2 API is healthy over HTTP but Compose does not report it as running."
+            "${compose[@]}" ps
+            exit 1
+          fi
+          api_binding=$(docker inspect "$api_id" | jq -r '
+            .[0].HostConfig.PortBindings["8000/tcp"] as $bindings
+            | if ($bindings | length) == 1
+              then "\($bindings[0].HostIp):\($bindings[0].HostPort)"
+              else "invalid"
+              end
+          ')
+          if test "$api_binding" != "127.0.0.1:28081"; then
+            echo "V2 API port mismatch: expected 127.0.0.1:28081, got $api_binding."
+            docker inspect "$api_id" | jq '.[0].HostConfig.PortBindings'
+            exit 1
+          fi
           if "${compose[@]}" port postgres 5432 >/tmp/v2-postgres-port 2>/dev/null; then
             echo "V2 PostgreSQL must not publish a host port."
             cat /tmp/v2-postgres-port
@@ -310,8 +327,18 @@ jobs:
             cat /tmp/v2-redis-port
             exit 1
           fi
-          test "$("${compose[@]}" exec -T redis redis-cli ping)" = "PONG"
-          test -n "$("${compose[@]}" ps --quiet --status running worker)"
+          redis_status=$("${compose[@]}" exec -T redis redis-cli ping)
+          if test "$redis_status" != "PONG"; then
+            echo "V2 Redis health probe returned: ${redis_status:-<empty>}."
+            exit 1
+          fi
+          worker_id=$("${compose[@]}" ps --quiet --status running worker)
+          if test -z "$worker_id"; then
+            echo "V2 worker is not running."
+            "${compose[@]}" ps
+            "${compose[@]}" logs --no-color worker
+            exit 1
+          fi
       - name: Stop V2 foundation
         if: always() && env.WOS_VERSION_CHANNEL == 'v2'
         run: >-
