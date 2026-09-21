@@ -42,6 +42,7 @@ import {
 import {
   DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
   pickDownloadDirectory,
+  recursiveDirectoryDownloadCapability,
   type LocalTransferQueueItem,
   type RecursiveTransferErrorCode,
   type RecursiveTransferProgress,
@@ -420,7 +421,8 @@ function ReadyTorrentContent({
 }) {
   const { formatBytes, t } = useI18n();
   const snapshot = manifest?.snapshot ?? null;
-  const compatible = !supportsRecursiveDirectoryDownload();
+  const directoryCapability = recursiveDirectoryDownloadCapability();
+  const compatible = directoryCapability !== "available";
   const managedFiles = supportsManagedFileDownload();
   const folderBusy = transfers.some(
     (transfer) => transfer.kind === "folder" && !["completed", "cancelled"].includes(transfer.status),
@@ -441,7 +443,7 @@ function ReadyTorrentContent({
               <DownloadIcon /> {t("downloads.downloadAll")}
             </Button>
           )}
-          {snapshot !== null && snapshot.file_count > 1 && snapshot.archive_available && (
+          {snapshot !== null && snapshot.file_count > 1 && compatible && snapshot.archive_available && (
             <a
               className="download-fallback-archive"
               href={api.torrentArchiveDownloadUrlV2(torrent.id, snapshot.snapshot_id)}
@@ -474,7 +476,7 @@ function ReadyTorrentContent({
         <>
           {compatible && snapshot.file_count > 1 && (
             <p className="ready-compatibility-note">
-              {window.isSecureContext === false
+              {directoryCapability === "insecure"
                 ? t("downloads.insecureContextHint")
                 : t("downloads.compatHint")}
             </p>
@@ -1155,6 +1157,13 @@ export function UserDownloadsPage({
       refreshDownloadPolicy();
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
+      if (
+        caught instanceof DOMException
+        && (caught.name === "NotAllowedError" || caught.name === "SecurityError")
+      ) {
+        feedback.toast({ tone: "error", message: t("downloads.directoryAccessDenied") });
+        return;
+      }
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;

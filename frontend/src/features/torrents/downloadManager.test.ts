@@ -136,6 +136,60 @@ describe("BrowserDownloadManager", () => {
     expect(current.activeStreams).toBe(0);
   });
 
+  it("alterne les permis entre dossiers concurrents au lieu de laisser un job monopoliser la file", async () => {
+    const gates = Array.from({ length: 4 }, deferred);
+    const started: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const index = started.length;
+      started.push(String(input));
+      await gates[index].promise;
+      return validResponse();
+    }));
+    const directory = {
+      getDirectoryHandle: vi.fn(async () => directory),
+      getFileHandle: vi.fn(async () => target()),
+    };
+    const folderSnapshot = (prefix: string): TorrentDownloadManifestPageV2 => ({
+      ...snapshot(`${prefix}-one`),
+      file_count: 2,
+      total_size: 2,
+      limit: 2,
+      items: [
+        { id: `${prefix}-one`, file_index: 0, relative_path: `${prefix}/one.bin`, size: 1 },
+        { id: `${prefix}-two`, file_index: 1, relative_path: `${prefix}/two.bin`, size: 1 },
+      ],
+    });
+    const manager = new BrowserDownloadManager(1, vi.fn());
+    manager.enqueueFolder({
+      torrentId: "torrent-a",
+      name: "A",
+      snapshot: folderSnapshot("a"),
+      directory,
+      loadManifestPage: vi.fn(),
+    });
+    manager.enqueueFolder({
+      torrentId: "torrent-b",
+      name: "B",
+      snapshot: folderSnapshot("b"),
+      directory,
+      loadManifestPage: vi.fn(),
+    });
+
+    await vi.waitFor(() => expect(started).toHaveLength(1));
+    gates[0].resolve();
+    await vi.waitFor(() => expect(started).toHaveLength(2));
+    expect(started[0]).toContain("/files/a-one/");
+    expect(started[1]).toContain("/files/b-one/");
+
+    gates[1].resolve();
+    await vi.waitFor(() => expect(started).toHaveLength(3));
+    expect(started[2]).toContain("/files/a-two/");
+    gates[2].resolve();
+    await vi.waitFor(() => expect(started).toHaveLength(4));
+    expect(started[3]).toContain("/files/b-two/");
+    gates[3].resolve();
+  });
+
   it("applies a raised administrator stream limit to already queued jobs", async () => {
     const gates = Array.from({ length: 5 }, deferred);
     let call = 0;

@@ -1,10 +1,32 @@
 # World of Seeds — Progress
 
-## Etat courant — 17 septembre 2026
+## Etat courant — 21 septembre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.2.6`.
+- Version applicative cible : `2.2.14`.
+
+## Release 2.2.14 — récupération locale priorisée et File API explicite
+
+- la File System Access API est l'action principale des contenus multi-fichiers et mémorise une
+  destination WoS dans le sélecteur natif ; le ZIP n'est plus affiché en parallèle lorsqu'elle est
+  disponible ;
+- le diagnostic distingue contexte non sécurisé, API absente et refus d'accès au dossier, avec un
+  message exploitable notamment sous Brave ;
+- les petits fichiers locaux sont servis en priorité par salves bornées, puis le fichier le plus
+  ancien est forcé afin qu'un gros fichier ne soit jamais affamé ;
+- les permis de flux du navigateur alternent entre travaux concurrents au lieu de laisser un seul
+  dossier monopoliser la file locale ;
+- les protections Range, snapshots, leases, limites serveur et reprise restent inchangées.
+
+## Release 2.2.13 — concurrence qBittorrent dynamique
+
+- le scheduler mesure le débit réellement observé sur une fenêtre durable et augmente par paliers
+  le nombre de torrents actifs lorsque le débit reste sous la cible et qu'une file attend ;
+- le plafond dur, les limites par utilisateur, le scheduler pondéré par taille et les protections
+  anti-famine restent autoritaires ;
+- une fenêtre de cooldown après achèvement évite de perturber l'ensemble actif pendant la nouvelle
+  mesure.
 
 ## Release 2.2.6 — supervision qBittorrent et NewGreedy
 
