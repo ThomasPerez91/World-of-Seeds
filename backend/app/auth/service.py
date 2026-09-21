@@ -142,6 +142,7 @@ async def authenticate(
     if throttle is not None:
         await db.delete(throttle)
 
+    user.last_login_at = now
     tokens = issue_session(db, user=user, settings=settings, now=now)
     await db.commit()
     return user, tokens
