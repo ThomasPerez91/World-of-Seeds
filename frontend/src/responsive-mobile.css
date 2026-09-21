@@ -1,0 +1,725 @@
+/* Mobile composition layer. Loaded last and intentionally scoped to existing WOS surfaces. */
+
+.app-shell,
+.dashboard-content,
+.user-dashboard,
+.user-downloads,
+.settings-page,
+.admin-page,
+.settings-shell,
+.settings-shell-content,
+.admin-section {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.c411-account-slot {
+  border-color: var(--wos-line, var(--color-border)) !important;
+  background: color-mix(in srgb, var(--color-surface-elevated) 72%, transparent) !important;
+}
+
+.c411-account-fields input,
+.c411-account-fields select {
+  border-color: var(--color-border) !important;
+  background: var(--color-background-secondary) !important;
+}
+
+.c411-account-fields input:hover:not(:disabled),
+.c411-account-fields select:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-text-muted) 62%, var(--color-border)) !important;
+}
+
+.c411-account-fields input:focus-visible,
+.c411-account-fields select:focus-visible {
+  border-color: var(--wos-accent, var(--color-primary)) !important;
+  outline: 2px solid color-mix(in srgb, var(--wos-accent, var(--color-primary)) 38%, transparent);
+  outline-offset: 1px;
+}
+
+.c411-account-fields input:disabled,
+.c411-account-fields select:disabled {
+  color: var(--color-text-muted);
+  border-color: color-mix(in srgb, var(--color-border) 72%, transparent) !important;
+  opacity: 0.68;
+}
+
+.c411-passkey-control {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) 2.75rem;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.c411-passkey-input {
+  min-width: 0;
+  -webkit-text-security: disc;
+}
+
+.c411-passkey-input[data-revealed="true"] {
+  -webkit-text-security: none;
+}
+
+.c411-passkey-toggle.ui-button {
+  width: 2.75rem;
+  min-width: 2.75rem;
+  height: 2.75rem;
+  min-height: 2.75rem;
+  margin: 0;
+  padding: 0.65rem;
+}
+
+.c411-passkey-toggle svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+@media (max-width: 959px) {
+  .settings-shell-navigation {
+    display: flex !important;
+    width: 100%;
+    max-width: 100%;
+    gap: 0.4rem !important;
+    overflow-x: auto !important;
+    overscroll-behavior-inline: contain;
+    padding: 0.2rem 0.15rem 0.45rem !important;
+    border: 0 !important;
+    scroll-padding-inline: 0.15rem;
+    scroll-snap-type: inline proximity;
+    scrollbar-width: thin;
+  }
+
+  .settings-shell-navigation-item {
+    min-width: max-content !important;
+    min-height: 2.75rem;
+    flex: 0 0 auto;
+    padding: 0.55rem 0.8rem !important;
+    border: 1px solid transparent !important;
+    border-radius: 999px !important;
+    text-align: center;
+    white-space: nowrap;
+    scroll-snap-align: center;
+  }
+
+  .settings-shell-navigation-item[aria-current="page"] {
+    border-color: color-mix(in srgb, var(--wos-accent, var(--color-primary)) 34%, transparent) !important;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wos-accent, var(--color-primary)) 12%, transparent);
+  }
+}
+
+@media (max-width: 760px) {
+  .app-header {
+    width: 100%;
+    max-width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 0.55rem 0.65rem !important;
+    padding: 0.6rem 0.7rem !important;
+  }
+
+  .navbar-brand,
+  .header-actions,
+  .user-navigation,
+  .user-navigation .ui-button,
+  .user-navigation .ui-button > span {
+    min-width: 0;
+  }
+
+  .authenticated-brand {
+    max-width: min(9.5rem, 42vw) !important;
+    height: auto;
+  }
+
+  .version-badge {
+    font-size: 0.62rem !important;
+  }
+
+  .header-actions {
+    gap: 0.35rem !important;
+  }
+
+  .header-actions-separator {
+    display: none;
+  }
+
+  .user-navigation {
+    grid-column: 1 / -1 !important;
+    grid-row: 2 !important;
+    display: grid !important;
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.3rem !important;
+    overflow: visible !important;
+  }
+
+  .user-navigation .ui-button {
+    width: 100%;
+    min-height: 2.75rem;
+    justify-content: center;
+    gap: 0.3rem !important;
+    padding: 0.5rem 0.35rem !important;
+    font-size: clamp(0.68rem, 2.7vw, 0.8rem) !important;
+    white-space: nowrap;
+  }
+
+  .user-navigation .ui-button > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .user-navigation .ui-button svg {
+    width: 0.95rem !important;
+    height: 0.95rem !important;
+    flex: 0 0 0.95rem;
+  }
+
+  .dashboard-content {
+    padding-inline: clamp(0.65rem, 3vw, 1rem) !important;
+  }
+
+  .user-dashboard-header h1 {
+    font-size: clamp(1.65rem, 8vw, 2.15rem) !important;
+  }
+
+  .dashboard-summary-card {
+    min-width: 0;
+    padding: 0.9rem !important;
+  }
+
+  .dashboard-summary-heading,
+  .dashboard-summary-title,
+  .network-throughput-direction,
+  .storage-summary-line,
+  .storage-legend {
+    min-width: 0;
+  }
+
+  .dashboard-summary-card h2 {
+    font-size: 1rem !important;
+  }
+
+  .network-throughput-direction > strong,
+  .dashboard-summary-value {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    font-size: clamp(1rem, 5vw, 1.35rem) !important;
+  }
+
+  .storage-summary-line,
+  .storage-legend {
+    flex-wrap: wrap;
+    align-items: baseline;
+  }
+
+  .user-downloads-header {
+    margin-bottom: 0.75rem !important;
+  }
+
+  .user-downloads-header h2 {
+    font-size: clamp(1.35rem, 7vw, 1.8rem) !important;
+  }
+
+  .user-downloads-header p {
+    margin-top: 0.35rem;
+    line-height: 1.45;
+  }
+
+  .torrent-drop-zone {
+    min-height: 0 !important;
+    gap: 0.3rem !important;
+    padding: 0.85rem 0.75rem !important;
+  }
+
+  .torrent-drop-zone > svg {
+    width: 1.35rem !important;
+    height: 1.35rem !important;
+  }
+
+  .torrent-drop-zone > span,
+  .torrent-atomic-note {
+    font-size: 0.78rem !important;
+    line-height: 1.4;
+  }
+
+  .torrent-atomic-note {
+    align-items: flex-start !important;
+    margin-block: 0.55rem 0.75rem !important;
+  }
+
+  .torrent-toolbar {
+    gap: 0.55rem !important;
+    padding-top: 0 !important;
+  }
+
+  .torrent-search,
+  .torrent-search input {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .torrent-filters {
+    display: flex !important;
+    width: 100%;
+    max-width: 100%;
+    flex-wrap: nowrap !important;
+    gap: 0.4rem !important;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding: 0.1rem 0.05rem 0.4rem !important;
+    scroll-padding-inline: 0.05rem;
+    scroll-snap-type: inline proximity;
+    scrollbar-width: thin;
+  }
+
+  .torrent-filter {
+    min-height: 2.75rem;
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+
+  .torrent-retention-filter {
+    min-width: 2.75rem !important;
+  }
+
+  .torrent-accordion-content {
+    padding: 0.65rem !important;
+  }
+
+  .torrent-meta-card {
+    gap: 0.55rem;
+    padding: 0.55rem;
+  }
+
+  .torrent-meta-value {
+    overflow-wrap: anywhere;
+  }
+
+  .admin-page,
+  .settings-page {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0.75rem 0 1.5rem !important;
+  }
+
+  .admin-page .settings-shell,
+  .settings-page .settings-shell {
+    width: 100%;
+    max-width: 100%;
+    gap: 0.65rem !important;
+    padding: 0.65rem !important;
+  }
+
+  .admin-page .settings-shell-content,
+  .settings-page .settings-shell-content,
+  .admin-page .admin-runtime,
+  .admin-section {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .admin-page[data-admin-view] .admin-runtime {
+    padding: 0.85rem !important;
+  }
+
+  .admin-page[data-admin-view] .admin-runtime-heading {
+    gap: 0.65rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .admin-page[data-admin-view] .admin-runtime-heading h2 {
+    font-size: clamp(1.2rem, 6vw, 1.55rem) !important;
+  }
+
+  .admin-qb-runtime-controls,
+  .admin-cleanup-toolbar,
+  .admin-cleanup-summary {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .admin-qb-transfer-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .admin-qb-transfer-card strong {
+    overflow-wrap: anywhere;
+    font-size: clamp(0.95rem, 4.5vw, 1.2rem) !important;
+  }
+
+  .admin-cleanup-toolbar {
+    gap: 0.65rem;
+    padding: 0.7rem !important;
+  }
+
+  .admin-cleanup-toolbar label,
+  .admin-cleanup-toolbar input,
+  .admin-cleanup-toolbar select,
+  .admin-cleanup-purge-filtered.ui-button {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .admin-cleanup-purge-filtered.ui-button {
+    height: auto;
+    min-height: 2.75rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .admin-cleanup-summary {
+    gap: 0.55rem;
+  }
+
+  .admin-cleanup-summary > div {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.7rem 0.8rem;
+  }
+
+  .admin-runtime-table-wrap {
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
+
+  .admin-runtime-table {
+    display: grid;
+    width: 100%;
+    min-width: 0 !important;
+    gap: 0.6rem;
+    border: 0;
+    background: transparent;
+  }
+
+  .admin-runtime-table thead {
+    display: block;
+    min-width: 0;
+  }
+
+  .admin-runtime-table thead tr {
+    display: flex;
+    width: 100%;
+    gap: 0.3rem;
+    overflow-x: auto;
+    padding: 0 0 0.35rem;
+    border: 0;
+    scroll-snap-type: inline proximity;
+    scrollbar-width: thin;
+  }
+
+  .admin-runtime-table thead th {
+    display: none;
+    width: auto !important;
+    flex: 0 0 auto;
+    padding: 0 !important;
+    border: 0;
+    background: transparent;
+    scroll-snap-align: start;
+  }
+
+  .admin-runtime-table thead th:has(.admin-table-sort),
+  .admin-runtime-table thead th:has(.admin-cleanup-sort) {
+    display: block;
+  }
+
+  .admin-runtime-table thead .admin-table-sort,
+  .admin-runtime-table thead .admin-cleanup-sort {
+    min-height: 2.5rem !important;
+    padding: 0.45rem 0.65rem !important;
+    border: 1px solid var(--color-border) !important;
+    border-radius: 999px !important;
+    background: var(--color-background-secondary) !important;
+    white-space: nowrap;
+  }
+
+  .admin-runtime-table tbody {
+    display: grid;
+    gap: 0.65rem;
+  }
+
+  .admin-runtime-table tbody tr {
+    display: grid;
+    min-width: 0;
+    gap: 0;
+    padding: 0.45rem 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-elevated);
+    box-shadow: 0 10px 26px color-mix(in srgb, var(--color-shadow) 52%, transparent);
+  }
+
+  .admin-runtime-table tbody td {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: minmax(6.25rem, 0.42fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.55rem 0;
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+    text-align: left !important;
+  }
+
+  .admin-runtime-table tbody td:last-child {
+    border-bottom: 0;
+  }
+
+  .admin-runtime-table tbody td::before {
+    content: attr(data-label);
+    min-width: 0;
+    color: var(--color-text-muted);
+    font-size: 0.69rem;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+    line-height: 1.25;
+    text-transform: uppercase;
+  }
+
+  .admin-runtime-table .admin-runtime-name,
+  .admin-runtime-table code,
+  .admin-runtime-table .ui-badge,
+  .admin-runtime-progress {
+    min-width: 0;
+    max-width: 100%;
+    justify-self: stretch;
+  }
+
+  .admin-runtime-table code,
+  .admin-runtime-name > span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .admin-runtime-progress {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .admin-qb-actions,
+  .admin-cleanup-actions {
+    display: grid !important;
+    grid-template-columns: minmax(6.25rem, 0.42fr) repeat(2, 2.75rem) !important;
+    justify-content: stretch !important;
+    gap: 0.55rem !important;
+  }
+
+  .admin-cleanup-actions {
+    grid-template-columns: minmax(6.25rem, 0.42fr) 2.75rem !important;
+  }
+
+  .admin-qb-actions::before,
+  .admin-cleanup-actions::before {
+    align-self: center;
+  }
+
+  .admin-qb-actions .ui-icon-button,
+  .admin-cleanup-actions .ui-icon-button {
+    width: 2.75rem !important;
+    min-width: 2.75rem !important;
+    height: 2.75rem !important;
+    min-height: 2.75rem !important;
+  }
+
+  .options-form,
+  .options-sections,
+  .options-fields,
+  .option-field,
+  .option-control,
+  .option-number-control,
+  .c411-account-list,
+  .c411-account-fields,
+  .c411-account-slot {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .option-field {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0.5rem !important;
+  }
+
+  .option-control input,
+  .option-control select,
+  .option-number-control input {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .option-number-control {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(4.5rem, auto);
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .option-number-control > span {
+    min-width: 0;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  .options-actions {
+    gap: 0.65rem;
+  }
+
+  .options-actions > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard-content {
+    padding-inline: 0.55rem !important;
+  }
+
+  .activity-metrics {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0.45rem !important;
+  }
+
+  .activity-metrics > div {
+    display: grid !important;
+    min-height: 2.75rem;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.55rem 0.65rem !important;
+  }
+
+  .activity-metrics > div > svg {
+    grid-row: 1;
+  }
+
+  .activity-metrics dt,
+  .activity-metrics dd {
+    grid-row: 1 !important;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .activity-metrics dt {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .activity-metrics dd {
+    grid-column: 3 !important;
+    justify-self: end !important;
+  }
+
+  .network-throughput-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .user-downloads .torrent-row-grid {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    grid-template-areas:
+      "name name"
+      "status queue"
+      "progress size"
+      "actions actions" !important;
+    column-gap: 0.65rem;
+    row-gap: 0.6rem;
+    padding: 0.7rem !important;
+  }
+
+  .torrent-summary-progress {
+    grid-template-columns: minmax(4.5rem, 1fr) auto !important;
+  }
+
+  .torrent-summary-size {
+    align-self: center;
+    justify-self: end;
+  }
+
+  .torrent-card-actions {
+    width: 100%;
+    justify-content: flex-end;
+    padding-top: 0.1rem !important;
+  }
+
+  .torrent-card-actions .ui-button {
+    width: 2.75rem !important;
+    min-width: 2.75rem !important;
+    height: 2.75rem !important;
+    min-height: 2.75rem !important;
+    flex-basis: 2.75rem !important;
+  }
+
+  .torrent-meta-card {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0.45rem;
+    padding: 0.25rem 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  .torrent-meta-item {
+    display: grid;
+    grid-template-columns: minmax(5rem, 0.4fr) minmax(0, 1fr);
+    align-items: baseline;
+    gap: 0.55rem;
+  }
+
+  .torrent-meta-separator {
+    width: 100%;
+    height: 1px;
+  }
+
+  .admin-page[data-admin-view] .admin-runtime,
+  .admin-section,
+  .settings-panel,
+  .settings-shell-content > .settings-panel {
+    padding-inline: 0.7rem !important;
+  }
+
+  .admin-runtime-table tbody td {
+    grid-template-columns: minmax(5.3rem, 0.4fr) minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+
+  .admin-qb-actions,
+  .admin-cleanup-actions {
+    grid-template-columns: minmax(5.3rem, 0.4fr) repeat(2, 2.75rem) !important;
+  }
+
+  .admin-cleanup-actions {
+    grid-template-columns: minmax(5.3rem, 0.4fr) 2.75rem !important;
+  }
+
+  .admin-cleanup-pagination {
+    gap: 0.55rem;
+  }
+
+  .admin-cleanup-pagination .ui-button {
+    min-width: 0;
+    padding-inline: 0.65rem;
+  }
+
+  .option-number-control {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .option-number-control > span {
+    padding-inline: 0.1rem;
+    font-size: 0.76rem;
+  }
+
+  .c411-account-list {
+    padding: 0.55rem !important;
+  }
+
+  .c411-account-slot {
+    padding: 0.55rem !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-shell-navigation {
+    scroll-behavior: auto;
+  }
+}

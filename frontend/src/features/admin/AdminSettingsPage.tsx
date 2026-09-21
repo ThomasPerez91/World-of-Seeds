@@ -1,5 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Eye, EyeOff } from "lucide-react";
 
 import {
   api,
@@ -105,6 +105,9 @@ export function AdminSettingsPage({
   const [notice, setNotice] = useState<PageNotice | null>(null);
   const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const [revealedC411Passkeys, setRevealedC411Passkeys] = useState<Set<string>>(
+    () => new Set(),
+  );
   const mounted = useRef(true);
 
   const load = useCallback(async () => {
@@ -316,6 +319,8 @@ export function AdminSettingsPage({
     const hintId = `${inputId}-hint`;
     const errorId = `${inputId}-error`;
     const c411Kind = /^WOS_C411_ACCOUNT_\d{2}_(USERNAME|NUMBER|PASSKEY)$/.exec(field.key)?.[1]?.toLowerCase();
+    const c411Slot = /^WOS_C411_ACCOUNT_(\d{2})_PASSKEY$/.exec(field.key)?.[1];
+    const c411PasskeyRevealed = revealedC411Passkeys.has(field.key);
     const describedBy = `${hintId}${error === undefined ? "" : ` ${errorId}`}`;
     return (
       <div
@@ -371,6 +376,47 @@ export function AdminSettingsPage({
               {field.unit !== null && (
                 <span>{unitLabels[field.unit] === undefined ? field.unit : t(unitLabels[field.unit])}</span>
               )}
+            </div>
+          ) : c411Kind === "passkey" ? (
+            <div className="c411-passkey-control">
+              <input
+                id={inputId}
+                className="c411-passkey-input"
+                type="text"
+                name={`c411-tracker-token-${c411Slot ?? "unknown"}`}
+                value={String(draft[field.key])}
+                maxLength={256}
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                data-revealed={c411PasskeyRevealed ? "true" : "false"}
+                data-1p-ignore="true"
+                data-lpignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                disabled={!field.editable || saving}
+                aria-describedby={describedBy}
+                aria-invalid={error !== undefined}
+                onChange={(event) => updateDraft(field.key, event.target.value)}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                className="c411-passkey-toggle"
+                aria-label={t(c411PasskeyRevealed ? "admin.hidePasskey" : "admin.showPasskey")}
+                aria-pressed={c411PasskeyRevealed}
+                disabled={!field.editable || saving}
+                onClick={() => setRevealedC411Passkeys((current) => {
+                  const next = new Set(current);
+                  if (next.has(field.key)) next.delete(field.key);
+                  else next.add(field.key);
+                  return next;
+                })}
+              >
+                {c411PasskeyRevealed
+                  ? <EyeOff aria-hidden="true" />
+                  : <Eye aria-hidden="true" />}
+              </Button>
             </div>
           ) : (
             <input
@@ -474,7 +520,10 @@ export function AdminSettingsPage({
             <form className="options-form" noValidate onSubmit={(event) => void save(event)}>
               <div className="options-sections">
                 {options.sections.map((section, sectionIndex) => (
-                  <details key={section.id} open={sectionIndex === 0}>
+                  <details
+                    key={section.id}
+                    open={sectionIndex === 0 && section.id !== "c411_accounts"}
+                  >
                     <summary>
                       <span className="options-summary-content">
                         <ChevronRight aria-hidden="true" />
