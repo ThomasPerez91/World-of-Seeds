@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -81,6 +82,30 @@ async def test_session_cookie_csrf_and_logout(
     logged_out = await client.post("/api/v1/auth/logout", headers=valid_csrf)
     assert logged_out.status_code == 204
     assert (await client.get("/api/v1/auth/me")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_successful_login_timestamp_never_moves_backwards(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await create_user(
+        db_session,
+        username="monotonic-login",
+        password="correct-horse-battery",
+    )
+    newer_login = datetime.now(UTC) + timedelta(minutes=5)
+    user.last_login_at = newer_login
+    await db_session.commit()
+
+    await login(client, user.username, "correct-horse-battery")
+
+    await db_session.refresh(user)
+    assert user.last_login_at is not None
+    persisted_login = user.last_login_at
+    if persisted_login.tzinfo is None:
+        persisted_login = persisted_login.replace(tzinfo=UTC)
+    assert persisted_login == newer_login
 
 
 @pytest.mark.asyncio
