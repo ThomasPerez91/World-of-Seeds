@@ -67,15 +67,16 @@ export function AdminUsersPage({
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [lastLoginFilter, setLastLoginFilter] = useState<LastLoginFilter>("all");
+  const [clockNow, setClockNow] = useState(() => Date.now());
 
   const filteredUsers = useMemo(
-    () => users.filter((account) => matchesLastLoginFilter(account, lastLoginFilter)),
-    [lastLoginFilter, users],
+    () => users.filter((account) => matchesLastLoginFilter(account, lastLoginFilter, clockNow)),
+    [clockNow, lastLoginFilter, users],
   );
 
   function describeLastLogin(value: string | null): string {
     if (value === null) return t("admin.lastLoginNever");
-    const age = getLastLoginAge(value);
+    const age = getLastLoginAge(value, clockNow);
     const duration = age.days > 0
       ? [
           t(age.days === 1 ? "admin.durationDay" : "admin.durationDays", { count: age.days }),
@@ -127,6 +128,18 @@ export function AdminUsersPage({
       active = false;
     };
   }, [onSessionExpired, t]);
+
+  useEffect(() => {
+    const refreshClock = () => setClockNow(Date.now());
+    const intervalId = window.setInterval(refreshClock, 60_000);
+    window.addEventListener("focus", refreshClock);
+    document.addEventListener("visibilitychange", refreshClock);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshClock);
+      document.removeEventListener("visibilitychange", refreshClock);
+    };
+  }, []);
 
   async function generateUser() {
     setGenerating(true);
