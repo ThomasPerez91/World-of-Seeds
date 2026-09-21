@@ -96,18 +96,24 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ComposePolicyError("api must retain the image single-process entry point")
 
     dependencies = _mapping(api.get("depends_on"), "services.api.depends_on")
+    worker_dependencies = _mapping(
+        worker.get("depends_on"), "services.worker.depends_on"
+    )
     for dependency in ("postgres", "redis"):
         policy = _mapping(dependencies.get(dependency), f"api dependency {dependency}")
         if policy.get("condition") != "service_healthy":
             raise ComposePolicyError(f"api must wait for healthy {dependency}")
         worker_policy = _mapping(
-            _mapping(worker.get("depends_on"), "services.worker.depends_on").get(
-                dependency
-            ),
+            worker_dependencies.get(dependency),
             f"worker dependency {dependency}",
         )
         if worker_policy.get("condition") != "service_healthy":
             raise ComposePolicyError(f"worker must wait for healthy {dependency}")
+    api_worker_policy = _mapping(
+        worker_dependencies.get("api"), "worker dependency api"
+    )
+    if api_worker_policy.get("condition") != "service_healthy":
+        raise ComposePolicyError("worker must wait for the API migrations to complete")
 
     ports = api.get("ports")
     if not isinstance(ports, list) or len(ports) != 1:

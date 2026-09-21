@@ -7,6 +7,7 @@ const MAX_MANIFEST_PAGE_SIZE = 500;
 const MAX_BUFFERED_MANIFEST_PAGES = 2;
 const MAX_VISIBLE_QUEUE_ITEMS = 8;
 const MAX_DOWNLOAD_BUSY_RETRIES = 6;
+const SIZE_PRIORITY_BURST = 3;
 export const DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY = 2;
 
 function waitForDownloadSlot(attempt: number, signal: AbortSignal): Promise<void> {
@@ -45,8 +46,14 @@ export interface LocalDirectoryHandle {
 }
 
 interface DirectoryPickerWindow extends Window {
-  showDirectoryPicker?: (options: { mode: "readwrite" }) => Promise<LocalDirectoryHandle>;
+  showDirectoryPicker?: (options: {
+    id?: string;
+    mode: "readwrite";
+    startIn?: "downloads";
+  }) => Promise<LocalDirectoryHandle>;
 }
+
+export type RecursiveDirectoryDownloadCapability = "available" | "insecure" | "unsupported";
 
 export type RecursiveTransferStatus =
   | "running"
@@ -115,15 +122,24 @@ class TransferFailure extends Error {
   }
 }
 
+export function recursiveDirectoryDownloadCapability(
+  target: Window = window,
+): RecursiveDirectoryDownloadCapability {
+  if (target.isSecureContext === false) return "insecure";
+  if (typeof (target as DirectoryPickerWindow).showDirectoryPicker !== "function") {
+    return "unsupported";
+  }
+  return "available";
+}
+
 export function supportsRecursiveDirectoryDownload(target: Window = window): boolean {
-  return target.isSecureContext !== false
-    && typeof (target as DirectoryPickerWindow).showDirectoryPicker === "function";
+  return recursiveDirectoryDownloadCapability(target) === "available";
 }
 
 export function pickDownloadDirectory(target: Window = window): Promise<LocalDirectoryHandle> {
   const picker = (target as DirectoryPickerWindow).showDirectoryPicker;
   if (picker === undefined) throw new Error("directory_picker_unavailable");
-  return picker.call(target, { mode: "readwrite" });
+  return picker.call(target, { id: "world-of-seeds-downloads", mode: "readwrite", startIn: "downloads" });
 }
 
 export class RecursiveDownloadController {
@@ -150,6 +166,7 @@ export class RecursiveDownloadController {
   private pageLoading: Promise<void> | null = null;
   private pageError: unknown = null;
   private running: Promise<void> | null = null;
+  private sizePrioritySelections = 0;
 
   constructor(options: RecursiveDownloadOptions) {
     const concurrency = options.concurrency ?? DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY;
@@ -251,7 +268,7 @@ export class RecursiveDownloadController {
   private async takeNextFile(): Promise<TorrentDownloadFileV2 | null> {
     while (this.status === "running") {
       if (this.pageError !== null) throw this.pageError;
-      const file = this.pendingFiles.shift();
+      const file = this.takePrioritizedPendingFile();
       if (file !== undefined) {
         this.startManifestPrefetch();
         return file;
@@ -261,6 +278,27 @@ export class RecursiveDownloadController {
       if (loading !== null) await loading;
     }
     return null;
+  }
+
+  private takePrioritizedPendingFile(): TorrentDownloadFileV2 | undefined {
+    if (this.pendingFiles.length === 0) return undefined;
+    if (this.sizePrioritySelections >= SIZE_PRIORITY_BURST) {
+      this.sizePrioritySelections = 0;
+      return this.pendingFiles.shift();
+    }
+    let selectedIndex = 0;
+    for (let index = 1; index < this.pendingFiles.length; index += 1) {
+      const candidate = this.pendingFiles[index];
+      const selected = this.pendingFiles[selectedIndex];
+      if (
+        candidate.size < selected.size
+        || (candidate.size === selected.size && candidate.file_index < selected.file_index)
+      ) {
+        selectedIndex = index;
+      }
+    }
+    this.sizePrioritySelections += 1;
+    return this.pendingFiles.splice(selectedIndex, 1)[0];
   }
 
   private startManifestPrefetch(force = false): Promise<void> | null {
@@ -528,7 +566,7 @@ export class RecursiveDownloadController {
       position: null,
     }));
     const remaining = Math.max(0, MAX_VISIBLE_QUEUE_ITEMS - active.length - completed.length);
-    const waiting = this.pendingFiles.slice(0, remaining).map((file, index) => {
+    const waiting = this.prioritizedPendingPreview(remaining).map((file, index) => {
       const status: LocalTransferQueueItemStatus = this.status === "cancelled"
         ? "cancelled"
         : this.status === "paused"
@@ -544,5 +582,33 @@ export class RecursiveDownloadController {
       };
     });
     return [...active, ...waiting, ...completed].slice(0, MAX_VISIBLE_QUEUE_ITEMS);
+  }
+
+  private prioritizedPendingPreview(limit: number): TorrentDownloadFileV2[] {
+    const pending = [...this.pendingFiles];
+    const result: TorrentDownloadFileV2[] = [];
+    let burst = this.sizePrioritySelections;
+    while (pending.length > 0 && result.length < limit) {
+      if (burst >= SIZE_PRIORITY_BURST) {
+        result.push(pending.shift() as TorrentDownloadFileV2);
+        burst = 0;
+        continue;
+      }
+      let selectedIndex = 0;
+      for (let index = 1; index < pending.length; index += 1) {
+        if (
+          pending[index].size < pending[selectedIndex].size
+          || (
+            pending[index].size === pending[selectedIndex].size
+            && pending[index].file_index < pending[selectedIndex].file_index
+          )
+        ) {
+          selectedIndex = index;
+        }
+      }
+      result.push(pending.splice(selectedIndex, 1)[0]);
+      burst += 1;
+    }
+    return result;
   }
 }
