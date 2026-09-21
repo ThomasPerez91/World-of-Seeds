@@ -61,6 +61,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 35s
     depends_on:
+      api:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
