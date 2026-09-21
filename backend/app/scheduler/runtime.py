@@ -160,8 +160,17 @@ class SchedulerRuntime:
                 now=now,
             )
             policy = replace(base_policy, max_active_global=dynamic.active_limit)
+            selection_candidates = (
+                tuple(
+                    candidate
+                    for candidate in candidates
+                    if candidate.torrent_id in dynamic.active_torrent_ids
+                )
+                if dynamic.preserve_active_set
+                else candidates
+            )
             selection = select_torrents(
-                candidates,
+                selection_candidates,
                 policy=policy,
                 now=now,
                 active_global=len(forced_torrents) + len(grace_torrents),
