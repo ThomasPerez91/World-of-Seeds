@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -30,6 +31,11 @@ class AuthResponse(BaseModel):
     user: UserResponse
 
 
+class AdminUserResponse(UserResponse):
+    created_at: datetime
+    last_login_at: datetime | None
+
+
 class ChangeCredentialsRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=256)
     username: Username
@@ -58,7 +64,7 @@ class UserStatusRequest(BaseModel):
 
 
 class GeneratedCredentialsResponse(BaseModel):
-    user: UserResponse
+    user: AdminUserResponse
     initial_password: str
     auth_seed: str = Field(min_length=25, max_length=25)
 

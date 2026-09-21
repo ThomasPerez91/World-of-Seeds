@@ -154,6 +154,29 @@
   font-weight: 700;
 }
 
+.user-login-filter {
+  display: grid;
+  width: min(100%, 25rem);
+  gap: 0.4rem;
+  margin-top: 1rem;
+}
+
+.user-login-filter label {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.user-login-filter select {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.65rem 2.25rem 0.65rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-background-secondary);
+}
+
 .external-api-panel {
   display: grid;
   gap: 1rem;
@@ -206,6 +229,52 @@
 .user-row > div:nth-child(2) > strong {
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.user-activity-dates {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: 0.5rem 1rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0.65rem 0;
+  border-block: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+}
+
+.user-activity-dates > div,
+.user-activity-dates dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.user-activity-dates dt {
+  margin-bottom: 0.2rem;
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.user-activity-dates time,
+.user-activity-dates dd > span,
+.user-activity-dates small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.user-activity-dates time,
+.user-activity-dates dd > span {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.user-activity-dates small {
+  margin-top: 0.15rem;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
 }
 
 .user-row-actions {
@@ -638,8 +707,14 @@
   }
 
   .user-row.ui-card {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(9rem, 0.8fr) minmax(16rem, 1.4fr) auto;
     align-items: center;
+  }
+
+  .user-activity-dates {
+    grid-column: auto;
+    padding: 0;
+    border-block: 0;
   }
 
   .user-row-actions {
