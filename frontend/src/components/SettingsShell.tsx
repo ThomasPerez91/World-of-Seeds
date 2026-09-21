@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 
 export interface SettingsNavigationItem<View extends string> {
   label: string;
@@ -18,9 +18,18 @@ export function SettingsShell<View extends string>({
   navigationLabel: string;
   onNavigate: (view: View) => void;
 }) {
+  const navigationRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!window.matchMedia("(max-width: 959px)").matches) return;
+    navigationRef.current
+      ?.querySelector<HTMLElement>('[aria-current="page"]')
+      ?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }, [activeView]);
+
   return (
     <div className="settings-shell wos-glass-panel">
-      <nav className="settings-shell-navigation" aria-label={navigationLabel}>
+      <nav ref={navigationRef} className="settings-shell-navigation" aria-label={navigationLabel}>
         {navigation.map((item) => (
           <button
             type="button"
