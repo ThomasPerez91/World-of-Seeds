@@ -237,7 +237,8 @@ Etat du dernier déploiement :
 - Refuser chemins absolus, `..`, évasions de racine et traversées de symlinks lors de toute résolution filesystem.
 - Les ouvertures sensibles utilisent des résolutions sûres/descripteurs et `O_NOFOLLOW` lorsque prévu par les primitives de téléchargement.
 - Ne jamais résoudre un problème de permissions avec `chmod 777`.
-- Les téléchargements READY privilégient la File System Access API pour reconstruire localement les dossiers ; le ZIP reste un fallback de compatibilité pour les navigateurs sans `showDirectoryPicker()`.
+- Les téléchargements READY privilégient la File System Access API pour reconstruire localement les dossiers ; le ZIP reste un fallback de compatibilité et ne doit pas être présenté en parallèle lorsque `showDirectoryPicker()` est disponible.
+- La file locale alterne les travaux concurrents. Dans un dossier, elle favorise les petits fichiers par salves bornées puis force le plus ancien afin d'améliorer le temps de complétion sans affamer les gros fichiers.
 - Les téléchargements READY doivent conserver les contrôles Range, leases, limites de concurrence et validation du manifeste.
 - Le plafond de flux simultanés par utilisateur s'applique aux comptes standards. Les administrateurs en sont exemptés, mais conservent une lease par flux et restent soumis aux rate limits et protections globales.
 - Les noms longs et chemins imbriqués ne doivent pas provoquer de débordement horizontal mobile.

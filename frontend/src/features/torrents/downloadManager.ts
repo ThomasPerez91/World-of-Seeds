@@ -97,6 +97,7 @@ class DownloadPermitPool {
   private active = 0;
   private readonly activeByJob = new Map<string, number>();
   private readonly waiters: PermitWaiter[] = [];
+  private lastGrantedJobId: string | null = null;
 
   constructor(limit: number | null, private readonly onChange: () => void) {
     this.limit = limit;
@@ -145,7 +146,10 @@ class DownloadPermitPool {
 
   private drain(): void {
     while ((this.limit === null || this.active < this.limit) && this.waiters.length > 0) {
-      const waiter = this.waiters.shift();
+      const nextJobIndex = this.waiters.findIndex(
+        (candidate) => candidate.jobId !== this.lastGrantedJobId,
+      );
+      const waiter = this.waiters.splice(nextJobIndex >= 0 ? nextJobIndex : 0, 1)[0];
       if (waiter === undefined) break;
       waiter.signal.removeEventListener("abort", waiter.onAbort);
       if (waiter.signal.aborted) {
@@ -154,6 +158,7 @@ class DownloadPermitPool {
       }
       this.active += 1;
       this.activeByJob.set(waiter.jobId, this.activeFor(waiter.jobId) + 1);
+      this.lastGrantedJobId = waiter.jobId;
       let released = false;
       waiter.resolve(() => {
         if (released) return;

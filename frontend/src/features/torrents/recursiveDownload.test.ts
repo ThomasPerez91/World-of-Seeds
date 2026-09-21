@@ -4,6 +4,8 @@ import type { TorrentDownloadSnapshotV2 } from "../../api/client";
 import {
   type LocalDirectoryHandle,
   type LocalFileHandle,
+  pickDownloadDirectory,
+  recursiveDirectoryDownloadCapability,
   RecursiveDownloadController,
   type RecursiveTransferProgress,
   type WritableFileHandle,
@@ -80,6 +82,60 @@ function fileResponse(content: Uint8Array, status = 200, rangeStart = 2, total =
 }
 
 describe("RecursiveDownloadController", () => {
+  it("diagnostique la File System Access API et mémorise la destination WoS", async () => {
+    const directory = new MemoryDirectory();
+    const picker = vi.fn(async () => directory);
+    const available = { isSecureContext: true, showDirectoryPicker: picker } as unknown as Window;
+    const insecure = { isSecureContext: false, showDirectoryPicker: picker } as unknown as Window;
+    const unsupported = { isSecureContext: true } as Window;
+
+    expect(recursiveDirectoryDownloadCapability(available)).toBe("available");
+    expect(recursiveDirectoryDownloadCapability(insecure)).toBe("insecure");
+    expect(recursiveDirectoryDownloadCapability(unsupported)).toBe("unsupported");
+    await expect(pickDownloadDirectory(available)).resolves.toBe(directory);
+    expect(picker).toHaveBeenCalledWith({
+      id: "world-of-seeds-downloads",
+      mode: "readwrite",
+      startIn: "downloads",
+    });
+  });
+
+  it("termine les petits fichiers en priorité sans affamer le plus ancien", async () => {
+    const directory = new MemoryDirectory();
+    const files = [
+      { id: "large", file_index: 0, relative_path: "large.bin", size: 100 },
+      { id: "small-1", file_index: 1, relative_path: "small-1.bin", size: 1 },
+      { id: "small-2", file_index: 2, relative_path: "small-2.bin", size: 2 },
+      { id: "small-3", file_index: 3, relative_path: "small-3.bin", size: 3 },
+      { id: "small-4", file_index: 4, relative_path: "small-4.bin", size: 4 },
+    ];
+    const order: string[] = [];
+    const controller = new RecursiveDownloadController({
+      torrentRequestId: "request",
+      firstPage: {
+        ...snapshot(),
+        file_count: files.length,
+        total_size: files.reduce((total, file) => total + file.size, 0),
+        items: files,
+      },
+      directory,
+      loadManifestPage: vi.fn(),
+      concurrency: 1,
+      fetcher: vi.fn(async (input: RequestInfo | URL) => {
+        const id = files.find((file) => String(input).includes(`/files/${file.id}/`))?.id;
+        if (id === undefined) throw new Error("unexpected download URL");
+        order.push(id);
+        const size = files.find((file) => file.id === id)?.size ?? 0;
+        return fileResponse(new Uint8Array(size));
+      }),
+      onProgress: vi.fn(),
+    });
+
+    await controller.start();
+
+    expect(order).toEqual(["small-1", "small-2", "small-3", "large", "small-4"]);
+  });
+
   it("recrée les sous-dossiers avec une concurrence bornée", async () => {
     const directory = new MemoryDirectory();
     let active = 0;

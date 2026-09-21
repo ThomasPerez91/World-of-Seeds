@@ -954,7 +954,7 @@ describe("UserDownloadsPage", () => {
     const content = await screen.findByRole("region", { name: "Contenu de Film.mkv" });
     await user.click(await within(content).findByRole("button", { name: "Suivant" }));
     expect(await within(content).findByText("cached-50.bin")).toBeTruthy();
-    await user.click(within(content).getByRole("button", { name: "Tout télécharger" }));
+    await user.click(within(content).getByRole("button", { name: "Télécharger dans un dossier" }));
 
     expect(await screen.findByText("« Film.mkv » a été téléchargé.")).toBeTruthy();
     expect(picker).toHaveBeenCalledOnce();
@@ -1019,13 +1019,53 @@ describe("UserDownloadsPage", () => {
     const view = renderPage();
 
     await user.click(await screen.findByRole("button", { name: "Afficher les détails de Film.mkv" }));
-    expect(screen.getByRole("link", { name: "Télécharger le ZIP" })).toBeTruthy();
-    await user.click(await screen.findByRole("button", { name: "Tout télécharger" }));
+    expect(screen.queryByRole("link", { name: "Télécharger le ZIP" })).toBeNull();
+    await user.click(await screen.findByRole("button", { name: "Télécharger dans un dossier" }));
 
     expect(await screen.findByText("« Film.mkv » a été téléchargé.")).toBeTruthy();
     expect(screen.getByText("2/2 fichiers · 3 o sur 3 o")).toBeTruthy();
     expect(writes).toEqual([1, 2, 3]);
     expect(view.container.querySelector("[style]")).toBeNull();
+  });
+
+  it("explique un refus du sélecteur de dossier au lieu de basculer silencieusement en ZIP", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("showDirectoryPicker", vi.fn(async () => {
+      throw new DOMException("denied", "NotAllowedError");
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("download-manifest")) {
+        return response({
+          snapshot_id: "d".repeat(64),
+          manifest_version: 1,
+          file_count: 2,
+          total_size: 2,
+          archive_available: true,
+          retention_expires_at: null,
+          offset: 0,
+          limit: 500,
+          items: [
+            { id: "one", file_index: 0, relative_path: "one.bin", size: 1 },
+            { id: "two", file_index: 1, relative_path: "two.bin", size: 1 },
+          ],
+        });
+      }
+      return response({
+        items: [torrent({ state: "ready", progress: 1 })],
+        offset: 0,
+        limit: 10,
+        total: 1,
+      });
+    }));
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Afficher les détails de Film.mkv" }));
+    await user.click(await screen.findByRole("button", { name: "Télécharger dans un dossier" }));
+
+    expect(await screen.findByText(
+      "Le navigateur ou le système a refusé l’accès au dossier. Autorise la sélection du dossier puis réessaie.",
+    )).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Télécharger le ZIP" })).toBeNull();
   });
 
   it.skip("rend la file locale active et les positions 1/2/3 sur mobile", async () => {
@@ -1092,7 +1132,7 @@ describe("UserDownloadsPage", () => {
 
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Afficher les détails de Film.mkv" }));
-    await user.click(await screen.findByRole("button", { name: "Tout télécharger" }));
+    await user.click(await screen.findByRole("button", { name: "Télécharger dans un dossier" }));
     await started;
     expect(await screen.findByText("En attente — 1er")).toBeTruthy();
     expect(screen.getByText("En attente — 2e")).toBeTruthy();
@@ -1154,7 +1194,7 @@ describe("UserDownloadsPage", () => {
 
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Show details for Film.mkv" }));
-    await user.click(await screen.findByRole("button", { name: "Download all" }));
+    await user.click(await screen.findByRole("button", { name: "Download to a folder" }));
 
     const notice = await screen.findByText("The transfer queue belongs to this tab. Closing it or refreshing the page may interrupt the queue; downloads can be started again.");
     expect(notice.closest("[aria-live]")).toBeNull();
@@ -1224,7 +1264,7 @@ describe("UserDownloadsPage", () => {
 
     const article = await screen.findByRole("article", { name: "Film.mkv" });
     await user.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
-    await user.click(await within(article).findByRole("button", { name: "Tout télécharger" }));
+    await user.click(await within(article).findByRole("button", { name: "Télécharger dans un dossier" }));
     expect(within(article).queryByRole("link", { name: "Télécharger le ZIP" })).toBeNull();
     const otherArticle = screen.getByRole("article", { name: "Autre READY" });
     await user.click(within(otherArticle).getByRole("button", { name: "Afficher les détails de Autre READY" }));
@@ -1277,7 +1317,7 @@ describe("UserDownloadsPage", () => {
 
     const article = await screen.findByRole("article", { name: "Film.mkv" });
     await user.click(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }));
-    await user.click(await within(article).findByRole("button", { name: "Tout télécharger" }));
+    await user.click(await within(article).findByRole("button", { name: "Télécharger dans un dossier" }));
     const alert = await within(article).findByRole("alert");
     expect(alert.textContent).toContain("Le contenu a changé. Relance le téléchargement.");
     expect(within(article).getByRole("button", { name: "Reprendre" })).toBeTruthy();
