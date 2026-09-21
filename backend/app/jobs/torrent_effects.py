@@ -602,6 +602,13 @@ class TorrentEffectHandlers:
         realtime_events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
         queue_changed = False
         async with self._session_factory() as session, session.begin():
+            # SchedulerRuntime takes the singleton scheduler lock before any torrent rows.
+            # READY transitions must follow the same order to avoid a PostgreSQL deadlock.
+            scheduler_state = (
+                await session.get(SchedulerState, 1, with_for_update=True)
+                if state is ManagedTorrentState.READY
+                else None
+            )
             torrent = await session.get(
                 ManagedTorrent,
                 managed_torrent_id,
@@ -638,14 +645,12 @@ class TorrentEffectHandlers:
                 torrent.desired_active = False
                 torrent.desired_priority = None
                 torrent.desired_download_limit = 0
-                if previous_state is not ManagedTorrentState.READY:
-                    scheduler_state = await session.get(SchedulerState, 1, with_for_update=True)
-                    if scheduler_state is not None:
-                        await record_dynamic_completion(
-                            session,
-                            scheduler_state,
-                            now=now,
-                        )
+                if previous_state is not ManagedTorrentState.READY and scheduler_state is not None:
+                    await record_dynamic_completion(
+                        session,
+                        scheduler_state,
+                        now=now,
+                    )
             torrent.updated_at = now
             if state is ManagedTorrentState.READY:
                 auto_unsubscribe_hours = await _integer_database_option(
