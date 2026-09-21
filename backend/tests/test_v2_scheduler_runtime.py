@@ -1108,3 +1108,60 @@ async def test_dynamic_limit_persists_and_two_instances_cannot_double_increase(
         assert state.dynamic_current_active == 3
         assert state.dynamic_last_decision == "dynamic_below_target_scaled_up"
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dynamic_completion_cooldown_preserves_remaining_active_set(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    first = await _torrent(
+        sessions,
+        username="cooldown-active",
+        info_hash="1" * 40,
+        size=100,
+        created_at=NOW + timedelta(seconds=1),
+        state=ManagedTorrentState.DOWNLOADING,
+    )
+    waiting = await _torrent(
+        sessions,
+        username="older-waiting",
+        info_hash="2" * 40,
+        size=10,
+        created_at=NOW,
+    )
+    async with sessions() as session, session.begin():
+        active = await session.get(ManagedTorrent, first.id)
+        assert active is not None
+        active.desired_active = True
+        active.desired_priority = 0
+        active.last_downloaded_bytes = 1024
+        session.add(
+            SchedulerState(
+                id=1,
+                dynamic_current_active=1,
+                dynamic_sampled_at=NOW,
+                dynamic_sample_baseline={first.info_hash: 0},
+                dynamic_cooldown_until=NOW + timedelta(seconds=60),
+                dynamic_observed_bytes_per_second=0,
+                dynamic_active_count=1,
+                dynamic_waiting_count=1,
+                dynamic_last_decision="dynamic_completion_cooldown",
+            )
+        )
+
+    result = await SchedulerRuntime(
+        sessions,
+        FakeGateway(),
+        scheduler_id="dynamic-completion-cooldown",
+        clock=lambda: NOW + timedelta(seconds=30),
+    ).run_once()
+
+    assert result.selected_torrent_ids == (first.id,)
+    assert waiting.id not in result.selected_torrent_ids
+    async with sessions() as session:
+        active = await session.get(ManagedTorrent, first.id)
+        queued = await session.get(ManagedTorrent, waiting.id)
+    assert active is not None and active.desired_active is True
+    assert queued is not None and queued.desired_active is False
+    await engine.dispose()
