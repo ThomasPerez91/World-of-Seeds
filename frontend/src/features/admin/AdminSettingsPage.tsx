@@ -439,6 +439,15 @@ export function AdminSettingsPage({
                 <dl className="admin-status-details">
                   <div><dt>{t("admin.desiredGeneration")}</dt><dd>{formatNumber(options.scheduler.desired_generation)}</dd></div>
                   <div><dt>{t("admin.appliedGeneration")}</dt><dd>{formatNumber(options.scheduler.applied_generation)}</dd></div>
+                  <div><dt>{t("admin.dynamicMode")}</dt><dd>{options.scheduler.dynamic_enabled ? t("admin.enabled") : t("admin.disabled")}</dd></div>
+                  <div><dt>{t("admin.staticLimit")}</dt><dd>{formatNumber(options.scheduler.static_active_limit)}</dd></div>
+                  <div><dt>{t("admin.dynamicLimit")}</dt><dd>{formatNumber(options.scheduler.dynamic_current_active)}</dd></div>
+                  <div><dt>{t("admin.activeDownloads")}</dt><dd>{formatNumber(options.scheduler.active_downloads)}</dd></div>
+                  <div><dt>{t("admin.waitingCandidates")}</dt><dd>{formatNumber(options.scheduler.waiting_candidates)}</dd></div>
+                  <div><dt>{t("admin.observedRate")}</dt><dd>{formatBytes(options.scheduler.observed_bytes_per_second)}/s</dd></div>
+                  <div><dt>{t("admin.targetRange")}</dt><dd>{formatBytes(options.scheduler.minimum_bytes_per_second)}/s – {formatBytes(options.scheduler.target_bytes_per_second)}/s</dd></div>
+                  <div><dt>{t("admin.nextEvaluation")}</dt><dd>{options.scheduler.next_evaluation_at === null ? "—" : formatDate(options.scheduler.next_evaluation_at)}</dd></div>
+                  <div><dt>{t("admin.lastDecision")}</dt><dd>{options.scheduler.last_decision}</dd></div>
                 </dl>
               </Card>
               <Card className="admin-summary-card">

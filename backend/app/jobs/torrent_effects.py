@@ -51,6 +51,7 @@ from app.models import (
     DownloadLease,
     ManagedTorrent,
     ManagedTorrentState,
+    SchedulerState,
     StorageLedger,
     TorrentFile,
     TorrentJob,
@@ -60,6 +61,7 @@ from app.models import (
     TrackerActivityOutcome,
     TrackerActivityType,
 )
+from app.scheduler.dynamic_concurrency import record_dynamic_completion
 from app.scheduler.queue_visibility import is_ranked_queue_member
 from app.storage import SharedContentStore, SharedContentStoreError
 from app.torrents import (
@@ -600,6 +602,13 @@ class TorrentEffectHandlers:
         realtime_events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
         queue_changed = False
         async with self._session_factory() as session, session.begin():
+            # SchedulerRuntime takes the singleton scheduler lock before any torrent rows.
+            # READY transitions must follow the same order to avoid a PostgreSQL deadlock.
+            scheduler_state = (
+                await session.get(SchedulerState, 1, with_for_update=True)
+                if state is ManagedTorrentState.READY
+                else None
+            )
             torrent = await session.get(
                 ManagedTorrent,
                 managed_torrent_id,
@@ -636,6 +645,12 @@ class TorrentEffectHandlers:
                 torrent.desired_active = False
                 torrent.desired_priority = None
                 torrent.desired_download_limit = 0
+                if previous_state is not ManagedTorrentState.READY and scheduler_state is not None:
+                    await record_dynamic_completion(
+                        session,
+                        scheduler_state,
+                        now=now,
+                    )
             torrent.updated_at = now
             if state is ManagedTorrentState.READY:
                 auto_unsubscribe_hours = await _integer_database_option(

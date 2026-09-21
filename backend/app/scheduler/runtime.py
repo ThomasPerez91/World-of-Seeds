@@ -5,7 +5,7 @@ import logging
 import math
 import uuid
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
@@ -27,6 +27,11 @@ from app.models import (
     User,
 )
 from app.options import PostgresOptionsRegistry
+from app.scheduler.dynamic_concurrency import (
+    DynamicConcurrencyConfig,
+    align_measurement_after_selection,
+    apply_dynamic_concurrency,
+)
 from app.scheduler.persistence import (
     acquire_scheduler_lease,
     load_scheduler_ledger,
@@ -117,7 +122,8 @@ class SchedulerRuntime:
 
             await self._options.initialize(session, now=now)
             options = await self._options.snapshot(session)
-            policy = SchedulerPolicy.from_options(options)
+            base_policy = SchedulerPolicy.from_options(options)
+            dynamic_config = DynamicConcurrencyConfig.from_options(options)
             purge_stops = await self._load_purge_stops(session)
             torrents = await self._load_control_set(session, state)
             forced_torrents = tuple(torrent for torrent in torrents if torrent.admin_forced_active)
@@ -146,8 +152,25 @@ class SchedulerRuntime:
                 now=now,
             )
             candidates = _scheduler_candidates(schedulable_torrents, requests, now=now)
-            selection = select_torrents(
+            dynamic = apply_dynamic_concurrency(
+                state,
+                torrents,
                 candidates,
+                config=dynamic_config,
+                now=now,
+            )
+            policy = replace(base_policy, max_active_global=dynamic.active_limit)
+            selection_candidates = (
+                tuple(
+                    candidate
+                    for candidate in candidates
+                    if candidate.torrent_id in dynamic.active_torrent_ids
+                )
+                if dynamic.preserve_active_set
+                else candidates
+            )
+            selection = select_torrents(
+                selection_candidates,
                 policy=policy,
                 now=now,
                 active_global=len(forced_torrents) + len(grace_torrents),
@@ -199,6 +222,18 @@ class SchedulerRuntime:
             _persist_desired_controls(
                 schedulable_torrents, scheduled_controls, generation=generation
             )
+            measured_ids = {
+                *(decision.candidate.torrent_id for decision in selection.selected),
+                *(torrent.id for torrent in forced_torrents),
+                *(torrent.id for torrent in grace_torrents),
+            }
+            align_measurement_after_selection(
+                state,
+                torrents,
+                measured_ids,
+                config=dynamic_config,
+                now=now,
+            )
             realtime_targets = _control_event_targets(
                 schedulable_torrents, requests, previous_active
             )
@@ -217,7 +252,11 @@ class SchedulerRuntime:
             if purge_controls
             else QBittorrentV2ControlResult((), (), (), ())
         )
-        scheduled_control_result = await self._gateway.apply_managed_controls(controls)
+        scheduled_control_result = (
+            await self._gateway.apply_managed_controls(controls)
+            if controls
+            else QBittorrentV2ControlResult((), (), (), ())
+        )
         control_result = _merge_control_results(purge_control_result, scheduled_control_result)
 
         applied_at = self._clock()
@@ -272,6 +311,10 @@ class SchedulerRuntime:
                 configured = options["WOS_SCHEDULER_CONTROL_INTERVAL_SECONDS"]
                 if type(configured) is int:
                     interval = float(configured)
+                dynamic_enabled = options.get("WOS_SCHEDULER_DYNAMIC_CONCURRENCY_ENABLED")
+                dynamic_interval = options.get("WOS_SCHEDULER_DYNAMIC_EVALUATION_SECONDS")
+                if dynamic_enabled is True and type(dynamic_interval) is int:
+                    interval = min(interval, float(dynamic_interval))
         except Exception:
             # The durable desired generation remains unapplied and is retried by this process
             # or by the next lease owner. Runtime logging is added with observability in V2-27.

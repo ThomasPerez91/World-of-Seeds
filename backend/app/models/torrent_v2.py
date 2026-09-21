@@ -290,6 +290,11 @@ class SchedulerState(Base):
         ),
         CheckConstraint("rounds >= 0", name="ck_scheduler_state_rounds"),
         CheckConstraint(
+            "dynamic_current_active >= 0 AND dynamic_observed_bytes_per_second >= 0 "
+            "AND dynamic_active_count >= 0 AND dynamic_waiting_count >= 0",
+            name="ck_scheduler_state_dynamic_values",
+        ),
+        CheckConstraint(
             "(scan_cursor_created_at IS NULL AND scan_cursor_id IS NULL) "
             "OR (scan_cursor_created_at IS NOT NULL AND scan_cursor_id IS NOT NULL)",
             name="ck_scheduler_state_scan_cursor",
@@ -307,6 +312,22 @@ class SchedulerState(Base):
     )
     scan_cursor_created_at: Mapped[datetime | None] = mapped_column(nullable=True)
     scan_cursor_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    dynamic_current_active: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    dynamic_last_evaluated_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    dynamic_cooldown_until: Mapped[datetime | None] = mapped_column(nullable=True)
+    dynamic_sampled_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    dynamic_sample_baseline: Mapped[dict[str, int]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    dynamic_observed_bytes_per_second: Mapped[int] = mapped_column(
+        BigInteger, default=0, nullable=False
+    )
+    dynamic_active_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    dynamic_waiting_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    dynamic_next_evaluation_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    dynamic_last_decision: Mapped[str] = mapped_column(
+        String(64), default="dynamic_idle_reset", nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
 
 
