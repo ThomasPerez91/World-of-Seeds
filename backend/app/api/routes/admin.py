@@ -57,9 +57,9 @@ from app.options import (
 from app.options.dependencies import OptionsStoreDependency
 from app.schemas.admin import AdminStorageResponse
 from app.schemas.auth import (
+    AdminUserResponse,
     GeneratedCredentialsResponse,
     UserQuotaResponse,
-    UserResponse,
     UserStatusRequest,
 )
 from app.schemas.health import AdminSystemHealthResponse, ServiceHealthDetail
@@ -497,17 +497,17 @@ async def request_wos_restart(
     return _restart_status_response(restart_status)
 
 
-@router.get("/users", response_model=list[UserResponse])
+@router.get("/users", response_model=list[AdminUserResponse])
 async def list_users(
     db: DbSession,
     _: Annotated[AuthContext, Depends(require_current_admin)],
-) -> list[UserResponse]:
+) -> list[AdminUserResponse]:
     users = (
         await db.scalars(
             select(User).where(User.deleted_at.is_(None)).order_by(User.created_at.desc())
         )
     ).all()
-    return [UserResponse.model_validate(user) for user in users]
+    return [AdminUserResponse.model_validate(user) for user in users]
 
 
 @router.get("/users/quota", response_model=UserQuotaResponse)
@@ -548,20 +548,20 @@ async def generate_user(
             ),
         ) from exc
     return GeneratedCredentialsResponse(
-        user=UserResponse.model_validate(result.user),
+        user=AdminUserResponse.model_validate(result.user),
         initial_password=result.initial_password,
         auth_seed=result.user.auth_seed,
     )
 
 
-@router.patch("/users/{user_id}/status", response_model=UserResponse)
+@router.patch("/users/{user_id}/status", response_model=AdminUserResponse)
 async def update_user_status(
     user_id: UUID,
     payload: UserStatusRequest,
     db: DbSession,
     redis: RedisCoordinatorDependency,
     _: Annotated[AuthContext, Depends(require_admin_csrf)],
-) -> UserResponse:
+) -> AdminUserResponse:
     try:
         result = await set_managed_user_active(db, user_id=user_id, is_active=payload.is_active)
     except ManagedUserNotFoundError as exc:
@@ -573,7 +573,7 @@ async def update_user_status(
         ) from exc
     if result.queue_membership_changed:
         await redis.publish_torrent_queue_changed(datetime.now(UTC))
-    return UserResponse.model_validate(result.user)
+    return AdminUserResponse.model_validate(result.user)
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
