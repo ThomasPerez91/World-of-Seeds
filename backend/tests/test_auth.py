@@ -49,7 +49,8 @@ async def test_session_cookie_csrf_and_logout(
     client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
-    await create_user(db_session, username="thomas", password="correct-horse-battery")
+    user = await create_user(db_session, username="thomas", password="correct-horse-battery")
+    assert user.last_login_at is None
 
     response = await client.post(
         "/api/v1/auth/login",
@@ -63,6 +64,8 @@ async def test_session_cookie_csrf_and_logout(
     assert "HttpOnly" in session_cookie
     assert "SameSite=strict" in session_cookie
     assert "HttpOnly" not in csrf_cookie
+    await db_session.refresh(user)
+    assert user.last_login_at is not None
     assert (await client.get("/api/v1/auth/me")).status_code == 200
 
     valid_csrf = csrf_header(client)
@@ -85,7 +88,7 @@ async def test_failed_logins_are_generic_and_throttled(
     client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
-    await create_user(db_session, username="thomas", password="correct-horse-battery")
+    user = await create_user(db_session, username="thomas", password="correct-horse-battery")
 
     for _ in range(5):
         response = await client.post(
@@ -104,6 +107,8 @@ async def test_failed_logins_are_generic_and_throttled(
         json={"username": "thomas", "password": "correct-horse-battery"},
     )
     assert locked.status_code == 429
+    await db_session.refresh(user)
+    assert user.last_login_at is None
 
 
 @pytest.mark.asyncio
@@ -160,6 +165,8 @@ async def test_admin_generates_initial_credentials_and_user_changes_them_without
     initial = generated.json()
     assert initial["user"]["username"].startswith("guest-")
     assert initial["user"]["must_change_credentials"] is True
+    assert initial["user"]["created_at"] is not None
+    assert initial["user"]["last_login_at"] is None
     assert "expires_at" not in initial["user"]
     assert len(initial["initial_password"]) >= 12
     assert not (data_root / initial["user"]["username"]).exists()
@@ -226,6 +233,8 @@ async def test_admin_generates_initial_credentials_and_user_changes_them_without
     users = await client.get("/api/v1/admin/users")
     assert users.status_code == 200
     assert {user["username"] for user in users.json()} == {"admin", "Shadowsun"}
+    assert all(user["created_at"] is not None for user in users.json())
+    assert all(user["last_login_at"] is not None for user in users.json())
 
 
 @pytest.mark.asyncio
