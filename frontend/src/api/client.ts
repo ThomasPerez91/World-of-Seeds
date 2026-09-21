@@ -10,6 +10,11 @@ export interface User {
   preferred_theme?: Theme;
 }
 
+export interface AdminUser extends User {
+  created_at: string;
+  last_login_at: string | null;
+}
+
 interface AuthResponse {
   user: User;
 }
@@ -26,7 +31,7 @@ export interface LivenessHealth {
 }
 
 export interface GeneratedCredentials {
-  user: User;
+  user: AdminUser;
   initial_password: string;
   auth_seed: string;
 }
@@ -654,8 +659,8 @@ export const api = {
     return response.user;
   },
 
-  listUsers(): Promise<User[]> {
-    return request<User[]>("/admin/users");
+  listUsers(): Promise<AdminUser[]> {
+    return request<AdminUser[]>("/admin/users");
   },
 
   getUserQuota(): Promise<UserQuota> {
@@ -668,8 +673,8 @@ export const api = {
     });
   },
 
-  setUserActive(userId: string, isActive: boolean): Promise<User> {
-    return request<User>(`/admin/users/${encodeURIComponent(userId)}/status`, {
+  setUserActive(userId: string, isActive: boolean): Promise<AdminUser> {
+    return request<AdminUser>(`/admin/users/${encodeURIComponent(userId)}/status`, {
       method: "PATCH",
       body: JSON.stringify({ is_active: isActive }),
     });
