@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   api,
   ApiError,
+  type AdminUser,
   type GeneratedCredentials,
-  type User,
   type UserQuota,
 } from "../../api/client";
 import { Dialog } from "../../components/Dialog";
@@ -12,6 +12,40 @@ import { useFeedback } from "../../components/Feedback";
 import { Badge, Button, Card, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
+
+type LastLoginFilter = "all" | "day" | "week" | "month" | "never";
+
+export interface LastLoginAge {
+  days: number;
+  hours: number;
+  minutes: number;
+}
+
+export function getLastLoginAge(value: string, now = Date.now()): LastLoginAge {
+  const elapsedSeconds = Math.max(0, Math.floor((now - new Date(value).getTime()) / 1_000));
+  return {
+    days: Math.floor(elapsedSeconds / 86_400),
+    hours: Math.floor((elapsedSeconds % 86_400) / 3_600),
+    minutes: Math.floor((elapsedSeconds % 3_600) / 60),
+  };
+}
+
+export function matchesLastLoginFilter(
+  account: AdminUser,
+  filter: LastLoginFilter,
+  now = Date.now(),
+): boolean {
+  if (filter === "all") return true;
+  if (filter === "never") return account.last_login_at === null;
+  if (account.last_login_at === null) return false;
+  const maximumAge = {
+    day: 86_400_000,
+    week: 7 * 86_400_000,
+    month: 30 * 86_400_000,
+  }[filter];
+  const elapsed = now - new Date(account.last_login_at).getTime();
+  return elapsed >= 0 && elapsed <= maximumAge;
+}
 
 export function AdminUsersPage({
   onBack,
@@ -23,15 +57,50 @@ export function AdminUsersPage({
   onSessionExpired: () => void;
 }) {
   const feedback = useFeedback();
-  const { t } = useI18n();
-  const [users, setUsers] = useState<User[]>([]);
+  const { t, formatDate } = useI18n();
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [quota, setQuota] = useState<UserQuota | null>(null);
   const [credentials, setCredentials] = useState<GeneratedCredentials | null>(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
+  const [lastLoginFilter, setLastLoginFilter] = useState<LastLoginFilter>("all");
+
+  const filteredUsers = useMemo(
+    () => users.filter((account) => matchesLastLoginFilter(account, lastLoginFilter)),
+    [lastLoginFilter, users],
+  );
+
+  function describeLastLogin(value: string | null): string {
+    if (value === null) return t("admin.lastLoginNever");
+    const age = getLastLoginAge(value);
+    const duration = age.days > 0
+      ? [
+          t(age.days === 1 ? "admin.durationDay" : "admin.durationDays", { count: age.days }),
+          age.hours > 0
+            ? t(age.hours === 1 ? "admin.durationHour" : "admin.durationHours", {
+                count: age.hours,
+              })
+            : "",
+        ].filter(Boolean).join(" ")
+      : age.hours > 0
+        ? t(age.hours === 1 ? "admin.durationHour" : "admin.durationHours", {
+            count: age.hours,
+          })
+        : age.minutes > 0
+          ? t(age.minutes === 1 ? "admin.durationMinute" : "admin.durationMinutes", {
+              count: age.minutes,
+            })
+          : "";
+    if (duration !== "") return t("admin.lastLoginAgo", { duration });
+    return t("admin.lastLoginJustNow");
+  }
+
+  function absoluteDate(value: string): string {
+    return formatDate(value, { dateStyle: "medium", timeStyle: "short" });
+  }
 
   useEffect(() => {
     let active = true;
@@ -89,7 +158,7 @@ export function AdminUsersPage({
     }
   }
 
-  async function setActive(account: User, isActive: boolean) {
+  async function setActive(account: AdminUser, isActive: boolean) {
     setUpdatingUserId(account.id);
     try {
       const updated = await api.setUserActive(account.id, isActive);
@@ -113,7 +182,7 @@ export function AdminUsersPage({
     }
   }
 
-  async function deleteAccess(account: User): Promise<boolean> {
+  async function deleteAccess(account: AdminUser): Promise<boolean> {
     if (updatingUserId !== null) return false;
     setUpdatingUserId(account.id);
     try {
@@ -207,13 +276,30 @@ export function AdminUsersPage({
           </Card>
         )}
 
+        <div className="user-login-filter">
+          <label htmlFor="last-login-filter">{t("admin.lastLoginFilter")}</label>
+          <select
+            id="last-login-filter"
+            value={lastLoginFilter}
+            onChange={(event) => setLastLoginFilter(event.target.value as LastLoginFilter)}
+          >
+            <option value="all">{t("admin.lastLoginFilterAll")}</option>
+            <option value="day">{t("admin.lastLoginFilterDay")}</option>
+            <option value="week">{t("admin.lastLoginFilterWeek")}</option>
+            <option value="month">{t("admin.lastLoginFilterMonth")}</option>
+            <option value="never">{t("admin.lastLoginFilterNever")}</option>
+          </select>
+        </div>
+
         {loading && users.length === 0 ? (
           <StateMessage tone="loading">{t("common.loading")}</StateMessage>
         ) : loadError !== "" ? (
           <StateMessage tone="error">{loadError}</StateMessage>
+        ) : filteredUsers.length === 0 ? (
+          <StateMessage tone="empty">{t("admin.usersNoFilterResults")}</StateMessage>
         ) : (
           <div className="user-list">
-            {users.map((account) => (
+            {filteredUsers.map((account) => (
               <Card className="user-row" key={account.id}>
                 <div className="avatar" aria-hidden="true">
                   {account.username.slice(0, 1).toUpperCase()}
@@ -228,6 +314,27 @@ export function AdminUsersPage({
                         : t("admin.configuredUser")}
                   </span>
                 </div>
+                <dl className="user-activity-dates">
+                  <div>
+                    <dt>{t("admin.registeredAt")}</dt>
+                    <dd>
+                      <time dateTime={account.created_at}>{absoluteDate(account.created_at)}</time>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("admin.lastLoginAt")}</dt>
+                    <dd>
+                      {account.last_login_at === null ? (
+                        <span>{t("admin.lastLoginNever")}</span>
+                      ) : (
+                        <time dateTime={account.last_login_at}>
+                          {absoluteDate(account.last_login_at)}
+                        </time>
+                      )}
+                      <small>{describeLastLogin(account.last_login_at)}</small>
+                    </dd>
+                  </div>
+                </dl>
                 <div className="user-row-actions">
                   <Badge tone={account.is_active ? "success" : "warning"}>
                     {account.is_active ? t("admin.active") : t("admin.suspended")}
