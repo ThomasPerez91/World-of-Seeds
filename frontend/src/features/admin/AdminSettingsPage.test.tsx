@@ -106,6 +106,11 @@ describe("AdminSettingsPage", () => {
     expect(screen.getByText("Pression")).toBeTruthy();
     expect(screen.getByText("Cycles du planificateur")).toBeTruthy();
     expect(view.container.querySelectorAll(".central-admin-status > .ui-card")).toHaveLength(3);
+    expect(screen.getByRole("heading", { name: "Scheduler", level: 3 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Stockage partagé", level: 3 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Quota par utilisateur", level: 3 })).toBeTruthy();
+    expect(view.container.querySelector(".admin-summary-card-scheduler")).toBeTruthy();
+    expect(view.container.querySelectorAll(".admin-summary-card-secondary")).toHaveLength(2);
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 

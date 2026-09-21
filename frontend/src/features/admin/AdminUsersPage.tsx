@@ -314,18 +314,52 @@ export function AdminUsersPage({
           <div className="user-list">
             {filteredUsers.map((account) => (
               <Card className="user-row" key={account.id}>
-                <div className="avatar" aria-hidden="true">
-                  {account.username.slice(0, 1).toUpperCase()}
-                </div>
-                <div>
-                  <strong>{account.username}</strong>
-                  <span>
-                    {account.is_admin
-                      ? t("admin.administrator")
-                      : account.must_change_credentials
-                        ? t("admin.personalizationPending")
-                        : t("admin.configuredUser")}
-                  </span>
+                <div className="user-row-heading">
+                  <div className="user-row-identity">
+                    <span className="account-avatar admin-user-avatar" aria-hidden="true">
+                      {account.username.slice(0, 1).toUpperCase()}
+                    </span>
+                    <div className="user-row-identity-copy">
+                      <strong>{account.username}</strong>
+                      <span>
+                        {account.is_admin
+                          ? t("admin.administrator")
+                          : account.must_change_credentials
+                            ? t("admin.personalizationPending")
+                            : t("admin.configuredUser")}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="user-row-actions">
+                    <Badge tone={account.is_active ? "success" : "warning"}>
+                      {account.is_active ? t("admin.active") : t("admin.suspended")}
+                    </Badge>
+                    {!account.is_admin && (
+                      <>
+                        <Button
+                          variant="secondary"
+                          className="compact-button"
+                          aria-label={t("admin.accountNamed", {
+                            action: account.is_active ? t("admin.suspend") : t("admin.reactivate"),
+                            name: account.username,
+                          })}
+                          disabled={updatingUserId === account.id}
+                          onClick={() => void setActive(account, !account.is_active)}
+                        >
+                          {account.is_active ? t("admin.suspend") : t("admin.reactivate")}
+                        </Button>
+                        <Button
+                          variant="danger"
+                          className="compact-button"
+                          aria-label={t("admin.deleteAccessNamed", { name: account.username })}
+                          disabled={updatingUserId === account.id}
+                          onClick={() => setDeleteTarget(account)}
+                        >
+                          {updatingUserId === account.id ? t("admin.deleting") : t("admin.deleteAccess")}
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
                 <dl className="user-activity-dates">
                   <div>
@@ -348,36 +382,6 @@ export function AdminUsersPage({
                     </dd>
                   </div>
                 </dl>
-                <div className="user-row-actions">
-                  <Badge tone={account.is_active ? "success" : "warning"}>
-                    {account.is_active ? t("admin.active") : t("admin.suspended")}
-                  </Badge>
-                  {!account.is_admin && (
-                    <>
-                      <Button
-                        variant="secondary"
-                        className="compact-button"
-                        aria-label={t("admin.accountNamed", {
-                          action: account.is_active ? t("admin.suspend") : t("admin.reactivate"),
-                          name: account.username,
-                        })}
-                        disabled={updatingUserId === account.id}
-                        onClick={() => void setActive(account, !account.is_active)}
-                      >
-                        {account.is_active ? t("admin.suspend") : t("admin.reactivate")}
-                      </Button>
-                      <Button
-                        variant="danger"
-                        className="compact-button"
-                        aria-label={t("admin.deleteAccessNamed", { name: account.username })}
-                        disabled={updatingUserId === account.id}
-                        onClick={() => setDeleteTarget(account)}
-                      >
-                        {updatingUserId === account.id ? t("admin.deleting") : t("admin.deleteAccess")}
-                      </Button>
-                    </>
-                  )}
-                </div>
               </Card>
             ))}
           </div>

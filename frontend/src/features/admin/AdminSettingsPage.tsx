@@ -475,8 +475,8 @@ export function AdminSettingsPage({
         ) : options !== null ? (
           <>
             <div className="central-admin-status" aria-label={t("admin.operationalState")}>
-              <Card className="admin-summary-card">
-                <header className="admin-summary-card-header"><span>Scheduler</span></header>
+              <Card className="admin-summary-card admin-summary-card-scheduler">
+                <header className="admin-summary-card-header"><h3>Scheduler</h3></header>
                 <div className="admin-summary-primary">
                   <Badge tone={options.scheduler.synchronized ? "success" : "warning"}>
                     {options.scheduler.synchronized ? t("admin.synchronized") : t("admin.reconcileRequired")}
@@ -496,16 +496,16 @@ export function AdminSettingsPage({
                   <div><dt>{t("admin.lastDecision")}</dt><dd>{options.scheduler.last_decision}</dd></div>
                 </dl>
               </Card>
-              <Card className="admin-summary-card">
-                <header className="admin-summary-card-header"><span>{t("admin.sharedStorage")}</span></header>
+              <Card className="admin-summary-card admin-summary-card-secondary">
+                <header className="admin-summary-card-header"><h3>{t("admin.sharedStorage")}</h3></header>
                 <strong className="admin-summary-primary">{formatBytes(options.storage.managed_bytes)}</strong>
                 <dl className="admin-status-details">
                   <div><dt>{t("admin.logicalSpace")}</dt><dd>{formatBytes(options.storage.logical_bytes)}</dd></div>
                   <div><dt>{t("admin.pressure")}</dt><dd>{options.storage.pressure}</dd></div>
                 </dl>
               </Card>
-              <Card className="admin-summary-card">
-                <header className="admin-summary-card-header"><span>{t("admin.userQuota")}</span></header>
+              <Card className="admin-summary-card admin-summary-card-secondary">
+                <header className="admin-summary-card-header"><h3>{t("admin.userQuota")}</h3></header>
                 <strong className="admin-summary-primary">
                   {options.storage.user_quota_bytes === 0
                     ? t("admin.unlimited")

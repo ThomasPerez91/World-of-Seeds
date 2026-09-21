@@ -333,12 +333,16 @@
   min-height: 1.5rem;
   align-items: center;
   justify-content: space-between;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--wos21-panel-border) 72%, transparent);
 }
 
-.admin-summary-card-header span {
-  color: var(--wos-muted);
-  font-size: 0.76rem;
-  font-weight: 700;
+.admin-summary-card-header h3 {
+  margin: 0;
+  color: var(--wos-text);
+  font-size: 0.82rem;
+  font-weight: 750;
+  letter-spacing: 0.015em;
 }
 
 .admin-summary-primary {
@@ -742,6 +746,15 @@
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
+  .admin-summary-card-scheduler {
+    grid-column: 1 / -1;
+  }
+
+  .admin-summary-card-scheduler .admin-status-details {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: clamp(1rem, 4vw, 3rem);
+  }
+
   .admin-storage-capacity {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -764,7 +777,11 @@
   }
 
   .central-admin-status {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .admin-summary-card-scheduler .admin-status-details {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
