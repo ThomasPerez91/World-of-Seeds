@@ -12,6 +12,7 @@ import adminSettingsParityStylesheetUrl from "./admin-settings-parity.css?url";
 import "./styles.css";
 import "./features/admin/admin.css";
 import toastSystemStylesheetUrl from "./toast-system.css?url";
+import responsiveMobileStylesheetUrl from "./responsive-mobile.css?url";
 
 function appendStylesheet(href: string, marker: string) {
   const stylesheet = document.createElement("link");
@@ -29,6 +30,7 @@ appendStylesheet(wos21StylesheetUrl, "wos-2-1-branding");
 appendStylesheet(wos21FinalStylesheetUrl, "wos-2-1-final-polish");
 appendStylesheet(adminSettingsParityStylesheetUrl, "admin-settings-parity");
 appendStylesheet(toastSystemStylesheetUrl, "toast-system");
+appendStylesheet(responsiveMobileStylesheetUrl, "responsive-mobile");
 
 const root = document.getElementById("root");
 
