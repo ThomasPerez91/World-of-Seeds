@@ -49,6 +49,7 @@ SCALES = (1, 10, 25, 50, 100)
 PREFIX = "load-v2-32-"
 CONTENT = b"World of Seeds V2 bounded load smoke\n"
 DOWNLOAD_RETRY_LIMIT = 10
+IDLE_TRANSACTION_LEAK_AGE_SECONDS = 1
 STORAGE_KEY = uuid.UUID("32323232-3232-4232-8232-323232323232")
 
 
@@ -307,19 +308,31 @@ async def _fixture_snapshot() -> dict[str, object]:
 
 async def _database_snapshot() -> dict[str, int]:
     async with session_factory() as session:
+        # pg_stat_activity is shared by API, worker, scheduler and this probe. A single
+        # instantaneous "idle in transaction" can therefore be a normal hand-off between
+        # two SQL statements in another service. Only an entry that remains idle long
+        # enough to cross this bounded age threshold represents the leak this smoke is
+        # intended to catch.
         activity = (
             await session.execute(
                 text(
-                    "SELECT count(*) FILTER (WHERE state = 'idle in transaction'), count(*) "
+                    "SELECT "
+                    "count(*) FILTER (WHERE state = 'idle in transaction'), "
+                    "count(*) FILTER (WHERE state = 'idle in transaction' "
+                    "AND state_change <= clock_timestamp() "
+                    "- make_interval(secs => :leak_age_seconds)), "
+                    "count(*) "
                     "FROM pg_stat_activity WHERE datname = current_database()"
-                )
+                ),
+                {"leak_age_seconds": IDLE_TRANSACTION_LEAK_AGE_SECONDS},
             )
         ).one()
         leases = await session.scalar(select(func.count()).select_from(DownloadLease))
         await session.rollback()
     return {
         "idle_in_transaction": int(activity[0]),
-        "database_connections": int(activity[1]),
+        "persistent_idle_in_transaction": int(activity[1]),
+        "database_connections": int(activity[2]),
         "active_download_leases": int(leases or 0),
     }
 
@@ -341,8 +354,12 @@ async def _websocket_batch(
 
     sockets = await asyncio.gather(*(connect(identity) for identity in identities))
     try:
+        # Keep every socket open beyond the leak threshold. A WebSocket authentication
+        # transaction that was accidentally retained will then be old enough to be
+        # detected, while unrelated sub-second SQL activity cannot make the gate flaky.
+        await asyncio.sleep(IDLE_TRANSACTION_LEAK_AGE_SECONDS)
         snapshot = await _database_snapshot()
-        if snapshot["idle_in_transaction"] != 0:
+        if snapshot["persistent_idle_in_transaction"] != 0:
             raise RuntimeError("WebSocket idle time retained a PostgreSQL transaction")
     finally:
         await asyncio.gather(*(socket.close() for socket in sockets))
@@ -382,7 +399,7 @@ async def run() -> dict[str, object]:
     database = await _database_snapshot()
     if database["active_download_leases"] != 0:
         raise RuntimeError("completed downloads retained a database lease")
-    if database["idle_in_transaction"] != 0:
+    if database["persistent_idle_in_transaction"] != 0:
         raise RuntimeError("load smoke retained an idle PostgreSQL transaction")
     if database["database_connections"] > 40:
         raise RuntimeError("the single-process profile exceeded its bounded connection budget")
