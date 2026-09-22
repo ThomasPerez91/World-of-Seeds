@@ -1,0 +1,169 @@
+/* Final component layout contract after the legacy theme layers.
+ * Desktop: fixed-layout tables. Mobile: one coherent card layout.
+ * Specificity is scoped to the administration shell, never to global tables. */
+.admin-page[data-admin-view] {
+  --color-surface: var(--wos-surface-strong);
+  --color-surface-elevated: var(--wos-surface-strong);
+  --color-background-secondary: var(--wos-surface-soft);
+}
+.admin-page[data-admin-view] .admin-runtime-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  border-collapse: collapse;
+  background: transparent;
+}
+.admin-page[data-admin-view] .admin-runtime-table-wrap,
+.admin-page[data-admin-view] .admin-users-table-wrap { min-width: 0; max-width: 100%; }
+.admin-page[data-admin-view] .admin-runtime-table th,
+.admin-page[data-admin-view] .admin-runtime-table td {
+  min-width: 0;
+  padding: 0.8rem 0.65rem;
+  overflow-wrap: anywhere;
+}
+.admin-page[data-admin-view] .admin-runtime-table th { white-space: normal; text-align: left; }
+.admin-page[data-admin-view] .admin-table-sort { max-width: 100%; white-space: normal; text-align: inherit; }
+.admin-page[data-admin-view] .admin-qb-table th:first-child { width: 34%; }
+.admin-page[data-admin-view] .admin-qb-table th:nth-child(2) { width: 12%; }
+.admin-page[data-admin-view] .admin-qb-table th:nth-child(3) { width: 17%; }
+.admin-page[data-admin-view] .admin-qb-table th:nth-child(4) { width: 21%; }
+.admin-page[data-admin-view] .admin-qb-table th:nth-child(5) { width: 16%; }
+.admin-page[data-admin-view] .admin-newgreedy-table th:first-child { width: 16%; }
+.admin-page[data-admin-view] .admin-newgreedy-table th:nth-child(2) { width: 30%; }
+.admin-page[data-admin-view] .admin-newgreedy-table th:nth-child(3) { width: 18%; }
+.admin-page[data-admin-view] .admin-newgreedy-table th:nth-child(n+4) { width: 12%; }
+.admin-page[data-admin-view] .admin-cleanup-table th:first-child { width: 36%; }
+.admin-page[data-admin-view] .admin-cleanup-table th:nth-child(2) { width: 12%; }
+.admin-page[data-admin-view] .admin-cleanup-table th:nth-child(3) { width: 14%; }
+.admin-page[data-admin-view] .admin-cleanup-table th:nth-child(4) { width: 24%; }
+.admin-page[data-admin-view] .admin-cleanup-table th:nth-child(5) { width: 14%; }
+.admin-page[data-admin-view] .admin-runtime-name { display: block; width: 100%; min-width: 0; max-width: 100%; }
+.admin-page[data-admin-view] .admin-runtime-name > span:first-child {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.admin-page[data-admin-view] .admin-runtime-progress {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem;
+}
+.admin-page[data-admin-view] .admin-runtime-progress progress { min-width: 0; width: 100%; }
+.admin-page[data-admin-view] .admin-runtime-table .ui-badge {
+  display: inline-flex; width: fit-content; max-width: 100%; justify-self: start; white-space: normal;
+}
+
+/* Preserve native checkbox semantics and keyboard handling. */
+.admin-page[data-admin-view] input.admin-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 1.25rem;
+  min-width: 1.25rem;
+  max-width: 1.25rem;
+  height: 1.25rem;
+  min-height: 1.25rem;
+  flex: 0 0 1.25rem;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--wos-line-strong);
+  border-radius: 0.35rem;
+  background: var(--wos-surface-strong);
+  box-shadow: none;
+  cursor: pointer;
+}
+.admin-page[data-admin-view] input.admin-checkbox:checked { background: var(--wos-accent); border-color: var(--wos-accent); }
+.admin-page[data-admin-view] input.admin-checkbox::before {
+  content: ""; width: 0.3rem; height: 0.6rem; border: solid var(--wos-bg); border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg) scale(0);
+}
+.admin-page[data-admin-view] input.admin-checkbox:checked::before { transform: translateY(-1px) rotate(45deg) scale(1); }
+.admin-page[data-admin-view] input.admin-checkbox:focus-visible { outline: 2px solid var(--wos-accent); outline-offset: 4px; }
+.admin-page[data-admin-view] .external-api-create fieldset {
+  display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; min-width: 0; margin: 0; padding: 0; border: 0;
+}
+.admin-page[data-admin-view] .external-api-create fieldset legend { margin-bottom: 0.5rem; color: var(--wos-muted); font-size: 0.8rem; }
+.admin-page[data-admin-view] .external-api-create fieldset label {
+  display: flex; align-items: center; gap: 0.65rem; min-height: 2.75rem; margin: 0; font-size: 0.85rem;
+}
+.admin-page[data-admin-view] .option-control:has(> .admin-checkbox) {
+  display: flex; min-height: 2.75rem; align-items: center; justify-content: flex-end;
+}
+.admin-page[data-admin-view] .options-actions { align-items: center; }
+.admin-page[data-admin-view] .options-actions > .ui-button {
+  flex: none; height: auto; min-height: 2.75rem; padding: 0.7rem 1.1rem; margin: 0;
+}
+
+@media (min-width: 821px) {
+  .admin-page[data-admin-view] .admin-users-table .user-row {
+    display: table-row; padding: 0; border: 0; border-radius: 0; background: transparent;
+  }
+  .admin-page[data-admin-view] .admin-users-table td { display: table-cell; background: transparent; border-radius: 0; }
+  .admin-page[data-admin-view] .admin-users-table th { font-size: 0.7rem; }
+  .admin-page[data-admin-view] .admin-users-table .user-row:hover { background: var(--wos-accent-dim); }
+  .admin-page[data-admin-view] .admin-qb-actions,
+  .admin-page[data-admin-view] .admin-cleanup-actions { display: table-cell !important; text-align: right; white-space: normal; }
+  .admin-page[data-admin-view] .admin-qb-actions > .ui-tooltip-anchor { display: inline-flex; margin: 0.15rem; }
+}
+
+@media (max-width: 820px) {
+  .admin-page[data-admin-view] .admin-runtime-table-wrap,
+  .admin-page[data-admin-view] .admin-users-table-wrap { overflow: visible; border: 0 !important; background: transparent !important; }
+  .admin-page[data-admin-view] .admin-runtime-table,
+  .admin-page[data-admin-view] .admin-runtime-table tbody { display: grid; gap: 0.75rem; background: transparent !important; }
+  /* Sorting remains available as wrapping chips, without a scrolling table header. */
+  .admin-page[data-admin-view] .admin-runtime-table thead { display: block; }
+  .admin-page[data-admin-view] .admin-runtime-table thead tr {
+    display: flex; flex-wrap: wrap; gap: 0.4rem; overflow: visible; padding: 0 0 0.25rem;
+  }
+  .admin-page[data-admin-view] .admin-runtime-table thead th { display: none; width: auto !important; padding: 0; border: 0; background: transparent; }
+  .admin-page[data-admin-view] .admin-runtime-table thead th:has(.admin-table-sort) { display: block; }
+  /* Users have no sorting toolbar: retain their clipped semantic column headers. */
+  .admin-page[data-admin-view] .admin-users-table thead tr { display: table-row; }
+  .admin-page[data-admin-view] .admin-users-table thead th { display: table-cell; }
+  .admin-page[data-admin-view] .admin-runtime-table thead .admin-table-sort {
+    min-height: 2.75rem !important; padding: 0.45rem 0.7rem !important;
+    border: 1px solid var(--wos-line) !important; border-radius: 999px !important;
+    background: var(--wos-surface-strong) !important; font-size: 0.68rem; letter-spacing: 0;
+  }
+  .admin-page[data-admin-view] .admin-runtime-table tbody tr {
+    display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0.5rem 0.9rem;
+    border: 1px solid var(--wos-line); border-radius: 14px; background: var(--wos-surface-strong); box-shadow: none;
+  }
+  .admin-page[data-admin-view] .admin-runtime-table tbody td {
+    display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); align-items: center;
+    gap: 0.75rem; padding: 0.65rem 0; border: 0; border-bottom: 1px solid var(--wos-line);
+    border-radius: 0; background: transparent; text-align: left !important;
+  }
+  .admin-page[data-admin-view] .admin-runtime-table tbody td:last-child { border-bottom: 0; }
+  .admin-page[data-admin-view] .admin-runtime-table tbody td::before {
+    content: attr(data-label); margin: 0; color: var(--wos-muted); font-size: 0.65rem;
+    font-weight: 650; letter-spacing: 0.035em; text-transform: uppercase;
+  }
+  .admin-page[data-admin-view] .admin-users-table tbody td:first-child { display: block; padding-block: 0.5rem 0.8rem; }
+  .admin-page[data-admin-view] .admin-users-table tbody td:first-child::before { display: none; }
+  .admin-page[data-admin-view] .admin-qb-actions { grid-template-columns: minmax(0, 1fr) 2.75rem 2.75rem !important; }
+  .admin-page[data-admin-view] .admin-cleanup-actions { grid-template-columns: minmax(0, 1fr) 2.75rem !important; }
+  .admin-page[data-admin-view] .user-row-actions { width: auto; gap: 0.5rem; }
+  .admin-page[data-admin-view] .options-actions { align-items: stretch; flex-direction: column; }
+  .admin-page[data-admin-view] .options-actions > .ui-button { width: 100%; }
+
+  .user-downloads .torrent-accordion-item { border-radius: 14px !important; }
+  .user-downloads .torrent-row-grid {
+    border-radius: 13px; grid-template-columns: minmax(0, 1fr) auto !important;
+    grid-template-areas: "name name" "status size" "progress progress" "queue actions" !important;
+    gap: 0.65rem !important; padding: 0.9rem !important;
+  }
+  .user-downloads .torrent-row-grid.is-expanded { border-radius: 13px 13px 0 0; }
+  .user-downloads .torrent-summary-status { justify-content: flex-start; }
+  .user-downloads .torrent-card-actions { width: auto; padding: 0 !important; gap: 0.4rem; }
+  .user-downloads .torrent-summary-queue { justify-self: start; }
+  .user-downloads .torrent-summary-queue[data-empty="true"] { visibility: hidden; }
+  .user-downloads .torrent-summary-progress { grid-template-columns: minmax(0, 1fr) auto !important; }
+  .user-downloads .torrent-accordion-content { min-width: 0; margin: 0.6rem 0.65rem 0.65rem !important; padding: 0.75rem !important; }
+  .user-downloads .torrent-detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .user-downloads .torrent-ready-overview { grid-template-columns: minmax(0, 1fr); }
+  .user-downloads .torrent-meta-item { min-width: 0; }
+  .user-downloads .torrent-meta-item > * { min-width: 0; overflow-wrap: anywhere; }
+}
+@media (forced-colors: active) {
+  .admin-page[data-admin-view] input.admin-checkbox { appearance: auto; }
+  .admin-page[data-admin-view] input.admin-checkbox::before { display: none; }
+}

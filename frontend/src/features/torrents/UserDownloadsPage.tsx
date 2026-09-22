@@ -638,7 +638,7 @@ function TorrentItem({
                     <RetentionWarning retentionExpiresAt={torrent.retention_expires_at} compact />
                   )}
                 </span>
-                <span className="torrent-summary-queue">{torrentQueueLabel(torrent)}</span>
+                <span className="torrent-summary-queue" data-empty={torrentQueueLabel(torrent) === "-"}>{torrentQueueLabel(torrent)}</span>
                 <span className={`torrent-summary-progress ${rowStatus}`}>
                   <Progress className="torrent-row-progress" label={t("downloads.progressFor", { name: torrent.name })} value={percent} />
                   <strong>{percent} %</strong>
