@@ -311,79 +311,92 @@ export function AdminUsersPage({
         ) : filteredUsers.length === 0 ? (
           <StateMessage tone="empty">{t("admin.usersNoFilterResults")}</StateMessage>
         ) : (
-          <div className="user-list">
-            {filteredUsers.map((account) => (
-              <Card className="user-row" key={account.id}>
-                <div className="user-row-heading">
-                  <div className="user-row-identity">
-                    <span className="account-avatar admin-user-avatar" aria-hidden="true">
-                      {account.username.slice(0, 1).toUpperCase()}
-                    </span>
-                    <div className="user-row-identity-copy">
-                      <strong>{account.username}</strong>
-                      <span>
-                        {account.is_admin
-                          ? t("admin.administrator")
-                          : account.must_change_credentials
-                            ? t("admin.personalizationPending")
-                            : t("admin.configuredUser")}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="user-row-actions">
-                    <Badge tone={account.is_active ? "success" : "warning"}>
-                      {account.is_active ? t("admin.active") : t("admin.suspended")}
-                    </Badge>
-                    {!account.is_admin && (
-                      <>
-                        <Button
-                          variant="secondary"
-                          className="compact-button"
-                          aria-label={t("admin.accountNamed", {
-                            action: account.is_active ? t("admin.suspend") : t("admin.reactivate"),
-                            name: account.username,
-                          })}
-                          disabled={updatingUserId === account.id}
-                          onClick={() => void setActive(account, !account.is_active)}
-                        >
-                          {account.is_active ? t("admin.suspend") : t("admin.reactivate")}
-                        </Button>
-                        <Button
-                          variant="danger"
-                          className="compact-button"
-                          aria-label={t("admin.deleteAccessNamed", { name: account.username })}
-                          disabled={updatingUserId === account.id}
-                          onClick={() => setDeleteTarget(account)}
-                        >
-                          {updatingUserId === account.id ? t("admin.deleting") : t("admin.deleteAccess")}
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <dl className="user-activity-dates">
-                  <div>
-                    <dt>{t("admin.registeredAt")}</dt>
-                    <dd>
+          <div className="admin-users-table-wrap">
+            <table className="admin-runtime-table admin-users-table">
+              <thead>
+                <tr>
+                  <th scope="col">{t("admin.username")}</th>
+                  <th scope="col">{t("admin.registeredAt")}</th>
+                  <th scope="col">{t("admin.lastLoginAt")}</th>
+                  <th scope="col">{t("admin.status")}</th>
+                  <th scope="col" className="admin-users-actions-heading">{t("admin.actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredUsers.map((account) => (
+                  <tr className="user-row" key={account.id}>
+                    <td data-label={t("admin.username")}>
+                      <div className="user-row-identity">
+                        <span className="account-avatar admin-user-avatar" aria-hidden="true">
+                          {account.username.slice(0, 1).toUpperCase()}
+                        </span>
+                        <div className="user-row-identity-copy">
+                          <strong>{account.username}</strong>
+                          <span>
+                            {account.is_admin
+                              ? t("admin.administrator")
+                              : account.must_change_credentials
+                                ? t("admin.personalizationPending")
+                                : t("admin.configuredUser")}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+                    <td data-label={t("admin.registeredAt")}>
                       <time dateTime={account.created_at}>{absoluteDate(account.created_at)}</time>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t("admin.lastLoginAt")}</dt>
-                    <dd>
-                      {account.last_login_at === null ? (
-                        <span>{t("admin.lastLoginNever")}</span>
-                      ) : (
-                        <time dateTime={account.last_login_at}>
-                          {absoluteDate(account.last_login_at)}
-                        </time>
-                      )}
-                      <small>{describeLastLogin(account.last_login_at)}</small>
-                    </dd>
-                  </div>
-                </dl>
-              </Card>
-            ))}
+                    </td>
+                    <td data-label={t("admin.lastLoginAt")}>
+                      <div className="user-last-login">
+                        {account.last_login_at === null ? (
+                          <span>{t("admin.lastLoginNever")}</span>
+                        ) : (
+                          <time dateTime={account.last_login_at}>
+                            {absoluteDate(account.last_login_at)}
+                          </time>
+                        )}
+                        <small>{describeLastLogin(account.last_login_at)}</small>
+                      </div>
+                    </td>
+                    <td data-label={t("admin.status")}>
+                      <Badge tone={account.is_active ? "success" : "warning"}>
+                        {account.is_active ? t("admin.active") : t("admin.suspended")}
+                      </Badge>
+                    </td>
+                    <td data-label={t("admin.actions")} className="admin-users-actions-cell">
+                      <div className="user-row-actions">
+                        {!account.is_admin ? (
+                          <>
+                            <Button
+                              variant="secondary"
+                              className="compact-button"
+                              aria-label={t("admin.accountNamed", {
+                                action: account.is_active ? t("admin.suspend") : t("admin.reactivate"),
+                                name: account.username,
+                              })}
+                              disabled={updatingUserId === account.id}
+                              onClick={() => void setActive(account, !account.is_active)}
+                            >
+                              {account.is_active ? t("admin.suspend") : t("admin.reactivate")}
+                            </Button>
+                            <Button
+                              variant="danger"
+                              className="compact-button"
+                              aria-label={t("admin.deleteAccessNamed", { name: account.username })}
+                              disabled={updatingUserId === account.id}
+                              onClick={() => setDeleteTarget(account)}
+                            >
+                              {updatingUserId === account.id ? t("admin.deleting") : t("admin.deleteAccess")}
+                            </Button>
+                          </>
+                        ) : (
+                          <span className="admin-users-no-action" aria-hidden="true">—</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>

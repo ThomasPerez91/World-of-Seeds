@@ -476,6 +476,23 @@
     text-transform: uppercase;
   }
 
+  .admin-users-table thead tr {
+    display: table-row;
+  }
+
+  .admin-users-table thead th {
+    display: table-cell;
+  }
+
+  .admin-users-table tbody td:first-child {
+    display: block;
+    grid-template-columns: none;
+  }
+
+  .admin-users-table tbody td:first-child::before {
+    display: none;
+  }
+
   .admin-runtime-table .admin-runtime-name,
   .admin-runtime-table code,
   .admin-runtime-table .ui-badge,
@@ -539,7 +556,7 @@
     gap: 0.5rem !important;
   }
 
-  .option-control input,
+  .option-control input:not([type="checkbox"]),
   .option-control select,
   .option-number-control input {
     width: 100%;

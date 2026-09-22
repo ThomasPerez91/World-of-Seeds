@@ -131,6 +131,7 @@ export function ExternalApiClientsPanel({
           {allScopes.map((scope) => (
             <label key={scope}>
               <input
+                className="admin-checkbox"
                 type="checkbox"
                 checked={scopes.includes(scope)}
                 onChange={() => toggleScope(scope)}
