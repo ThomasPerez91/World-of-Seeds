@@ -339,6 +339,7 @@ export function AdminSettingsPage({
         <div className="option-control">
           {field.input_type === "boolean" ? (
             <input
+              className="admin-checkbox"
               id={inputId}
               type="checkbox"
               checked={Boolean(draft[field.key])}

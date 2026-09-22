@@ -114,6 +114,39 @@ describe("AdminSettingsPage", () => {
     expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
   });
 
+  it("utilise la checkbox d’administration compacte pour les options booléennes", async () => {
+    const booleanOptions = {
+      ...options,
+      sections: [{
+        id: "torrents",
+        label: "Torrents",
+        fields: [{
+          ...options.sections[0].fields[0],
+          key: "WOS_SCHEDULER_DYNAMIC_CONCURRENCY_ENABLED",
+          input_type: "boolean",
+          value: true,
+          default: true,
+          unit: null,
+          minimum: null,
+          maximum: null,
+        }],
+      }],
+    } as const;
+    vi.stubGlobal("fetch", vi.fn(async () => response(booleanOptions)));
+
+    render(
+      <FeedbackProvider>
+        <AdminSettingsPage onBack={vi.fn()} onNavigate={vi.fn()} onSessionExpired={vi.fn()} />
+      </FeedbackProvider>,
+    );
+
+    const checkbox = await screen.findByRole("checkbox", {
+      name: "Régulation dynamique des téléchargements",
+    });
+    expect(checkbox.classList.contains("admin-checkbox")).toBe(true);
+    expect(checkbox.getAttribute("type")).toBe("checkbox");
+  });
+
   it("affiche une erreur métier structurée sous le champ concerné", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
