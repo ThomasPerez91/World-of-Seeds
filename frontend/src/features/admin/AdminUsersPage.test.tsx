@@ -46,6 +46,8 @@ describe("AdminUsersPage", () => {
       );
 
       expect(await screen.findByText(username)).toBeTruthy();
+      expect(screen.getByRole("table")).toBeTruthy();
+      expect(screen.getAllByRole("columnheader")).toHaveLength(5);
       expect(screen.getByRole("navigation", { name: "Sections d’administration" }).querySelectorAll("button")).toHaveLength(7);
       expect(screen.getByRole("button", { name: "Utilisateurs" }).getAttribute("aria-current")).toBe("page");
       expect(screen.getByRole("button", { name: `Suspendre ${username}` })).toBeTruthy();
