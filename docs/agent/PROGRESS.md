@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.2.14`.
+- Version applicative cible : `2.2.15`.
+
+## Release 2.2.15 — cohérence desktop et mobile
+
+- Fermeture de deux media queries dans `styles.css` qui absorbaient les styles suivants lors de la compilation ; test de parsing strict sur toutes les feuilles CSS.
+- Tableaux administratifs à colonnes fixes et noms tronqués avec les tooltips existants ; lignes utilisateurs restaurées en véritables lignes de tableau sur desktop.
+- Composition mobile unifiée, tri sous forme de boutons qui reviennent à la ligne, surfaces forêt et cases à cocher émeraude, bouton Enregistrer compact.
+- Cards de téléchargements réagencées, arrondis du fond sélectionné, espacement des détails et suppression des largeurs minimales de l’aperçu mobile.
+- Validation : build et tests frontend ; inspection visuelle locale indisponible (accès localhost bloqué par le navigateur de validation).
 
 ## Release 2.2.14 — récupération locale priorisée et File API explicite
 
