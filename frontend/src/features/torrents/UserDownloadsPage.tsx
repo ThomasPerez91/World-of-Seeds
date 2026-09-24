@@ -61,7 +61,6 @@ export const NATIVE_DOWNLOAD_STORAGE_KEY = "wos.local-download-starts";
 export const NATIVE_DOWNLOAD_MAX_AGE_MS = 30 * 60 * 1_000;
 
 const TORRENT_ERROR_MESSAGES: Readonly<Record<string, MessageKey>> = {
-  torrent_file_type_not_allowed: "downloads.error.fileType",
   torrent_unsafe_file_attribute: "downloads.error.unsafeAttribute",
   torrent_add_rejected: "downloads.error.qbRejected",
   qbittorrent_metainfo_invalid: "downloads.error.qbInvalid",
