@@ -70,6 +70,36 @@ def torrent_content(name: bytes = b"Film.mkv", size: int = 5) -> bytes:
     )
 
 
+def game_torrent_content(*, unsafe_attribute: bytes | None = None) -> bytes:
+    paths = [
+        [b"game", b"setup.exe"],
+        [b"game", b"bin", b"game.dll"],
+        [b"game", b"data", b"content.pak"],
+        [b"game", b"data", b"archive.bin"],
+        [b"game", b"config", b"settings.ini"],
+        [b"README"],
+    ]
+    files: list[dict[bytes, object]] = []
+    for path in paths:
+        entry: dict[bytes, object] = {b"length": 5, b"path": path}
+        if unsafe_attribute is not None and path[-1] == b"setup.exe":
+            entry[b"attr"] = unsafe_attribute
+            if unsafe_attribute == b"l":
+                entry[b"symlink path"] = [b"elsewhere"]
+        files.append(entry)
+    return _encode(
+        {
+            b"announce": b"https://c411.org/announce/old-user-passkey",
+            b"info": {
+                b"files": files,
+                b"name": b"Game",
+                b"piece length": 16_384,
+                b"pieces": b"p" * 20,
+            },
+        }
+    )
+
+
 async def prepare_user(db: AsyncSession, username: str = "thomas") -> User:
     user = User(username=username, password_hash=hash_password("correct-horse-battery"))
     db.add(user)
@@ -214,6 +244,83 @@ async def test_v2_upload_is_durable_idempotent_and_secret_free(
         (user.id, TorrentEventType.REQUESTED)
     ]
     assert redis.events[0][1].request_id == uuid.UUID(first.json()["id"])
+
+
+@pytest.mark.asyncio
+async def test_v2_individual_and_batch_style_upload_accept_ordinary_game_files(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+    app.state.redis_coordinator = RecordingRedis()
+
+    # The frontend batch sends one request per .torrent through this same endpoint.
+    for filename, content in (
+        ("game.torrent", game_torrent_content()),
+        ("readme.torrent", torrent_content(name=b"README")),
+    ):
+        response = await client.post(
+            "/api/v2/torrents",
+            files={"torrent": (filename, content, "application/x-bittorrent")},
+            headers=headers,
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["created"] is True
+
+    assert await db_session.scalar(select(func.count()).select_from(ManagedTorrent)) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attribute", [b"l", b"x", b"z"])
+async def test_v2_upload_still_rejects_unsafe_file_attributes_regardless_of_extension(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    attribute: bytes,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+
+    response = await client.post(
+        "/api/v2/torrents",
+        files={
+            "torrent": (
+                "game.torrent",
+                game_torrent_content(unsafe_attribute=attribute),
+                "application/x-bittorrent",
+            )
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "torrent_unsafe_file_attribute"
+    assert await db_session.scalar(select(func.count()).select_from(ManagedTorrent)) == 0
+
+
+@pytest.mark.asyncio
+async def test_v2_upload_still_rejects_unsafe_exe_path(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+
+    response = await client.post(
+        "/api/v2/torrents",
+        files={
+            "torrent": (
+                "game.torrent",
+                torrent_content(name=b"../setup.exe"),
+                "application/x-bittorrent",
+            )
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "torrent_invalid"
+    assert await db_session.scalar(select(func.count()).select_from(ManagedTorrent)) == 0
 
 
 @pytest.mark.asyncio
@@ -383,7 +490,7 @@ async def test_v2_listing_exposes_only_bounded_error_code(
         job_type="ADD_TORRENT",
         idempotency_key="add:failed-safe-diagnostic",
         state=TorrentJobState.FAILED,
-        last_error_code="torrent_file_type_not_allowed",
+        last_error_code="torrent_unsafe_file_attribute",
         finished_at=datetime.now(UTC),
     )
     db_session.add_all([managed, request, job])
@@ -394,7 +501,7 @@ async def test_v2_listing_exposes_only_bounded_error_code(
 
     assert response.status_code == 200
     assert response.json()["items"][0]["state"] == "error"
-    assert response.json()["items"][0]["error_code"] == "torrent_file_type_not_allowed"
+    assert response.json()["items"][0]["error_code"] == "torrent_unsafe_file_attribute"
     assert "info_hash" not in response.json()["items"][0]
     assert "storage" not in response.text.lower()
 

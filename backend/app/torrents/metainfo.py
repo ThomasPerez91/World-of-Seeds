@@ -13,87 +13,6 @@ MAX_TORRENT_FILES = 100_000
 MAX_PATH_COMPONENT_BYTES = 255
 MAX_TORRENT_PATH_BYTES = 4096
 
-# WOS is a media delivery service. Keeping this list explicit prevents a new
-# executable/script format from becoming downloadable merely because it was
-# not present in a denylist. Additions require a reviewed code change.
-ALLOWED_CONTENT_EXTENSIONS = frozenset(
-    {
-        # Video and optical-disc metadata.
-        "3g2",
-        "3gp",
-        "avi",
-        "bdmv",
-        "bup",
-        "clpi",
-        "divx",
-        "flv",
-        "ifo",
-        "m2ts",
-        "m4v",
-        "mkv",
-        "mov",
-        "mp4",
-        "mpeg",
-        "mpg",
-        "mpls",
-        "mts",
-        "ogv",
-        "ts",
-        "vob",
-        "webm",
-        "wmv",
-        # Audio.
-        "aac",
-        "ac3",
-        "aif",
-        "aiff",
-        "alac",
-        "ape",
-        "dts",
-        "flac",
-        "m4a",
-        "mka",
-        "mp3",
-        "oga",
-        "ogg",
-        "opus",
-        "wav",
-        "wma",
-        # Subtitles.
-        "ass",
-        "dfxp",
-        "idx",
-        "smi",
-        "smil",
-        "srt",
-        "ssa",
-        "sub",
-        "sup",
-        "ttml",
-        "vtt",
-        # Images and benign release metadata.
-        "avif",
-        "bmp",
-        "cue",
-        "gif",
-        "heic",
-        "heif",
-        "jpeg",
-        "jpg",
-        "json",
-        "md5",
-        "nfo",
-        "png",
-        "sfv",
-        "sha1",
-        "sha256",
-        "tif",
-        "tiff",
-        "txt",
-        "webp",
-        "xml",
-    }
-)
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:$")
 
 BValue = int | bytes | list["BValue"] | dict[bytes, "BValue"]
@@ -359,17 +278,6 @@ def _path_collision_key(parts: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(unicodedata.normalize("NFC", part).casefold() for part in parts)
 
 
-def _require_allowed_file_type(filename: str, *, padding: bool = False) -> None:
-    if padding:
-        return
-    _, separator, extension = filename.rpartition(".")
-    if not separator or extension.casefold() not in ALLOWED_CONTENT_EXTENSIONS:
-        raise TorrentValidationError(
-            "Le torrent contient un type de fichier non autorisé.",
-            code="torrent_file_type_not_allowed",
-        )
-
-
 def _torrent_name(info: dict[bytes, BValue]) -> str:
     raw_name = _select_utf8_bytes(
         info,
@@ -393,7 +301,6 @@ def _torrent_files(
     single_length = info.get(b"length")
     files = info.get(b"files")
     if isinstance(single_length, int) and single_length >= 0 and files is None:
-        _require_allowed_file_type(torrent_name)
         return (TorrentContentFile(0, torrent_name, single_length),)
     elif isinstance(files, list) and single_length is None and files:
         if len(files) > MAX_TORRENT_FILES:
@@ -461,7 +368,6 @@ def _torrent_files(
             padding = "p" in attributes
             if padding and (components[0] != ".pad" or attributes != {"p"}):
                 raise TorrentValidationError("Un fichier de remplissage torrent est invalide.")
-            _require_allowed_file_type(components[-1], padding=padding)
             collision_paths.add(collision_key)
             entries.append(TorrentContentFile(file_index, relative_path, length))
         return tuple(entries)

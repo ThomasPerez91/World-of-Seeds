@@ -1,3 +1,3 @@
 """World of Seeds backend package."""
 
-__version__ = "2.2.15"
+__version__ = "2.3.0"
