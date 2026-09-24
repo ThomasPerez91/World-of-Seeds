@@ -246,6 +246,8 @@ Etat du dernier déploiement :
 ## Torrent et sécurité tracker
 
 - Parser le bencode strictement.
+- Aucune whitelist d'extensions ne s'applique aux fichiers contenus dans un torrent : tout fichier ordinaire est accepté, avec ou sans extension (y compris `.exe`, `.dll`, `.bin`, `.pak` et `README`). Le suffixe du nom ne doit pas être confondu avec l'attribut torrent exécutable `x`, qui reste interdit.
+- La sécurité de l'ingestion repose sur les chemins et leurs collisions (y compris Unicode et casse), les attributs des fichiers (symlink, exécutable et attributs inconnus interdits), les métadonnées torrent, les trackers et les limites applicatives (taille, fichiers, profondeur et upload).
 - Le hash est calculé depuis les octets bruts exacts du dictionnaire `info`; ne jamais le réencoder avant calcul.
 - Les trackers sont allowlistés côté serveur.
 - Les passkeys et credentials restent des secrets de déploiement ; ne jamais les persister dans les tables métier, logs, diagnostics ou réponses frontend.

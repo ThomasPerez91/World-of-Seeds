@@ -1624,7 +1624,7 @@ describe("UserDownloadsPage", () => {
   });
 
   it.each([
-    ["torrent_file_type_not_allowed", "Le torrent contient un type de fichier non autorisé."],
+    ["torrent_unsafe_file_attribute", "Le torrent contient un lien ou un attribut de fichier dangereux."],
     ["qbittorrent_add_conflict", "Le torrent existe déjà mais appartient à une autre ressource."],
     ["torrent_add_rejected", "Le fichier torrent a été refusé par le client de téléchargement."],
   ])("traduit la cause fonctionnelle bornée %s", async (errorCode, expectedMessage) => {

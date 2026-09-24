@@ -1,10 +1,16 @@
 # World of Seeds — Progress
 
-## Etat courant — 21 septembre 2026
+## Etat courant — 24 septembre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.2.15`.
+- Version applicative cible : `2.3.0`.
+
+## Release 2.3.0 — fichiers ordinaires dans les torrents
+
+- Supprime la whitelist des extensions des fichiers contenus dans les `.torrent` : les jeux Windows, fichiers sans extension et formats inconnus suivent la même validation que les médias.
+- Conserve les rejets liés aux métadonnées malformées, chemins dangereux ou ambigus, symlinks, attributs exécutables `x` et inconnus, trackers et limites de taille/nombre ; le contrôle de l'extension du fichier `.torrent` déposé reste applicable.
+- Supprime le code d'erreur obsolète lié aux extensions et ses traductions ; couvre les téléchargements unitaires et les envois successifs du batch par tests d'API.
 
 ## Release 2.2.15 — cohérence desktop et mobile
 

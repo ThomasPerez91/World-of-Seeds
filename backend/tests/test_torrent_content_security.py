@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app.torrents import ParsedTorrent, TorrentValidationError, sanitize_torrent
+from app.torrents import ParsedTorrent, TorrentContentFile, TorrentValidationError, sanitize_torrent
 
 FIXTURES = Path(__file__).with_name("fixtures")
 REGRESSION_INFO_HASH = "a929d5b7af16a8a585fba8c7c8bddc70d61f1686"
@@ -64,25 +64,58 @@ def _sanitize(content: bytes) -> ParsedTorrent:
         [["Été à Tokyo.mkv".encode()], ["Sous-titre français.srt".encode()]],
     ],
 )
-def test_media_allowlist_accepts_normal_content(paths: list[list[bytes]]) -> None:
+def test_ordinary_media_files_remain_supported(paths: list[list[bytes]]) -> None:
     parsed = _sanitize(_torrent(paths))
 
     assert len(parsed.files) == len(paths)
 
 
-@pytest.mark.parametrize("extension", ["sh", "py", "exe", "desktop"])
-def test_media_allowlist_rejects_active_file_types(extension: str) -> None:
-    with pytest.raises(TorrentValidationError) as failure:
-        _sanitize(_torrent([[f"payload.{extension}".encode()]]))
+def test_ordinary_game_files_and_extensionless_readme_are_accepted() -> None:
+    paths = [
+        [b"game", b"setup.exe"],
+        [b"game", b"bin", b"game.dll"],
+        [b"game", b"data", b"content.pak"],
+        [b"game", b"data", b"archive.bin"],
+        [b"game", b"config", b"settings.ini"],
+        [b"game", b"data", b"save.dat"],
+        [b"game", b"setup.cab"],
+        [b"game", b"install.bat"],
+        [b"README"],
+        [b"LICENSE"],
+    ]
 
-    assert failure.value.code == "torrent_file_type_not_allowed"
-    assert "non autorisé" in str(failure.value)
+    parsed = _sanitize(_torrent(paths))
+
+    assert [item.relative_path for item in parsed.files] == [
+        "Media/" + "/".join(component.decode("utf-8") for component in path) for path in paths
+    ]
+
+
+@pytest.mark.parametrize("filename", [b"setup.exe", b"README", b"LICENSE", b"unknown.future"])
+def test_ordinary_single_file_torrents_accept_any_extension(filename: bytes) -> None:
+    content = _bencode(
+        {
+            b"announce": b"https://c411.org/announce/redacted",
+            b"info": {
+                b"length": 5,
+                b"name": filename,
+                b"piece length": 16_384,
+                b"pieces": b"p" * 20,
+            },
+        }
+    )
+
+    parsed = _sanitize(content)
+
+    assert parsed.files == (TorrentContentFile(0, filename.decode("utf-8"), 5),)
 
 
 @pytest.mark.parametrize(
     "path",
     [
-        [b"..", b"escape.mkv"],
+        [b"..", b"escape.exe"],
+        [b".", b"escape.exe"],
+        [b"", b"escape.exe"],
         [b"/etc", b"escape.mkv"],
         [b"C:", b"escape.mkv"],
         [b"folder\\..\\escape.mkv"],
@@ -95,9 +128,9 @@ def test_torrent_rejects_traversal_absolute_and_ambiguous_paths(path: list[bytes
 
 
 def test_torrent_rejects_symlink_and_executable_attributes() -> None:
-    for attribute in (b"l", b"x"):
+    for attribute in (b"l", b"x", b"z"):
         with pytest.raises(TorrentValidationError) as failure:
-            _sanitize(_torrent([[b"Film.mkv"]], attributes=[attribute]))
+            _sanitize(_torrent([[b"game", b"setup.exe"]], attributes=[attribute]))
         assert failure.value.code == "torrent_unsafe_file_attribute"
 
 
