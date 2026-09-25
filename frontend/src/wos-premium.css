@@ -1243,7 +1243,6 @@ input::placeholder {
 .ready-torrent-content,
 .ready-file-list,
 .recursive-transfer,
-.local-download-manager-summary,
 .torrent-upload-batch,
 .torrent-queue-summary {
   border-radius: 13px !important;

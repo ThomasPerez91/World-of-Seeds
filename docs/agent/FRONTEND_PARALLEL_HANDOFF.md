@@ -79,16 +79,9 @@ The Unicode `🇫🇷` / `🇬🇧` glyphs have been removed from `LanguageSelec
 
 The compact login toggle and the General account-settings selector share this component. The native `<select>` keeps plain localized option text while the adjacent SVG reflects the selected locale. Button and select accessible names remain textual (`Français` / `English` through the existing localized labels); flags are decorative.
 
-## Local recovery audit and fix
+## Local recovery audit (historical)
 
-Before this task, the complete path was:
-
-- managed file/folder action → `showSaveFilePicker` / `showDirectoryPicker` → `BrowserDownloadManager` → `RecursiveDownloadController` streaming fetch → `managerSnapshot` → `onLocalTransferChanged` → `LocalDownloadCard`;
-- compatibility file or ZIP action → native `<a download>` endpoint → browser download manager, with no update to `managerSnapshot` or `LocalDownloadCard`.
-
-The first path already reports real received bytes, total size, percentage, queue state, completion, and failures without buffering the whole file. It is unchanged. The second path was the reason the Dashboard card appeared disconnected on browsers using native downloads.
-
-Native file and streamed-ZIP clicks now create a lightweight local entry containing an ID, display name, kind, `started` status, and start timestamp. Recent entries are stored under `wos.local-download-starts`, capped at ten, and removed after 30 minutes. The card displays the latest name and the count of other starts. It deliberately displays no byte count, percentage, speed, or `completed` state because a normal page cannot query Chrome/Brave/Firefox native download progress. Managed streams continue to show only their real progress and error state.
+This section described an earlier Dashboard card and its simulated native download history. Both were removed in 2.3.2. Native `<a download>` links now delegate to the browser without keeping a local status; the actively managed file and folder transfers still show their real queue and progress in the download manager under « Mes téléchargements ».
 
 ## Administration navigation
 

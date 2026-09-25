@@ -93,7 +93,6 @@ describe("CompatibilityDirectoryBrowser", () => {
           onDownloadFile={vi.fn()}
           onDownloadFolder={vi.fn()}
           onLoadFallbackPage={vi.fn()}
-          onNativeDownload={vi.fn()}
           snapshot={snapshot}
           torrentId="d86528f5-bc01-4a8b-86a1-74fe3404864b"
         />
@@ -139,7 +138,6 @@ describe("CompatibilityDirectoryBrowser", () => {
           onDownloadFile={vi.fn()}
           onDownloadFolder={onDownloadFolder}
           onLoadFallbackPage={vi.fn()}
-          onNativeDownload={vi.fn()}
           snapshot={snapshot}
           torrentId="d86528f5-bc01-4a8b-86a1-74fe3404864b"
         />
