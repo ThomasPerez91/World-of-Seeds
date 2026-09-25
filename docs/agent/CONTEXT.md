@@ -52,6 +52,7 @@ Principes de scope :
 - réutiliser en priorité les données et contrats existants ;
 - le frontend ne doit jamais contacter qBittorrent ou NewGreedy directement ;
 - la file de récupération affichée est celle du contrôleur navigateur local : nombre de transferts actifs, concurrence maximale locale et positions disponibles pour les éléments en attente ; elle n'est pas une file globale autoritaire inter-utilisateurs ou multi-appareils ;
+- les téléchargements natifs gérés par le navigateur ne sont ni persistés ni suivis par WoS ; aucun bloc Dashboard de récupération locale n'est affiché pour ces téléchargements. Les transferts de dossiers et fichiers réellement gérés par WoS conservent leur file et leurs actions dans « Mes téléchargements » ;
 - l'annulation d'un torrent conserve le modèle V2 : désabonnement d'un utilisateur lorsqu'il reste d'autres droits actifs, puis lifecycle de purge seulement lorsqu'il ne reste plus de demande active ;
 - V2-32D reste bloquée : ne pas prétendre supprimer précisément les statistiques NewGreedy lors d'une dernière annulation tant que NewGreedy n'offre pas le contrat full-hash requis.
 

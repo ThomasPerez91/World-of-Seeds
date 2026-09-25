@@ -4,7 +4,13 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.1`.
+- Version applicative cible : `2.3.2`.
+
+## Release 2.3.2 — retrait du résumé de récupération native
+
+- Supprime le bloc « Récupération locale » du Dashboard et le suivi persistant des téléchargements natifs du navigateur, y compris la restauration après refresh.
+- Les liens natifs READY et ZIP déclenchent toujours le navigateur sans fabriquer de statut ; la file réelle du `BrowserDownloadManager` reste visible uniquement dans « Mes téléchargements » pour les transferts gérés.
+- Nettoie callbacks, styles, traductions et tests associés à l'ancien résumé. Aucun historique artificiel n'est restauré depuis le navigateur.
 
 ## Release 2.3.1 — thème Forest / Green unique
 
