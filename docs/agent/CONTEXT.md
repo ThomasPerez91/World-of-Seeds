@@ -38,8 +38,7 @@ Cible utilisateur durable :
 
 Principes de design :
 
-- palettes claire et sombre lisibles et douces ;
-- thème `light`, `dark` ou `system` avec préférence persistée par utilisateur ;
+- thème unique Forest / Green sombre, indépendant du système d'exploitation et du compte ;
 - langue FR/EN conservée comme préférence utilisateur ;
 - surfaces/cartouches compacts, boutons modernes et hiérarchie visuelle dense ;
 - éviter les grands titres et espaces vides qui réduisent la densité utile ;
@@ -224,11 +223,8 @@ Etat du dernier déploiement :
 
 ## Préférences d’interface
 
-- `User.preferred_theme` est obligatoire, vaut `light`, `dark` ou `system` et a pour défaut serveur `system` (migration `20260908_23`). Le champ est exposé dans les réponses utilisateur.
-- `PATCH /api/v1/auth/theme` reçoit `{ "preferred_theme": "dark" }` et retourne `AuthResponse`, avec les mêmes exigences authentification/CSRF que la langue. Aucune modification des règles de credentials/session.
-- `data-theme="light|dark"` sur `document.documentElement` représente le thème effectif ; `system` est une préférence, jamais une palette CSS.
-- Le bootstrap externe same-origin `theme-bootstrap.js` applique avant React la dernière préférence locale (`wos.preferred-theme`), ou `system` si absente/invalide/inaccessible. Le compte devient autoritaire lors de la connexion/restauration de session ; le cache ne contient aucun secret.
-- Le provider englobe tous les écrans, suit les changements de `prefers-color-scheme` en mode système et centralise les écritures. Une sauvegarde échouée rétablit le choix précédent sans invalider la session. Les réponses d’une session quittée sont ignorées.
+- World of Seeds utilise un thème unique Forest / Green. Le rendu ne dépend ni du thème du système d'exploitation, ni du compte utilisateur. Aucune préférence de thème n'est stockée ; la migration `20260925_34` supprime l'ancien champ sans intervention sur les comptes existants.
+- La préférence de langue FR/EN reste persistée et modifiable. La prise en charge de `prefers-reduced-motion` reste active pour limiter les animations ; seule la sélection d'une palette visuelle est supprimée.
 
 ## Invariants filesystem et téléchargement
 

@@ -33,7 +33,6 @@ from app.schemas.auth import (
     ChangeCredentialsRequest,
     ChangeLocaleRequest,
     ChangePasswordRequest,
-    ChangeThemeRequest,
     ChangeUsernameRequest,
     LoginRequest,
     UserResponse,
@@ -239,17 +238,6 @@ async def update_locale(
     context: Annotated[AuthContext, Depends(require_csrf)],
 ) -> AuthResponse:
     context.user.preferred_locale = payload.preferred_locale
-    await db.commit()
-    return AuthResponse(user=UserResponse.model_validate(context.user))
-
-
-@router.patch("/theme", response_model=AuthResponse)
-async def update_theme(
-    payload: ChangeThemeRequest,
-    db: DbSession,
-    context: Annotated[AuthContext, Depends(require_csrf)],
-) -> AuthResponse:
-    context.user.preferred_theme = payload.preferred_theme
     await db.commit()
     return AuthResponse(user=UserResponse.model_validate(context.user))
 

@@ -15,7 +15,7 @@ const stylesheets = readStyles(join(process.cwd(), "src"));
 
 const cascade = [
   "styles", "features/admin/admin", "production-hotfix", "wos-premium",
-  "wos-premium-torrents", "wos-premium-review-fixes", "wos-2-1", "wos-2-1-final",
+  "wos-premium-torrents", "wos-2-1", "wos-2-1-final",
   "admin-settings-parity", "toast-system", "responsive-mobile", "admin-layout",
 ];
 
@@ -51,6 +51,26 @@ function mountCascade(width: number) {
 }
 
 describe("CSS compilation boundaries", () => {
+  it("uses only the Forest / Green palette at every viewport and system preference", () => {
+    for (const [path, source] of Object.entries(stylesheets)) {
+      const root = postcss.parse(source, { from: path });
+      root.walkRules((rule) => {
+        expect(rule.selector, path).not.toContain("data-theme");
+      });
+      root.walkAtRules("media", (rule) => {
+        expect(rule.params, path).not.toContain("prefers-color-scheme");
+      });
+    }
+
+    const rootRules = postcss.parse(stylesheets["./styles.css"]).nodes;
+    const forest = rootRules.find((node) => node.type === "rule" && node.selector === ":root");
+    expect(forest?.toString()).toContain("color-scheme: dark");
+    expect(forest?.toString()).toContain("--color-background: #202925");
+    expect(stylesheets["./wos-premium.css"]).toContain("--wos-bg: #07150f");
+    expect(stylesheets["./wos-2-1-final.css"]).toContain("--wos21-login-input-bg: #06271b");
+    expect(stylesheets["./wos-2-1-final.css"]).toContain("prefers-reduced-motion: reduce");
+  });
+
   it.each(Object.entries(stylesheets))("parses %s without implicit block recovery", (path, source) => {
     expect(() => postcss.parse(source, { from: path })).not.toThrow();
   });

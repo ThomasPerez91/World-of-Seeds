@@ -128,29 +128,6 @@ select { min-height: 2.75rem; }
 .account-trigger { min-height: 2.75rem; }
 .account-dropdown-item { min-height: 2.75rem; overflow-wrap: anywhere; }
 
-.theme-selector { padding: 0.25rem; }
-.theme-selector > [role="group"] {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.25rem;
-  padding: 0.25rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-background-secondary);
-}
-.theme-selector button {
-  min-width: 0;
-  margin: 0;
-  padding: 0.6rem 0.25rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-.theme-selector button[aria-pressed="true"] {
-  color: var(--color-text);
-  background: var(--color-surface-elevated);
-  box-shadow: 0 1px 4px var(--color-shadow);
-}
-.theme-selector p { margin: 0.5rem 0 0; font-size: 0.8125rem; }
 .preferences-card { margin-bottom: 1rem; }
 .preferences-grid {
   display: grid;
@@ -168,7 +145,6 @@ select { min-height: 2.75rem; }
   font-size: 0.875rem;
   font-weight: 650;
 }
-.preferences-grid .theme-selector { padding: 0; }
 
 @media (min-width: 600px) {
   .account-trigger strong { display: block; }

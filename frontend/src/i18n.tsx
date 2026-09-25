@@ -18,11 +18,6 @@ const messages = {
   fr: {
     "preferences.title": "Préférences",
     "preferences.intro": "Personnalise la langue de ton espace.",
-    "theme.label": "Thème",
-    "theme.light": "Clair",
-    "theme.dark": "Sombre",
-    "theme.system": "Système",
-    "theme.saveFailed": "Le thème n’a pas pu être enregistré. Le choix précédent a été rétabli. Réessaie.",
     "language.label": "Langue",
     "language.fr": "Français",
     "language.en": "English",
@@ -685,11 +680,6 @@ const messages = {
   en: {
     "preferences.title": "Preferences",
     "preferences.intro": "Choose the language for your space.",
-    "theme.label": "Theme",
-    "theme.light": "Light",
-    "theme.dark": "Dark",
-    "theme.system": "System",
-    "theme.saveFailed": "The theme could not be saved. Your previous choice was restored. Please try again.",
     "language.label": "Language",
     "language.fr": "Français",
     "language.en": "English",
