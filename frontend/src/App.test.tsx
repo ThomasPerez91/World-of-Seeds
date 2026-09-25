@@ -33,6 +33,23 @@ function emptyTorrentListing(url: string): Response | null {
 }
 
 describe("App", () => {
+  it("démarre sans moteur de thème, même si matchMedia manque et qu'un ancien choix existe", async () => {
+    vi.stubGlobal("matchMedia", undefined);
+    localStorage.setItem("wos.preferred-theme", "light");
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/auth/me") return response({ detail: "Not authenticated" }, 401);
+      if (url === "/api/v1/health/status") return response({ status: "ok", checked_at: "2026-09-25T06:00:00Z" }, 200);
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "Bienvenue" });
+    expect(screen.queryByRole("button", { name: /^(Clair|Sombre|Système)$/ })).toBeNull();
+    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    expect(localStorage.getItem("wos.preferred-theme")).toBe("light");
+  });
+
   it("affiche le login 2.1 compact avec langue et visibilité du mot de passe", async () => {
     vi.stubGlobal(
       "fetch",

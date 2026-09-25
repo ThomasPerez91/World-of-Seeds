@@ -1,5 +1,7 @@
 # Frontend 2.1 parallel handoff
 
+Archive de la phase 2.1 : les références au moteur de thèmes et à ses tests ont été retirées en 2.3.1.
+
 - `BASE_SHA`: `0347f0fd84197247887e2597a94dee113f2d0f01`
 - Integration branch: `integration/frontend-2.1`
 - Task branch: `frontend/language-recovery-admin-nav`

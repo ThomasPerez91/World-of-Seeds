@@ -96,7 +96,7 @@ La file de récupération présentée reste celle gérée localement par le cont
 | Tâche | Risque | Dépendances | Statut | Scope |
 | --- | --- | --- | --- | --- |
 | UX-00 | RAPIDE | aucune | TERMINE | Formaliser la direction produit, le découpage des PR et les contraintes de scope. |
-| UX-01 | MOYEN | UX-00 | TERMINE | Design system, palettes claire/sombre, composants UI modernes, préférence `light/dark/system`, préférences langue/thème, nouveau shell et login. |
+| UX-01 | MOYEN | UX-00 | TERMINE | Design system, composants UI modernes, préférence de langue, nouveau shell et login. Les thèmes multiples historiques ont été supprimés en 2.3.1. |
 | UX-02 | MOYEN | UX-01 | TERMINE | Nouveau Dashboard utilisateur avec cartouches torrents, récupération locale et stockage. |
 | UX-03 | MOYEN | UX-02 | TERMINE | Gestionnaire de torrents en accordéons en conservant drag/drop, multi-upload, progression, queue, WebSocket, annulation/désabonnement et rétention. |
 | UX-04 | MOYEN | UX-03 | TERMINE | Recomposer l'expérience READY et la récupération locale sans nouvelle télémétrie backend. |
@@ -104,12 +104,11 @@ La file de récupération présentée reste celle gérée localement par le cont
 | UX-05B | ELEVE | UX-05 | TERMINE | Supprimer le filesystem/workspace utilisateur legacy, migrer la capacité Dashboard vers un contrat partagé dédié et nettoyer routes/files/trash/workspaces morts sans toucher au `SharedContentStore` torrent. |
 | UX-06 | MOYEN | UX-05B | TERMINE | Harmoniser l'administration avec le design system, finaliser responsive/accessibilité, supprimer les reliquats frontend morts et effectuer le nettoyage final. |
 
-### UX-01 — Design system, thèmes et préférences
+### UX-01 — Design system et préférences
 
 Objectifs accomplis :
 
-- palettes Light/Dark à tokens partagés ;
-- thèmes `light`, `dark`, `system` persistés ;
+- thème unique Forest / Green depuis 2.3.1, indépendant du système d'exploitation ;
 - préférence de langue FR/EN conservée ;
 - primitives UI légères réutilisables ;
 - login, shell, paramètres et credentials alignés sur le design system ;

@@ -675,30 +675,6 @@ body {
   font-size: 0.72rem !important;
 }
 
-/* ---------- Light/system theme still keeps the scenic identity ---------- */
-
-:root[data-theme="light"] #root::before {
-  filter: brightness(1.08) saturate(0.86);
-}
-
-:root[data-theme="light"] .app-shell,
-:root[data-theme="light"] .centered-page {
-  background: rgba(238, 247, 241, 0.78) !important;
-}
-
-:root[data-theme="light"] .login-page {
-  color: #f7fbf8 !important;
-  background: transparent !important;
-}
-
-:root[data-theme="light"] .login-page .brand-panel,
-:root[data-theme="light"] .login-page .form-panel {
-  color: var(--wos21-text) !important;
-  background:
-    linear-gradient(145deg, rgba(103, 239, 162, 0.055), transparent 48%),
-    var(--wos21-glass) !important;
-}
-
 /* ---------- Responsive ---------- */
 
 @media (max-width: 900px) {
@@ -1154,8 +1130,6 @@ body {
   box-shadow: 0 0 12px rgba(80, 240, 148, 0.42);
   font-weight: 820;
 }
-:root[data-theme="light"] .torrent-filter.active .torrent-filter-count { color: #fff; }
-
 @media (max-width: 1024px) {
   .app-header { grid-template-columns: 1fr auto !important; }
   .user-navigation { grid-column: 1 / -1 !important; grid-row: 2; width: 100%; }

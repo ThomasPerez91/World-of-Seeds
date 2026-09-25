@@ -1,10 +1,16 @@
 # World of Seeds — Progress
 
-## Etat courant — 24 septembre 2026
+## Etat courant — 25 septembre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.0`.
+- Version applicative cible : `2.3.1`.
+
+## Release 2.3.1 — thème Forest / Green unique
+
+- Le mode clair et la préférence système sont retirés. Les tokens sombres actuels deviennent la palette canonique ; aucune préférence d'OS ni ancienne valeur de stockage local ne peut sélectionner une autre palette.
+- Suppression du bootstrap, du provider, du sélecteur, de l'API et des variantes CSS de thème clair ; les contrôles natifs utilisent un `color-scheme: dark` statique.
+- Migration `20260925_34` : suppression de la contrainte et de la colonne de thème des comptes existants ; langue, session et `prefers-reduced-motion` inchangés.
 
 ## Release 2.3.0 — fichiers ordinaires dans les torrents
 
@@ -207,13 +213,13 @@ Décisions validées :
 - l'ajout `.torrent`, la progression, les états de queue, le WebSocket, l'annulation/désabonnement, la rétention et le manifeste READY existants sont réutilisés ;
 - la récupération affichée reste celle du contrôleur navigateur local, pas une file globale autoritaire multi-appareils ;
 - le frontend ne contacte jamais qBittorrent ou NewGreedy directement ;
-- le thème offre `light`, `dark` et `system` avec préférence persistée, et la langue FR/EN reste conservée ;
+- le thème Forest / Green unique remplace les anciens choix visuels depuis 2.3.1 ; la langue FR/EN reste conservée ;
 - le mobile-first et le responsive restent un critère de Definition of Done de chaque PR UX.
 
 ### Découpage des tâches
 
 - **UX-00 — TERMINE** : planification documentaire de la refonte.
-- **UX-01 — TERMINE** : design system, thèmes, préférence persistée, login/settings/shell.
+- **UX-01 — TERMINE** : design system, préférence de langue, login/settings/shell ; les anciens thèmes sont retirés depuis 2.3.1.
 - **UX-02 — TERMINE** : nouveau Dashboard et ses cartouches.
 - **UX-03 — TERMINE** : gestionnaire de torrents en accordéons.
 - **UX-04 — TERMINE** : expérience READY et récupération locale intégrées aux accordéons.
@@ -241,13 +247,11 @@ La V1 ne reçoit plus de développement normal. Elle reste seulement une référ
 
 Les PR encore ouvertes contre `develop_V2` sont historiques et ne doivent pas être fusionnées telles quelles dans le nouveau flux. Toute correction encore pertinente doit être réévaluée puis réimplémentée depuis le `develop` courant.
 
-## UX-01 — Design system, thèmes et préférences
+## UX-01 — historique du design system et des préférences (thèmes retirés en 2.3.1)
 
 - Palettes Light/Dark à tokens partagés.
-- `preferred_theme` (`light`, `dark`, `system`) persistant ; migration additive `20260908_23`, défaut serveur `system`.
-- `PATCH /api/v1/auth/theme` authentifié avec CSRF.
-- Provider partagé, suivi dynamique du système et rollback optimiste en cas d'échec de sauvegarde.
-- Cartouche Préférences langue/thème et sélection rapide dans le menu compte.
+- L'ancien système de thèmes et sa migration `20260908_23` appartiennent à l'historique UX-01 ; la migration `20260925_34` l'a supprimé en 2.3.1.
+- Seule la langue FR/EN reste configurable dans les préférences et le menu compte.
 - Primitives natives légères Button, IconButton, Card, Badge, Progress, Accordion et StateMessage.
 - Login, credentials, shell et paramètres compacts et mobile-first.
 
