@@ -1,5 +1,3 @@
-import type { Theme } from "../theme";
-
 export interface User {
   id: string;
   username: string;
@@ -7,7 +5,6 @@ export interface User {
   is_active: boolean;
   must_change_credentials: boolean;
   preferred_locale?: "fr" | "en";
-  preferred_theme?: Theme;
 }
 
 export interface AdminUser extends User {
@@ -647,14 +644,6 @@ export const api = {
     const response = await request<AuthResponse>("/auth/locale", {
       method: "PATCH",
       body: JSON.stringify({ preferred_locale: preferredLocale }),
-    });
-    return response.user;
-  },
-
-  async changeTheme(preferredTheme: Theme): Promise<User> {
-    const response = await request<AuthResponse>("/auth/theme", {
-      method: "PATCH",
-      body: JSON.stringify({ preferred_theme: preferredTheme }),
     });
     return response.user;
   },

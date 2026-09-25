@@ -27,24 +27,6 @@
   --wos-content: 1660px;
 }
 
-:root[data-theme="light"] {
-  --wos-bg: #eaf2ec;
-  --wos-bg-2: #f5f8f5;
-  --wos-surface: rgba(250, 253, 251, 0.86);
-  --wos-surface-strong: rgba(255, 255, 255, 0.96);
-  --wos-surface-soft: rgba(229, 240, 233, 0.82);
-  --wos-line: rgba(28, 82, 54, 0.18);
-  --wos-line-strong: rgba(28, 82, 54, 0.28);
-  --wos-text: #13241b;
-  --wos-muted: #52685c;
-  --wos-muted-2: #72857a;
-  --wos-accent: #1d9b5b;
-  --wos-accent-strong: #12824a;
-  --wos-accent-dim: rgba(28, 151, 86, 0.12);
-  --wos-shadow: 0 22px 54px rgba(27, 63, 43, 0.12);
-  --wos-shadow-soft: 0 12px 30px rgba(27, 63, 43, 0.09);
-}
-
 html {
   min-height: 100%;
   background: var(--wos-bg);
@@ -253,12 +235,6 @@ textarea {
   border: 1px solid var(--wos-line);
   border-radius: 12px;
   background: rgba(5, 20, 14, 0.38);
-}
-
-:root[data-theme="light"] input,
-:root[data-theme="light"] select,
-:root[data-theme="light"] textarea {
-  background: rgba(255, 255, 255, 0.76);
 }
 
 input::placeholder {
@@ -474,10 +450,6 @@ input::placeholder {
   background: rgba(8, 27, 20, 0.82);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
   backdrop-filter: blur(18px) saturate(130%);
-}
-
-:root[data-theme="light"] .app-header {
-  background: rgba(245, 250, 247, 0.9);
 }
 
 .app-header .wordmark {

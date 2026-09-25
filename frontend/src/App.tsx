@@ -23,7 +23,6 @@ import {
   LegalPage,
   type LegalDocument,
 } from "./components/LegalPage";
-import { ThemeProvider } from "./theme";
 import { Button, Card, Badge, StateMessage, Tooltip } from "./components/ui";
 import { UI_VERSION } from "./uiVersion";
 import { FeedbackProvider } from "./components/Feedback";
@@ -966,7 +965,7 @@ function AppContent() {
     }
     return null;
   }
-  return <ThemeProvider user={auth.status === "authenticated" ? auth.user : null}>{renderScreen()}</ThemeProvider>;
+  return renderScreen();
 }
 
 export function App() {

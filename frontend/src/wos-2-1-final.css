@@ -7,12 +7,6 @@
   --wos21-login-input-focus-bg: #083324;
 }
 
-:root[data-theme="light"] {
-  --wos21-panel-surface: linear-gradient(145deg, rgba(21, 139, 78, 0.055), transparent 45%), rgba(238, 250, 243, 0.78);
-  --wos21-panel-card: rgba(247, 253, 249, 0.68);
-  --wos21-panel-border: rgba(24, 119, 68, 0.2);
-}
-
 /* Let the original artwork breathe a little more without filtering the image. */
 #root::before {
   background:
@@ -572,10 +566,6 @@
 
 .network-throughput-state.is-error {
   color: var(--wos-muted-2);
-}
-
-:root[data-theme="light"] .network-throughput-direction {
-  background: rgba(31, 142, 80, 0.045);
 }
 
 @media (prefers-reduced-motion: reduce) {
