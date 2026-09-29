@@ -75,6 +75,45 @@ async def test_saturated_uplink_reduces_lanes_and_wakes_waiter_on_growth() -> No
 
 
 @pytest.mark.asyncio
+async def test_saturated_uplink_skips_ineligible_demotions() -> None:
+    scheduler = DownloadTrafficScheduler(uplink_bytes_per_second=100_000_000)
+    owner = uuid.uuid4()
+    await scheduler.register(uuid.uuid4(), owner, 20_000_000_000)
+    for _ in range(4):
+        await scheduler.register(uuid.uuid4(), uuid.uuid4(), 20_000_000_000)
+    for _ in range(2):
+        await scheduler.register(uuid.uuid4(), owner, 20_000_000_000)
+    await scheduler.observe_upload(0)
+    assert await scheduler.snapshot() == (7, 0)
+    for _ in range(2):
+        await scheduler.register(uuid.uuid4(), owner, 20_000_000_000)
+    await scheduler.observe_upload(99_000_000)
+    assert await scheduler.snapshot() == (5, 4)
+
+
+@pytest.mark.asyncio
+async def test_quantum_rotation_serves_other_account_when_owner_has_two_waiters() -> None:
+    now = [0.0]
+    scheduler = DownloadTrafficScheduler(clock=lambda: now[0])
+    owner = uuid.uuid4()
+    fast = [uuid.uuid4() for _ in range(5)]
+    for lease_id in fast:
+        await scheduler.register(lease_id, owner, 20_000_000_000)
+    for _ in range(2):
+        await scheduler.register(uuid.uuid4(), owner, 20_000_000_000)
+    other = uuid.uuid4()
+    other_user = uuid.uuid4()
+    await scheduler.register(other, other_user, 20_000_000_000)
+
+    now[0] = 121
+    assert await scheduler.next_chunk(fast[0], 1_048_576) == (1024, 1024)
+    assert await scheduler.next_chunk(other, 1_048_576) == (1_048_576, 0)
+    assert await scheduler.snapshot() == (5, 3)
+    with pytest.raises(DownloadWaitingLimit):
+        await scheduler.register(uuid.uuid4(), owner, 20_000_000_000)
+
+
+@pytest.mark.asyncio
 async def test_monitor_feeds_measured_host_upload_to_scheduler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
