@@ -95,6 +95,7 @@ from app.torrents.downloads import (
     ManagedFolderArchiver,
     download_snapshot_id,
 )
+from app.torrents.traffic import DownloadTrafficScheduler, DownloadWaitingLimit
 
 router = APIRouter()
 UPLOAD_READ_CHUNK = 64 * 1024
@@ -158,6 +159,13 @@ def _download_rate_limiter(request: Request) -> DownloadRateLimiter:
     if not isinstance(limiter, DownloadRateLimiter):
         raise RuntimeError("download rate limiter is unavailable")
     return limiter
+
+
+def _download_traffic_scheduler(request: Request) -> DownloadTrafficScheduler:
+    scheduler = request.app.state.download_traffic_scheduler
+    if not isinstance(scheduler, DownloadTrafficScheduler):
+        raise RuntimeError("download traffic scheduler is unavailable")
+    return scheduler
 
 
 def _detail(code: str, message: str, field: str | None = None) -> dict[str, str | None]:
@@ -714,6 +722,7 @@ async def download_torrent_folder_archive(
             managed_torrent_id=managed_torrent_id,
             torrent_request_id=torrent_request_id,
             torrent_file_id=first_file_id,
+            kind="archive",
             max_concurrent=None if is_admin else max_concurrent,
             max_concurrent_global=max_concurrent_global,
         )
@@ -877,6 +886,7 @@ async def download_torrent_archive(
             managed_torrent_id=managed_torrent_id,
             torrent_request_id=torrent_request_id,
             torrent_file_id=first_file_id,
+            kind="archive",
             max_concurrent=None if is_admin else max_concurrent,
             max_concurrent_global=max_concurrent_global,
         )
@@ -939,7 +949,6 @@ async def download_torrent_file(
     snapshot: Annotated[str | None, Query(min_length=64, max_length=64)] = None,
 ) -> Response:
     owner_id = context.user.id
-    is_admin = context.user.is_admin
     now = datetime.now(UTC)
     row = (
         await db.execute(
@@ -1000,8 +1009,6 @@ async def download_torrent_file(
         options = await PostgresOptionsRegistry().snapshot(db)
         chunk_size = _integer_option(options, "WOS_HTTP_STREAM_CHUNK_BYTES")
         lease_seconds = _integer_option(options, "WOS_DOWNLOAD_LEASE_SECONDS")
-        max_concurrent = _integer_option(options, "WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER")
-        max_concurrent_global = _integer_option(options, "WOS_DOWNLOAD_MAX_CONCURRENT_GLOBAL")
         per_user_rate = _integer_option(
             options,
             "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
@@ -1025,8 +1032,8 @@ async def download_torrent_file(
                 managed_torrent_id=managed_torrent_id,
                 torrent_request_id=torrent_request_id,
                 torrent_file_id=torrent_file_id,
-                max_concurrent=None if is_admin else max_concurrent,
-                max_concurrent_global=max_concurrent_global,
+                max_concurrent=None,
+                max_concurrent_global=None,
             )
         except DownloadConcurrencyError:
             _fail(
@@ -1100,6 +1107,21 @@ async def download_torrent_file(
         download.close()
         return Response(status_code=response_status, headers=headers)
     assert lease is not None
+    traffic = _download_traffic_scheduler(request)
+    try:
+        await traffic.register(lease.id, owner_id, length)
+    except DownloadWaitingLimit:
+        download.close()
+        await leases.release(lease.id)
+        _fail(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "download_waiting_limit_reached",
+            "Deux récupérations sont déjà en attente pour ce compte.",
+        )
+    except BaseException:
+        download.close()
+        await leases.release(lease.id)
+        raise
     return ManagedDownloadStreamingResponse(
         download,
         start=start,
@@ -1111,6 +1133,7 @@ async def download_torrent_file(
         lease=lease,
         leases=leases,
         limiter=_download_rate_limiter(request),
+        traffic=traffic,
         per_user_bytes_per_second=per_user_rate,
         global_bytes_per_second=global_rate,
     )

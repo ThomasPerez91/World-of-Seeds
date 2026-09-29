@@ -351,6 +351,13 @@ Cette consolidation ne modifie ni le schéma PostgreSQL, ni `UserTorrent` histor
 - La policy de récupération expose explicitement `unlimited: true` et une limite `null` pour les administrateurs. Chaque flux conserve sa lease et tous les rate limits/protections globales restent actifs.
 - Les comptes standards conservent les plafonds existants de lot et de flux simultanés.
 
+## Ordonnancement des récupérations HTTP de fichiers
+
+- Les fichiers READY n'ont plus de plafond global de huit connexions : un transfert peut commencer sur chaque appareil. Le contrôleur démarre à cinq flux rapides et augmente ou diminue leur nombre (de 5 à 64) selon le débit montant total du serveur, sondé toutes les 15 secondes via Prometheus. Rise2 annonce 125 Mo/s de capacité configurable ; sous 80 % il ouvre progressivement des voies en attente, au-delà de 95 % il rétrograde les transferts les moins productifs. Si la télémétrie manque, il garde sa dernière décision. Les autres progressent à 1 Kio/s, avec un maximum de deux attentes par compte.
+- Une voie rapide est redistribuée après deux minutes, ou dès que son flux se ferme. La taille restante donne un bonus plafonné à cinq minutes, puis l'ancienneté départage les attentes. Une limite de débit global configurée est appliquée aux octets réellement transmis sans réserver une fraction fixe aux clients lents.
+- L'API expose `/api/v2/downloads/traffic` pour les compteurs réels des flux du compte et de l'instance. « Mes téléchargements » affiche cet état serveur en complément des jobs locaux ; aucun état fictif de téléchargement natif n'est persisté.
+- Les ZIP conservent leurs plafonds spécifiques et leurs leases sont désormais comptées séparément des fichiers (`20260929_35`). L'ordonnanceur des fichiers dépend de l'invariant Rise2 `WOS_API_PROCESS_COUNT=1` ; une interruption du processus coupe les connexions HTTP, que le client peut reprendre avec `Range`.
+
 ## Prochaine tâche
 
 La séquence **UX-00 → UX-06 est terminée**. Aucun chantier UX supplémentaire n'est présumé automatiquement.

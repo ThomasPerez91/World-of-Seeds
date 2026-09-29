@@ -757,6 +757,13 @@ describe("UserDownloadsPage", () => {
     const nativeClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     vi.stubGlobal("showDirectoryPicker", picker);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/downloads/traffic")) {
+        return response({
+          fast_streams: 5, waiting_streams: 45,
+          my_fast_streams: 0, my_waiting_streams: 1,
+          fast_limit: 5, waiting_limit_per_user: 2, waiting_bytes_per_second: 1024,
+        });
+      }
       if (String(input).includes("download-manifest")) {
         return response({
           snapshot_id: "3".repeat(64),
@@ -785,6 +792,7 @@ describe("UserDownloadsPage", () => {
     expect(link.getAttribute("href")).toContain(`/files/single-id/download?snapshot=${"3".repeat(64)}`);
     expect(link.getAttribute("download")).toBe("Film final.mkv");
     expect(nativeClick).toHaveBeenCalledOnce();
+    expect(await screen.findByText("Serveur : 0 rapides, 1 en attente (5 places rapides)")).toBeTruthy();
     expect(picker).not.toHaveBeenCalled();
     expect(localStorage.getItem(oldNativeDownloadKey)).toBeNull();
     expect(screen.queryByText("Récupération locale")).toBeNull();
