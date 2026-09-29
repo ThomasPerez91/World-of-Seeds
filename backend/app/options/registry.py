@@ -157,8 +157,8 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     ),
     _integer(
         "WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER",
-        "Téléchargements simultanés par utilisateur",
-        "Nombre maximal de flux de fichiers ouverts par un même compte.",
+        "Archives ZIP simultanées par utilisateur",
+        "Nombre maximal de flux ZIP par compte. Les fichiers utilisent l’ordonnanceur HTTP.",
         2,
         "downloads",
         minimum=1,
@@ -167,8 +167,8 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     ),
     _integer(
         "WOS_DOWNLOAD_MAX_CONCURRENT_GLOBAL",
-        "Téléchargements simultanés globaux",
-        "Nombre maximal de flux HTTP ouverts sur l’ensemble des API, administrateurs inclus.",
+        "Archives ZIP simultanées globales",
+        "Nombre maximal de flux ZIP. Les voies rapides des fichiers suivent le débit montant.",
         8,
         "downloads",
         minimum=1,

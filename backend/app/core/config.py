@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     prometheus_url: AnyHttpUrl | None = None
     prometheus_connect_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
     prometheus_read_timeout_seconds: float = Field(default=3.0, gt=0, le=15)
+    http_uplink_capacity_bytes_per_second: int = Field(
+        default=125_000_000, ge=1_000_000, le=10_000_000_000
+    )
     network_interface: str = Field(
         default="auto",
         min_length=1,

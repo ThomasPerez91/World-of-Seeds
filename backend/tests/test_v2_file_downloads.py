@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.security import hash_password
+from app.main import app
 from app.models import (
     DownloadLease,
     ManagedTorrent,
@@ -31,6 +32,7 @@ from app.torrents.downloads import (
     DownloadRateLimiter,
     ManagedDownloadError,
 )
+from app.torrents.traffic import DownloadTrafficScheduler
 
 PASSWORD = "correct-horse-battery"
 CONTENT = b"World of Seeds V2 download"
@@ -123,6 +125,9 @@ async def test_owned_ready_file_supports_head_range_etag_and_releases_lease(
     assert ignored_range.status_code == 200
     assert ignored_range.content == CONTENT
     assert await db_session.scalar(select(func.count()).select_from(DownloadLease)) == 0
+    traffic = app.state.download_traffic_scheduler
+    assert isinstance(traffic, DownloadTrafficScheduler)
+    assert await traffic.snapshot() == (0, 0)
 
 
 @pytest.mark.asyncio
@@ -287,7 +292,46 @@ async def test_download_lease_global_limit_also_applies_without_a_per_user_ceili
 
 
 @pytest.mark.asyncio
-async def test_admin_file_download_bypasses_only_the_per_user_lease_ceiling(
+async def test_file_streams_do_not_consume_zip_archive_lease_slots(
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    owner, torrent, request, torrent_file, _ = await _ready_file(db_session, data_root)
+    manager = DownloadLeaseManager(db_session, lease_seconds=60)
+    file_lease = await manager.acquire(
+        user_id=owner.id,
+        managed_torrent_id=torrent.id,
+        torrent_request_id=request.id,
+        torrent_file_id=torrent_file.id,
+        max_concurrent=None,
+        max_concurrent_global=None,
+    )
+    archive_lease = await manager.acquire(
+        user_id=owner.id,
+        managed_torrent_id=torrent.id,
+        torrent_request_id=request.id,
+        torrent_file_id=torrent_file.id,
+        max_concurrent=1,
+        max_concurrent_global=1,
+        kind="archive",
+    )
+    file_lease_id, archive_lease_id = file_lease.id, archive_lease.id
+    with pytest.raises(DownloadConcurrencyError):
+        await manager.acquire(
+            user_id=owner.id,
+            managed_torrent_id=torrent.id,
+            torrent_request_id=request.id,
+            torrent_file_id=torrent_file.id,
+            max_concurrent=1,
+            max_concurrent_global=1,
+            kind="archive",
+        )
+    await manager.release(file_lease_id)
+    await manager.release(archive_lease_id)
+
+
+@pytest.mark.asyncio
+async def test_admin_file_download_does_not_consume_existing_leases(
     client: AsyncClient,
     db_session: AsyncSession,
     data_root: Path,

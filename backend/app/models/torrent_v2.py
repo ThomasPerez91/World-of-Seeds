@@ -453,6 +453,7 @@ class TorrentFile(Base):
 class DownloadLease(Base):
     __tablename__ = "download_leases"
     __table_args__ = (
+        CheckConstraint("kind IN ('file', 'archive')", name="ck_download_leases_kind"),
         Index("ix_download_leases_user_expiry", "user_id", "expires_at"),
         Index("ix_download_leases_torrent_expiry", "managed_torrent_id", "expires_at"),
         Index("ix_download_leases_request", "torrent_request_id"),
@@ -479,6 +480,7 @@ class DownloadLease(Base):
         ForeignKey("torrent_files.id", ondelete="CASCADE"),
         nullable=False,
     )
+    kind: Mapped[str] = mapped_column(String(8), default="file", nullable=False)
     expires_at: Mapped[datetime] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     renewed_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)

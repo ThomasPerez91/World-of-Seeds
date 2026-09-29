@@ -13,7 +13,7 @@ from collections.abc import AsyncGenerator, Callable, Generator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import IO, cast
+from typing import IO, Literal, cast
 from urllib.parse import quote
 
 from sqlalchemy import delete, func, select
@@ -34,6 +34,7 @@ from app.models import (
     User,
 )
 from app.storage import SharedContentStore
+from app.torrents.traffic import DownloadTrafficScheduler
 
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_NONBLOCK", 0)
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0)
@@ -343,11 +344,12 @@ class DownloadLeaseManager:
         torrent_request_id: uuid.UUID,
         torrent_file_id: uuid.UUID,
         max_concurrent: int | None,
-        max_concurrent_global: int = 20,
+        max_concurrent_global: int | None = 20,
+        kind: Literal["file", "archive"] = "file",
     ) -> DownloadLease:
         if max_concurrent is not None and not 1 <= max_concurrent <= 20:
             raise ValueError("download concurrency limit is invalid")
-        if not 1 <= max_concurrent_global <= 20:
+        if max_concurrent_global is not None and not 1 <= max_concurrent_global <= 20:
             raise ValueError("global download concurrency limit is invalid")
         now = self._clock()
         async with self._session.begin():
@@ -387,13 +389,14 @@ class DownloadLeaseManager:
                     DownloadLease.expires_at <= now,
                 )
             )
-            active_global = await self._session.scalar(
-                select(func.count())
-                .select_from(DownloadLease)
-                .where(DownloadLease.expires_at > now)
-            )
-            if active_global is None or active_global >= max_concurrent_global:
-                raise DownloadConcurrencyError("global download concurrency limit reached")
+            if max_concurrent_global is not None:
+                active_global = await self._session.scalar(
+                    select(func.count())
+                    .select_from(DownloadLease)
+                    .where(DownloadLease.expires_at > now, DownloadLease.kind == kind)
+                )
+                if active_global is None or active_global >= max_concurrent_global:
+                    raise DownloadConcurrencyError("global download concurrency limit reached")
             if max_concurrent is not None:
                 active = await self._session.scalar(
                     select(func.count())
@@ -401,6 +404,7 @@ class DownloadLeaseManager:
                     .where(
                         DownloadLease.user_id == user_id,
                         DownloadLease.expires_at > now,
+                        DownloadLease.kind == kind,
                     )
                 )
                 if active is None or active >= max_concurrent:
@@ -410,6 +414,7 @@ class DownloadLeaseManager:
                 managed_torrent_id=managed_torrent_id,
                 torrent_request_id=torrent_request_id,
                 torrent_file_id=torrent_file_id,
+                kind=kind,
                 expires_at=now + timedelta(seconds=self._lease_seconds),
                 created_at=now,
                 renewed_at=now,
@@ -493,6 +498,7 @@ class DownloadRateLimiter:
         self._lock = asyncio.Lock()
         self._global_next = 0.0
         self._user_next: dict[uuid.UUID, float] = {}
+        self._stream_next: dict[uuid.UUID, float] = {}
 
     async def reserve(
         self,
@@ -501,25 +507,42 @@ class DownloadRateLimiter:
         *,
         per_user_bytes_per_second: int,
         global_bytes_per_second: int,
+        stream_id: uuid.UUID | None = None,
+        stream_bytes_per_second: int = 0,
     ) -> float:
-        if byte_count < 0 or per_user_bytes_per_second < 0 or global_bytes_per_second < 0:
+        if (
+            byte_count < 0
+            or per_user_bytes_per_second < 0
+            or global_bytes_per_second < 0
+            or stream_bytes_per_second < 0
+        ):
             raise ValueError("download rate values must be non-negative")
+        if stream_bytes_per_second and stream_id is None:
+            raise ValueError("stream rate requires a stream ID")
         async with self._lock:
             now = self._clock()
             user_ready = self._user_next.get(user_id, now)
             global_ready = self._global_next
+            stream_ready = self._stream_next.get(stream_id, now) if stream_id else now
             ready_at = max(
                 now,
                 user_ready if per_user_bytes_per_second else now,
                 global_ready if global_bytes_per_second else now,
+                stream_ready if stream_bytes_per_second else now,
             )
             if per_user_bytes_per_second:
                 self._user_next[user_id] = ready_at + byte_count / per_user_bytes_per_second
             if global_bytes_per_second:
                 self._global_next = ready_at + byte_count / global_bytes_per_second
+            if stream_id is not None and stream_bytes_per_second:
+                self._stream_next[stream_id] = ready_at + byte_count / stream_bytes_per_second
             if len(self._user_next) > 10_000:
                 self._user_next = {
                     key: value for key, value in self._user_next.items() if value > now
+                }
+            if len(self._stream_next) > 10_000:
+                self._stream_next = {
+                    key: value for key, value in self._stream_next.items() if value > now
                 }
             return max(0.0, ready_at - now)
 
@@ -534,6 +557,7 @@ async def stream_managed_download(
     lease: DownloadLease,
     leases: DownloadLeaseManager,
     limiter: DownloadRateLimiter,
+    traffic: DownloadTrafficScheduler,
     per_user_bytes_per_second: int,
     global_bytes_per_second: int,
 ) -> AsyncGenerator[bytes, None]:
@@ -553,12 +577,17 @@ async def stream_managed_download(
             if time.monotonic() >= next_renewal:
                 await leases.renew(lease.id)
                 next_renewal = time.monotonic() + leases.heartbeat_seconds
-            requested = min(remaining, chunk_size)
+            requested, share = await traffic.next_chunk(
+                lease.id,
+                min(remaining, chunk_size),
+            )
             delay = await limiter.reserve(
                 user_id,
                 requested,
                 per_user_bytes_per_second=per_user_bytes_per_second,
                 global_bytes_per_second=global_bytes_per_second,
+                stream_id=lease.id,
+                stream_bytes_per_second=share,
             )
             while delay > 0:
                 interval = min(delay, leases.heartbeat_seconds)
@@ -575,6 +604,7 @@ async def stream_managed_download(
             if not chunk:
                 raise ManagedDownloadError("managed file ended before its manifest size")
             yield chunk
+            await traffic.report(lease.id, len(chunk))
             offset += len(chunk)
             remaining -= len(chunk)
     finally:
@@ -637,12 +667,14 @@ class ManagedDownloadStreamingResponse(StreamingResponse):
         lease: DownloadLease,
         leases: DownloadLeaseManager,
         limiter: DownloadRateLimiter,
+        traffic: DownloadTrafficScheduler,
         per_user_bytes_per_second: int,
         global_bytes_per_second: int,
     ) -> None:
         self._download = download
         self._lease = lease
         self._leases = leases
+        self._traffic = traffic
         super().__init__(
             stream_managed_download(
                 download,
@@ -653,6 +685,7 @@ class ManagedDownloadStreamingResponse(StreamingResponse):
                 lease=lease,
                 leases=leases,
                 limiter=limiter,
+                traffic=traffic,
                 per_user_bytes_per_second=per_user_bytes_per_second,
                 global_bytes_per_second=global_bytes_per_second,
             ),
@@ -665,7 +698,10 @@ class ManagedDownloadStreamingResponse(StreamingResponse):
             await super().__call__(scope, receive, send)
         finally:
             self._download.close()
-            await self._leases.release(self._lease.id)
+            try:
+                await self._traffic.unregister(self._lease.id)
+            finally:
+                await self._leases.release(self._lease.id)
 
 
 class ManagedArchiveStreamingResponse(StreamingResponse):

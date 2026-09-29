@@ -16,6 +16,7 @@ x-wos-environment: &wos-environment
   WOS_REDIS_URL: redis://redis:6379/0
   WOS_PROMETHEUS_URL: http://prometheus:9090
   WOS_NETWORK_INTERFACE: ${WOS_V2_NETWORK_INTERFACE:-auto}
+  WOS_HTTP_UPLINK_CAPACITY_BYTES_PER_SECOND: ${WOS_V2_HTTP_UPLINK_CAPACITY_BYTES_PER_SECOND:-125000000}
 
 x-wos-runtime: &wos-runtime
   image: ${WOS_V2_IMAGE:?set immutable WOS_V2_IMAGE digest}

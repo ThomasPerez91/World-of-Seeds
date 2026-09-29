@@ -1,6 +1,9 @@
+import asyncio
+import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -20,19 +23,55 @@ from app.core.database import engine
 from app.core.http_security import SecurityHeadersMiddleware
 from app.integrations import ExternalServicesMonitor
 from app.integrations.admin_runtime import AdminRuntimeMonitor
+from app.integrations.http import integration_timeout
 from app.integrations.newgreedy_config import NewGreedyConfigStore
 from app.integrations.newgreedy_restart import NewGreedyRestartStore
+from app.integrations.prometheus_network import PrometheusNetworkClient, PrometheusNetworkError
 from app.integrations.wos_restart import WosRestartStore
 from app.observability import MetricsRegistry, OperationalMetricsCache, RequestMetricsMiddleware
 from app.options import OptionsStore
 from app.torrents.downloads import DownloadRateLimiter
+from app.torrents.traffic import DownloadTrafficScheduler
+
+logger = logging.getLogger(__name__)
+
+
+async def monitor_http_upload(application: FastAPI) -> None:
+    """Re-evaluate HTTP stream capacity from the existing host network metric."""
+    settings: Settings = application.state.settings
+    if settings.prometheus_url is None:
+        return
+    timeout = integration_timeout(
+        settings.prometheus_connect_timeout_seconds,
+        settings.prometheus_read_timeout_seconds,
+    )
+    async with httpx.AsyncClient(
+        base_url=str(settings.prometheus_url).rstrip("/"), timeout=timeout, trust_env=False
+    ) as client:
+        prometheus = PrometheusNetworkClient(client, interface=settings.network_interface)
+        while True:
+            try:
+                snapshot = await prometheus.snapshot("realtime")
+                if snapshot.status == "ok" and snapshot.upload is not None:
+                    await application.state.download_traffic_scheduler.observe_upload(
+                        snapshot.upload.current_bytes_per_second
+                    )
+            except PrometheusNetworkError:
+                logger.warning("HTTP upload scheduler could not read network telemetry")
+            await asyncio.sleep(15)
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    yield
-    await application.state.redis_coordinator.aclose()
-    await engine.dispose()
+    monitor = asyncio.create_task(monitor_http_upload(application))
+    try:
+        yield
+    finally:
+        monitor.cancel()
+        with suppress(asyncio.CancelledError):
+            await monitor
+        await application.state.redis_coordinator.aclose()
+        await engine.dispose()
 
 
 def create_app(settings_override: Settings | None = None) -> FastAPI:
@@ -48,6 +87,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
         openapi_url=openapi_url,
         lifespan=lifespan,
     )
+    application.state.settings = settings
     application.state.external_services_monitor = ExternalServicesMonitor(settings)
     application.state.admin_runtime_monitor = AdminRuntimeMonitor(settings)
     application.state.redis_coordinator = RedisCoordinator.from_settings(settings)
@@ -59,6 +99,9 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     application.state.wos_restart_store = WosRestartStore(settings.data_root)
     application.state.options_store = OptionsStore(settings.data_root)
     application.state.download_rate_limiter = DownloadRateLimiter()
+    application.state.download_traffic_scheduler = DownloadTrafficScheduler(
+        uplink_bytes_per_second=settings.http_uplink_capacity_bytes_per_second
+    )
     application.state.external_api_rate_limiter = ExternalApiRateLimiter()
     application.state.metrics_registry = MetricsRegistry()
     application.state.operational_metrics_cache = OperationalMetricsCache()
