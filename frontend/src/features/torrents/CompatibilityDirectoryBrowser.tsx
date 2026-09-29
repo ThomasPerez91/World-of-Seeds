@@ -120,6 +120,7 @@ export function CompatibilityDirectoryBrowser({
   onDownloadFile,
   onDownloadFolder,
   onLoadFallbackPage,
+  onNativeDownloadStart,
   snapshot,
   torrentId,
 }: {
@@ -130,6 +131,7 @@ export function CompatibilityDirectoryBrowser({
     directory: Pick<TorrentDownloadDirectoryV2, "name" | "relative_path">,
   ) => void;
   onLoadFallbackPage: (offset: number) => void;
+  onNativeDownloadStart?: () => void;
   snapshot: TorrentDownloadManifestPageV2;
   torrentId: string;
 }) {
@@ -228,6 +230,7 @@ export function CompatibilityDirectoryBrowser({
                 className="ready-file-download-button"
                 href={api.torrentFileDownloadUrlV2(torrentId, file.id, snapshot.snapshot_id)}
                 download={name}
+                onClick={onNativeDownloadStart}
                 aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
               >
                 <Download aria-hidden="true" />

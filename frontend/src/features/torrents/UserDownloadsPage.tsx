@@ -102,6 +102,14 @@ interface ReadyManifestState {
   snapshot: TorrentDownloadManifestPageV2 | null;
 }
 
+interface ServerDownloadTraffic {
+  fast_streams: number;
+  waiting_streams: number;
+  my_fast_streams: number;
+  my_waiting_streams: number;
+  fast_limit: number;
+}
+
 const EMPTY_MANAGER_SNAPSHOT: BrowserDownloadManagerSnapshot = {
   activeStreams: 0,
   maxConcurrentStreams: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
@@ -281,6 +289,7 @@ function ReadyTorrentContent({
   onDownloadFile,
   onDownloadFolder,
   onLoadPage,
+  onNativeDownloadStart,
   onPauseTransfer,
   onResumeTransfer,
   onRetry,
@@ -297,6 +306,7 @@ function ReadyTorrentContent({
     snapshot: TorrentDownloadManifestPageV2,
   ) => void;
   onLoadPage: (offset: number) => void;
+  onNativeDownloadStart: () => void;
   onPauseTransfer: (jobId: string) => void;
   onResumeTransfer: (jobId: string) => void;
   onRetry: () => void;
@@ -331,6 +341,7 @@ function ReadyTorrentContent({
               className="download-fallback-archive"
               href={api.torrentArchiveDownloadUrlV2(torrent.id, snapshot.snapshot_id)}
               download={`${torrent.name}.zip`}
+              onClick={onNativeDownloadStart}
             >
               <Archive aria-hidden="true" /> {t("downloads.archive")}
             </a>
@@ -373,6 +384,7 @@ function ReadyTorrentContent({
             <CompatibilityDirectoryBrowser
               fallbackLoading={manifest.loading}
               onLoadFallbackPage={onLoadPage}
+              onNativeDownloadStart={onNativeDownloadStart}
               onDownloadFile={(file) => onDownloadFile(file, snapshot)}
               onDownloadFolder={(directory) => onDownloadFolder(directory, snapshot)}
               snapshot={snapshot}
@@ -404,6 +416,7 @@ function ReadyTorrentContent({
                           className="ready-file-download-button"
                           href={api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id)}
                           download={file.relative_path.split("/").at(-1)}
+                          onClick={onNativeDownloadStart}
                           aria-label={t("downloads.downloadNamedFile", { name: file.relative_path })}
                         >
                           <Download aria-hidden="true" />
@@ -616,6 +629,8 @@ export function UserDownloadsPage({
   const [retentionCounts, setRetentionCounts] = useState({ green: 0, orange: 0, red: 0 });
   const [openTorrentIds, setOpenTorrentIds] = useState<Set<string>>(() => new Set());
   const [managerSnapshot, setManagerSnapshot] = useState<BrowserDownloadManagerSnapshot>(EMPTY_MANAGER_SNAPSHOT);
+  const [serverTraffic, setServerTraffic] = useState<ServerDownloadTraffic | null>(null);
+  const [trackNativeDownloads, setTrackNativeDownloads] = useState(false);
   const loadGenerationRef = useRef(0);
   const managerRef = useRef<BrowserDownloadManager | null>(null);
   const completedDownloadNotificationsRef = useRef(new Set<string>());
@@ -638,6 +653,31 @@ export function UserDownloadsPage({
   }
 
   useEffect(() => () => managerRef.current?.dispose(), []);
+
+  useEffect(() => {
+    if (!trackNativeDownloads && managerSnapshot.jobs.length === 0) return;
+    let mounted = true;
+    let pending = false;
+    const refresh = async () => {
+      if (pending) return;
+      pending = true;
+      try {
+        const response = await fetch("/api/v2/downloads/traffic", { credentials: "same-origin" });
+        if (!response.ok) return;
+        const value = await response.json() as ServerDownloadTraffic;
+        if (mounted && Number.isInteger(value.my_fast_streams) && Number.isInteger(value.my_waiting_streams)) {
+          setServerTraffic(value);
+        }
+      } catch {
+        // The next poll refreshes this informational display.
+      } finally {
+        pending = false;
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 5_000);
+    return () => { mounted = false; window.clearInterval(interval); };
+  }, [trackNativeDownloads, managerSnapshot.jobs.length]);
 
   useEffect(() => {
     for (const job of managerSnapshot.jobs) {
@@ -1015,6 +1055,7 @@ export function UserDownloadsPage({
     file: TorrentDownloadFileV2,
   ) {
     if (!supportsManagedFileDownload()) {
+      setTrackNativeDownloads(true);
       const name = file.relative_path.split("/").at(-1) ?? file.relative_path;
       const link = document.createElement("a");
       link.href = api.torrentFileDownloadUrlV2(torrent.id, file.id, snapshot.snapshot_id);
@@ -1239,12 +1280,22 @@ export function UserDownloadsPage({
         </div>
       </div>
 
-      {managerSnapshot.jobs.length > 0 && (
+      {(managerSnapshot.jobs.length > 0 || (serverTraffic !== null &&
+        serverTraffic.my_fast_streams + serverTraffic.my_waiting_streams > 0)) && (
         <aside className="torrent-queue-summary" aria-live="polite">
           <QueueIcon />
           <div>
-            <strong>{t("downloads.localActive", { active: managerSnapshot.activeStreams, maximum: managerSnapshot.maxConcurrentStreams ?? DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY })}</strong>
-            <span>{t("downloads.localWaitingCount", { waiting: waitingDownloads })}</span>
+            {managerSnapshot.jobs.length > 0 && <>
+              <strong>{managerSnapshot.maxConcurrentStreams === null
+                ? t("downloads.localActiveUnlimited", { active: managerSnapshot.activeStreams })
+                : t("downloads.localActive", { active: managerSnapshot.activeStreams, maximum: managerSnapshot.maxConcurrentStreams })}</strong>
+              <span>{t("downloads.localWaitingCount", { waiting: waitingDownloads })}</span>
+            </>}
+            {serverTraffic !== null && <span>{t("downloads.serverTraffic", {
+              fast: serverTraffic.my_fast_streams,
+              waiting: serverTraffic.my_waiting_streams,
+              total: serverTraffic.fast_limit,
+            })}</span>}
           </div>
         </aside>
       )}
@@ -1313,6 +1364,7 @@ export function UserDownloadsPage({
                       torrent={torrent}
                       manifest={manifest}
                       transfers={transfers}
+                      onNativeDownloadStart={() => setTrackNativeDownloads(true)}
                       onLoadPage={(requestedOffset) => void loadReadyManifest(
                         torrent.id,
                         requestedOffset,
