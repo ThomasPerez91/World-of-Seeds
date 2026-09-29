@@ -67,10 +67,14 @@ class DownloadTrafficScheduler:
             if lease_id in self._transfers:
                 raise ValueError("download is already registered")
             fast = sum(transfer.fast for transfer in self._transfers.values()) < self._fast_limit
-            if not fast and sum(
-                transfer.user_id == user_id and not transfer.fast
-                for transfer in self._transfers.values()
-            ) >= self.WAITING_PER_USER:
+            if (
+                not fast
+                and sum(
+                    transfer.user_id == user_id and not transfer.fast
+                    for transfer in self._transfers.values()
+                )
+                >= self.WAITING_PER_USER
+            ):
                 raise DownloadWaitingLimit("user download waiting limit reached")
             self._sequence += 1
             now = self._clock()
@@ -127,10 +131,13 @@ class DownloadTrafficScheduler:
                     fast,
                     key=lambda item: (item.sent_bytes - item.observed_bytes, item.sequence),
                 )[: max(0, len(fast) - target)]:
-                    if sum(
-                        item.user_id == entry.user_id and not item.fast
-                        for item in self._transfers.values()
-                    ) >= self.WAITING_PER_USER:
+                    if (
+                        sum(
+                            item.user_id == entry.user_id and not item.fast
+                            for item in self._transfers.values()
+                        )
+                        >= self.WAITING_PER_USER
+                    ):
                         continue
                     entry.fast = False
                     entry.joined_at = now

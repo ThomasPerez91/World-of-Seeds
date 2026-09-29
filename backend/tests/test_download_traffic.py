@@ -29,18 +29,12 @@ async def test_fifty_users_get_five_fast_and_forty_five_slow_streams() -> None:
     assert own["my_fast_streams"] == 0
     assert own["my_waiting_streams"] == 1
     assert own["waiting_streams"] == 45
-    assert await scheduler.next_chunk(
-        transfers[0][0], 1_048_576
-    ) == (1_048_576, 0)
-    assert await scheduler.next_chunk(
-        transfers[-1][0], 1_048_576
-    ) == (1024, 1024)
+    assert await scheduler.next_chunk(transfers[0][0], 1_048_576) == (1_048_576, 0)
+    assert await scheduler.next_chunk(transfers[-1][0], 1_048_576) == (1024, 1024)
 
     await scheduler.unregister(transfers[0][0])
     assert await scheduler.snapshot() == (5, 44)
-    assert await scheduler.next_chunk(
-        transfers[5][0], 1_048_576
-    ) == (1_048_576, 0)
+    assert await scheduler.next_chunk(transfers[5][0], 1_048_576) == (1_048_576, 0)
 
 
 @pytest.mark.asyncio
@@ -56,9 +50,7 @@ async def test_low_uplink_usage_promotes_all_fifty_without_reserving_fixed_share
     assert (await scheduler.status(uuid.uuid4()))["fast_limit"] >= 50
     # Without an explicitly configured global cap, TCP backpressure decides
     # each client's rate; the 500 kB/s client receives no reserved fifth.
-    assert await scheduler.next_chunk(leases[-1], 1_048_576) == (
-        1_048_576, 0
-    )
+    assert await scheduler.next_chunk(leases[-1], 1_048_576) == (1_048_576, 0)
 
 
 @pytest.mark.asyncio
@@ -67,12 +59,8 @@ async def test_saturated_uplink_reduces_lanes_and_wakes_waiter_on_growth() -> No
     leases = [uuid.uuid4() for _ in range(8)]
     for lease in leases:
         await scheduler.register(lease, uuid.uuid4(), 20_000_000_000)
-    assert await scheduler.next_chunk(leases[5], 1024 * 1024) == (
-        1024, 1024
-    )
-    pending = asyncio.create_task(
-        scheduler.next_chunk(leases[5], 1024 * 1024)
-    )
+    assert await scheduler.next_chunk(leases[5], 1024 * 1024) == (1024, 1024)
+    pending = asyncio.create_task(scheduler.next_chunk(leases[5], 1024 * 1024))
     await asyncio.sleep(0)
     await scheduler.observe_upload(10_000_000)
     assert await scheduler.snapshot() == (7, 1)
@@ -144,9 +132,7 @@ async def test_waiting_stream_wakes_on_promotion_and_small_file_gets_bounded_pri
     await scheduler.register(large, uuid.uuid4(), 20_000_000_000)
     await scheduler.register(small, uuid.uuid4(), 1_000_000)
     assert (await scheduler.next_chunk(small, 1_048_576))[0] == 1024
-    pending = asyncio.create_task(
-        scheduler.next_chunk(small, 1_048_576)
-    )
+    pending = asyncio.create_task(scheduler.next_chunk(small, 1_048_576))
     await asyncio.sleep(0)
     await scheduler.unregister(fast[0])
     assert await asyncio.wait_for(pending, timeout=0.2) == (1_048_576, 0)
@@ -165,9 +151,7 @@ async def test_fast_stream_does_not_reserve_a_fixed_share_of_upload_budget() -> 
         await scheduler.register(lease_id, uuid.uuid4(), 20_000_000_000)
     waiting = uuid.uuid4()
     await scheduler.register(waiting, uuid.uuid4(), 20_000_000_000)
-    assert await scheduler.next_chunk(
-        fast[0], 1_048_576
-    ) == (1_048_576, 0)
+    assert await scheduler.next_chunk(fast[0], 1_048_576) == (1_048_576, 0)
 
 
 @pytest.mark.asyncio
@@ -181,12 +165,8 @@ async def test_long_films_rotate_fast_lanes_without_waiting_for_completion() -> 
     await scheduler.register(sixth, uuid.uuid4(), 20_000_000_000)
 
     now[0] = 121.0
-    assert await scheduler.next_chunk(fast[0], 1_048_576) == (
-        1024, 1024
-    )
-    assert await scheduler.next_chunk(sixth, 1_048_576) == (
-        1_048_576, 0
-    )
+    assert await scheduler.next_chunk(fast[0], 1_048_576) == (1024, 1024)
+    assert await scheduler.next_chunk(sixth, 1_048_576) == (1_048_576, 0)
     assert await scheduler.snapshot() == (5, 1)
 
 
@@ -196,19 +176,25 @@ async def test_waiting_stream_rate_is_per_file_even_on_same_account() -> None:
     user_id = uuid.uuid4()
     first, second = uuid.uuid4(), uuid.uuid4()
     for stream_id in (first, second):
-        assert await limiter.reserve(
+        assert (
+            await limiter.reserve(
+                user_id,
+                1024,
+                per_user_bytes_per_second=0,
+                global_bytes_per_second=0,
+                stream_id=stream_id,
+                stream_bytes_per_second=1024,
+            )
+            == 0
+        )
+    assert (
+        await limiter.reserve(
             user_id,
             1024,
             per_user_bytes_per_second=0,
             global_bytes_per_second=0,
-            stream_id=stream_id,
+            stream_id=first,
             stream_bytes_per_second=1024,
-        ) == 0
-    assert await limiter.reserve(
-        user_id,
-        1024,
-        per_user_bytes_per_second=0,
-        global_bytes_per_second=0,
-        stream_id=first,
-        stream_bytes_per_second=1024,
-    ) == 1
+        )
+        == 1
+    )
