@@ -151,7 +151,10 @@ class DownloadTrafficScheduler:
                 "waiting_streams": len(self._transfers) - fast,
                 "my_fast_streams": sum(entry.fast for entry in mine),
                 "my_waiting_streams": sum(not entry.fast for entry in mine),
-                "fast_limit": self._fast_limit,
+                # Existing fast transfers keep their lane even if the current
+                # admission target was lowered by a busy uplink sample.
+                "fast_limit": max(fast, self._fast_limit),
+                "fast_admission_target": self._fast_limit,
                 "waiting_limit_per_user": self.WAITING_PER_USER,
                 "waiting_bytes_per_second": self.WAITING_BYTES_PER_SECOND,
             }

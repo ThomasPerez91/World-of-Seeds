@@ -69,7 +69,9 @@ async def test_saturated_uplink_reduces_future_admissions_without_demoting_trans
     assert await asyncio.wait_for(pending, 0.2) == (1024 * 1024, 0)
     await scheduler.observe_upload(99_000_000)
     assert await scheduler.snapshot() == (7, 1)
-    assert (await scheduler.status(uuid.uuid4()))["fast_limit"] == 5
+    status = await scheduler.status(uuid.uuid4())
+    assert status["fast_limit"] == 7
+    assert status["fast_admission_target"] == 5
     assert await scheduler.next_chunk(leases[0], 1024 * 1024) == (1024 * 1024, 0)
     await scheduler.unregister(leases[0])
     assert await scheduler.snapshot() == (6, 1)
