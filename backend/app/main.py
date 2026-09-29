@@ -52,7 +52,11 @@ async def monitor_http_upload(application: FastAPI) -> None:
         while True:
             try:
                 snapshot = await prometheus.snapshot("realtime")
-                if snapshot.status == "ok" and snapshot.upload is not None:
+                if (
+                    snapshot.status == "ok"
+                    and snapshot.upload is not None
+                    and snapshot.upload.samples
+                ):
                     await application.state.download_traffic_scheduler.observe_upload(
                         snapshot.upload.current_bytes_per_second
                     )

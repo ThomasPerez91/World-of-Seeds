@@ -2,6 +2,7 @@ import asyncio
 import math
 import uuid
 from contextlib import suppress
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,7 @@ from fastapi import FastAPI
 
 from app.integrations.prometheus_network import (
     NetworkDirection,
+    NetworkSample,
     NetworkThroughputSnapshot,
     PrometheusNetworkClient,
 )
@@ -83,7 +85,10 @@ async def test_monitor_feeds_measured_host_upload_to_scheduler(
 
     async def snapshot(*_: object) -> NetworkThroughputSnapshot:
         observed.set()
-        return NetworkThroughputSnapshot(status="ok", upload=NetworkDirection(10_000_000, ()))
+        return NetworkThroughputSnapshot(
+            status="ok",
+            upload=NetworkDirection(10_000_000, (NetworkSample(datetime.now(UTC), 10_000_000),)),
+        )
 
     monkeypatch.setattr(PrometheusNetworkClient, "snapshot", snapshot)
     app = FastAPI()
@@ -100,6 +105,37 @@ async def test_monitor_feeds_measured_host_upload_to_scheduler(
         # The snapshot handler completes before the monitor's next sleep.
         await asyncio.sleep(0)
         assert await scheduler.snapshot() == (6, 0)
+    finally:
+        monitor.cancel()
+        with suppress(asyncio.CancelledError):
+            await monitor
+
+
+@pytest.mark.asyncio
+async def test_monitor_ignores_missing_upload_samples(monkeypatch: pytest.MonkeyPatch) -> None:
+    scheduler = DownloadTrafficScheduler(uplink_bytes_per_second=100_000_000)
+    for _ in range(6):
+        await scheduler.register(uuid.uuid4(), uuid.uuid4(), 20_000_000_000)
+    observed = asyncio.Event()
+
+    async def snapshot(*_: object) -> NetworkThroughputSnapshot:
+        observed.set()
+        return NetworkThroughputSnapshot(status="ok", upload=NetworkDirection(0, ()))
+
+    monkeypatch.setattr(PrometheusNetworkClient, "snapshot", snapshot)
+    app = FastAPI()
+    app.state.settings = SimpleNamespace(
+        prometheus_url="http://prometheus.test",
+        prometheus_connect_timeout_seconds=1.0,
+        prometheus_read_timeout_seconds=3.0,
+        network_interface="auto",
+    )
+    app.state.download_traffic_scheduler = scheduler
+    monitor = asyncio.create_task(monitor_http_upload(app))
+    try:
+        await asyncio.wait_for(observed.wait(), 1)
+        await asyncio.sleep(0)
+        assert await scheduler.snapshot() == (5, 1)
     finally:
         monitor.cancel()
         with suppress(asyncio.CancelledError):
