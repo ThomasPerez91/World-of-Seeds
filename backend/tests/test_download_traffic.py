@@ -56,7 +56,7 @@ async def test_low_uplink_usage_promotes_all_fifty_without_reserving_fixed_share
 
 
 @pytest.mark.asyncio
-async def test_saturated_uplink_reduces_lanes_and_wakes_waiter_on_growth() -> None:
+async def test_saturated_uplink_reduces_future_admissions_without_demoting_transfers() -> None:
     scheduler = DownloadTrafficScheduler(uplink_bytes_per_second=100_000_000)
     leases = [uuid.uuid4() for _ in range(8)]
     for lease in leases:
@@ -68,14 +68,22 @@ async def test_saturated_uplink_reduces_lanes_and_wakes_waiter_on_growth() -> No
     assert await scheduler.snapshot() == (7, 1)
     assert await asyncio.wait_for(pending, 0.2) == (1024 * 1024, 0)
     await scheduler.observe_upload(99_000_000)
-    assert await scheduler.snapshot() == (5, 3)
+    assert await scheduler.snapshot() == (7, 1)
+    assert (await scheduler.status(uuid.uuid4()))["fast_limit"] == 5
+    assert await scheduler.next_chunk(leases[0], 1024 * 1024) == (1024 * 1024, 0)
+    await scheduler.unregister(leases[0])
+    assert await scheduler.snapshot() == (6, 1)
+    await scheduler.unregister(leases[1])
+    assert await scheduler.snapshot() == (5, 1)
+    await scheduler.unregister(leases[2])
+    assert await scheduler.snapshot() == (5, 0)
     await scheduler.observe_upload(None)
     await scheduler.observe_upload(math.nan)
-    assert await scheduler.snapshot() == (5, 3)
+    assert await scheduler.snapshot() == (5, 0)
 
 
 @pytest.mark.asyncio
-async def test_saturated_uplink_skips_ineligible_demotions() -> None:
+async def test_saturated_uplink_never_demotes_even_when_waiting_limit_is_reached() -> None:
     scheduler = DownloadTrafficScheduler(uplink_bytes_per_second=100_000_000)
     owner = uuid.uuid4()
     await scheduler.register(uuid.uuid4(), owner, 20_000_000_000)
@@ -88,13 +96,14 @@ async def test_saturated_uplink_skips_ineligible_demotions() -> None:
     for _ in range(2):
         await scheduler.register(uuid.uuid4(), owner, 20_000_000_000)
     await scheduler.observe_upload(99_000_000)
-    assert await scheduler.snapshot() == (5, 4)
+    assert await scheduler.snapshot() == (7, 2)
+    assert (await scheduler.status(owner))["my_fast_streams"] == 3
 
 
 @pytest.mark.asyncio
-async def test_quantum_rotation_serves_other_account_when_owner_has_two_waiters() -> None:
+async def test_fast_transfer_keeps_its_slot_until_completion() -> None:
     now = [0.0]
-    scheduler = DownloadTrafficScheduler(clock=lambda: now[0])
+    scheduler = DownloadTrafficScheduler(clock=lambda: now[0], uplink_bytes_per_second=100_000_000)
     owner = uuid.uuid4()
     fast = [uuid.uuid4() for _ in range(5)]
     for lease_id in fast:
@@ -103,14 +112,17 @@ async def test_quantum_rotation_serves_other_account_when_owner_has_two_waiters(
         await scheduler.register(uuid.uuid4(), owner, 20_000_000_000)
     other = uuid.uuid4()
     other_user = uuid.uuid4()
-    await scheduler.register(other, other_user, 20_000_000_000)
+    await scheduler.register(other, other_user, 1_000_000)
 
-    now[0] = 121
-    assert await scheduler.next_chunk(fast[0], 1_048_576) == (1024, 1024)
-    assert await scheduler.next_chunk(other, 1_048_576) == (1_048_576, 0)
+    now[0] = 3600
+    await scheduler.observe_upload(99_000_000)
+    assert await scheduler.next_chunk(fast[0], 1_048_576) == (1_048_576, 0)
+    assert await scheduler.next_chunk(other, 1_048_576) == (1024, 1024)
     assert await scheduler.snapshot() == (5, 3)
     with pytest.raises(DownloadWaitingLimit):
         await scheduler.register(uuid.uuid4(), owner, 20_000_000_000)
+    await scheduler.unregister(fast[0])
+    assert await scheduler.next_chunk(other, 1_048_576) == (1_048_576, 0)
 
 
 @pytest.mark.asyncio
@@ -230,18 +242,20 @@ async def test_fast_stream_does_not_reserve_a_fixed_share_of_upload_budget() -> 
 
 
 @pytest.mark.asyncio
-async def test_long_films_rotate_fast_lanes_without_waiting_for_completion() -> None:
+async def test_older_large_file_outweighs_new_small_files_after_bounded_bonus() -> None:
     now = [0.0]
     scheduler = DownloadTrafficScheduler(clock=lambda: now[0])
     fast = [uuid.uuid4() for _ in range(5)]
     for lease_id in fast:
         await scheduler.register(lease_id, uuid.uuid4(), 20_000_000_000)
-    sixth = uuid.uuid4()
-    await scheduler.register(sixth, uuid.uuid4(), 20_000_000_000)
-
-    now[0] = 121.0
-    assert await scheduler.next_chunk(fast[0], 1_048_576) == (1024, 1024)
-    assert await scheduler.next_chunk(sixth, 1_048_576) == (1_048_576, 0)
+    large = uuid.uuid4()
+    await scheduler.register(large, uuid.uuid4(), 20_000_000_000)
+    now[0] = 301.0
+    small = uuid.uuid4()
+    await scheduler.register(small, uuid.uuid4(), 1_000_000)
+    await scheduler.unregister(fast[0])
+    assert await scheduler.next_chunk(large, 1_048_576) == (1_048_576, 0)
+    assert await scheduler.next_chunk(small, 1_048_576) == (1024, 1024)
     assert await scheduler.snapshot() == (5, 1)
 
 
