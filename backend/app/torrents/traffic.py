@@ -127,10 +127,13 @@ class DownloadTrafficScheduler:
                 target = max(self.INITIAL_FAST_LIMIT, self._fast_limit - decrease)
                 # Demote the least productive eligible stream first. A slow
                 # receiver must not reserve a fast lane indefinitely.
+                fast_count = len(fast)
                 for entry in sorted(
                     fast,
                     key=lambda item: (item.sent_bytes - item.observed_bytes, item.sequence),
-                )[: max(0, len(fast) - target)]:
+                ):
+                    if fast_count <= target:
+                        break
                     if (
                         sum(
                             item.user_id == entry.user_id and not item.fast
@@ -143,7 +146,8 @@ class DownloadTrafficScheduler:
                     entry.joined_at = now
                     entry.next_slow_at = now
                     entry.promoted.clear()
-                self._fast_limit = max(target, sum(item.fast for item in self._transfers.values()))
+                    fast_count -= 1
+                self._fast_limit = max(target, fast_count)
             for entry in self._transfers.values():
                 entry.observed_bytes = entry.sent_bytes
 
@@ -161,12 +165,13 @@ class DownloadTrafficScheduler:
                 now = self._clock()
                 if entry.fast and now - entry.fast_since >= self.FAST_QUANTUM_SECONDS:
                     waiting = [item for item in self._transfers.values() if not item.fast]
-                    own_waiting = [item for item in waiting if item.user_id == entry.user_id]
-                    # Demotion must not create a third waiting request for this account.
-                    eligible = own_waiting if len(own_waiting) >= self.WAITING_PER_USER else waiting
-                    if eligible:
+                    # The two-waiting limit applies to new admissions. Rotation
+                    # can temporarily add a third preempted stream so another
+                    # account still gets a turn.
+                    if waiting:
+                        other_accounts = [item for item in waiting if item.user_id != entry.user_id]
                         next_entry = max(
-                            eligible,
+                            other_accounts or waiting,
                             key=lambda item: (self._priority(item, now), -item.sequence),
                         )
                         entry.fast = False
