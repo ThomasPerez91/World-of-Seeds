@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.3` ;
+- version stable : `2.3.4` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -342,6 +342,10 @@ Prometheus/Grafana surveillent application, jobs, scheduler, DB, Redis, qB, stoc
 Les métriques doivent rester sans secrets et à cardinalité bornée.
 
 Les exporters internes ne doivent pas publier de nouveaux ports hôte sans décision explicite.
+
+Les métriques HTTP agrégées sont exposées sur `/api/v2/metrics` : voies et admissions, pics, ancienneté d’attente, délai de voie rapide/premier corps ASGI, octets acceptés par ASGI, issues de réponse et fraîcheur de la mesure réseau. Aucun label utilisateur/fichier/lease. Les compteurs décrivent l’envoi serveur, pas l’enregistrement sur le disque du client. Les heartbeats des fichiers READY utilisent une tâche indépendante et de courtes sessions SQL pour survivre à la contre-pression réseau ; une perte de lease termine le flux.
+
+La campagne reproductible et ses limites sont documentées dans `docs/http-download-load.md`. Le résultat local à 50 clients ne valide pas la capacité Rise2 avec PostgreSQL, disque réel et qB actif ; cette validation opérateur reste requise.
 
 ## Backup et rollback
 
