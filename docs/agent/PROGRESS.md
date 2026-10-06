@@ -4,7 +4,16 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.3`.
+- Version applicative cible : `2.3.4`.
+
+## Release 2.3.4 — observabilité et charge HTTP READY
+
+- Métriques HTTP à cardinalité bornée : flux rapides/attentes/pics, admissions, délais de voie rapide et premier corps ASGI, ancienneté, absence de progression, octets ASGI, issues, mesure montante et fraîcheur réelle des échantillons. Compteurs/histogrammes cumulatifs sans identifiants métier.
+- Régression de contre-pression reproduite : l’ancien heartbeat inline ne renouvelle pas pendant un `ASGI send` bloqué. Les fichiers READY renouvellent désormais indépendamment, via de courtes sessions SQL ; la perte de lease termine le flux et les chemins fin/erreur/déconnexion nettoient les ressources.
+- Runner externe en GET uniquement, manifeste de sessions privé, SHA-256, retries 429 bornés, reprises Range/ETag, sondes live/ready et collecte Prometheus optionnelle CPU/disque/qB/HTTP. Runner local isolé sur vraies routes READY avec SQLite et Uvicorn.
+- Preuve locale de 45 s : 50 flux simultanés, 45 attentes au pic, 42 fichiers terminés et SHA-256 valides, 4 reprises, 8 gros transferts arrêtés au budget, aucune erreur et aucun slot/lease résiduel. P95 live 5,4 ms et ready 48,2 ms. Rapport dans `docs/evidence/http-load-local-2.3.4.json`.
+- Limite explicite : aucun accès d’exécution Rise2 dans cet environnement. La campagne réelle avec PostgreSQL, disque/hôte et qB actif reste requise ; ne pas annoncer une validation de capacité production. Procédure et critères dans `docs/http-download-load.md`.
+- Aucun changement de règle d’admission, de conservation des slots rapides, de cadence de 15 secondes ou d’infrastructure. Version +0.0.1 ; 3.0.0 attend la fin des améliorations et validations.
 
 ## Release 2.3.3 — authentification asynchrone et concurrence bornée
 

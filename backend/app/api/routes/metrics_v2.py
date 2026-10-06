@@ -109,6 +109,7 @@ async def _collect_operational_metrics(
 
 @router.get("", include_in_schema=False)
 async def metrics(
+    request: Request,
     db: DbSession,
     redis: RedisCoordinatorDependency,
     monitor: ExternalServicesMonitorDependency,
@@ -131,6 +132,7 @@ async def metrics(
         else 0.0
     )
     lines = registry.render_api()
+    lines.extend(await request.app.state.download_traffic_scheduler.render_metrics())
     lines.extend(
         [
             "# HELP wos_jobs Current durable jobs by fixed state.",
