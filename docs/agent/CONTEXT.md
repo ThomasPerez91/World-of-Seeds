@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.2.3` ;
+- version stable : `2.3.3` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -101,6 +101,10 @@ Checks obligatoires sur les branches protégées :
 - `Container image` ;
 - `Dependency and image security` ;
 - `Validate restricted Rise2 deploy path`.
+
+## Politique de version post-audit
+
+Chaque mise à jour livrée incrémente la version de `0.0.1` ; les commits correctifs d’une même livraison ne créent pas de version supplémentaire. La version `3.0.0` sera publiée après réalisation et validation de l’ensemble des améliorations de l’audit.
 
 ## Technologie
 
@@ -221,6 +225,10 @@ Etat du dernier déploiement :
 - Les droits sur le contenu torrent sont portés par `TorrentRequest`, pas par un chemin de workspace fourni par le client.
 - Le client ne peut jamais choisir un chemin hôte ou un save path qBittorrent.
 - Ne jamais révéler chemins hôte, secrets, passkeys ou données d'un autre utilisateur dans une réponse API.
+
+Les opérations Argon2 des chemins asynchrones passent par un pool de threads dédié au processus API : deux calculs simultanés, dix opérations en cours ou en attente au total, délai de réponse maximal de cinq secondes. Une annulation ou un timeout ne libère le budget d’un calcul déjà exécuté qu’à sa fin réelle ; les opérations encore en file peuvent être annulées. La surcharge renvoie une erreur générique `503` avec `Retry-After`, sans affaiblir les hashes existants. Le pool est fermé proprement au shutdown.
+
+La connexion consomme un budget agrégé par IP avant tout calcul : trente tentatives, réussies ou non, par fenêtre fixe de soixante secondes par défaut (`WOS_AUTH_IP_MAX_ATTEMPTS`, `WOS_AUTH_IP_WINDOW_SECONDS`). Le cache est limité à 10 000 IP hachées ; les entrées expirent et la saturation refuse de nouveaux budgets sans évincer les budgets actifs. Ce budget complète le verrouillage persistant IP/utilisateur existant. Il est non durable et se réinitialise au redémarrage. L’adresse client vient exclusivement de `request.client`, résolue par Uvicorn depuis l’ingress de confiance configuré ; aucun header transmis directement par le client n’est lu par la route.
 
 ## Préférences d’interface
 

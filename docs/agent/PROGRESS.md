@@ -1,10 +1,18 @@
 # World of Seeds — Progress
 
-## Etat courant — 25 septembre 2026
+## Etat courant — 6 octobre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.2`.
+- Version applicative cible : `2.3.3`.
+
+## Release 2.3.3 — authentification asynchrone et concurrence bornée
+
+- Déporte vérification et hachage Argon2 vers un pool dédié : deux calculs simultanés, huit attentes au maximum, délai de réponse de cinq secondes ; réponses de surcharge génériques et retryables. Les calculs commencés conservent leur budget après déconnexion jusqu’à leur fin réelle.
+- Couvre connexion, modification de mot de passe/identifiants, provisioning admin/API externe/CLI et seed local ; préserve les mots de passe, sessions et CSRF existants. Revalide état du compte et hash sous verrou avant émission de session.
+- Ajoute trente tentatives par IP par fenêtre fixe de soixante secondes avant crypto, indépendamment des noms soumis, en complément des verrous PostgreSQL existants. Cache borné, expiration et refus sans éviction lorsque saturé ; adresse uniquement issue du proxy de confiance existant.
+- Diagnostic reproductible : `cd backend && uv run python -m app.benchmark_password_work`. Sur cet environnement local, quatre vérifications et un ticker à 10 ms : gap maximal de boucle 217,1 ms avant, 16,6 ms après ; durée des vérifications 206,9 ms avant, 135,5 ms après. Ces résultats ne constituent pas une mesure de charge Rise2.
+- Version incrémentée de 0.0.1 ; la release 3.0.0 attend la fin et la validation des améliorations de l’audit. Aucun changement de topologie ni des règles de téléchargements.
 
 ## Release 2.3.2 — retrait du résumé de récupération native
 

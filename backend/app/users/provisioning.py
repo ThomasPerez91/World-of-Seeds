@@ -7,12 +7,12 @@ from typing import Literal
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.passwords import hash_password_async
 from app.auth.security import (
     canonical_username,
     generate_auth_seed,
     generate_initial_password,
     generate_initial_username,
-    hash_password,
     normalize_username,
 )
 from app.models import DatabaseOption, User, UserProvisioningAudit
@@ -73,7 +73,7 @@ class UserProvisioningService:
             initial_password = password or generate_initial_password()
             user = User(
                 username=candidate_username,
-                password_hash=hash_password(initial_password),
+                password_hash=await hash_password_async(initial_password),
                 auth_seed=seed,
                 is_admin=is_admin,
                 must_change_credentials=password is None,

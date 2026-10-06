@@ -8,6 +8,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.auth.passwords import password_work_pool
+from app.auth.rate_limit import LoginIpRateLimiter
 from app.coordination import RedisCoordinator
 from app.core.config import Settings, get_settings
 from app.core.database import get_db_session
@@ -21,6 +23,13 @@ from app.observability import OperationalMetricsCache
 from app.options import OptionsStore
 from app.torrents.downloads import DownloadRateLimiter
 from app.torrents.traffic import DownloadTrafficScheduler
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def password_pool_lifecycle() -> AsyncIterator[None]:
+    password_work_pool.start()
+    yield
+    await password_work_pool.aclose()
 
 
 @pytest.fixture
@@ -53,6 +62,7 @@ async def client(db_session: AsyncSession, data_root: Path) -> AsyncIterator[Asy
         yield db_session
 
     test_settings = Settings(data_root=data_root)
+    app.state.login_ip_rate_limiter = LoginIpRateLimiter()
 
     def override_settings() -> Settings:
         return test_settings

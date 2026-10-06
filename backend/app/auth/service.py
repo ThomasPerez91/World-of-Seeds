@@ -6,15 +6,14 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.passwords import hash_password_async, verify_password_async
 from app.auth.security import (
     DUMMY_PASSWORD_HASH,
     canonical_username,
     generate_token,
-    hash_password,
     hash_token,
     normalize_username,
     throttle_key,
-    verify_password,
 )
 from app.core.config import Settings
 from app.models import LoginThrottle, TorrentRequest, TorrentRequestState, User, UserSession
@@ -128,12 +127,11 @@ async def authenticate(
         and throttle.locked_until is not None
         and ensure_utc(throttle.locked_until) > now
     ):
-        verify_password(password, DUMMY_PASSWORD_HASH)
         raise AuthenticationLockedError
 
     user = await db.scalar(select(User).where(func.lower(User.username) == username_key))
     encoded_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
-    password_matches = verify_password(password, encoded_hash)
+    password_matches = await verify_password_async(password, encoded_hash)
 
     if user is None or not password_matches or not user_can_login(user, now):
         await _register_failure(db, key, throttle, settings, now)
@@ -148,7 +146,11 @@ async def authenticate(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    if locked_user is None:
+    if (
+        locked_user is None
+        or locked_user.password_hash != encoded_hash
+        or not user_can_login(locked_user, datetime.now(UTC))
+    ):
         raise AuthenticationFailedError
     if locked_user.last_login_at is None or ensure_utc(locked_user.last_login_at) < now:
         locked_user.last_login_at = now
@@ -198,7 +200,9 @@ async def change_credentials(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    if locked_user is None or not verify_password(current_password, locked_user.password_hash):
+    if locked_user is None or not await verify_password_async(
+        current_password, locked_user.password_hash
+    ):
         raise AuthenticationFailedError
 
     username = normalize_username(username_input)
@@ -213,7 +217,7 @@ async def change_credentials(
 
     now = datetime.now(UTC)
     locked_user.username = username
-    locked_user.password_hash = hash_password(new_password)
+    locked_user.password_hash = await hash_password_async(new_password)
     locked_user.must_change_credentials = False
     locked_user.updated_at = now
     await db.execute(
@@ -286,11 +290,13 @@ async def change_password(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    if locked_user is None or not verify_password(current_password, locked_user.password_hash):
+    if locked_user is None or not await verify_password_async(
+        current_password, locked_user.password_hash
+    ):
         raise AuthenticationFailedError
 
     now = datetime.now(UTC)
-    locked_user.password_hash = hash_password(new_password)
+    locked_user.password_hash = await hash_password_async(new_password)
     locked_user.updated_at = now
     await db.execute(
         update(UserSession)

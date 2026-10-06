@@ -80,7 +80,15 @@ async def login(
     db: DbSession,
     settings: AppSettings,
 ) -> AuthResponse:
+    # Uvicorn resolves forwarded addresses only from the configured trusted ingress.
     client_ip = request.client.host if request.client is not None else "unknown"
+    retry_after = request.app.state.login_ip_rate_limiter.consume(client_ip)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=_detail("authentication_throttled", "Too many authentication attempts"),
+            headers={"Retry-After": str(retry_after)},
+        )
     try:
         user, tokens = await authenticate(
             db,
