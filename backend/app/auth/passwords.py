@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from threading import Lock
+from threading import Event, Lock
 from typing import TypeVar
 
 from app.auth.security import hash_password, verify_password
@@ -40,6 +40,16 @@ class PasswordWorkPool:
             self._pending -= 1
 
     async def run(self, operation: Callable[[], T]) -> T:
+        abandoned = Event()
+
+        def execute() -> T:
+            # Keep cancelled queue entries in the budget until dequeued. Releasing
+            # them immediately would let cancellations grow the executor's internal
+            # queue without bound while workers are busy.
+            if abandoned.is_set():
+                raise PasswordWorkUnavailableError
+            return operation()
+
         with self._lock:
             if self._closed or self._pending >= self._max_pending:
                 raise PasswordWorkUnavailableError
@@ -47,15 +57,22 @@ class PasswordWorkPool:
                 self._executor = ThreadPoolExecutor(
                     max_workers=self._workers, thread_name_prefix="wos-password"
                 )
-            future = self._executor.submit(operation)
+            future = self._executor.submit(execute)
             self._pending += 1
         # Install outside the mutex: add_done_callback can execute synchronously.
         future.add_done_callback(self._completed)
+        wrapped = asyncio.wrap_future(future)
+        # Retrieve abandoned work's exceptions without logging credential values.
+        wrapped.add_done_callback(lambda result: None if result.cancelled() else result.exception())
         try:
             async with asyncio.timeout(self._timeout_seconds):
-                return await asyncio.wrap_future(future)
+                return await asyncio.shield(wrapped)
         except TimeoutError as exc:
+            abandoned.set()
             raise PasswordWorkUnavailableError from exc
+        except asyncio.CancelledError:
+            abandoned.set()
+            raise
 
     async def aclose(self) -> None:
         with self._lock:

@@ -89,7 +89,7 @@ async def test_cancelled_or_timed_out_worker_retains_capacity(use_timeout: bool)
 
 
 @pytest.mark.asyncio
-async def test_cancelled_queued_work_releases_its_capacity() -> None:
+async def test_cancelled_queued_work_stays_bounded_and_skips_crypto_when_dequeued() -> None:
     pool = PasswordWorkPool(workers=1, max_pending=2)
     started, release = Event(), Event()
 
@@ -101,16 +101,21 @@ async def test_cancelled_queued_work_releases_its_capacity() -> None:
     queued = None
     try:
         await wait_started(started)
-        queued = asyncio.create_task(pool.run(lambda: "unused"))
+        unused = Event()
+        queued = asyncio.create_task(pool.run(unused.set))
         await asyncio.sleep(0)
         queued.cancel()
         with pytest.raises(asyncio.CancelledError):
             await queued
-        replacement = asyncio.create_task(pool.run(lambda: "replacement"))
-        await asyncio.sleep(0)
+        # Repeated cancellations must not create unlimited internal executor entries.
+        for _ in range(20):
+            with pytest.raises(PasswordWorkUnavailableError):
+                await pool.run(unused.set)
         release.set()
         await first
-        assert await replacement == "replacement"
+        # A sentinel completes after the abandoned entry is dequeued and skipped.
+        assert await pool.run(lambda: "replacement") == "replacement"
+        assert not unused.is_set()
     finally:
         release.set()
         await asyncio.gather(first, *([queued] if queued else []), return_exceptions=True)
