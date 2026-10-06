@@ -43,6 +43,7 @@ jobs:
     env:
       WOS_DATABASE_URL: postgresql+asyncpg://world_of_seeds:world_of_seeds_test@127.0.0.1:5432/world_of_seeds_test
       WOS_REDIS_URL: redis://127.0.0.1:6379/15
+      WOS_TEST_DATABASE_BACKUP_DOCKER: "1"
     defaults:
       run:
         working-directory: backend
@@ -55,6 +56,8 @@ jobs:
         with:
           enable-cache: true
           working-directory: backend
+      - name: Install encrypted-backup integration prerequisite
+        run: sudo apt-get update && sudo apt-get install -y age
       - run: uv sync --frozen --dev
       - name: Verify Docker dependency export
         run: |

@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.5`.
+- Version applicative cible : `2.3.6`.
+
+## Release 2.3.6 — sauvegarde PostgreSQL quotidienne
+
+- Nouveau dump en ligne, restauration obligatoire sur PostgreSQL jetable sans réseau avec image exacte de la source, chiffrement age, manifeste SHA-256, rétention 14 jours + huit points hebdomadaires et verrou de concurrence.
+- Helper opérateur : première sauvegarde/restauration avant activation persistante du timer quotidien 03:30 UTC. Clé locale privée créée uniquement si aucun destinataire n'existe. Aucune unité hôte installée implicitement par le déploiement applicatif.
+- Métriques textfile et règles Prometheus pour absence, ancienneté >26 h et échec ; les règles seules ne livrent pas de notifications. Aucun destinataire externe ni stockage hors hôte connu/configuré.
+- Tests unitaires et scénario Docker/age de CI sur source isolée, double restauration et corruption refusée. L'activation et une restauration d'une archive Rise2 restent à confirmer avec accès opérateur ; procédure `docs/database-backups-rise2.md`.
+- Limites : base uniquement, copie de clé/archives hors serveur et réception de notification encore requises. La reprise complète contenu/config/qB/NewGreedy garde sa procédure distincte. +0.0.1 ; 3.0.0 réservée à la validation finale.
 
 ## Release 2.3.5 — arrêt API borné et reprise des fichiers READY
 
