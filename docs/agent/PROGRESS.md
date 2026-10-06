@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.4`.
+- Version applicative cible : `2.3.5`.
+
+## Release 2.3.5 — arrêt API borné et reprise des fichiers READY
+
+- Entrypoint API avec drain SIGTERM/SIGINT : refus temporaire 503/Retry-After des nouvelles requêtes, readiness retirée, cinq secondes de grâce puis annulation. Le lifespan attend jusqu’à deux secondes le nettoyage des réponses avant fermeture Redis/SQL. Aucune modification de Compose ni des services persistants.
+- Reprise automatique des transferts fichiers/dossiers gérés par WoS : réseau/5xx/EOF prématuré, fermeture du writer partiel, taille locale revalidée, Range et snapshot constant. Huit retries au maximum, backoff plafonné à quinze secondes, pause/annulation immédiates. Les pages de manifeste réessaient également les indisponibilités.
+- Régression TCP réelle : SIGTERM au milieu d’un fichier de 128 Mio, arrêt en moins de neuf secondes, zéro lease, redémarrage puis Range/ETag/Content-Range et SHA-256 valides. Régressions navigateur sur pannes, limites, annulation et erreurs locales non retryables.
+- Les téléchargements natifs restent sous le contrôle du navigateur, les ZIP gardent leur contrat distinct et aucun état artificiel ne revient au Dashboard. Le test opérateur pendant un déploiement Rise2 réel reste à exécuter avec l’accès serveur ; preuve locale et procédure dans `docs/download-deploy-resume.md`.
+- Version +0.0.1 à 2.3.5 ; 3.0.0 reste réservée à la fin et à la validation de l’audit.
 
 ## Release 2.3.4 — observabilité et charge HTTP READY
 

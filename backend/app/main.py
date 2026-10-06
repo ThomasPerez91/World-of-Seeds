@@ -23,6 +23,7 @@ from app.auth.rate_limit import LoginIpRateLimiter
 from app.coordination import RedisCoordinator
 from app.core.config import Settings, get_settings
 from app.core.database import engine
+from app.core.drain import RequestDrain, RequestDrainMiddleware
 from app.core.http_security import SecurityHeadersMiddleware
 from app.integrations import ExternalServicesMonitor
 from app.integrations.admin_runtime import AdminRuntimeMonitor
@@ -81,6 +82,9 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        application.state.request_drain.begin()
+        if not await application.state.request_drain.wait_closed():
+            logger.warning("API request cleanup exceeded its shutdown budget")
         monitor.cancel()
         with suppress(asyncio.CancelledError):
             await monitor
@@ -103,6 +107,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = settings
+    application.state.request_drain = RequestDrain()
     application.state.external_services_monitor = ExternalServicesMonitor(settings)
     application.state.admin_runtime_monitor = AdminRuntimeMonitor(settings)
     application.state.redis_coordinator = RedisCoordinator.from_settings(settings)
@@ -124,6 +129,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     application.state.metrics_registry = MetricsRegistry()
     application.state.operational_metrics_cache = OperationalMetricsCache()
     application.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+    application.add_middleware(RequestDrainMiddleware, drain=application.state.request_drain)
     application.add_middleware(ExternalRequestIdMiddleware)
     application.add_middleware(
         SecurityHeadersMiddleware,
