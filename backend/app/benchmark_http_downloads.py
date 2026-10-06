@@ -153,6 +153,9 @@ async def download_one(
                         result.first_byte_seconds = perf_counter() - started
                     result.bytes_received += len(chunk)
                     digest.update(chunk)
+                    if target.read_bytes_per_second:
+                        # Idle admission/retry/reconnect time cannot buy burst allowance.
+                        await asyncio.sleep(len(chunk) / target.read_bytes_per_second)
                     if (
                         target.cancel_after_bytes
                         and not interrupted
@@ -160,12 +163,6 @@ async def download_one(
                     ):
                         interrupted = True
                         break
-                    if target.read_bytes_per_second:
-                        rate_delay = result.bytes_received / target.read_bytes_per_second - (
-                            perf_counter() - started
-                        )
-                        if rate_delay > 0:
-                            await asyncio.sleep(rate_delay)
             if interrupted and not result.resumed:
                 if not target.resume_after_cancel:
                     result.outcome = "cancelled"

@@ -66,7 +66,7 @@ processus Python complet, serveur **et clients**, et les lectures peuvent profit
 Preuve locale de la préparation 2.3.4 : [rapport JSON](evidence/http-load-local-2.3.4.json).
 Sur 45 secondes : pic de 50 flux et 45 attentes, 42 fichiers terminés avec SHA-256 valide,
 4 reprises Range, 8 gros transferts arrêtés au budget, zéro erreur et zéro slot/lease restant.
-P95 liveness 5,4 ms ; readiness SQL 48,2 ms. Ces chiffres ne constituent pas un GO de capacité Rise2.
+P95 liveness 4,1 ms ; readiness SQL 47,8 ms. Ces chiffres ne constituent pas un GO de capacité Rise2.
 
 ## Campagne sur Rise2
 

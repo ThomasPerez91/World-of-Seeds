@@ -122,3 +122,47 @@ def test_campaign_manifest_requires_private_permissions_and_download_paths(tmp_p
     path.write_text(json.dumps({"base_url": "https://example.test", "targets": [invalid_target]}))
     with pytest.raises(ValueError):
         read_manifest(path)
+
+
+@pytest.mark.asyncio
+async def test_slow_reader_cannot_bank_idle_retry_or_reconnect_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = 0.0
+    delays: list[float] = []
+    calls = 0
+
+    async def sleep(delay: float) -> None:
+        nonlocal clock
+        delays.append(delay)
+        clock += delay
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal clock, calls
+        calls += 1
+        clock += 100  # Admission and reconnect delays dwarf the file's read time.
+        if calls == 1:
+            return httpx.Response(429, headers={"Retry-After": "2"})
+        if calls == 2:
+            return httpx.Response(
+                200, headers={"etag": '"stable"'}, stream=httpx.ByteStream(b"1234")
+            )
+        assert request.headers["Range"] == "bytes=4-"
+        return httpx.Response(
+            206,
+            headers={"etag": '"stable"', "Content-Range": "bytes 4-7/8"},
+            stream=httpx.ByteStream(b"5678"),
+        )
+
+    monkeypatch.setattr("app.benchmark_http_downloads.perf_counter", lambda: clock)
+    monkeypatch.setattr("app.benchmark_http_downloads.asyncio.sleep", sleep)
+    spec = target(read_bytes_per_second=4, cancel_after_bytes=4, resume_after_cancel=True)
+    manifest = Manifest(base_url="https://example.test", targets=[spec])
+    result = ClientResult(0)
+    async with httpx.AsyncClient(
+        base_url=manifest.base_url, transport=httpx.MockTransport(handle)
+    ) as client:
+        await download_one(client, manifest, spec, result)
+    assert result.outcome == "completed" and result.resumed
+    assert result.retries_429 == 1
+    assert delays == [2, 1, 1]
