@@ -20,7 +20,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import StreamingResponse
-from starlette.types import Receive, Scope, Send
+from starlette.types import Message, Receive, Scope, Send
 
 from app.http_downloads import OpenedDownload
 from app.models import (
@@ -478,6 +478,15 @@ class DownloadLeaseManager:
             lease.renewed_at = now
             lease.expires_at = now + timedelta(seconds=self._lease_seconds)
 
+    async def keep_alive(self, lease_id: uuid.UUID) -> None:
+        """Renew on independent short SQL sessions even while ASGI send is blocked."""
+        while True:
+            await asyncio.sleep(self.heartbeat_seconds)
+            async with AsyncSession(bind=self._session.bind, expire_on_commit=False) as session:
+                await DownloadLeaseManager(
+                    session, lease_seconds=self._lease_seconds, clock=self._clock
+                ).renew(lease_id)
+
     async def release(self, lease_id: uuid.UUID) -> None:
         await self._session.rollback()
         async with self._session.begin():
@@ -571,12 +580,8 @@ async def stream_managed_download(
         )
     offset = start
     remaining = length
-    next_renewal = time.monotonic() + leases.heartbeat_seconds
     try:
         while remaining > 0:
-            if time.monotonic() >= next_renewal:
-                await leases.renew(lease.id)
-                next_renewal = time.monotonic() + leases.heartbeat_seconds
             requested, share = await traffic.next_chunk(
                 lease.id,
                 min(remaining, chunk_size),
@@ -593,8 +598,6 @@ async def stream_managed_download(
                 interval = min(delay, leases.heartbeat_seconds)
                 await asyncio.sleep(interval)
                 delay -= interval
-                await leases.renew(lease.id)
-                next_renewal = time.monotonic() + leases.heartbeat_seconds
             chunk = await run_in_threadpool(
                 os.pread,
                 download.file_descriptor,
@@ -604,7 +607,6 @@ async def stream_managed_download(
             if not chunk:
                 raise ManagedDownloadError("managed file ended before its manifest size")
             yield chunk
-            await traffic.report(lease.id, len(chunk))
             offset += len(chunk)
             remaining -= len(chunk)
     finally:
@@ -675,6 +677,7 @@ class ManagedDownloadStreamingResponse(StreamingResponse):
         self._lease = lease
         self._leases = leases
         self._traffic = traffic
+        self._expected_length = length
         super().__init__(
             stream_managed_download(
                 download,
@@ -694,12 +697,35 @@ class ManagedDownloadStreamingResponse(StreamingResponse):
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        sent = 0
+        outcome: Literal["completed", "interrupted", "error"] = "interrupted"
+
+        async def measured_send(message: Message) -> None:
+            nonlocal sent
+            await send(message)
+            if message["type"] == "http.response.body":
+                size = len(message.get("body", b""))
+                sent += size
+                await self._traffic.report(self._lease.id, size)
+
         try:
-            await super().__call__(scope, receive, send)
+            async with asyncio.TaskGroup() as group:
+                heartbeat = group.create_task(self._leases.keep_alive(self._lease.id))
+                try:
+                    await super().__call__(scope, receive, measured_send)
+                finally:
+                    heartbeat.cancel()
+            if sent == self._expected_length:
+                outcome = "completed"
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            outcome = "error"
+            raise
         finally:
             self._download.close()
             try:
-                await self._traffic.unregister(self._lease.id)
+                await self._traffic.unregister(self._lease.id, outcome=outcome)
             finally:
                 await self._leases.release(self._lease.id)
 

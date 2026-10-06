@@ -2,6 +2,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import FastAPI, Request
@@ -60,7 +61,13 @@ async def monitor_http_upload(application: FastAPI) -> None:
                     and snapshot.upload.samples
                 ):
                     await application.state.download_traffic_scheduler.observe_upload(
-                        snapshot.upload.current_bytes_per_second
+                        snapshot.upload.current_bytes_per_second,
+                        sample_age_seconds=max(
+                            0,
+                            (
+                                datetime.now(UTC) - snapshot.upload.samples[-1].timestamp
+                            ).total_seconds(),
+                        ),
                     )
             except PrometheusNetworkError:
                 logger.warning("HTTP upload scheduler could not read network telemetry")
