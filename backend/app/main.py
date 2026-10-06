@@ -17,6 +17,8 @@ from app.api.external.errors import ExternalApiError
 from app.api.external.middleware import ExternalRequestIdMiddleware
 from app.api.external.rate_limit import ExternalApiRateLimiter
 from app.api.router import api_v2_router, build_api_router, external_v1_router
+from app.auth.passwords import PasswordWorkUnavailableError, password_work_pool
+from app.auth.rate_limit import LoginIpRateLimiter
 from app.coordination import RedisCoordinator
 from app.core.config import Settings, get_settings
 from app.core.database import engine
@@ -67,6 +69,7 @@ async def monitor_http_upload(application: FastAPI) -> None:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    password_work_pool.start()
     monitor = asyncio.create_task(monitor_http_upload(application))
     try:
         yield
@@ -74,6 +77,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         monitor.cancel()
         with suppress(asyncio.CancelledError):
             await monitor
+        await password_work_pool.aclose()
         await application.state.redis_coordinator.aclose()
         await engine.dispose()
 
@@ -107,6 +111,9 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
         uplink_bytes_per_second=settings.http_uplink_capacity_bytes_per_second
     )
     application.state.external_api_rate_limiter = ExternalApiRateLimiter()
+    application.state.login_ip_rate_limiter = LoginIpRateLimiter(
+        maximum=settings.auth_ip_max_attempts, window_seconds=settings.auth_ip_window_seconds
+    )
     application.state.metrics_registry = MetricsRegistry()
     application.state.operational_metrics_cache = OperationalMetricsCache()
     application.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
@@ -139,6 +146,28 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
                 }
             },
             headers=headers,
+        )
+
+    async def password_work_error_handler(
+        request: Request, exc: PasswordWorkUnavailableError
+    ) -> JSONResponse:
+        if request.url.path.startswith("/api/external/v1"):
+            return await external_error_handler(
+                request,
+                ExternalApiError(
+                    503, "authentication_unavailable", "Authentication temporarily unavailable", 1
+                ),
+            )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": {
+                    "code": "authentication_unavailable",
+                    "message": "Authentication temporarily unavailable",
+                    "field": None,
+                }
+            },
+            headers={"Retry-After": "1"},
         )
 
     async def validation_error_handler(
@@ -181,6 +210,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
 
         return await http_exception_handler(request, exc)
 
+    application.add_exception_handler(PasswordWorkUnavailableError, password_work_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(ExternalApiError, external_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(StarletteHTTPException, external_http_error_handler)  # type: ignore[arg-type]

@@ -6,15 +6,14 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.passwords import hash_password_async, verify_password_async
 from app.auth.security import (
     DUMMY_PASSWORD_HASH,
     canonical_username,
     generate_token,
-    hash_password,
     hash_token,
     normalize_username,
     throttle_key,
-    verify_password,
 )
 from app.core.config import Settings
 from app.models import LoginThrottle, TorrentRequest, TorrentRequestState, User, UserSession
@@ -120,36 +119,55 @@ async def authenticate(
         username_key = username.lower()
 
     key = throttle_key(client_ip, username)
+    throttle = await db.scalar(select(LoginThrottle).where(LoginThrottle.key_hash == key))
+    if (
+        throttle is not None
+        and throttle.locked_until is not None
+        and ensure_utc(throttle.locked_until) > now
+    ):
+        raise AuthenticationLockedError
+
+    user = await db.scalar(select(User).where(func.lower(User.username) == username_key))
+    user_id = user.id if user is not None else None
+    encoded_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
+    # Release the read transaction/connection before any crypto or queue wait.
+    await db.commit()
+    password_matches = await verify_password_async(password, encoded_hash)
+
+    now = datetime.now(UTC)
     throttle = await db.scalar(
-        select(LoginThrottle).where(LoginThrottle.key_hash == key).with_for_update()
+        select(LoginThrottle)
+        .where(LoginThrottle.key_hash == key)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if (
         throttle is not None
         and throttle.locked_until is not None
         and ensure_utc(throttle.locked_until) > now
     ):
-        verify_password(password, DUMMY_PASSWORD_HASH)
         raise AuthenticationLockedError
 
-    user = await db.scalar(select(User).where(func.lower(User.username) == username_key))
-    encoded_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
-    password_matches = verify_password(password, encoded_hash)
-
-    if user is None or not password_matches or not user_can_login(user, now):
+    if user_id is None or not password_matches:
         await _register_failure(db, key, throttle, settings, now)
         raise AuthenticationFailedError
 
-    if throttle is not None:
-        await db.delete(throttle)
-
     locked_user = await db.scalar(
         select(User)
-        .where(User.id == user.id)
+        .where(User.id == user_id)
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    if locked_user is None:
+    if (
+        locked_user is None
+        or locked_user.password_hash != encoded_hash
+        or canonical_username(locked_user.username) != username_key
+        or not user_can_login(locked_user, datetime.now(UTC))
+    ):
+        await _register_failure(db, key, throttle, settings, now)
         raise AuthenticationFailedError
+    if throttle is not None:
+        await db.delete(throttle)
     if locked_user.last_login_at is None or ensure_utc(locked_user.last_login_at) < now:
         locked_user.last_login_at = now
     tokens = issue_session(db, user=locked_user, settings=settings, now=now)
@@ -183,6 +201,30 @@ def issue_session(
     )
 
 
+async def _password_snapshot(db: AsyncSession, user_id: UUID) -> str:
+    encoded_hash = await db.scalar(select(User.password_hash).where(User.id == user_id))
+    await db.commit()
+    if encoded_hash is None:
+        raise AuthenticationFailedError
+    return encoded_hash
+
+
+async def _lock_verified_user(db: AsyncSession, user_id: UUID, encoded_hash: str) -> User:
+    locked_user = await db.scalar(
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if (
+        locked_user is None
+        or locked_user.password_hash != encoded_hash
+        or not user_can_login(locked_user, datetime.now(UTC))
+    ):
+        raise AuthenticationFailedError
+    return locked_user
+
+
 async def change_credentials(
     db: AsyncSession,
     *,
@@ -192,16 +234,14 @@ async def change_credentials(
     new_password: str,
     settings: Settings,
 ) -> SessionTokens:
-    locked_user = await db.scalar(
-        select(User)
-        .where(User.id == user.id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    if locked_user is None or not verify_password(current_password, locked_user.password_hash):
+    user_id = user.id
+    encoded_hash = await _password_snapshot(db, user_id)
+    if not await verify_password_async(current_password, encoded_hash):
         raise AuthenticationFailedError
 
     username = normalize_username(username_input)
+    new_encoded_hash = await hash_password_async(new_password)
+    locked_user = await _lock_verified_user(db, user_id, encoded_hash)
     existing_user = await db.scalar(
         select(User).where(
             func.lower(User.username) == canonical_username(username),
@@ -213,7 +253,7 @@ async def change_credentials(
 
     now = datetime.now(UTC)
     locked_user.username = username
-    locked_user.password_hash = hash_password(new_password)
+    locked_user.password_hash = new_encoded_hash
     locked_user.must_change_credentials = False
     locked_user.updated_at = now
     await db.execute(
@@ -280,17 +320,15 @@ async def change_password(
     current_password: str,
     new_password: str,
 ) -> None:
-    locked_user = await db.scalar(
-        select(User)
-        .where(User.id == user.id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    if locked_user is None or not verify_password(current_password, locked_user.password_hash):
+    user_id = user.id
+    encoded_hash = await _password_snapshot(db, user_id)
+    if not await verify_password_async(current_password, encoded_hash):
         raise AuthenticationFailedError
 
+    new_encoded_hash = await hash_password_async(new_password)
+    locked_user = await _lock_verified_user(db, user_id, encoded_hash)
     now = datetime.now(UTC)
-    locked_user.password_hash = hash_password(new_password)
+    locked_user.password_hash = new_encoded_hash
     locked_user.updated_at = now
     await db.execute(
         update(UserSession)
