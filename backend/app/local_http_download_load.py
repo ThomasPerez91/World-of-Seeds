@@ -41,7 +41,9 @@ from app.storage import SharedContentStore
 
 
 @asynccontextmanager
-async def local_fixture(root: Path, clients: int) -> AsyncIterator[tuple[Manifest, FastAPI]]:
+async def local_fixture(
+    root: Path, clients: int, *, serve: bool = True
+) -> AsyncIterator[tuple[Manifest, FastAPI]]:
     settings = Settings(data_root=root / "data", runtime_profile="v2", allowed_hosts=["127.0.0.1"])
     settings.data_root.mkdir()
     engine = create_async_engine(
@@ -118,6 +120,12 @@ async def local_fixture(root: Path, clients: int) -> AsyncIterator[tuple[Manifes
                 )
             )
         await session.commit()
+    if not serve:
+        try:
+            yield Manifest(base_url="http://127.0.0.1", targets=targets), application
+        finally:
+            await engine.dispose()
+        return
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     sock.listen(128)

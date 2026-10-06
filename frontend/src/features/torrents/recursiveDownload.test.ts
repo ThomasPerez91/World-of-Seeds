@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { TorrentDownloadSnapshotV2 } from "../../api/client";
+import { ApiError, type TorrentDownloadSnapshotV2 } from "../../api/client";
 import {
   type LocalDirectoryHandle,
   type LocalFileHandle,
@@ -82,6 +82,168 @@ function fileResponse(content: Uint8Array, status = 200, rangeStart = 2, total =
 }
 
 describe("RecursiveDownloadController", () => {
+  it.each(["same", "changed"])("reprend un corps tronqué et refuse un Range invalide : %s", async (variant) => {
+    vi.useFakeTimers();
+    try {
+      const directory = new MemoryDirectory();
+      const updates: RecursiveTransferProgress[] = [];
+      const fetcher = vi.fn()
+        .mockResolvedValueOnce(fileResponse(new Uint8Array([1, 2])))
+        .mockResolvedValueOnce(fileResponse(new Uint8Array([3, 4]), variant === "same" ? 206 : 200));
+      const controller = new RecursiveDownloadController({
+        torrentRequestId: "request",
+        firstPage: {
+          ...snapshot(), file_count: 1, total_size: 4,
+          items: [{ id: "file", file_index: 0, relative_path: "file.bin", size: 4 }],
+        },
+        directory, loadManifestPage: vi.fn(), concurrency: 1, fetcher,
+        onProgress: (progress) => updates.push(progress),
+      });
+      const running = controller.start();
+      await vi.runAllTimersAsync();
+      await running;
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(new Headers(fetcher.mock.calls[1][1].headers).get("Range")).toBe("bytes=2-");
+      expect(updates.at(-1)?.status).toBe(variant === "same" ? "completed" : "error");
+      expect(updates.at(-1)?.error).toBe(variant === "same" ? null : "manifest_changed");
+      expect([...directory.files.get("file.bin")!.content]).toEqual(
+        variant === "same" ? [1, 2, 3, 4] : [1, 2],
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["write", "close"])("ne réessaie pas une TypeError locale de %s", async (operation) => {
+    class BrokenFile extends MemoryFile {
+      override async createWritable(): Promise<WritableFileHandle> {
+        const writer = await super.createWritable();
+        return { ...writer, [operation]: async () => { throw new TypeError("local failure"); } };
+      }
+    }
+    const directory = new MemoryDirectory();
+    directory.files.set("file.bin", new BrokenFile());
+    const updates: RecursiveTransferProgress[] = [];
+    const fetcher = vi.fn(async () => fileResponse(new Uint8Array([1, 2, 3])));
+    const controller = new RecursiveDownloadController({
+      torrentRequestId: "request",
+      firstPage: {
+        ...snapshot(), file_count: 1, total_size: 3,
+        items: [{ id: "file", file_index: 0, relative_path: "file.bin", size: 3 }],
+      },
+      directory, loadManifestPage: vi.fn(), concurrency: 1, fetcher,
+      onProgress: (progress) => updates.push(progress),
+    });
+    await controller.start();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(updates.at(-1)).toMatchObject({ status: "error", error: "local_transfer_failed" });
+  });
+
+  it("reprend les octets conservés après coupure, 503 puis erreur réseau", async () => {
+    vi.useFakeTimers();
+    try {
+      const directory = new MemoryDirectory();
+      const oneFile = {
+        ...snapshot(), file_count: 1, total_size: 4,
+        items: [{ id: "file", file_index: 0, relative_path: "file.bin", size: 4 }],
+      };
+      const updates: RecursiveTransferProgress[] = [];
+      let calls = 0;
+      const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        calls += 1;
+        const headers = new Headers(init?.headers);
+        expect(headers.get("X-WOS-Download-Snapshot")).toBe(oneFile.snapshot_id);
+        if (calls === 1) {
+          let pulls = 0;
+          return new Response(new ReadableStream<Uint8Array>({
+            pull(stream) {
+              if (pulls++ === 0) stream.enqueue(new Uint8Array([1, 2]));
+              else stream.error(new TypeError("connection lost"));
+            },
+          }), { headers: { "X-WOS-Manifest-Version": "3" } });
+        }
+        expect(headers.get("Range")).toBe("bytes=2-");
+        if (calls === 2) return new Response(null, { status: 503, headers: { "Retry-After": "3" } });
+        if (calls === 3) throw new TypeError("offline");
+        return fileResponse(new Uint8Array([3, 4]), 206, 2, 4);
+      });
+      const controller = new RecursiveDownloadController({
+        torrentRequestId: "request", firstPage: oneFile, directory,
+        loadManifestPage: vi.fn(), concurrency: 1, fetcher,
+        onProgress: (progress) => updates.push(progress),
+      });
+      const running = controller.start();
+      await vi.advanceTimersByTimeAsync(999);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(2_999);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      await vi.runAllTimersAsync();
+      await running;
+      expect(fetcher).toHaveBeenCalledTimes(4);
+      expect([...directory.files.get("file.bin")!.content]).toEqual([1, 2, 3, 4]);
+      expect(updates.at(-1)).toMatchObject({ status: "completed", downloadedBytes: 4, error: null });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("borne la reprise et permet d’annuler immédiatement pendant son attente", async () => {
+    vi.useFakeTimers();
+    try {
+      const firstPage = { ...snapshot(), file_count: 1, total_size: 3, items: [snapshot().items[0]] };
+      const updates: RecursiveTransferProgress[] = [];
+      const fetcher = vi.fn(async () => new Response(null, { status: 503 }));
+      const controller = new RecursiveDownloadController({
+        torrentRequestId: "request", firstPage, directory: new MemoryDirectory(),
+        loadManifestPage: vi.fn(), concurrency: 1, fetcher,
+        onProgress: (progress) => updates.push(progress),
+      });
+      const running = controller.start();
+      await vi.runAllTimersAsync();
+      await running;
+      expect(fetcher).toHaveBeenCalledTimes(9);
+      expect(updates.at(-1)).toMatchObject({ status: "error", error: "download_interrupted" });
+      const resumed = controller.resume();
+      await vi.advanceTimersByTimeAsync(0);
+      controller.cancel();
+      await resumed;
+      await vi.runAllTimersAsync();
+      expect(fetcher).toHaveBeenCalledTimes(10);
+      expect(updates.at(-1)).toMatchObject({ status: "cancelled" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("réessaie une page de manifeste indisponible sans changer son snapshot", async () => {
+    vi.useFakeTimers();
+    try {
+      const firstPage = { ...snapshot(), file_count: 3, total_size: 9, limit: 2 };
+      const loadManifestPage = vi.fn()
+        .mockRejectedValueOnce(new ApiError(503, "unavailable"))
+        .mockResolvedValueOnce({
+          ...firstPage, offset: 2,
+          items: [{ id: "third", file_index: 2, relative_path: "third.bin", size: 3 }],
+        });
+      const updates: RecursiveTransferProgress[] = [];
+      const controller = new RecursiveDownloadController({
+        torrentRequestId: "request", firstPage, directory: new MemoryDirectory(),
+        loadManifestPage, concurrency: 1,
+        fetcher: vi.fn(async () => fileResponse(new Uint8Array([1, 2, 3]))),
+        onProgress: (progress) => updates.push(progress),
+      });
+      const running = controller.start();
+      await vi.runAllTimersAsync();
+      await running;
+      expect(loadManifestPage).toHaveBeenCalledTimes(2);
+      expect(loadManifestPage.mock.calls[1].slice(0, 2)).toEqual([2, firstPage.snapshot_id]);
+      expect(updates.at(-1)).toMatchObject({ status: "completed", completedFiles: 3 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("diagnostique la File System Access API et mémorise la destination WoS", async () => {
     const directory = new MemoryDirectory();
     const picker = vi.fn(async () => directory);
