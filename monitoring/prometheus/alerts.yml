@@ -1,6 +1,24 @@
 groups:
   - name: world-of-seeds-v2
     rules:
+      - alert: WOSDatabaseBackupMissing
+        expr: absent(wos_database_backup_last_success_timestamp_seconds)
+        for: 30m
+        labels: {severity: critical}
+        annotations:
+          summary: La sauvegarde PostgreSQL quotidienne n'est pas installée ou n'émet plus de métriques
+      - alert: WOSDatabaseBackupStale
+        expr: time() - wos_database_backup_last_success_timestamp_seconds > 93600
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: Aucune sauvegarde PostgreSQL restaurée et validée depuis 26 heures
+      - alert: WOSDatabaseBackupFailed
+        expr: wos_database_backup_last_attempt_success == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: La dernière sauvegarde ou son exercice de restauration a échoué
       - alert: WOSMetricsTargetDown
         expr: up == 0
         for: 2m
