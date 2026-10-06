@@ -33,4 +33,4 @@ COPY --from=frontend-build /build/frontend/dist ./static
 USER 10001:10001
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-server-header"]
+CMD ["python", "-m", "app.server"]

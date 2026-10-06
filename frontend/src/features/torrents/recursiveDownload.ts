@@ -1,17 +1,23 @@
-import type {
-  TorrentDownloadFileV2,
-  TorrentDownloadManifestPageV2,
+import {
+  ApiError,
+  type TorrentDownloadFileV2,
+  type TorrentDownloadManifestPageV2,
 } from "../../api/client";
 
 const MAX_MANIFEST_PAGE_SIZE = 500;
 const MAX_BUFFERED_MANIFEST_PAGES = 2;
 const MAX_VISIBLE_QUEUE_ITEMS = 8;
 const MAX_DOWNLOAD_BUSY_RETRIES = 6;
+const MAX_RECOVERY_RETRIES = 8;
 const SIZE_PRIORITY_BURST = 3;
 export const DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY = 2;
 
 function waitForDownloadSlot(attempt: number, signal: AbortSignal): Promise<void> {
   const delayMs = Math.min(2_000, 100 * (2 ** attempt));
+  return waitForRetry(delayMs, signal);
+}
+
+function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(new DOMException("transfer stopped", "AbortError"));
@@ -120,6 +126,21 @@ class TransferFailure extends Error {
   constructor(readonly code: RecursiveTransferErrorCode) {
     super(code);
   }
+}
+
+class InterruptedTransfer extends TransferFailure {
+  constructor(readonly retryAfterMs = 0) {
+    super("download_interrupted");
+  }
+}
+
+function isNetworkFailure(error: unknown): boolean {
+  return error instanceof TypeError
+    || (error instanceof DOMException && error.name === "NetworkError");
+}
+
+function recoveryDelay(attempt: number, retryAfterMs = 0): number {
+  return Math.min(15_000, Math.max(1_000 * (2 ** attempt), retryAfterMs));
 }
 
 export function recursiveDirectoryDownloadCapability(
@@ -311,7 +332,7 @@ export class RecursiveDownloadController {
     const controller = new AbortController();
     this.activeRequests.add(controller);
     let loading: Promise<void>;
-    loading = this.loadManifestPage(
+    loading = this.loadManifestWithRecovery(
       expectedOffset,
       this.snapshot.snapshot_id,
       controller.signal,
@@ -335,6 +356,22 @@ export class RecursiveDownloadController {
     return loading;
   }
 
+  private async loadManifestWithRecovery(
+    offset: number,
+    snapshotId: string,
+    signal: AbortSignal,
+  ): Promise<TorrentDownloadManifestPageV2> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.loadManifestPage(offset, snapshotId, signal);
+      } catch (error) {
+        const transient = isNetworkFailure(error) || (error instanceof ApiError && error.status >= 500);
+        if (!transient || attempt >= MAX_RECOVERY_RETRIES || signal.aborted) throw error;
+        await waitForRetry(recoveryDelay(attempt), signal);
+      }
+    }
+  }
+
   private validateManifestPage(page: TorrentDownloadManifestPageV2, expectedOffset: number): void {
     if (
       page.snapshot_id !== this.snapshot.snapshot_id ||
@@ -352,6 +389,28 @@ export class RecursiveDownloadController {
   }
 
   private async downloadFile(file: TorrentDownloadFileV2): Promise<void> {
+    const recovery = new AbortController();
+    this.activeRequests.add(recovery);
+    try {
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await this.downloadFileOnce(file);
+          return;
+        } catch (error) {
+          if (
+            !(error instanceof InterruptedTransfer)
+            || attempt >= MAX_RECOVERY_RETRIES
+            || this.status !== "running"
+          ) throw error;
+          await waitForRetry(recoveryDelay(attempt, error.retryAfterMs), recovery.signal);
+        }
+      }
+    } finally {
+      this.activeRequests.delete(recovery);
+    }
+  }
+
+  private async downloadFileOnce(file: TorrentDownloadFileV2): Promise<void> {
     if (this.status !== "running") throw new DOMException("transfer stopped", "AbortError");
     const localFile = await this.openLocalFile(file.relative_path);
     if (this.status !== "running") throw new DOMException("transfer stopped", "AbortError");
@@ -365,10 +424,15 @@ export class RecursiveDownloadController {
       if (offset > 0) headers.set("Range", `bytes=${offset}-`);
       let response: Response;
       for (let attempt = 0; ; attempt += 1) {
-        response = await this.fetcher(
-          `/api/v2/torrents/${encodeURIComponent(this.torrentRequestId)}/files/${encodeURIComponent(file.id)}/download`,
-          { headers, credentials: "same-origin", signal: controller.signal },
-        );
+        try {
+          response = await this.fetcher(
+            `/api/v2/torrents/${encodeURIComponent(this.torrentRequestId)}/files/${encodeURIComponent(file.id)}/download`,
+            { headers, credentials: "same-origin", signal: controller.signal },
+          );
+        } catch (error) {
+          if (isNetworkFailure(error) && !controller.signal.aborted) throw new InterruptedTransfer();
+          throw error;
+        }
         if (response.status !== 429) break;
         await response.body?.cancel().catch(() => undefined);
         if (attempt >= MAX_DOWNLOAD_BUSY_RETRIES) {
@@ -382,7 +446,10 @@ export class RecursiveDownloadController {
       }
       if (response.status >= 500) {
         await response.body?.cancel().catch(() => undefined);
-        throw new TransferFailure("download_interrupted");
+        const retryAfter = Number(response.headers.get("Retry-After"));
+        throw new InterruptedTransfer(
+          Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1_000 : 0,
+        );
       }
       if (!this.responseMatchesSnapshot(response, file, offset) || response.body === null) {
         if (response.body !== null) {
@@ -408,7 +475,13 @@ export class RecursiveDownloadController {
         if (offset > 0) await writer.seek(offset);
         reader = response.body.getReader();
         while (true) {
-          const result = await reader.read();
+          let result: ReadableStreamReadResult<Uint8Array>;
+          try {
+            result = await reader.read();
+          } catch (error) {
+            if (isNetworkFailure(error) && !controller.signal.aborted) throw new InterruptedTransfer();
+            throw error;
+          }
           if (result.done) break;
           if (written + result.value.byteLength > file.size) {
             throw new TransferFailure("received_file_too_large");
@@ -433,7 +506,7 @@ export class RecursiveDownloadController {
         throw new TransferFailure(this.safeErrorCode(error));
       }
       if (streamError !== null) throw streamError;
-      if (written !== file.size) throw new TransferFailure("received_file_incomplete");
+      if (written !== file.size) throw new InterruptedTransfer();
     } finally {
       this.activeRequests.delete(controller);
     }

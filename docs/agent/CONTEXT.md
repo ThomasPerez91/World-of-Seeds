@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.4` ;
+- version stable : `2.3.5` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -101,6 +101,17 @@ Checks obligatoires sur les branches protégées :
 - `Container image` ;
 - `Dependency and image security` ;
 - `Validate restricted Rise2 deploy path`.
+
+## Redémarrage de l’API et reprises READY
+
+L’image démarre via `python -m app.server` : SIGTERM/SIGINT active le drain, les nouveaux appels
+reçoivent 503/Retry-After, Uvicorn accorde cinq secondes aux requêtes en cours puis les annule.
+Le lifespan attend leur nettoyage jusqu’à deux secondes avant de fermer Redis/SQL, dans le
+budget Docker API inchangé. Les transferts fichiers/dossiers gérés par WoS réessaient réseau,
+5xx et EOF prématuré avec Range et snapshot constant, offset relu sur disque, huit retries
+bornés et timers annulables. Les erreurs de disque/droits/snapshot restent terminales.
+Les transferts natifs et ZIP gardent leurs contrats distincts ; aucune restauration de
+contrôleur après refresh n’est introduite. Voir `docs/download-deploy-resume.md`.
 
 ## Politique de version post-audit
 
