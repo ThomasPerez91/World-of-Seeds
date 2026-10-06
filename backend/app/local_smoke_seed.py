@@ -9,7 +9,7 @@ import secrets
 
 from sqlalchemy import func, select
 
-from app.auth.security import hash_password
+from app.auth.passwords import hash_password_async, password_work_pool
 from app.core.database import engine, session_factory
 from app.models import User
 from app.options import PostgresOptionsRegistry
@@ -25,11 +25,13 @@ async def seed() -> dict[str, str]:
         await PostgresOptionsRegistry().initialize(session)
         user = await session.scalar(select(User).where(func.lower(User.username) == USERNAME))
         if user is None:
-            user = User(username=USERNAME, password_hash=hash_password(password), is_admin=True)
+            user = User(
+                username=USERNAME, password_hash=await hash_password_async(password), is_admin=True
+            )
             session.add(user)
             await session.flush()
         else:
-            user.password_hash = hash_password(password)
+            user.password_hash = await hash_password_async(password)
             user.is_active = True
             user.must_change_credentials = False
             user.deleted_at = None
@@ -50,6 +52,7 @@ async def _main() -> None:
     try:
         print(json.dumps(await seed(), separators=(",", ":")))
     finally:
+        await password_work_pool.aclose()
         await engine.dispose()
 
 

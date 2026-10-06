@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     auth_attempt_window_minutes: int = Field(default=15, ge=1, le=1440)
     auth_lock_minutes: int = Field(default=15, ge=1, le=1440)
     auth_max_attempts: int = Field(default=5, ge=1, le=100)
+    auth_ip_max_attempts: int = Field(default=30, ge=1, le=1000)
+    auth_ip_window_seconds: int = Field(default=60, ge=1, le=3600)
     database_url: str | None = Field(default=None, repr=False)
     postgres_host: str = Field(default="localhost", min_length=1)
     postgres_port: int = Field(default=5432, ge=1, le=65535)

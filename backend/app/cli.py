@@ -4,6 +4,7 @@ import getpass
 import uuid
 from pathlib import Path
 
+from app.auth.passwords import password_work_pool
 from app.auth.security import normalize_username
 from app.core.database import session_factory
 from app.users import UserAccountQuotaReachedError, UserProvisioningService
@@ -135,10 +136,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+async def _create_admin_command(username: str) -> None:
+    password_work_pool.start()
+    try:
+        await create_admin(username)
+    finally:
+        await password_work_pool.aclose()
+
+
 def main() -> None:
     args = build_parser().parse_args()
     if args.command == "create-admin":
-        asyncio.run(create_admin(args.username))
+        asyncio.run(_create_admin_command(args.username))
     elif args.command == "inventory-v1":
         asyncio.run(inventory_v1(args.source_url_file, args.output, args.snapshot_id))
     elif args.command == "import-v1":
