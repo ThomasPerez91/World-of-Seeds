@@ -22,6 +22,25 @@ from app.users.provisioning import UserProvisioningConflictError
 router = APIRouter()
 
 
+def _replay_response(
+    existing: ExternalApiIdempotency, request_hash: str, response: Response
+) -> ExternalUserCreateResponse:
+    if existing.request_hash != request_hash:
+        raise ExternalApiError(
+            409, "idempotency_conflict", "Idempotency key reused with a different request"
+        )
+    response.status_code = status.HTTP_200_OK
+    response.headers["Cache-Control"] = "no-store"
+    return ExternalUserCreateResponse(
+        id=existing.user.id,
+        username=existing.user.username,
+        temporary_password=None,
+        auth_seed=existing.user.auth_seed,
+        must_change_credentials=existing.user.must_change_credentials,
+        idempotent_replay=True,
+    )
+
+
 @router.post(
     "/users",
     response_model=ExternalUserCreateResponse,
@@ -50,35 +69,34 @@ async def create_external_user(
         json.dumps(payload.model_dump(), sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     provisioning = UserProvisioningService()
-    await provisioning.lock_creation(db)
-    existing = await db.scalar(
+    lookup = (
         select(ExternalApiIdempotency)
         .options(selectinload(ExternalApiIdempotency.user))
         .where(
             ExternalApiIdempotency.client_id == client.id,
             ExternalApiIdempotency.key_hash == key_hash,
         )
+        .execution_options(populate_existing=True)
     )
+    existing = await db.scalar(lookup)
     if existing is not None:
-        if existing.request_hash != request_hash:
-            raise ExternalApiError(
-                409, "idempotency_conflict", "Idempotency key reused with a different request"
-            )
-        response.status_code = status.HTTP_200_OK
-        response.headers["Cache-Control"] = "no-store"
+        result_response = _replay_response(existing, request_hash, response)
         await db.commit()
-        return ExternalUserCreateResponse(
-            id=existing.user.id,
-            username=existing.user.username,
-            temporary_password=None,
-            auth_seed=existing.user.auth_seed,
-            must_change_credentials=existing.user.must_change_credentials,
-            idempotent_replay=True,
-        )
+        return result_response
+    # No SQL connection or quota/idempotency lock is retained while hashing.
+    await db.commit()
+    prepared_password = await provisioning.prepare_password()
+    await provisioning.lock_creation(db)
+    existing = await db.scalar(lookup)
+    if existing is not None:
+        result_response = _replay_response(existing, request_hash, response)
+        await db.commit()
+        return result_response
     try:
         result = await provisioning.provision(
             db,
             username=payload.username,
+            prepared_password=prepared_password,
             source="external_api",
             external_client_id=client.id,
         )

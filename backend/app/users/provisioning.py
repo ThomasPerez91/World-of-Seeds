@@ -33,6 +33,13 @@ class UserProvisioningConflictError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedPassword:
+    initial_password: str
+    encoded_hash: str
+    must_change_credentials: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ProvisionedUser:
     user: User
     initial_password: str
@@ -41,17 +48,29 @@ class ProvisionedUser:
 class UserProvisioningService:
     """Single transactional entry point for every runtime account creation."""
 
+    async def prepare_password(self, password: str | None = None) -> PreparedPassword:
+        initial_password = password or generate_initial_password()
+        return PreparedPassword(
+            initial_password=initial_password,
+            encoded_hash=await hash_password_async(initial_password),
+            must_change_credentials=password is None,
+        )
+
     async def provision(
         self,
         session: AsyncSession,
         *,
         username: str | None = None,
         password: str | None = None,
+        prepared_password: PreparedPassword | None = None,
         is_admin: bool = False,
         source: Literal["admin", "external_api", "cli"],
         actor_user_id: uuid.UUID | None = None,
         external_client_id: uuid.UUID | None = None,
     ) -> ProvisionedUser:
+        # Prepare before taking quota/advisory locks. Callers already inside a
+        # creation transaction must prepare first and pass the result explicitly.
+        prepared = prepared_password or await self.prepare_password(password)
         await self.lock_creation(session)
         await self._check_quota(session)
         requested_username = normalize_username(username) if username is not None else None
@@ -70,13 +89,12 @@ class UserProvisioningService:
                     raise UserProvisioningConflictError
                 continue
 
-            initial_password = password or generate_initial_password()
             user = User(
                 username=candidate_username,
-                password_hash=await hash_password_async(initial_password),
+                password_hash=prepared.encoded_hash,
                 auth_seed=seed,
                 is_admin=is_admin,
-                must_change_credentials=password is None,
+                must_change_credentials=prepared.must_change_credentials,
             )
             session.add(user)
             await session.flush()
@@ -89,7 +107,7 @@ class UserProvisioningService:
                 )
             )
             await session.flush()
-            return ProvisionedUser(user=user, initial_password=initial_password)
+            return ProvisionedUser(user=user, initial_password=prepared.initial_password)
 
         raise UserProvisioningConflictError
 

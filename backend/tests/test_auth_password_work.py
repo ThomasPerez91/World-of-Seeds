@@ -13,6 +13,7 @@ from app.auth.rate_limit import LoginIpRateLimiter
 from app.auth.security import hash_password
 from app.main import app
 from app.models import User, UserSession
+from app.users import UserProvisioningService
 
 
 async def wait_started(event: Event) -> None:
@@ -236,3 +237,61 @@ async def test_account_change_during_verification_cannot_issue_session(
     assert response.status_code == 401
     assert "set-cookie" not in response.headers
     assert await db_session.scalar(select(UserSession)) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["credentials", "password"])
+async def test_login_and_credential_crypto_do_not_retain_sql_transactions(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    route: str,
+) -> None:
+    user = User(username="no-sql-wait", password_hash=hash_password("correct-horse-battery"))
+    db_session.add(user)
+    await db_session.commit()
+    operations: list[str] = []
+
+    async def verify(value: str, encoded: str) -> bool:
+        assert not db_session.in_transaction()
+        operations.append("verify")
+        return await passwords.verify_password_async(value, encoded)
+
+    async def hash_value(value: str) -> str:
+        assert not db_session.in_transaction()
+        operations.append("hash")
+        return await passwords.hash_password_async(value)
+
+    monkeypatch.setattr("app.auth.service.verify_password_async", verify)
+    monkeypatch.setattr("app.auth.service.hash_password_async", hash_value)
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"username": user.username, "password": "correct-horse-battery"},
+    )
+    assert response.status_code == 200
+    payload = {"current_password": "correct-horse-battery", "new_password": "new-password-long"}
+    if route == "credentials":
+        payload["username"] = "no-sql-wait-updated"
+    changed = await client.patch(
+        f"/api/v1/auth/{route}",
+        json=payload,
+        headers={"X-CSRF-Token": str(client.cookies.get("wos_csrf"))},
+    )
+    assert changed.status_code == (200 if route == "credentials" else 204)
+    assert operations == ["verify", "verify", "hash"]
+
+
+@pytest.mark.asyncio
+async def test_provisioning_hash_precedes_quota_transaction(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def hash_value(value: str) -> str:
+        assert not db_session.in_transaction()
+        return await passwords.hash_password_async(value)
+
+    monkeypatch.setattr("app.users.provisioning.hash_password_async", hash_value)
+    created = await UserProvisioningService().provision(db_session, source="admin")
+    await db_session.commit()
+    assert await passwords.verify_password_async(
+        created.initial_password, created.user.password_hash
+    )
