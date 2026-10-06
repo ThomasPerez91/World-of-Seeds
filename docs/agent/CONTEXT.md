@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.5` ;
+- version stable : `2.3.6` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -380,3 +380,15 @@ L'ancien serveur V1 reste seulement une possibilité de rollback trafic pendant 
 - `docs/deployment-rise2-github-actions.md` : CI/CD production.
 
 Toute modification durable d'architecture, de direction produit ou de flux de release doit mettre ces fichiers en cohérence dans la même PR.
+
+## Sauvegarde PostgreSQL quotidienne (2.3.6)
+
+`scripts/rise2_v2_database_backup.py` sauvegarde la base en ligne et restaure chaque dump dans
+un PostgreSQL jetable sans réseau avant chiffrement age. Le helper explicite installe le timer
+quotidien uniquement après première réussite. Le déploiement app ne l'active pas sur Rise2.
+Destination locale `/var/backups/world-of-seeds-v2/postgres`, 14 jours + huit hebdomadaires,
+clé locale privée si aucune clé existante, métriques textfile et alertes Prometheus.
+Copie hors hôte, clé hors hôte, activation et réception d'alertes nécessitent une preuve opérateur.
+Ne jamais annoncer des sauvegardes production actives sur la seule base de la CI.
+Procédure : `docs/database-backups-rise2.md`. La reprise complète des films/configs/qB/NG reste
+celle de `docs/backup-restore-rise2-v2.md`.

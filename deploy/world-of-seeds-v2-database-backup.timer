@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily World of Seeds V2 PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+RandomizedDelaySec=10min
+Unit=world-of-seeds-v2-database-backup.service
+
+[Install]
+WantedBy=timers.target
