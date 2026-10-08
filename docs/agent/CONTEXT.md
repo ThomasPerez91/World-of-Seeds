@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.6` ;
+- version stable : `2.3.7` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -392,3 +392,13 @@ Copie hors hôte, clé hors hôte, activation et réception d'alertes nécessite
 Ne jamais annoncer des sauvegardes production actives sur la seule base de la CI.
 Procédure : `docs/database-backups-rise2.md`. La reprise complète des films/configs/qB/NG reste
 celle de `docs/backup-restore-rise2-v2.md`.
+
+## Supervision HTTP READY (2.3.7)
+
+Grafana `wos-v2-http-downloads` consomme les métriques agrégées existantes. Aucun Dashboard
+utilisateur ni règle d’admission n’est modifié. Les alertes HTTP distinguent annulations/erreurs,
+restent par cible API et ne déclenchent jamais sur la seule contre-pression d’un client lent.
+La CI teste leurs conditions via promtool et chaque requête du tableau via le smoke Prometheus.
+Thomas reporte l’activation des sauvegardes/notifications ; ne pas annoncer ces services actifs.
+Le chargement des nouvelles règles Prometheus exige une preuve OPS (bind de fichier/inode),
+procédure dans `docs/http-download-supervision.md`.

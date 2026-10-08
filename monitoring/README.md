@@ -11,6 +11,7 @@ Le monitoring V2 est provisionné depuis Git afin qu'un reset complet du pilote 
 
 ## Dashboards provisionnés
 
+- **World of Seeds V2 — Récupérations HTTP READY** : slots rapides/attentes, délais, débits ASGI/hôte, issues et fraîcheur réseau, sans identifiants métier.
 - **World of Seeds V2 — Vue opérationnelle** : état général, API, jobs, scheduler, stockage et dépendances.
 - **Rise2 — Serveur, stockage & réseau** : CPU, mémoire, swap, load, systèmes de fichiers, inodes, I/O, RAID `md10`, réseau et processus bloqués.
 - **Rise2 — Docker & conteneurs** : CPU, RAM, réseau, I/O, présence et redémarrages de chaque conteneur.
@@ -51,3 +52,5 @@ Les sauvegardes PostgreSQL quotidiennes ajoutent un textfile et des alertes abse
 Activation explicite et limites dans `docs/database-backups-rise2.md`. Les règles Prometheus
 ne constituent pas un routage de notifications : aucun Alertmanager ou destinataire externe
 n'est provisionné par ce dépôt ; sa configuration et la réception d'un test restent requises.
+
+La supervision HTTP READY et ses alertes d’investigation sont décrites dans `docs/http-download-supervision.md`. Les nouvelles règles nécessitent un chargement Prometheus confirmé ; aucune notification externe n’est annoncée.
