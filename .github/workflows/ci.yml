@@ -359,6 +359,11 @@ jobs:
       - name: Start isolated V2 monitoring
         if: env.WOS_VERSION_CHANNEL == 'v2'
         run: scripts/local_v2.sh monitoring-up
+      - name: Test HTTP download alert behavior
+        run: >-
+          docker run --rm --network none --entrypoint promtool
+          --workdir /rules --volume "$PWD/monitoring/prometheus:/rules:ro"
+          prom/prometheus:v3.14.0 test rules http-download-alerts.test.yml
       - name: Run V2 monitoring smoke
         if: env.WOS_VERSION_CHANNEL == 'v2'
         run: scripts/local_v2.sh monitoring-smoke

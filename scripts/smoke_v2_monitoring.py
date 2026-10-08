@@ -10,6 +10,7 @@ import platform
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,9 @@ if MONITORING_PLATFORM == "docker-desktop":
     COMPOSE.extend(["-f", str(ROOT / "compose.v2.monitoring.docker-desktop.yaml")])
 COMPOSE.extend(["--profile", "monitoring"])
 ALERTS = {
+    "WOSHttpDownloadTelemetryStale",
+    "WOSHttpDownloadWaitingTooLong",
+    "WOSHttpDownloadErrors",
     "WOSMetricsTargetDown",
     "WOSJobQueueStalled",
     "WOSJobFailures",
@@ -79,6 +83,7 @@ ALERTS = {
     "WOSSmartTemperatureHigh",
 }
 DASHBOARDS = {
+    "wos-v2-http-downloads",
     "world-of-seeds-v2",
     "rise2-host",
     "rise2-docker",
@@ -192,6 +197,19 @@ def main() -> int:
     if not DASHBOARDS.issubset(dashboard_uids):
         raise RuntimeError(f"missing provisioned dashboards: {sorted(DASHBOARDS - dashboard_uids)}")
 
+    http_dashboard = _request(
+        f"http://127.0.0.1:{port}/api/dashboards/uid/wos-v2-http-downloads",
+        authorization=authorization,
+    )["dashboard"]
+    http_queries = 0
+    for panel in http_dashboard["panels"]:
+        for target in panel.get("targets", []):
+            expression = target["expr"].replace("$__rate_interval", "5m")
+            result = _prometheus("/api/v1/query?" + urllib.parse.urlencode({"query": expression}))
+            if result.get("status") != "success":
+                raise RuntimeError("HTTP download dashboard query failed")
+            http_queries += 1
+
     print(
         json.dumps(
             {
@@ -199,6 +217,7 @@ def main() -> int:
                 "prometheus_targets": targets,
                 "alerts": len(alert_names),
                 "dashboards": len(DASHBOARDS),
+                "http_download_dashboard_queries": http_queries,
             }
         )
     )

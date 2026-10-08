@@ -1,0 +1,278 @@
+rule_files:
+- alerts.yml
+evaluation_interval: 1m
+tests:
+- name: network loss is sustained, then recovers
+  interval: 1m
+  input_series:
+  - series: wos_http_download_telemetry_fresh{job="wos-api",instance="api:8000"}
+    values: 0 0 0 1+0x8
+  - series: wos_http_download_fast_streams{job="wos-api",instance="api:8000"}
+    values: 1+0x12
+  - series: wos_http_download_waiting_streams{job="wos-api",instance="api:8000"}
+    values: 0+0x12
+  - series: wos_http_download_telemetry_configured{job="wos-api",instance="api:8000"}
+    values: 1+0x12
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: WOSHttpDownloadTelemetryStale
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: WOSHttpDownloadTelemetryStale
+    exp_alerts:
+    - exp_labels:
+        job: wos-api
+        instance: api:8000
+        severity: warning
+      exp_annotations: &id001
+        summary: Des récupérations HTTP sont actives sans mesure réseau fraîche
+  - eval_time: 3m
+    alertname: WOSHttpDownloadTelemetryStale
+    exp_alerts: []
+- name: idle and unrelated instance cannot trigger stale-network alert
+  interval: 1m
+  input_series:
+  - series: wos_http_download_telemetry_fresh{job="wos-api",instance="api:8000"}
+    values: 0+0x12
+  - series: wos_http_download_fast_streams{job="wos-api",instance="api:8000"}
+    values: 0+0x12
+  - series: wos_http_download_waiting_streams{job="wos-api",instance="api:8000"}
+    values: 0+0x12
+  - series: wos_http_download_telemetry_fresh{job="wos-api",instance="other:8000"}
+    values: 1+0x12
+  - series: wos_http_download_fast_streams{job="wos-api",instance="other:8000"}
+    values: 5+0x12
+  - series: wos_http_download_waiting_streams{job="wos-api",instance="other:8000"}
+    values: 2+0x12
+  - series: wos_http_download_telemetry_configured{job="wos-api",instance="api:8000"}
+    values: 1+0x12
+  - series: wos_http_download_telemetry_configured{job="wos-api",instance="other:8000"}
+    values: 1+0x12
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: WOSHttpDownloadTelemetryStale
+    exp_alerts: []
+- name: waiting-only activity still needs fresh network data
+  interval: 1m
+  input_series:
+  - series: wos_http_download_telemetry_fresh{job="wos-api",instance="api:8000"}
+    values: 0+0x12
+  - series: wos_http_download_fast_streams{job="wos-api",instance="api:8000"}
+    values: 0+0x12
+  - series: wos_http_download_waiting_streams{job="wos-api",instance="api:8000"}
+    values: 1+0x12
+  - series: wos_http_download_telemetry_configured{job="wos-api",instance="api:8000"}
+    values: 1+0x12
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: WOSHttpDownloadTelemetryStale
+    exp_alerts:
+    - exp_labels:
+        job: wos-api
+        instance: api:8000
+        severity: warning
+      exp_annotations: *id001
+- name: disabled local collection never triggers the stale-network alert
+  interval: 1m
+  input_series:
+  - series: wos_http_download_telemetry_fresh{job="wos-api",instance="api:8000"}
+    values: 0+0x12
+  - series: wos_http_download_telemetry_configured{job="wos-api",instance="api:8000"}
+    values: 0+0x12
+  - series: wos_http_download_fast_streams{job="wos-api",instance="api:8000"}
+    values: 5+0x12
+  - series: wos_http_download_waiting_streams{job="wos-api",instance="api:8000"}
+    values: 2+0x12
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: WOSHttpDownloadTelemetryStale
+    exp_alerts: []
+  promql_expr_test:
+  - expr: wos_http_download_telemetry_fresh{job="wos-api"} * on (job, instance) wos_http_download_telemetry_configured{job="wos-api"}
+      + on (job, instance) (wos_http_download_telemetry_configured{job="wos-api"}
+      - 1)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{job="wos-api",instance="api:8000"}'
+      value: -1
+- name: old waiting point must persist and disappears when the queue drains
+  interval: 1m
+  input_series:
+  - series: wos_http_download_waiting_oldest_age_seconds{job="wos-api",instance="api:8000"}
+    values: 1900+0x12
+  - series: wos_http_download_waiting_streams{job="wos-api",instance="api:8000"}
+    values: 1+0x5 0+0x6
+  alert_rule_test:
+  - eval_time: 4m
+    alertname: WOSHttpDownloadWaitingTooLong
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: WOSHttpDownloadWaitingTooLong
+    exp_alerts:
+    - exp_labels:
+        job: wos-api
+        instance: api:8000
+        severity: warning
+      exp_annotations:
+        summary: Une récupération HTTP attend une voie rapide depuis plus de 30 minutes
+  - eval_time: 6m
+    alertname: WOSHttpDownloadWaitingTooLong
+    exp_alerts: []
+- name: 30-minute boundary alone is not overdue
+  interval: 1m
+  input_series:
+  - series: wos_http_download_waiting_oldest_age_seconds{job="wos-api",instance="api:8000"}
+    values: 1800+0x12
+  - series: wos_http_download_waiting_streams{job="wos-api",instance="api:8000"}
+    values: 1+0x12
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: WOSHttpDownloadWaitingTooLong
+    exp_alerts: []
+- name: repeated real errors are not diluted by client interruptions
+  interval: 1m
+  input_series:
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="error"}
+    values: 0+15x12
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="completed"}
+    values: 0+100x12
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="interrupted"}
+    values: 0+300x12
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: WOSHttpDownloadErrors
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: WOSHttpDownloadErrors
+    exp_alerts:
+    - exp_labels:
+        job: wos-api
+        instance: api:8000
+        severity: warning
+      exp_annotations: &id002
+        summary: Les erreurs de récupération HTTP dépassent 10 % avec au moins trois
+          erreurs en cinq minutes
+- name: client interruptions and zero traffic are not server errors
+  interval: 1m
+  input_series:
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="error"}
+    values: 0+0x12
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="completed"}
+    values: 0+0x12
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="interrupted"}
+    values: 0+300x12
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: WOSHttpDownloadErrors
+    exp_alerts: []
+- name: high error proportion without three recent errors is insufficient
+  interval: 1m
+  input_series:
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="error"}
+    values: 0+0.2x12
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="completed"}
+    values: 0+0.2x12
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="interrupted"}
+    values: 0+0x12
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: WOSHttpDownloadErrors
+    exp_alerts: []
+- name: repeated errors below ten percent are insufficient
+  interval: 1m
+  input_series:
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="error"}
+    values: 0+3x12
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="completed"}
+    values: 0+100x12
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="interrupted"}
+    values: 0+0x12
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: WOSHttpDownloadErrors
+    exp_alerts: []
+- name: counter reset does not hide continued failures
+  interval: 1m
+  input_series:
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="error"}
+    values: 0+5x4 0+5x8
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="completed"}
+    values: 0+20x4 0+20x8
+  - series: wos_http_download_ended_total{job="wos-api",instance="api:8000",outcome="interrupted"}
+    values: 0+0x12
+  alert_rule_test:
+  - eval_time: 8m
+    alertname: WOSHttpDownloadErrors
+    exp_alerts:
+    - exp_labels:
+        job: wos-api
+        instance: api:8000
+        severity: warning
+      exp_annotations: *id002
+- name: all dashboard queries accept absent metrics without fabricating zeros
+  interval: 1m
+  input_series: []
+  promql_expr_test:
+  - expr: wos_http_download_fast_streams{job="wos-api"}
+    eval_time: 10m
+    exp_samples: []
+  - expr: wos_http_download_waiting_streams{job="wos-api"}
+    eval_time: 10m
+    exp_samples: []
+  - expr: wos_http_download_waiting_oldest_age_seconds{job="wos-api"}
+    eval_time: 10m
+    exp_samples: []
+  - expr: wos_http_download_telemetry_fresh{job="wos-api"} * on (job, instance) wos_http_download_telemetry_configured{job="wos-api"}
+      + on (job, instance) (wos_http_download_telemetry_configured{job="wos-api"}
+      - 1)
+    eval_time: 10m
+    exp_samples: []
+  - expr: wos_http_download_fast_streams{job="wos-api"}
+    eval_time: 10m
+    exp_samples: []
+  - expr: wos_http_download_fast_admission_target{job="wos-api"}
+    eval_time: 10m
+    exp_samples: []
+  - expr: wos_http_download_waiting_streams{job="wos-api"}
+    eval_time: 10m
+    exp_samples: []
+  - expr: sum by (lane) (rate(wos_http_download_bytes_total{job="wos-api"}[5m]))
+    eval_time: 10m
+    exp_samples: []
+  - expr: histogram_quantile(0.5, sum by (le) (rate(wos_http_download_fast_grant_seconds_bucket{job="wos-api"}[5m])))
+    eval_time: 10m
+    exp_samples: []
+  - expr: histogram_quantile(0.95, sum by (le) (rate(wos_http_download_fast_grant_seconds_bucket{job="wos-api"}[5m])))
+    eval_time: 10m
+    exp_samples: []
+  - expr: histogram_quantile(0.5, sum by (le) (rate(wos_http_download_first_byte_seconds_bucket{job="wos-api"}[5m])))
+    eval_time: 10m
+    exp_samples: []
+  - expr: histogram_quantile(0.95, sum by (le) (rate(wos_http_download_first_byte_seconds_bucket{job="wos-api"}[5m])))
+    eval_time: 10m
+    exp_samples: []
+  - expr: wos_http_download_host_upload_bytes_per_second{job="wos-api"} and on (job,
+      instance) wos_http_download_telemetry_fresh{job="wos-api"} == 1
+    eval_time: 10m
+    exp_samples: []
+  - expr: wos_http_download_uplink_capacity_bytes_per_second{job="wos-api"}
+    eval_time: 10m
+    exp_samples: []
+  - expr: wos_http_download_telemetry_age_seconds{job="wos-api"}
+    eval_time: 10m
+    exp_samples: []
+  - expr: sum by (outcome) (rate(wos_http_download_ended_total{job="wos-api"}[5m]))
+    eval_time: 10m
+    exp_samples: []
+  - expr: sum(rate(wos_http_download_admitted_total{job="wos-api"}[5m]))
+    eval_time: 10m
+    exp_samples: []
+  - expr: sum(rate(wos_http_download_waiting_rejected_total{job="wos-api"}[5m]))
+    eval_time: 10m
+    exp_samples: []
+  - expr: wos_http_download_fast_max_idle_seconds{job="wos-api"}
+    eval_time: 10m
+    exp_samples: []
+  - expr: sum by (outcome) (increase(wos_http_download_ended_total{job="wos-api"}[15m]))
+    eval_time: 10m
+    exp_samples: []
