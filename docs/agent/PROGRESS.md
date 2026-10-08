@@ -4,7 +4,14 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.8`.
+- Version applicative cible : `2.3.9`.
+
+## Release 2.3.9 — lectures frontend sans courses ni chevauchement
+
+- Hook commun par source/composant pour Dashboard et supervision admin : une lecture à la fois, rafale manuelle regroupée, timer n'annulant plus une lecture lente, abort/cleanup et callbacks tardifs ignorés. Cadences, routes et visibilité par utilisateur conservées.
+- GET d'aperçu/statut NewGreedy suspendus pendant les mutations correspondantes puis relus ; l'ancien résultat ne peut pas annuler l'affichage du redémarrage demandé. Propagation AbortSignal jusqu'à fetch pour six lectures admin.
+- Deux régressions réellement reproduites sur l'ancien Dashboard : trois lectures/annulations en trente secondes pour une réponse lente et expiration de session après navigation sur 401 tardif. Passent après correction, avec tests de rafale, StrictMode, démontage, changement de source/callback, reprise et lecture concurrente à une mutation NewGreedy.
+- Version +0.0.1 à 2.3.9 ; 3.0.0 reste réservée à la fin de l'audit. Sauvegardes/activation opérateur des alertes restent reportées. Prochaine étape : vérifier l'intégration API Discord/provisioning avant correction, puis les jobs périodiques.
 
 ## Release 2.3.8 — mutualisation des collectes réseau
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import {
   api,
@@ -9,6 +9,7 @@ import {
   type NewGreedyOverview,
   type NewGreedyRestartStatus,
 } from "../../api/client";
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { Dialog } from "../../components/Dialog";
 import { useFeedback } from "../../components/Feedback";
 import {
@@ -145,7 +146,6 @@ export function NewGreedyControlPanel({
   const [restartControlError, setRestartControlError] = useState("");
   const [restartOpen, setRestartOpen] = useState(false);
   const [requestingRestart, setRequestingRestart] = useState(false);
-  const mounted = useRef(true);
 
   const handleUnauthorized = useCallback(
     (caught: unknown): boolean => {
@@ -158,59 +158,33 @@ export function NewGreedyControlPanel({
     [onSessionExpired],
   );
 
-  const loadOverview = useCallback(async () => {
-    try {
-      const result = await api.getNewGreedyOverview();
-      if (mounted.current) {
-        setOverview(result);
-        setOverviewError("");
-      }
-    } catch (caught) {
-      if (!mounted.current || handleUnauthorized(caught)) return;
-      setOverviewError(t("admin.ngOverviewUnavailable"));
-    }
-  }, [handleUnauthorized, t]);
-
-  const loadRestartStatus = useCallback(async () => {
-    try {
-      const result = await api.getNewGreedyRestartStatus();
-      if (mounted.current) {
-        setRestartStatus(result);
-        setRestartControlError("");
-      }
-    } catch (caught) {
-      if (!mounted.current || handleUnauthorized(caught)) return;
-      setRestartControlError(t("admin.ngRestartControlUnavailable"));
-    }
-  }, [handleUnauthorized, t]);
-
-  useEffect(() => {
-    mounted.current = true;
-    void (async () => {
-      try {
-        const result = await api.getNewGreedyConfig();
-        if (mounted.current) {
-          setConfig(result);
-          setDraft(initialDraft(result));
-          setConfigError("");
-        }
-      } catch (caught) {
-        if (!mounted.current || handleUnauthorized(caught)) return;
-        setConfigError(t("admin.ngConfigUnavailable"));
-      } finally {
-        if (mounted.current) setLoadingConfig(false);
-      }
-    })();
-    void loadOverview();
-    void loadRestartStatus();
-    const interval = window.setInterval(() => void loadOverview(), 15_000);
-    const restartInterval = window.setInterval(() => void loadRestartStatus(), 2_000);
-    return () => {
-      mounted.current = false;
-      window.clearInterval(interval);
-      window.clearInterval(restartInterval);
-    };
-  }, [handleUnauthorized, loadOverview, loadRestartStatus, t]);
+  useAsyncRefresh(api.getNewGreedyOverview, {
+    intervalMs: 15_000,
+    enabled: !resetting,
+    onData: (result) => { setOverview(result); setOverviewError(""); },
+    onError: (caught) => {
+      if (!handleUnauthorized(caught)) setOverviewError(t("admin.ngOverviewUnavailable"));
+    },
+  });
+  useAsyncRefresh(api.getNewGreedyRestartStatus, {
+    intervalMs: 2_000,
+    enabled: !requestingRestart,
+    onData: (result) => { setRestartStatus(result); setRestartControlError(""); },
+    onError: (caught) => {
+      if (!handleUnauthorized(caught)) setRestartControlError(t("admin.ngRestartControlUnavailable"));
+    },
+  });
+  useAsyncRefresh(api.getNewGreedyConfig, {
+    onLoading: setLoadingConfig,
+    onData: (result) => {
+      setConfig(result);
+      setDraft(initialDraft(result));
+      setConfigError("");
+    },
+    onError: (caught) => {
+      if (!handleUnauthorized(caught)) setConfigError(t("admin.ngConfigUnavailable"));
+    },
+  });
 
   const changes = useMemo(
     () => (config === null ? {} : changedValues(config, draft)),
@@ -256,7 +230,6 @@ export function NewGreedyControlPanel({
               count: formatNumber(result.purged),
             }),
       });
-      await loadOverview();
     } catch (caught) {
       if (handleUnauthorized(caught)) return;
       feedback.toast({ tone: "error", message: t("admin.ngResetFailed") });
@@ -276,7 +249,6 @@ export function NewGreedyControlPanel({
       if (handleUnauthorized(caught)) return;
       if (caught instanceof ApiError && caught.status === 409) {
         setRestartOpen(false);
-        await loadRestartStatus();
         feedback.toast({ tone: "info", message: t("admin.ngRestartAlready") });
       } else {
         feedback.toast({ tone: "error", message: t("admin.restartRequestFailed") });

@@ -716,12 +716,12 @@ export const api = {
     return request<AdminStorageOverview>("/admin/storage");
   },
 
-  getAdminServicesHealth(): Promise<AdminServicesHealth> {
-    return request<AdminServicesHealth>("/admin/services/health");
+  getAdminServicesHealth(signal?: AbortSignal): Promise<AdminServicesHealth> {
+    return request<AdminServicesHealth>("/admin/services/health", { signal });
   },
 
-  getNewGreedyConfig(): Promise<NewGreedyConfig> {
-    return request<NewGreedyConfig>("/admin/services/newgreedy/config");
+  getNewGreedyConfig(signal?: AbortSignal): Promise<NewGreedyConfig> {
+    return request<NewGreedyConfig>("/admin/services/newgreedy/config", { signal });
   },
 
   updateNewGreedyConfig(
@@ -733,8 +733,8 @@ export const api = {
     });
   },
 
-  getNewGreedyOverview(): Promise<NewGreedyOverview> {
-    return request<NewGreedyOverview>("/admin/services/newgreedy/overview");
+  getNewGreedyOverview(signal?: AbortSignal): Promise<NewGreedyOverview> {
+    return request<NewGreedyOverview>("/admin/services/newgreedy/overview", { signal });
   },
 
   resetNewGreedyStats(): Promise<NewGreedyStatsReset> {
@@ -743,16 +743,16 @@ export const api = {
     });
   },
 
-  listNewGreedyTorrents(): Promise<NewGreedyTorrentListing> {
-    return request<NewGreedyTorrentListing>("/admin/services/newgreedy/torrents");
+  listNewGreedyTorrents(signal?: AbortSignal): Promise<NewGreedyTorrentListing> {
+    return request<NewGreedyTorrentListing>("/admin/services/newgreedy/torrents", { signal });
   },
 
-  listQBittorrentTorrents(): Promise<QBittorrentTorrentListing> {
-    return request<QBittorrentTorrentListing>("/admin/services/qbittorrent/torrents");
+  listQBittorrentTorrents(signal?: AbortSignal): Promise<QBittorrentTorrentListing> {
+    return request<QBittorrentTorrentListing>("/admin/services/qbittorrent/torrents", { signal });
   },
 
-  getNewGreedyRestartStatus(): Promise<NewGreedyRestartStatus> {
-    return request<NewGreedyRestartStatus>("/admin/services/newgreedy/restart");
+  getNewGreedyRestartStatus(signal?: AbortSignal): Promise<NewGreedyRestartStatus> {
+    return request<NewGreedyRestartStatus>("/admin/services/newgreedy/restart", { signal });
   },
 
   restartNewGreedy(): Promise<NewGreedyRestartStatus> {
