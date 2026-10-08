@@ -4,7 +4,14 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.7`.
+- Version applicative cible : `2.3.8`.
+
+## Release 2.3.8 — mutualisation des collectes réseau
+
+- Le Dashboard et le suivi de capacité HTTP partagent les deux requêtes Prometheus réseau par processus API, via une connexion persistante et un cache serveur de quinze secondes au maximum. Les demandes simultanées attendent une seule collecte ; aucune donnée utilisateur dans le cache.
+- Expiration plafonnée par la fraîcheur réelle des échantillons et âge transmis inchangé au scheduler ; panne temporisée cinq secondes sans réutilisation des valeurs expirées, annulation sans verrou résiduel et fermeture du client au shutdown.
+- Régressions : cinquante lecteurs ne produisent que deux requêtes réseau ; expiration, perte/reprise, limite de fraîcheur, annulation, isolation entre applications et partage effectif avec le monitor. Contrat API/authentification/no-store et règles de slots conservés.
+- +0.0.1 à 2.3.8 ; 3.0.0 réservée à la fin de l'audit. Sauvegardes et chargement opérateur des nouvelles alertes restent reportés. Prochaine tâche : consolidation du frontend après inspection des rafraîchissements et du traitement des requêtes concurrentes.
 
 ## Release 2.3.7 — supervision des récupérations HTTP READY
 

@@ -1,15 +1,12 @@
-from collections.abc import AsyncIterator
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
-import httpx
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.auth.dependencies import AuthContext, require_current_credentials
 from app.core.config import Settings, get_settings
-from app.integrations.http import integration_timeout
+from app.integrations.network_collection import NetworkThroughputCollector
 from app.integrations.prometheus_network import (
     NetworkDirection,
-    PrometheusNetworkClient,
     PrometheusNetworkError,
 )
 from app.schemas.dashboard_v2 import (
@@ -37,20 +34,12 @@ def _direction(value: NetworkDirection | None) -> NetworkThroughputDirectionResp
 
 
 async def get_prometheus_network_client(
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
-) -> AsyncIterator[PrometheusNetworkClient | None]:
+) -> NetworkThroughputCollector | None:
     if settings.prometheus_url is None:
-        yield None
-        return
-    timeout = integration_timeout(
-        settings.prometheus_connect_timeout_seconds,
-        settings.prometheus_read_timeout_seconds,
-    )
-    async with httpx.AsyncClient(
-        base_url=str(settings.prometheus_url).rstrip("/"),
-        timeout=timeout,
-    ) as client:
-        yield PrometheusNetworkClient(client, interface=settings.network_interface)
+        return None
+    return cast(NetworkThroughputCollector, request.app.state.network_throughput_collector)
 
 
 @router.get("/network-throughput", response_model=NetworkThroughputResponse)
@@ -58,7 +47,7 @@ async def get_network_throughput(
     response: Response,
     _context: Annotated[AuthContext, Depends(require_current_credentials)],
     prometheus: Annotated[
-        PrometheusNetworkClient | None,
+        NetworkThroughputCollector | None,
         Depends(get_prometheus_network_client),
     ],
     period: Annotated[Literal["realtime"], Query()] = "realtime",

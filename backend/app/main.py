@@ -4,7 +4,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 
-import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -27,10 +26,10 @@ from app.core.drain import RequestDrain, RequestDrainMiddleware
 from app.core.http_security import SecurityHeadersMiddleware
 from app.integrations import ExternalServicesMonitor
 from app.integrations.admin_runtime import AdminRuntimeMonitor
-from app.integrations.http import integration_timeout
+from app.integrations.network_collection import NetworkThroughputCollector
 from app.integrations.newgreedy_config import NewGreedyConfigStore
 from app.integrations.newgreedy_restart import NewGreedyRestartStore
-from app.integrations.prometheus_network import PrometheusNetworkClient, PrometheusNetworkError
+from app.integrations.prometheus_network import PrometheusNetworkError
 from app.integrations.wos_restart import WosRestartStore
 from app.observability import MetricsRegistry, OperationalMetricsCache, RequestMetricsMiddleware
 from app.options import OptionsStore
@@ -45,34 +44,21 @@ async def monitor_http_upload(application: FastAPI) -> None:
     settings: Settings = application.state.settings
     if settings.prometheus_url is None:
         return
-    timeout = integration_timeout(
-        settings.prometheus_connect_timeout_seconds,
-        settings.prometheus_read_timeout_seconds,
-    )
-    async with httpx.AsyncClient(
-        base_url=str(settings.prometheus_url).rstrip("/"), timeout=timeout, trust_env=False
-    ) as client:
-        prometheus = PrometheusNetworkClient(client, interface=settings.network_interface)
-        while True:
-            try:
-                snapshot = await prometheus.snapshot("realtime")
-                if (
-                    snapshot.status == "ok"
-                    and snapshot.upload is not None
-                    and snapshot.upload.samples
-                ):
-                    await application.state.download_traffic_scheduler.observe_upload(
-                        snapshot.upload.current_bytes_per_second,
-                        sample_age_seconds=max(
-                            0,
-                            (
-                                datetime.now(UTC) - snapshot.upload.samples[-1].timestamp
-                            ).total_seconds(),
-                        ),
-                    )
-            except PrometheusNetworkError:
-                logger.warning("HTTP upload scheduler could not read network telemetry")
-            await asyncio.sleep(15)
+    prometheus: NetworkThroughputCollector = application.state.network_throughput_collector
+    while True:
+        try:
+            snapshot = await prometheus.snapshot("realtime")
+            if snapshot.status == "ok" and snapshot.upload is not None and snapshot.upload.samples:
+                await application.state.download_traffic_scheduler.observe_upload(
+                    snapshot.upload.current_bytes_per_second,
+                    sample_age_seconds=max(
+                        0,
+                        (datetime.now(UTC) - snapshot.upload.samples[-1].timestamp).total_seconds(),
+                    ),
+                )
+        except PrometheusNetworkError:
+            logger.warning("HTTP upload scheduler could not read network telemetry")
+        await asyncio.sleep(15)
 
 
 @asynccontextmanager
@@ -88,6 +74,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         monitor.cancel()
         with suppress(asyncio.CancelledError):
             await monitor
+        await application.state.network_throughput_collector.aclose()
         await password_work_pool.aclose()
         await application.state.redis_coordinator.aclose()
         await engine.dispose()
@@ -107,6 +94,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = settings
+    application.state.network_throughput_collector = NetworkThroughputCollector(settings)
     application.state.request_drain = RequestDrain()
     application.state.external_services_monitor = ExternalServicesMonitor(settings)
     application.state.admin_runtime_monitor = AdminRuntimeMonitor(settings)
