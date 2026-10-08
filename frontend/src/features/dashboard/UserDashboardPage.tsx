@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import {
   api,
@@ -14,6 +14,7 @@ import {
 } from "../../components/icons";
 import { ArrowDown, ArrowRight, ArrowUp, Check, Clock3, Download, Gauge, HardDrive } from "lucide-react";
 import { Button, Card, Progress, StateMessage } from "../../components/ui";
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { useI18n } from "../../i18n";
 import { UserDownloadsPage } from "../torrents/UserDownloadsPage";
 
@@ -112,35 +113,17 @@ export function NetworkThroughputCard({ onSessionExpired }: { onSessionExpired: 
   const { formatBytes, t } = useI18n();
   const [network, setNetwork] = useState<NetworkThroughput | null>(null);
   const [networkError, setNetworkError] = useState(false);
-  const controller = useRef<AbortController | null>(null);
-
-  const refresh = useCallback(() => {
-    controller.current?.abort();
-    const nextController = new AbortController();
-    controller.current = nextController;
-    void api.getNetworkThroughput(nextController.signal)
-      .then((next) => {
-        setNetwork(next);
-        setNetworkError(false);
-      })
-      .catch((caught: unknown) => {
-        if (caught instanceof DOMException && caught.name === "AbortError") return;
-        if (caught instanceof ApiError && caught.status === 401) {
-          onSessionExpired();
-          return;
-        }
-        setNetworkError(true);
-      });
-  }, [onSessionExpired]);
-
-  useEffect(() => {
-    refresh();
-    const interval = window.setInterval(refresh, NETWORK_REFRESH_MS);
-    return () => {
-      window.clearInterval(interval);
-      controller.current?.abort();
-    };
-  }, [refresh]);
+  useAsyncRefresh(api.getNetworkThroughput, {
+    intervalMs: NETWORK_REFRESH_MS,
+    onData: (next) => { setNetwork(next); setNetworkError(false); },
+    onError: (caught) => {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setNetworkError(true);
+    },
+  });
 
   const ready = network?.status === "ok" && network.download !== null && network.upload !== null;
   return (
@@ -183,73 +166,27 @@ export function UserDashboardPage({
   const [activityError, setActivityError] = useState("");
   const [storage, setStorage] = useState<SharedStorageCapacity | null>(null);
   const [storageError, setStorageError] = useState("");
-  const activityController = useRef<AbortController | null>(null);
-  const storageController = useRef<AbortController | null>(null);
-  const activityRunning = useRef(false);
-  const activityQueued = useRef(false);
-  const mounted = useRef(true);
-
-  const refreshActivity = useCallback(() => {
-    if (!mounted.current) return;
-    if (activityRunning.current) {
-      activityQueued.current = true;
-      return;
-    }
-    activityRunning.current = true;
-    const controller = new AbortController();
-    activityController.current = controller;
-    void loadTorrentActivity(controller.signal)
-      .then((next) => {
-        setActivity(next);
-        setActivityError("");
-      })
-      .catch((caught: unknown) => {
-        if (caught instanceof DOMException && caught.name === "AbortError") return;
-        if (caught instanceof ApiError && caught.status === 401) {
-          onSessionExpired();
-          return;
-        }
-        setActivityError(apiError(caught, "dashboard.activityError"));
-      })
-      .finally(() => {
-        activityRunning.current = false;
-        if (!mounted.current || !activityQueued.current) return;
-        activityQueued.current = false;
-        refreshActivity();
-      });
-  }, [apiError, onSessionExpired]);
-
-  const refreshStorage = useCallback(() => {
-    storageController.current?.abort();
-    const controller = new AbortController();
-    storageController.current = controller;
-    setStorageError("");
-    void api.getSharedStorageCapacity(controller.signal)
-      .then((next) => setStorage(next))
-      .catch((caught: unknown) => {
-        if (caught instanceof DOMException && caught.name === "AbortError") return;
-        if (caught instanceof ApiError && caught.status === 401) {
-          onSessionExpired();
-          return;
-        }
-        setStorageError(apiError(caught, "dashboard.storageError"));
-      })
-      .finally(() => {
-        if (storageController.current === controller) storageController.current = null;
-      });
-  }, [apiError, onSessionExpired]);
-
-  useEffect(() => {
-    mounted.current = true;
-    refreshActivity();
-    refreshStorage();
-    return () => {
-      mounted.current = false;
-      activityQueued.current = false;
-      activityController.current?.abort();
-      storageController.current?.abort();
-    };
-  }, [refreshActivity, refreshStorage]);
+  const refreshActivity = useAsyncRefresh(loadTorrentActivity, {
+    onData: (next) => { setActivity(next); setActivityError(""); },
+    onError: (caught) => {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setActivityError(apiError(caught, "dashboard.activityError"));
+    },
+  });
+  const refreshStorage = useAsyncRefresh(api.getSharedStorageCapacity, {
+    onLoading: (loading) => { if (loading) setStorageError(""); },
+    onData: setStorage,
+    onError: (caught) => {
+      if (caught instanceof ApiError && caught.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setStorageError(apiError(caught, "dashboard.storageError"));
+    },
+  });
 
   const usedPercent = storage === null || storage.total_bytes === 0
     ? 0

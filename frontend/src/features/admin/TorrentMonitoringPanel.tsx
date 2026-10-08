@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   api,
@@ -8,6 +8,7 @@ import {
   type QBittorrentTorrentListing,
 } from "../../api/client";
 import { RefreshIcon } from "../../components/icons";
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { type MessageKey, useI18n } from "../../i18n";
 
 const PAGE_SIZE = 50;
@@ -106,6 +107,13 @@ function NewGreedyTorrentStatus({
   );
 }
 
+function loadMonitoring(signal: AbortSignal) {
+  return Promise.allSettled([
+    api.listQBittorrentTorrents(signal),
+    api.listNewGreedyTorrents(signal),
+  ]);
+}
+
 export function TorrentMonitoringPanel({
   onSessionExpired,
 }: {
@@ -120,31 +128,16 @@ export function TorrentMonitoringPanel({
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const mounted = useRef(true);
-  const inFlight = useRef(false);
-
-  const load = useCallback(async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    if (mounted.current) setLoading(true);
-    try {
-      const [qbittorrentResult, newgreedyResult] = await Promise.allSettled([
-        api.listQBittorrentTorrents(),
-        api.listNewGreedyTorrents(),
-      ]);
-      if (!mounted.current) return;
-
+  const load = useAsyncRefresh(loadMonitoring, {
+    intervalMs: 15_000,
+    onLoading: setLoading,
+    onError: () => setError(t("admin.qbListUnavailable")),
+    onData: ([qbittorrentResult, newgreedyResult]) => {
       const authenticationFailure = [qbittorrentResult, newgreedyResult].some(
-        (result) =>
-          result.status === "rejected" &&
-          result.reason instanceof ApiError &&
-          result.reason.status === 401,
+        (result) => result.status === "rejected" &&
+          result.reason instanceof ApiError && result.reason.status === 401,
       );
-      if (authenticationFailure) {
-        onSessionExpired();
-        return;
-      }
-
+      if (authenticationFailure) { onSessionExpired(); return; }
       if (qbittorrentResult.status === "fulfilled") {
         setListing(qbittorrentResult.value);
         setError("");
@@ -160,21 +153,8 @@ export function TorrentMonitoringPanel({
         setNewgreedyError(t("admin.newgreedyCorrelationUnavailable"));
       }
       setLastUpdated(new Date());
-    } finally {
-      inFlight.current = false;
-      if (mounted.current) setLoading(false);
-    }
-  }, [onSessionExpired, t]);
-
-  useEffect(() => {
-    mounted.current = true;
-    void load();
-    const interval = window.setInterval(() => void load(), 15_000);
-    return () => {
-      mounted.current = false;
-      window.clearInterval(interval);
-    };
-  }, [load]);
+    },
+  });
 
   const torrents = listing?.torrents ?? [];
   const correlation = useMemo(
