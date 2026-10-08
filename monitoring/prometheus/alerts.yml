@@ -1,6 +1,24 @@
 groups:
   - name: world-of-seeds-v2
     rules:
+      - alert: WOSHttpDownloadTelemetryStale
+        expr: (wos_http_download_telemetry_fresh{job="wos-api"} == 0) and on (job, instance) (wos_http_download_telemetry_configured{job="wos-api"} == 1) and on (job, instance) ((wos_http_download_fast_streams{job="wos-api"} + wos_http_download_waiting_streams{job="wos-api"}) > 0)
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: Des récupérations HTTP sont actives sans mesure réseau fraîche
+      - alert: WOSHttpDownloadWaitingTooLong
+        expr: (wos_http_download_waiting_oldest_age_seconds{job="wos-api"} > 1800) and on (job, instance) (wos_http_download_waiting_streams{job="wos-api"} > 0)
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Une récupération HTTP attend une voie rapide depuis plus de 30 minutes
+      - alert: WOSHttpDownloadErrors
+        expr: (sum by (job, instance) (increase(wos_http_download_ended_total{job="wos-api",outcome="error"}[5m])) >= 3) and on (job, instance) ((sum by (job, instance) (rate(wos_http_download_ended_total{job="wos-api",outcome="error"}[5m])) / sum by (job, instance) (rate(wos_http_download_ended_total{job="wos-api",outcome=~"completed|error"}[5m]))) > 0.1)
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Les erreurs de récupération HTTP dépassent 10 % avec au moins trois erreurs en cinq minutes
       - alert: WOSDatabaseBackupMissing
         expr: absent(wos_database_backup_last_success_timestamp_seconds)
         for: 30m

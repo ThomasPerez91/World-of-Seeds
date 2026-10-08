@@ -8,8 +8,10 @@ from typing import cast
 
 import pytest
 from httpx import AsyncClient
+from pydantic import AnyHttpUrl
 from starlette.types import Message, Scope
 
+from app.core.config import Settings, get_settings
 from app.http_downloads import OpenedDownload
 from app.main import app
 from app.models import DownloadLease
@@ -71,6 +73,23 @@ async def test_scrape_exposes_live_traffic_without_caching_or_identifiers(
     await scheduler.unregister(lease)
     response = await client.get("/api/v2/metrics")
     assert "wos_http_download_fast_streams 0.000000" in response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("configured", [False, True])
+async def test_metrics_distinguish_disabled_collection_from_configured_without_sample(
+    client: AsyncClient, data_root: Path, configured: bool
+) -> None:
+    settings = Settings(
+        data_root=data_root,
+        prometheus_url=AnyHttpUrl("http://prometheus:9090") if configured else None,
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    response = await client.get("/api/v2/metrics")
+    assert response.status_code == 200
+    assert f"wos_http_download_telemetry_configured {int(configured)}" in response.text
+    assert "wos_http_download_telemetry_fresh 0.000000" in response.text
+    assert "prometheus:9090" not in response.text
 
 
 class RecordingLeases:
