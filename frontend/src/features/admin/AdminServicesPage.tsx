@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import {
   api,
@@ -12,6 +12,7 @@ import {
   RefreshIcon,
 } from "../../components/icons";
 import { Badge, Button, Card, StateMessage } from "../../components/ui";
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { type MessageKey, useI18n } from "../../i18n";
 import { AdminPageShell, type AdminView } from "./AdminPageShell";
 import { ExternalApiClientsPanel } from "./ExternalApiClientsPanel";
@@ -103,37 +104,18 @@ export function AdminServicesPage({
   const [health, setHealth] = useState<AdminServicesHealth | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const mounted = useRef(true);
-
-  const load = useCallback(async () => {
-    if (mounted.current) {
-      setLoading(true);
-      setError("");
-    }
-    try {
-      const result = await api.getAdminServicesHealth();
-      if (mounted.current) setHealth(result);
-    } catch (caught) {
-      if (!mounted.current) return;
+  const load = useAsyncRefresh(api.getAdminServicesHealth, {
+    intervalMs: 15_000,
+    onLoading: (value) => { setLoading(value); if (value) setError(""); },
+    onData: setHealth,
+    onError: (caught) => {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
       setError(t("admin.loadFailed"));
-    } finally {
-      if (mounted.current) setLoading(false);
-    }
-  }, [onSessionExpired, t]);
-
-  useEffect(() => {
-    mounted.current = true;
-    void load();
-    const interval = window.setInterval(() => void load(), 15_000);
-    return () => {
-      mounted.current = false;
-      window.clearInterval(interval);
-    };
-  }, [load]);
+    },
+  });
 
   return (
     <AdminPageShell activeView="admin-services" onBack={onBack} onNavigate={onNavigate}>

@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.8` ;
+- version stable : `2.3.9` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -423,3 +423,25 @@ mis en cache commun. Le cache SQL des scrapes `/metrics` existant de quinze
 secondes reste distinct. Les règles de slots et la cadence du monitor sont
 conservées. Cache local au processus : plusieurs workers collectent chacun
 leurs mesures ; aucun cache Redis durable ni migration de BDD.
+
+## Rafraîchissements frontend (2.3.9)
+
+`useAsyncRefresh` centralise les lectures du Dashboard (réseau, activité,
+stockage), de l'état des services administratifs, du monitoring corrélé
+qB/NewGreedy et des lectures configuration/aperçu/redémarrage NewGreedy.
+Une seule lecture est en cours par source/composant ; les timers sautent
+les ticks occupés sans annuler la requête lente. Les demandes manuelles
+pendant une lecture sont regroupées en une relance. Les cadences existantes
+restent inchangées. Cleanup, changement de source et suspension annulent
+le signal et invalident les callbacks, même si le transport ignore abort.
+Les callbacks courants n'entraînent pas de nouvelles lectures au rerender
+ou au changement de langue. Isolation locale au composant ; aucun cache
+commun de données utilisateur, aucune persistance de téléchargements natifs.
+
+Les GET NewGreedy concernés sont suspendus pendant les mutations de
+redémarrage/remise à zéro correspondantes et relus à leur fin ; une réponse
+antérieure ne peut pas écraser le résultat de l'action. Le client API
+transmet les signaux des lectures aux fetch existants. Les actions explicites
+conservent authentification/CSRF/confirmation ; aucun redémarrage automatique.
+Le suivi WebSocket/pagination/manifeste de Mes téléchargements et les
+transferts binaires gardent leurs coordinations distinctes.
