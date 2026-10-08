@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.7` ;
+- version stable : `2.3.8` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -404,3 +404,22 @@ La CI teste leurs conditions via promtool et chaque requête du tableau via le s
 Thomas reporte l’activation des sauvegardes/notifications ; ne pas annoncer ces services actifs.
 Le chargement des nouvelles règles Prometheus exige une preuve OPS (bind de fichier/inode),
 procédure dans `docs/http-download-supervision.md`.
+
+## Collecte réseau mutualisée (2.3.8)
+
+Le graphique réseau du Dashboard et `monitor_http_upload` partagent un
+`NetworkThroughputCollector` par processus API. Une collecte bornée (deux
+`query_range`) et une connexion HTTP réutilisable remplacent les clients
+par requête. Cache serveur de quinze secondes au maximum, réduit à la
+fraîcheur restante des échantillons ; aucune prolongation artificielle de
+la télémétrie transmise au scheduler. Les échecs sont temporisés cinq secondes
+sans servir les anciennes valeurs. Verrou asynchrone, annulation libérant
+le verrou et client fermé après l'arrêt du monitor au shutdown.
+
+Seules les mesures réseau agrégées et immuables sont partagées.
+L'authentification reste obligatoire, les réponses HTTP restent `no-store`,
+et les torrents/films et compteurs propres aux utilisateurs ne sont jamais
+mis en cache commun. Le cache SQL des scrapes `/metrics` existant de quinze
+secondes reste distinct. Les règles de slots et la cadence du monitor sont
+conservées. Cache local au processus : plusieurs workers collectent chacun
+leurs mesures ; aucun cache Redis durable ni migration de BDD.

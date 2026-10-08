@@ -7,7 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
+from pydantic import AnyHttpUrl
 
+from app.core.config import Settings
+from app.integrations.network_collection import NetworkThroughputCollector
 from app.integrations.prometheus_network import (
     NetworkDirection,
     NetworkSample,
@@ -151,6 +154,9 @@ async def test_monitor_feeds_measured_host_upload_to_scheduler(
         prometheus_read_timeout_seconds=3.0,
         network_interface="auto",
     )
+    app.state.network_throughput_collector = NetworkThroughputCollector(
+        Settings(prometheus_url=AnyHttpUrl("http://prometheus.test"))
+    )
     app.state.download_traffic_scheduler = scheduler
     monitor = asyncio.create_task(monitor_http_upload(app))
     try:
@@ -162,6 +168,7 @@ async def test_monitor_feeds_measured_host_upload_to_scheduler(
         monitor.cancel()
         with suppress(asyncio.CancelledError):
             await monitor
+        await app.state.network_throughput_collector.aclose()
 
 
 @pytest.mark.asyncio
@@ -183,6 +190,9 @@ async def test_monitor_ignores_missing_upload_samples(monkeypatch: pytest.Monkey
         prometheus_read_timeout_seconds=3.0,
         network_interface="auto",
     )
+    app.state.network_throughput_collector = NetworkThroughputCollector(
+        Settings(prometheus_url=AnyHttpUrl("http://prometheus.test"))
+    )
     app.state.download_traffic_scheduler = scheduler
     monitor = asyncio.create_task(monitor_http_upload(app))
     try:
@@ -193,6 +203,7 @@ async def test_monitor_ignores_missing_upload_samples(monkeypatch: pytest.Monkey
         monitor.cancel()
         with suppress(asyncio.CancelledError):
             await monitor
+        await app.state.network_throughput_collector.aclose()
 
 
 @pytest.mark.asyncio
