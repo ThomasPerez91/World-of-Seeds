@@ -135,6 +135,12 @@ async def metrics(
     lines.extend(await request.app.state.download_traffic_scheduler.render_metrics())
     lines.extend(
         [
+            "# TYPE wos_http_download_telemetry_configured gauge",
+            f"wos_http_download_telemetry_configured {int(settings.prometheus_url is not None)}",
+        ]
+    )
+    lines.extend(
+        [
             "# HELP wos_jobs Current durable jobs by fixed state.",
             "# TYPE wos_jobs gauge",
         ]

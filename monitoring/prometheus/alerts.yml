@@ -2,7 +2,7 @@ groups:
   - name: world-of-seeds-v2
     rules:
       - alert: WOSHttpDownloadTelemetryStale
-        expr: (wos_http_download_telemetry_fresh{job="wos-api"} == 0) and on (job, instance) ((wos_http_download_fast_streams{job="wos-api"} + wos_http_download_waiting_streams{job="wos-api"}) > 0)
+        expr: (wos_http_download_telemetry_fresh{job="wos-api"} == 0) and on (job, instance) (wos_http_download_telemetry_configured{job="wos-api"} == 1) and on (job, instance) ((wos_http_download_fast_streams{job="wos-api"} + wos_http_download_waiting_streams{job="wos-api"}) > 0)
         for: 2m
         labels: {severity: warning}
         annotations:

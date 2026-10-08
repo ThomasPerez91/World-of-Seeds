@@ -398,6 +398,8 @@ celle de `docs/backup-restore-rise2-v2.md`.
 Grafana `wos-v2-http-downloads` consomme les métriques agrégées existantes. Aucun Dashboard
 utilisateur ni règle d’admission n’est modifié. Les alertes HTTP distinguent annulations/erreurs,
 restent par cible API et ne déclenchent jamais sur la seule contre-pression d’un client lent.
+L’indicateur `telemetry_configured` évite les fausses alertes lorsque la collecte est désactivée
+volontairement (profil local sans URL Prometheus), sans exporter la configuration privée.
 La CI teste leurs conditions via promtool et chaque requête du tableau via le smoke Prometheus.
 Thomas reporte l’activation des sauvegardes/notifications ; ne pas annoncer ces services actifs.
 Le chargement des nouvelles règles Prometheus exige une preuve OPS (bind de fichier/inode),

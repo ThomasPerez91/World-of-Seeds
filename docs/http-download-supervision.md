@@ -19,6 +19,7 @@ une cible disparue affiche « Sans données », pas son ancienne valeur dans la 
   du fichier sur le disque client. L’upload hôte inclut qBittorrent et les autres services.
 - Une mesure réseau périmée est masquée sur le graphique de débit hôte, jamais remplacée par zéro.
   Fraîcheur zéro et âge zéro indiquent qu’aucun échantillon valide n’a été reçu.
+  Le statut « Collecte désactivée » distingue une absence volontaire de configuration Prometheus.
 - Les histogrammes couvrent les observations terminées. La plus ancienne attente décrit les
   transferts toujours en attente ; l’absence d’observations n’est pas une latence nulle.
 - `completed` signifie corps envoyé intégralement à ASGI (y compris Range) ; `interrupted` désigne
@@ -30,13 +31,15 @@ une cible disparue affiche « Sans données », pas son ancienne valeur dans la 
 
 | Règle | Condition persistante |
 | --- | --- |
-| `WOSHttpDownloadTelemetryStale` | Mesure réseau périmée/absente avec au moins une récupération active pendant 2 min |
+| `WOSHttpDownloadTelemetryStale` | Collecte configurée, mesure réseau périmée/absente et au moins une récupération active pendant 2 min |
 | `WOSHttpDownloadWaitingTooLong` | Plus ancienne attente >30 min et file non vide pendant 5 min |
 | `WOSHttpDownloadErrors` | ≥3 erreurs sur 5 min et >10 % des réponses terminées/erreurs, pendant 5 min |
 
 Ces alertes sont de sévérité warning et ne modifient pas l’ordonnanceur. Le ratio d’erreurs exclut
 les interruptions des clients, qui ne doivent ni fabriquer ni masquer les erreurs serveur.
-Les conditions sont évaluées par cible API, pour éviter de combiner l’activité d’une instance
+La métrique `wos_http_download_telemetry_configured` vaut 1 seulement si l’URL Prometheus est
+configurée, et n’exporte pas cette URL. Le profil local sans collecte réseau ne déclenche donc pas
+cette alerte. Les conditions sont évaluées par cible API, pour éviter de combiner l’activité d’une instance
 avec la mesure réseau d’une autre. Une attente prolongée peut rester explicable par de longs
 transferts engagés ; l’alerte invite à examiner les courbes, sans promettre un délai maximum.
 

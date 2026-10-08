@@ -161,7 +161,7 @@
         "uid": "prometheus"
       },
       "title": "Mesure réseau fraîche",
-      "description": "Fraîche ≤45 secondes. Une mesure absente ou périmée ne prouve pas une saturation réseau.",
+      "description": "Collecte désactivée si aucune URL Prometheus n’est configurée. Quand elle est activée, une mesure est fraîche jusqu’à 45 secondes.",
       "gridPos": {
         "x": 18,
         "y": 0,
@@ -170,7 +170,7 @@
       },
       "targets": [
         {
-          "expr": "wos_http_download_telemetry_fresh{job=\"wos-api\"}",
+          "expr": "wos_http_download_telemetry_fresh{job=\"wos-api\"} * on (job, instance) wos_http_download_telemetry_configured{job=\"wos-api\"} + on (job, instance) (wos_http_download_telemetry_configured{job=\"wos-api\"} - 1)",
           "refId": "A",
           "legendFormat": "Mesure réseau fraîche",
           "datasource": {
@@ -184,7 +184,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "min": 0,
+          "min": -1,
           "noValue": "Sans données",
           "max": 1,
           "mappings": [
@@ -198,6 +198,10 @@
                 "1": {
                   "text": "Fraîche",
                   "color": "green"
+                },
+                "-1": {
+                  "text": "Collecte désactivée",
+                  "color": "gray"
                 }
               }
             }

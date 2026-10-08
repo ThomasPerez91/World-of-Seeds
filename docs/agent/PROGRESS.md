@@ -9,9 +9,9 @@ World of Seeds V2 est désormais la ligne de production active.
 ## Release 2.3.7 — supervision des récupérations HTTP READY
 
 - Tableau Grafana dédié aux métriques 2.3.4 : flux rapides/attentes, cible future, délai de promotion/premier corps, débits ASGI/hôte, fraîcheur, interruptions/erreurs et refus. Aucun identifiant métier ; Dashboard utilisateur inchangé.
-- Jauges instantanées, débit hôte masqué si périmé, sens des compteurs/latences explicité. Le temps sans progression d’un client lent n’est pas assimilé à une panne.
+- Jauges instantanées, débit hôte masqué si périmé, collecte désactivée distinguée des mesures périmées via indicateur agrégé de configuration, sens des compteurs/latences explicité. Le temps sans progression d’un client lent n’est pas assimilé à une panne.
 - Alertes warning par cible pour télémétrie périmée avec activité, attente >30 min persistante, et erreurs répétées >10 %, sans compter les annulations comme erreurs ni modifier les slots.
-- Tests promtool de comportement et smoke de provisioning Grafana avec exécution de toutes les requêtes Prometheus. Procédure `docs/http-download-supervision.md`.
+- Tests promtool de comportement (dont profil local sans URL Prometheus) et smoke de provisioning Grafana avec exécution de toutes les requêtes Prometheus. Procédure `docs/http-download-supervision.md`.
 - Activation backups/notifications reportée à la demande de Thomas. Le nouveau tableau est provisionné depuis le répertoire monté ; nouvelles règles Prometheus à charger/confirmer lors d’une intervention OPS, sans prétendre une activation observée sur Rise2.
 - +0.0.1 à 2.3.7 ; 3.0.0 réservée à la fin de l’audit. Prochaine amélioration technique : réduire les collectes répétées Dashboard/Prometheus après vérification du code courant.
 
