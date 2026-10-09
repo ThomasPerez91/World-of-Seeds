@@ -46,10 +46,14 @@ def _validate_job_type(job_type: str) -> None:
         raise ValueError("job_type must be a safe opaque identifier")
 
 
-def _require_claim_owner(job: TorrentJob, worker_id: str) -> None:
+def _require_claim_owner(job: TorrentJob, worker_id: str, *, now: datetime) -> None:
     _validate_worker_id(worker_id)
     if job.state is not TorrentJobState.RUNNING or job.claimed_by != worker_id:
         raise TorrentJobTransitionError("the worker does not own this running job")
+    if job.claim_expires_at is None or _as_utc(now) >= _as_utc(job.claim_expires_at):
+        raise TorrentJobTransitionError("the job claim has expired")
+    if job.timeout_at is None or _as_utc(now) >= _as_utc(job.timeout_at):
+        raise TorrentJobTransitionError("the job execution timeout has expired")
 
 
 def _release_claim(job: TorrentJob) -> None:
@@ -131,7 +135,7 @@ async def complete_torrent_job(
     worker_id: str,
     now: datetime,
 ) -> None:
-    _require_claim_owner(job, worker_id)
+    _require_claim_owner(job, worker_id, now=now)
     final_state = (
         TorrentJobState.CANCELLED
         if job.cancel_requested_at is not None
@@ -150,11 +154,10 @@ async def renew_torrent_job_claim(
     now: datetime,
     claim_ttl: timedelta,
 ) -> None:
-    _require_claim_owner(job, worker_id)
+    _require_claim_owner(job, worker_id, now=now)
     if claim_ttl <= timedelta(0):
         raise ValueError("claim_ttl must be positive")
-    if job.timeout_at is None or _as_utc(now) >= _as_utc(job.timeout_at):
-        raise TorrentJobTransitionError("the job execution timeout has expired")
+    assert job.timeout_at is not None
     renewed_until = now + claim_ttl
     job.claim_expires_at = (
         renewed_until if _as_utc(renewed_until) <= _as_utc(job.timeout_at) else job.timeout_at
@@ -172,7 +175,7 @@ async def retry_torrent_job(
     available_at: datetime,
     error_code: str,
 ) -> None:
-    _require_claim_owner(job, worker_id)
+    _require_claim_owner(job, worker_id, now=now)
     _validate_error_code(error_code)
     if _as_utc(available_at) < _as_utc(now):
         raise ValueError("available_at cannot be in the past")
@@ -198,7 +201,7 @@ async def fail_torrent_job(
 ) -> None:
     """Finish an owned job after a permanent, secret-safe failure."""
 
-    _require_claim_owner(job, worker_id)
+    _require_claim_owner(job, worker_id, now=now)
     _validate_error_code(error_code)
     job.last_error_code = error_code
     job.updated_at = now
@@ -232,7 +235,7 @@ async def cancel_claimed_torrent_job(
     worker_id: str,
     now: datetime,
 ) -> None:
-    _require_claim_owner(job, worker_id)
+    _require_claim_owner(job, worker_id, now=now)
     if job.cancel_requested_at is None:
         raise TorrentJobTransitionError("cancellation was not requested")
     _finish(job, TorrentJobState.CANCELLED, now)

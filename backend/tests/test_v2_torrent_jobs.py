@@ -389,3 +389,71 @@ async def test_postgresql_skip_locked_allows_only_one_claim() -> None:
                 )
                 await cleanup_session.commit()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transition", ["renew", "complete", "retry", "fail", "cancel"])
+@pytest.mark.parametrize("deadline", ["claim", "execution"])
+@pytest.mark.parametrize("late_by", [timedelta(0), timedelta(seconds=1)])
+async def test_expired_claim_cannot_be_renewed_or_finalized_before_recovery(
+    db_session: AsyncSession,
+    transition: str,
+    deadline: str,
+    late_by: timedelta,
+) -> None:
+    from app.jobs.torrent_jobs import fail_torrent_job
+
+    torrent = await create_torrent(db_session)
+    job = await create_job(db_session, torrent, key="expired-owner")
+    await claim_next_torrent_job(
+        db_session,
+        worker_id="expired-worker",
+        now=NOW,
+        claim_ttl=CLAIM_TTL,
+        execution_timeout=EXECUTION_TIMEOUT,
+    )
+    if transition == "cancel":
+        await request_torrent_job_cancellation(db_session, job.id, now=NOW)
+    if deadline == "execution":
+        job.claim_expires_at = NOW + EXECUTION_TIMEOUT + timedelta(minutes=1)
+    await db_session.commit()
+    await db_session.refresh(job)  # Database timestamps may be timezone-naive.
+    now = NOW + (CLAIM_TTL if deadline == "claim" else EXECUTION_TIMEOUT) + late_by
+    old_expiry = job.claim_expires_at
+    with pytest.raises(TorrentJobTransitionError):
+        if transition == "renew":
+            await renew_torrent_job_claim(
+                db_session,
+                job,
+                worker_id="expired-worker",
+                now=now,
+                claim_ttl=CLAIM_TTL,
+            )
+        elif transition == "complete":
+            await complete_torrent_job(db_session, job, worker_id="expired-worker", now=now)
+        elif transition == "retry":
+            await retry_torrent_job(
+                db_session,
+                job,
+                worker_id="expired-worker",
+                now=now,
+                available_at=now,
+                error_code="test_transient_failure",
+            )
+        elif transition == "fail":
+            await fail_torrent_job(
+                db_session,
+                job,
+                worker_id="expired-worker",
+                now=now,
+                error_code="test_permanent_failure",
+            )
+        else:
+            await cancel_claimed_torrent_job(db_session, job, worker_id="expired-worker", now=now)
+    assert job.state is TorrentJobState.RUNNING
+    assert job.claim_expires_at == old_expiry
+    assert job.finished_at is None
+    assert job.last_error_code is None
+    recovered = await recover_expired_torrent_jobs(db_session, now=now, retry_delay=timedelta(0))
+    assert recovered == [job]
+    assert job.claimed_by is None

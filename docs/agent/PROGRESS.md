@@ -4,7 +4,14 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.11`.
+- Version applicative cible : `2.3.12`.
+
+## Release 2.3.12 — claims expirés et tentatives obsolètes
+
+- Expiration stricte : renouveler, compléter, retenter, échouer ou annuler un job exige un claim et un délai d'exécution encore valides, y compris exactement à l'échéance et avec timestamps SQL naïfs. Un claim expiré ne peut plus être ressuscité avant le passage de la récupération.
+- Le worker vérifie également le numéro de tentative sous verrou, pour chaque heartbeat/finalisation : un ancien handler ne peut pas modifier une nouvelle tentative reprise par le même processus. L'heure de finalisation d'échec est lue après acquisition du verrou. Perte de claim traitée par code constant, sans transition ni écriture de torrent depuis l'ancien résultat.
+- Régressions reproduites : 18 transitions périmées acceptées auparavant ; trois résultats d'une ancienne tentative finalisaient auparavant le job repris. Tests de frontières, heartbeat annulant le handler puis reprise par un autre worker, résultats tardifs succès/transitoire/permanent, et heartbeat d'une tentative obsolète.
+- +0.0.1 à 2.3.12 ; 3.0.0 réservée à la fin de l'audit. Politique de slots de téléchargement inchangée. Les effets externes restent réconciliés/idempotents ; ce correctif n'annule pas un effet déjà exécuté côté qBittorrent. Sauvegardes/chargement opérateur des alertes toujours reportés. Prochaine vérification : annulation demandée avant récupération d'un claim abandonné.
 
 ## Release 2.3.11 — reprise de la supervision après erreur SQL
 

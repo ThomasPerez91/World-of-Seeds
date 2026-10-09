@@ -384,3 +384,196 @@ async def test_postgresql_worker_renews_and_completes_durable_job() -> None:
             async with sessions() as session, session.begin():
                 await session.execute(delete(ManagedTorrent).where(ManagedTorrent.id == managed_id))
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_expired_heartbeat_cancels_handler_then_another_worker_recovers(
+    worker_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    from app.jobs.torrent_jobs import recover_expired_torrent_jobs
+
+    job_id = await create_job(worker_sessions)
+    clock = [NOW]
+    started, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def handler(_snapshot: TorrentJobSnapshot) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    runtime = TorrentWorker(
+        worker_sessions,
+        RedisCoordinator.unconfigured(),
+        {"TEST_JOB": handler},
+        worker_id="expired-worker",
+        config=CONFIG,
+        clock=lambda: clock[0],
+    )
+    task = asyncio.create_task(runtime.process_once())
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        clock[0] += CONFIG.claim_ttl
+        await asyncio.wait_for(cancelled.wait(), 1)
+        assert await asyncio.wait_for(task, 1)
+        expired = await load_job(worker_sessions, job_id)
+        assert expired.state is TorrentJobState.RUNNING
+        assert expired.claim_expires_at is not None
+        assert as_utc(expired.claim_expires_at) == NOW + CONFIG.claim_ttl
+        async with worker_sessions() as session, session.begin():
+            assert (
+                len(
+                    await recover_expired_torrent_jobs(
+                        session,
+                        now=clock[0],
+                        retry_delay=timedelta(0),
+                    )
+                )
+                == 1
+            )
+        handled = 0
+
+        async def replacement(_snapshot: TorrentJobSnapshot) -> None:
+            nonlocal handled
+            handled += 1
+
+        successor = TorrentWorker(
+            worker_sessions,
+            RedisCoordinator.unconfigured(),
+            {"TEST_JOB": replacement},
+            worker_id="replacement-worker",
+            config=CONFIG,
+            clock=lambda: clock[0],
+        )
+        assert await successor.process_once()
+        recovered = await load_job(worker_sessions, job_id)
+        assert recovered.state is TorrentJobState.COMPLETED
+        assert recovered.attempt_count == 2
+        assert handled == 1
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "transient", "permanent"])
+async def test_handler_finishing_after_expiry_leaves_job_for_recovery(
+    worker_sessions: async_sessionmaker[AsyncSession],
+    caplog: pytest.LogCaptureFixture,
+    outcome: str,
+) -> None:
+    job_id = await create_job(worker_sessions)
+    clock = [NOW]
+
+    async def handler(_snapshot: TorrentJobSnapshot) -> None:
+        clock[0] += CONFIG.claim_ttl
+        if outcome == "transient":
+            raise TransientTorrentJobError("test_transient_error")
+        if outcome == "permanent":
+            raise PermanentTorrentJobError("test_permanent_error")
+
+    runtime = TorrentWorker(
+        worker_sessions,
+        RedisCoordinator.unconfigured(),
+        {"TEST_JOB": handler},
+        worker_id="expired-worker",
+        config=CONFIG,
+        clock=lambda: clock[0],
+    )
+    assert await runtime.process_once()
+    job = await load_job(worker_sessions, job_id)
+    assert job.state is TorrentJobState.RUNNING
+    assert job.claimed_by == "expired-worker"
+    assert job.last_error_code is None
+    assert job.finished_at is None
+    assert "torrent_worker_claim_lost" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "transient", "permanent"])
+async def test_old_attempt_cannot_finalize_reclaimed_job_with_same_worker_id(
+    worker_sessions: async_sessionmaker[AsyncSession],
+    outcome: str,
+) -> None:
+    from app.jobs.torrent_jobs import claim_next_torrent_job, recover_expired_torrent_jobs
+
+    job_id = await create_job(worker_sessions)
+    clock = [NOW]
+
+    async def handler(_snapshot: TorrentJobSnapshot) -> None:
+        clock[0] += CONFIG.claim_ttl
+        async with worker_sessions() as session, session.begin():
+            await recover_expired_torrent_jobs(session, now=clock[0], retry_delay=timedelta(0))
+            reclaimed = await claim_next_torrent_job(
+                session,
+                worker_id="test-worker",
+                now=clock[0],
+                claim_ttl=CONFIG.claim_ttl,
+                execution_timeout=CONFIG.execution_timeout,
+            )
+            assert reclaimed is not None and reclaimed.id == job_id
+        if outcome == "transient":
+            raise TransientTorrentJobError("old_attempt_transient_error")
+        if outcome == "permanent":
+            raise PermanentTorrentJobError("old_attempt_permanent_error")
+
+    runtime = TorrentWorker(
+        worker_sessions,
+        RedisCoordinator.unconfigured(),
+        {"TEST_JOB": handler},
+        worker_id="test-worker",
+        config=CONFIG,
+        clock=lambda: clock[0],
+    )
+    assert await runtime.process_once()
+    job = await load_job(worker_sessions, job_id)
+    assert job.state is TorrentJobState.RUNNING
+    assert job.attempt_count == 2
+    assert job.claimed_by == "test-worker"
+    assert job.last_error_code == "claim_expired"
+    assert job.finished_at is None
+
+
+@pytest.mark.asyncio
+async def test_old_heartbeat_cannot_renew_reclaimed_job_with_same_worker_id(
+    worker_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    from app.jobs.torrent_jobs import claim_next_torrent_job, recover_expired_torrent_jobs
+    from app.jobs.worker import TorrentJobClaimLostError
+
+    job_id = await create_job(worker_sessions)
+    async with worker_sessions() as session, session.begin():
+        claimed = await claim_next_torrent_job(
+            session,
+            worker_id="test-worker",
+            now=NOW,
+            claim_ttl=CONFIG.claim_ttl,
+            execution_timeout=CONFIG.execution_timeout,
+        )
+        assert claimed is not None
+        snapshot = TorrentJobSnapshot.from_model(claimed)
+    reclaimed_at = NOW + CONFIG.claim_ttl
+    async with worker_sessions() as session, session.begin():
+        await recover_expired_torrent_jobs(session, now=reclaimed_at, retry_delay=timedelta(0))
+        reclaimed = await claim_next_torrent_job(
+            session,
+            worker_id="test-worker",
+            now=reclaimed_at,
+            claim_ttl=CONFIG.claim_ttl,
+            execution_timeout=CONFIG.execution_timeout,
+        )
+        assert reclaimed is not None
+
+    async def unused_handler(_snapshot: TorrentJobSnapshot) -> None:
+        pytest.fail("No handler should run in this heartbeat test")
+
+    runtime = worker(worker_sessions, unused_handler, now=reclaimed_at + timedelta(milliseconds=50))
+    with pytest.raises(TorrentJobClaimLostError):
+        await asyncio.wait_for(runtime._heartbeat(snapshot, asyncio.Event()), 1)
+    job = await load_job(worker_sessions, job_id)
+    assert job.state is TorrentJobState.RUNNING
+    assert job.attempt_count == 2
+    assert job.claim_expires_at is not None
+    assert as_utc(job.claim_expires_at) == reclaimed_at + CONFIG.claim_ttl
