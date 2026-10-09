@@ -4,29 +4,28 @@ from time import monotonic
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
 from sqlalchemy import event, text
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.coordination import RedisCoordinator
 from app.core.config import Settings
-from app.core.database import create_database_engine
+from app.core.database import DatabaseTimeouts, create_database_engine
 from app.jobs.worker import TorrentJobSnapshot, TorrentWorker
 
 
 @pytest.mark.parametrize(
     "field",
     [
-        "database_connect_timeout_seconds",
-        "database_command_timeout_seconds",
-        "database_pool_timeout_seconds",
+        "connect_seconds",
+        "command_seconds",
+        "pool_seconds",
     ],
 )
 @pytest.mark.parametrize("value", [0, -1, 31, float("inf"), float("nan")])
 def test_database_deadlines_cannot_be_disabled(field: str, value: float) -> None:
-    with pytest.raises(ValidationError):
-        Settings.model_validate({field: value})
+    with pytest.raises(ValueError):
+        DatabaseTimeouts(**{field: value})
 
 
 @pytest.mark.asyncio
@@ -44,10 +43,8 @@ async def test_runtime_deadlines_reach_the_driver_and_pool() -> None:
     engine = create_database_engine(
         Settings(
             database_url="postgresql+asyncpg://fake:fake@127.0.0.1/fake",
-            database_connect_timeout_seconds=0.2,
-            database_command_timeout_seconds=0.4,
-            database_pool_timeout_seconds=0.3,
-        )
+        ),
+        timeouts=DatabaseTimeouts(connect_seconds=0.2, command_seconds=0.4, pool_seconds=0.3),
     )
     received: dict[str, object] = {}
 
@@ -90,8 +87,8 @@ async def test_silent_postgres_handshake_times_out_and_can_retry(
     engine = create_database_engine(
         Settings(
             database_url=f"postgresql+asyncpg://fake:fake@127.0.0.1:{port}/fake",
-            database_connect_timeout_seconds=0.1,
-        )
+        ),
+        timeouts=DatabaseTimeouts(connect_seconds=0.1),
     )
 
     async def unused(_job: TorrentJobSnapshot) -> None:
@@ -143,7 +140,7 @@ POSTGRES = pytest.mark.skipif(
 @pytest.mark.parametrize("operation", ["slow_query", "lock_wait"])
 async def test_postgres_command_deadline_rolls_back_and_pool_recovers(operation: str) -> None:
     engine = create_database_engine(
-        Settings(database_command_timeout_seconds=0.2, database_connect_timeout_seconds=2)
+        Settings(), timeouts=DatabaseTimeouts(command_seconds=0.2, connect_seconds=2)
     )
     key = uuid4().int % (2**63 - 1)
     try:
@@ -172,7 +169,7 @@ async def test_postgres_command_deadline_rolls_back_and_pool_recovers(operation:
 @POSTGRES
 @pytest.mark.asyncio
 async def test_postgres_pool_exhaustion_has_a_deadline_and_recovers() -> None:
-    engine = create_database_engine(Settings(database_pool_timeout_seconds=0.1))
+    engine = create_database_engine(Settings(), timeouts=DatabaseTimeouts(pool_seconds=0.1))
     connections = []
     try:
         # Keep the existing default capacity: five pooled plus ten overflow connections.
@@ -292,7 +289,7 @@ async def test_established_blackholed_connection_is_terminated_and_pool_recovers
     port = server.sockets[0].getsockname()[1]
     url = target.set(host="127.0.0.1", port=port).render_as_string(hide_password=False)
     engine = create_database_engine(
-        Settings(database_url=url, database_command_timeout_seconds=0.1)
+        Settings(database_url=url), timeouts=DatabaseTimeouts(command_seconds=0.1)
     )
     try:
         if phase == "pre_ping":
