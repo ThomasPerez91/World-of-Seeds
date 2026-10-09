@@ -189,3 +189,148 @@ async def test_postgres_pool_exhaustion_has_a_deadline_and_recovers() -> None:
     finally:
         await asyncio.gather(*(connection.close() for connection in connections))
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exit_mode", ["deadline", "cancel"])
+async def test_outer_deadline_terminates_before_waiting_for_cancellation(exit_mode: str) -> None:
+    from app.core.database_driver import bounded_database_wait
+
+    started = asyncio.Event()
+    terminated = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def stalled_operation() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            # Model cancellation that cannot finish without forcibly closing TCP.
+            await terminated.wait()
+        finally:
+            finished.set()
+
+    task = asyncio.create_task(
+        bounded_database_wait(stalled_operation(), deadline_seconds=0.03, terminate=terminated.set)
+    )
+    await started.wait()
+    if exit_mode == "cancel":
+        task.cancel()
+        expected: type[BaseException] = asyncio.CancelledError
+    else:
+        expected = TimeoutError
+    async with asyncio.timeout(1):
+        with pytest.raises(expected):
+            await task
+    assert terminated.is_set()
+    assert finished.is_set()
+
+
+@pytest.mark.asyncio
+async def test_outer_deadline_preserves_success_and_unexpected_errors() -> None:
+    from app.core.database_driver import bounded_database_wait
+
+    def forbidden_termination() -> None:
+        pytest.fail("A finished operation must not terminate the connection")
+
+    async def result() -> int:
+        return 7
+
+    async def failure() -> int:
+        raise RuntimeError("unexpected")
+
+    assert (
+        await bounded_database_wait(result(), deadline_seconds=0.1, terminate=forbidden_termination)
+        == 7
+    )
+    with pytest.raises(RuntimeError, match="unexpected"):
+        await bounded_database_wait(
+            failure(), deadline_seconds=0.1, terminate=forbidden_termination
+        )
+
+
+@POSTGRES
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["query", "pre_ping", "commit", "rollback"])
+async def test_established_blackholed_connection_is_terminated_and_pool_recovers(
+    phase: str,
+) -> None:
+    from sqlalchemy.engine import make_url
+
+    target = make_url(Settings().sqlalchemy_database_url)
+    blackhole = asyncio.Event()
+    writers: list[asyncio.StreamWriter] = []
+    handlers: set[asyncio.Task[None]] = set()
+
+    async def proxy(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        current = asyncio.current_task()
+        assert current is not None
+        handlers.add(current)
+        writers.append(writer)
+        try:
+            upstream_reader, upstream_writer = await asyncio.open_connection(
+                target.host, target.port or 5432
+            )
+            writers.append(upstream_writer)
+
+            async def forward(
+                source: asyncio.StreamReader, destination: asyncio.StreamWriter
+            ) -> None:
+                while data := await source.read(65536):
+                    if not blackhole.is_set():
+                        destination.write(data)
+                        await destination.drain()
+
+            async with asyncio.TaskGroup() as group:
+                group.create_task(forward(reader, upstream_writer))
+                group.create_task(forward(upstream_reader, writer))
+        finally:
+            handlers.discard(current)
+            writer.close()
+
+    server = await asyncio.start_server(proxy, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    url = target.set(host="127.0.0.1", port=port).render_as_string(hide_password=False)
+    engine = create_database_engine(
+        Settings(database_url=url, database_command_timeout_seconds=0.1)
+    )
+    try:
+        if phase == "pre_ping":
+            async with engine.connect() as primed:
+                assert await primed.scalar(text("SELECT 1")) == 1
+            blackhole.set()
+            async with asyncio.timeout(4):
+                with pytest.raises(TimeoutError):
+                    async with engine.connect():
+                        pytest.fail("A blackholed pre-ping must fail")
+        else:
+            async with engine.connect() as connection:
+                assert await connection.scalar(text("SELECT 1")) == 1
+                raw = await connection.get_raw_connection()
+                driver = raw.driver_connection
+                assert driver is not None
+                blackhole.set()
+                async with asyncio.timeout(4):
+                    with pytest.raises(TimeoutError):
+                        if phase == "query":
+                            await connection.execute(text("SELECT 2"))
+                        elif phase == "commit":
+                            await connection.commit()
+                        else:
+                            await connection.rollback()
+                assert driver.is_closed()
+                await connection.invalidate()
+        blackhole.clear()
+        # Neither a terminated driver nor a stuck cancellation is returned to callers.
+        async with asyncio.timeout(4), engine.connect() as recovered:
+            assert await recovered.scalar(text("SELECT 1")) == 1
+    finally:
+        await engine.dispose()
+        server.close()
+        for writer in writers:
+            writer.close()
+        for handler in list(handlers):
+            handler.cancel()
+        await asyncio.gather(*handlers, return_exceptions=True)
+        await asyncio.gather(*(writer.wait_closed() for writer in writers), return_exceptions=True)
+        await server.wait_closed()

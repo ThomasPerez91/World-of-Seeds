@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.config import Settings, get_settings
+from app.core.database_driver import BoundedAsyncpgDBAPI
 
 settings = get_settings()
 
@@ -20,6 +21,7 @@ def create_database_engine(config: Settings) -> AsyncEngine:
         # command_timeout also covers pre-ping, transactions and lock waits.
         return create_async_engine(
             url,
+            module=BoundedAsyncpgDBAPI(config.database_command_timeout_seconds),
             pool_pre_ping=True,
             pool_timeout=config.database_pool_timeout_seconds,
             connect_args={
