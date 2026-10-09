@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Header, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.api.external.dependencies import require_scope
+from app.api.external.dependencies import lock_external_client_authorization, require_scope
 from app.api.external.errors import ExternalApiError
 from app.api.external.schemas import (
     ExternalErrorResponse,
@@ -68,18 +68,22 @@ async def create_external_user(
     request_hash = sha256(
         json.dumps(payload.model_dump(), sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+    client_id, client_key_hash = client.id, client.key_hash
     provisioning = UserProvisioningService()
     lookup = (
         select(ExternalApiIdempotency)
         .options(selectinload(ExternalApiIdempotency.user))
         .where(
-            ExternalApiIdempotency.client_id == client.id,
+            ExternalApiIdempotency.client_id == client_id,
             ExternalApiIdempotency.key_hash == key_hash,
         )
         .execution_options(populate_existing=True)
     )
     existing = await db.scalar(lookup)
     if existing is not None:
+        await lock_external_client_authorization(
+            db, client_id=client_id, key_hash=client_key_hash, scope="users:create"
+        )
         result_response = _replay_response(existing, request_hash, response)
         await db.commit()
         return result_response
@@ -87,6 +91,9 @@ async def create_external_user(
     await db.commit()
     prepared_password = await provisioning.prepare_password()
     await provisioning.lock_creation(db)
+    await lock_external_client_authorization(
+        db, client_id=client_id, key_hash=client_key_hash, scope="users:create"
+    )
     existing = await db.scalar(lookup)
     if existing is not None:
         result_response = _replay_response(existing, request_hash, response)
@@ -98,7 +105,7 @@ async def create_external_user(
             username=payload.username,
             prepared_password=prepared_password,
             source="external_api",
-            external_client_id=client.id,
+            external_client_id=client_id,
         )
     except UserAccountQuotaReachedError as exc:
         await db.rollback()
@@ -110,7 +117,7 @@ async def create_external_user(
     request_id = request.state.external_request_id
     db.add(
         ExternalApiIdempotency(
-            client_id=client.id,
+            client_id=client_id,
             key_hash=key_hash,
             request_hash=request_hash,
             created_user_id=result.user.id,
@@ -118,7 +125,7 @@ async def create_external_user(
     )
     db.add(
         ExternalApiAudit(
-            client_id=client.id,
+            client_id=client_id,
             user_id=result.user.id,
             action="users.create",
             request_id=request_id,

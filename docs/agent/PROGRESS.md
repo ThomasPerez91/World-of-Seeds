@@ -1,10 +1,17 @@
 # World of Seeds — Progress
 
-## Etat courant — 8 octobre 2026
+## Etat courant — 9 octobre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.9`.
+- Version applicative cible : `2.3.10`.
+
+## Release 2.3.10 — révocation pendant le provisioning externe
+
+- Corrige une course confirmée : une clé désactivée/révoquée ou privée de scope pendant la préparation du mot de passe pouvait encore créer un compte. L'empreinte authentifiée est figée, puis l'autorisation relue sous verrou avant création/commit ; replays rapides également revalidés sans recalcul crypto.
+- Aucune transaction/verrou conservé pendant Argon2. Ordre quota puis client, verrou client jusqu'au commit ; refus 401/403 avec rollback, sans compte/credentials/audits/idempotence. Contrats de quotas, générations, scopes et isolation des téléchargements conservés.
+- Quatre régressions reproduites sur le code précédent (201 malgré droits modifiés) puis refus corrects, avec identité ORM volontairement périmée. Deux scénarios PostgreSQL à sessions indépendantes vérifient révocation avant création et révocation attendant une création déjà verrouillée. Les scénarios PostgreSQL sont requis en CI, ignorés localement sans ce service.
+- +0.0.1 à 2.3.10 ; 3.0.0 réservée à la fin de l'audit. Ce correctif fiabilise l'API existante, sans activer de bot ni inventer une liaison d'identité Discord. Sauvegardes/chargement opérateur des alertes restent reportés. Prochaine correction : audit des jobs périodiques et de leur reprise.
 
 ## Release 2.3.9 — lectures frontend sans courses ni chevauchement
 
