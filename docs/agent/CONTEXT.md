@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.10` ;
+- version stable : `2.3.11` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -467,3 +467,7 @@ quota/client. Tests PostgreSQL avec sessions indépendantes pour les deux
 ordres création/révocation, en plus des régressions de cache ORM périmé.
 Pas de nouveau scope, route, champ Discord, migration ou bot activé ;
 le périmètre reste l'API externe existante et sa sûreté transactionnelle.
+
+## Reprise de la supervision périodique — 2.3.11
+
+`V2IntegrationObservabilityPublisher.run` absorbe les erreurs SQLAlchemy et OSError (y compris connexion socket/DNS/timeout brute asyncpg) au niveau du cycle, après rollback/fermeture des contextes de session, et attend la cadence configurée avant de refaire un cycle complet. Cela empêche une panne PostgreSQL de la supervision d'annuler le scheduler voisin dans le TaskGroup de `scheduler_service`. Le code de journal constant est `integration_observability_database_unavailable`, sans exception SQL ni secrets. Les observations existantes conservent leur validité originale ; les sets incomplets/périmés restent indisponibles. Les erreurs inattendues et CancelledError remontent ; request_stop réveille l'attente de reprise. Les garanties de slots et d'équité des téléchargements ne changent pas.

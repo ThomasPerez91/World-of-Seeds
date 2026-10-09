@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections.abc import Sequence
 from contextlib import suppress
@@ -11,6 +12,7 @@ from typing import Literal
 
 import httpx
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.integrations.account_routing import DeploymentAccountSpec
@@ -26,6 +28,8 @@ from app.models import (
     QBittorrentInventoryItem,
     QBittorrentInventorySnapshot,
 )
+
+logger = logging.getLogger(__name__)
 
 INVENTORY_PAGE_SIZE = 200
 MAX_ACCOUNT_INVENTORY = 1_000
@@ -144,7 +148,13 @@ class V2IntegrationObservabilityPublisher:
 
     async def run(self) -> None:
         while not self._stop.is_set():
-            await self.refresh_once()
+            try:
+                await self.refresh_once()
+            except (SQLAlchemyError, OSError):
+                # SQL sessions have rolled back; asyncpg may also raise a raw socket/DNS
+                # error while connecting. Retry at the normal cadence without
+                # cancelling the scheduler that shares this process/TaskGroup.
+                logger.warning("integration_observability_database_unavailable")
             with suppress(TimeoutError):
                 await asyncio.wait_for(self._stop.wait(), timeout=self._interval.total_seconds())
 
