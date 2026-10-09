@@ -577,3 +577,34 @@ async def test_old_heartbeat_cannot_renew_reclaimed_job_with_same_worker_id(
     assert job.attempt_count == 2
     assert job.claim_expires_at is not None
     assert as_utc(job.claim_expires_at) == reclaimed_at + CONFIG.claim_ttl
+
+
+@pytest.mark.asyncio
+async def test_worker_does_not_replay_cancelled_abandoned_job(
+    worker_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    job_id = await create_job(
+        worker_sessions,
+        state=TorrentJobState.RUNNING,
+        claimed_by="dead-worker",
+        claim_expires_at=NOW - timedelta(seconds=1),
+        timeout_at=NOW + timedelta(minutes=1),
+    )
+    async with worker_sessions() as session, session.begin():
+        job = await session.get(TorrentJob, job_id)
+        assert job is not None
+        job.cancel_requested_at = NOW - timedelta(seconds=2)
+
+    async def handler(_snapshot: TorrentJobSnapshot) -> None:
+        pytest.fail("A cancelled abandoned job must never be replayed")
+
+    runtime = worker(worker_sessions, handler)
+    assert await runtime.process_once() is False
+    # Even after the usual retry delay, recovery must not have left runnable work.
+    assert (
+        await worker(worker_sessions, handler, now=NOW + CONFIG.retry_base).process_once() is False
+    )
+    job = await load_job(worker_sessions, job_id)
+    assert job.state is TorrentJobState.CANCELLED
+    assert job.finished_at is not None
+    assert job.attempt_count == 1

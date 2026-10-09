@@ -457,3 +457,40 @@ async def test_expired_claim_cannot_be_renewed_or_finalized_before_recovery(
     recovered = await recover_expired_torrent_jobs(db_session, now=now, retry_delay=timedelta(0))
     assert recovered == [job]
     assert job.claimed_by is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("deadline", ["claim", "execution"])
+@pytest.mark.parametrize("max_attempts", [1, 3])
+async def test_recovery_honors_cancellation_before_retry_or_exhaustion(
+    db_session: AsyncSession,
+    deadline: str,
+    max_attempts: int,
+) -> None:
+    torrent = await create_torrent(db_session)
+    job = await create_job(db_session, torrent, key="cancel-expired", max_attempts=max_attempts)
+    await claim_next_torrent_job(
+        db_session,
+        worker_id="interrupted-worker",
+        now=NOW,
+        claim_ttl=CLAIM_TTL,
+        execution_timeout=EXECUTION_TIMEOUT,
+    )
+    await request_torrent_job_cancellation(db_session, job.id, now=NOW + timedelta(seconds=1))
+    now = NOW + (CLAIM_TTL if deadline == "claim" else EXECUTION_TIMEOUT)
+    recovered = await recover_expired_torrent_jobs(db_session, now=now, retry_delay=timedelta(0))
+    assert recovered == [job]
+    assert job.state is TorrentJobState.CANCELLED
+    assert job.finished_at == now
+    assert job.claimed_by is None
+    assert job.claim_expires_at is None
+    assert (
+        await claim_next_torrent_job(
+            db_session,
+            worker_id="replacement-worker",
+            now=now,
+            claim_ttl=CLAIM_TTL,
+            execution_timeout=EXECUTION_TIMEOUT,
+        )
+        is None
+    )

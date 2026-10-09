@@ -281,7 +281,9 @@ async def recover_expired_torrent_jobs(
             else "claim_expired"
         )
         job.updated_at = now
-        if job.attempt_count >= job.max_attempts:
+        if job.cancel_requested_at is not None:
+            _finish(job, TorrentJobState.CANCELLED, now)
+        elif job.attempt_count >= job.max_attempts:
             _finish(job, TorrentJobState.FAILED, now)
         else:
             job.state = TorrentJobState.QUEUED

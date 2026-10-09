@@ -475,3 +475,5 @@ le périmètre reste l'API externe existante et sa sûreté transactionnelle.
 ## Claims de jobs et fencing de tentative — 2.3.12
 
 Les transitions d'un job RUNNING exigent un propriétaire et des échéances de claim/exécution strictement futures, comparées en UTC. Un worker retardé laisse le claim expiré à `recover_expired_torrent_jobs`, même si la récupération n'est pas encore passée. Chaque heartbeat et finalisation verrouille/recharge le job et compare également `attempt_count` au snapshot immuable : une tentative obsolète ne peut pas renouveler/finaliser le claim d'une nouvelle tentative du même worker. Une finalisation ayant perdu le claim sort sans écrire de transition ni d'état torrent, avec `torrent_worker_claim_lost`. L'heure de finalisation d'échec est lue après le verrou. Les effets externes déjà exécutés ne peuvent pas être défaits par ce fencing ; les règles d'idempotence/réconciliation existantes restent nécessaires.
+
+La récupération de claims expirés honore `cancel_requested_at` avant le retry ou l'épuisement des tentatives : le job devient CANCELLED et ne peut pas être réclamé/réexécuté.
