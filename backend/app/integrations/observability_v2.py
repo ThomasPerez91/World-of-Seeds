@@ -150,8 +150,9 @@ class V2IntegrationObservabilityPublisher:
         while not self._stop.is_set():
             try:
                 await self.refresh_once()
-            except SQLAlchemyError:
-                # Session contexts have rolled back; retry at the normal cadence without
+            except (SQLAlchemyError, OSError):
+                # SQL sessions have rolled back; asyncpg may also raise a raw socket/DNS
+                # error while connecting. Retry at the normal cadence without
                 # cancelling the scheduler that shares this process/TaskGroup.
                 logger.warning("integration_observability_database_unavailable")
             with suppress(TimeoutError):

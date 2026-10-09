@@ -233,3 +233,54 @@ async def test_stop_interrupts_database_retry_wait_without_another_cycle(
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_raw_postgres_connection_refusal_is_retried(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import socket
+
+    # Reserve a local port without listening: real asyncpg connection establishment
+    # fails without relying on PostgreSQL, DNS, or an external service.
+    with socket.socket() as reserved:
+        reserved.bind(("127.0.0.1", 0))
+        port = reserved.getsockname()[1]
+        engine = create_async_engine(
+            f"postgresql+asyncpg://FAKE_USER:FAKE_PASSWORD@127.0.0.1:{port}/FAKE_DATABASE"
+        )
+        attempts = 0
+        raw_error_seen = False
+        async with httpx.AsyncClient(trust_env=False) as client:
+            publisher = V2IntegrationObservabilityPublisher(
+                async_sessionmaker(engine),
+                client,
+                [_spec()],
+                data_root=tmp_path,
+                interval=timedelta(seconds=0.03),
+            )
+
+            async def refresh() -> None:
+                nonlocal attempts, raw_error_seen
+                attempts += 1
+                if attempts == 1:
+                    try:
+                        async with engine.connect():
+                            pytest.fail("The reserved port must not accept connections")
+                    except OSError:
+                        raw_error_seen = True
+                        raise
+                publisher.request_stop()
+
+            monkeypatch.setattr(publisher, "refresh_once", refresh)
+            try:
+                await asyncio.wait_for(publisher.run(), 2)
+                assert raw_error_seen and attempts == 2
+                assert "integration_observability_database_unavailable" in caplog.text
+                assert "FAKE_PASSWORD" not in caplog.text
+                assert "Connection refused" not in caplog.text
+            finally:
+                publisher.request_stop()
+                await engine.dispose()
