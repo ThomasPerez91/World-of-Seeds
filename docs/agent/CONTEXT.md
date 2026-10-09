@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.9` ;
+- version stable : `2.3.10` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -445,3 +445,25 @@ transmet les signaux des lectures aux fetch existants. Les actions explicites
 conservent authentification/CSRF/confirmation ; aucun redémarrage automatique.
 Le suivi WebSocket/pagination/manifeste de Mes téléchargements et les
 transferts binaires gardent leurs coordinations distinctes.
+
+## Autorisation de provisioning externe (2.3.10)
+
+`POST /api/external/v1/users` conserve une copie immuable du client ID et
+de l'empreinte de clé authentifiés. Après le calcul du mot de passe hors
+transaction et l'acquisition du mutex de quota, il relit la ligne client
+avec `FOR UPDATE`/`populate_existing`, vérifie empreinte, activation,
+révocation et scope `users:create`, puis conserve ce verrou jusqu'au commit
+du compte/audits/idempotence. Une révocation validée avant cette acquisition
+interdit la création ; une création ayant acquis le verrou finit avant que
+la révocation puisse être confirmée. Aucun verrou SQL pendant le calcul
+crypto. Le replay rapide revalide également l'autorisation, sans calcul
+crypto ni mutation de quota. Les refus libèrent la transaction et gardent
+les contrats d'erreur 401/403 existants.
+
+Ordre des verrous pour une création nouvelle : mutex quota, ligne client,
+lecture idempotence/quota. Le replay rapide ne prend pas le mutex quota.
+La révocation administrative ne prend que la ligne client ; pas d'inversion
+quota/client. Tests PostgreSQL avec sessions indépendantes pour les deux
+ordres création/révocation, en plus des régressions de cache ORM périmé.
+Pas de nouveau scope, route, champ Discord, migration ou bot activé ;
+le périmètre reste l'API externe existante et sa sûreté transactionnelle.
