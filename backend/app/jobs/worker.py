@@ -236,7 +236,7 @@ class TorrentWorker:
         handler = self._handlers[snapshot.job_type]
         heartbeat_stop = asyncio.Event()
         handler_task = asyncio.create_task(handler(snapshot))
-        heartbeat_task = asyncio.create_task(self._heartbeat(snapshot.id, heartbeat_stop))
+        heartbeat_task = asyncio.create_task(self._heartbeat(snapshot, heartbeat_stop))
         try:
             done, _ = await asyncio.wait(
                 {handler_task, heartbeat_task},
@@ -276,6 +276,10 @@ class TorrentWorker:
                 await self._finish_failure(snapshot, "worker_unexpected_error", permanent=False)
             else:
                 await self._finish_success(snapshot)
+        except (TorrentJobClaimLostError, TorrentJobTransitionError):
+            # An expired/reassigned claim must be left to durable recovery, even when
+            # the handler finishes before the next heartbeat can observe the loss.
+            logger.warning("torrent_worker_claim_lost")
         finally:
             heartbeat_stop.set()
             if not handler_task.done():
@@ -284,7 +288,7 @@ class TorrentWorker:
                 heartbeat_task.cancel()
             await asyncio.gather(handler_task, heartbeat_task, return_exceptions=True)
 
-    async def _heartbeat(self, job_id: uuid.UUID, stop: asyncio.Event) -> None:
+    async def _heartbeat(self, snapshot: TorrentJobSnapshot, stop: asyncio.Event) -> None:
         interval = self._config.claim_ttl.total_seconds() / 3
         while True:
             try:
@@ -294,11 +298,7 @@ class TorrentWorker:
                 pass
             try:
                 async with self._session_factory() as session, session.begin():
-                    job = await session.scalar(
-                        select(TorrentJob).where(TorrentJob.id == job_id).with_for_update()
-                    )
-                    if job is None:
-                        raise TorrentJobClaimLostError("job no longer exists")
+                    job = await self._owned_job(session, snapshot)
                     await renew_torrent_job_claim(
                         session,
                         job,
@@ -311,7 +311,7 @@ class TorrentWorker:
 
     async def _finish_success(self, snapshot: TorrentJobSnapshot) -> None:
         async with self._session_factory() as session, session.begin():
-            job = await self._owned_job(session, snapshot.id)
+            job = await self._owned_job(session, snapshot)
             if job.cancel_requested_at is not None:
                 await cancel_claimed_torrent_job(
                     session, job, worker_id=self._worker_id, now=self._clock()
@@ -329,11 +329,11 @@ class TorrentWorker:
         permanent: bool,
         torrent_state: ManagedTorrentState | None = None,
     ) -> None:
-        now = self._clock()
         realtime_events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
         queue_changed = False
         async with self._session_factory() as session, session.begin():
-            job = await self._owned_job(session, snapshot.id)
+            job = await self._owned_job(session, snapshot)
+            now = self._clock()
             if job.cancel_requested_at is not None:
                 await cancel_claimed_torrent_job(session, job, worker_id=self._worker_id, now=now)
             elif permanent:
@@ -407,14 +407,15 @@ class TorrentWorker:
         if queue_changed:
             await self._redis.publish_torrent_queue_changed(now)
 
-    async def _owned_job(self, session: AsyncSession, job_id: uuid.UUID) -> TorrentJob:
+    async def _owned_job(self, session: AsyncSession, snapshot: TorrentJobSnapshot) -> TorrentJob:
         job = await session.scalar(
-            select(TorrentJob).where(TorrentJob.id == job_id).with_for_update()
+            select(TorrentJob).where(TorrentJob.id == snapshot.id).with_for_update()
         )
         if (
             job is None
             or job.state is not TorrentJobState.RUNNING
             or job.claimed_by != self._worker_id
+            or job.attempt_count != snapshot.attempt_count
         ):
             raise TorrentJobClaimLostError("worker no longer owns the job")
         return job
