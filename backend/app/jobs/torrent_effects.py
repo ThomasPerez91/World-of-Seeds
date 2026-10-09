@@ -80,6 +80,7 @@ SYNC_TORRENT_JOB = "SYNC_TORRENT"
 MAX_SYNC_BATCH = 200
 MAX_RETENTION_BATCH = 200
 RETENTION_REAPER_INTERVAL_SECONDS = 3600
+DATABASE_RETRY_SECONDS = 5.0
 SYNC_INTERVAL_OPTION = "WOS_QB_SYNC_INTERVAL_SECONDS"
 STALL_TIMEOUT = timedelta(seconds=60)
 STALL_COOLDOWNS = (
@@ -749,12 +750,12 @@ class TorrentSyncEnqueuer:
 
     async def run(self) -> None:
         while not self._stop.is_set():
-            interval = 5
+            interval = DATABASE_RETRY_SECONDS
             try:
                 interval, created = await self.enqueue_once()
                 if created:
                     await self._redis.signal_job_available()
-            except SQLAlchemyError:
+            except (SQLAlchemyError, OSError):
                 logger.warning("torrent_sync_enqueuer_database_unavailable")
             with suppress(TimeoutError):
                 await asyncio.wait_for(self._stop.wait(), timeout=interval)
@@ -847,14 +848,16 @@ class TorrentRetentionReaper:
 
     async def run(self) -> None:
         while not self._stop.is_set():
+            interval = float(RETENTION_REAPER_INTERVAL_SECONDS)
             try:
                 await self.expire_once()
-            except SQLAlchemyError:
+            except (SQLAlchemyError, OSError):
                 logger.warning("torrent_retention_reaper_database_unavailable")
+                interval = DATABASE_RETRY_SECONDS
             with suppress(TimeoutError):
                 await asyncio.wait_for(
                     self._stop.wait(),
-                    timeout=RETENTION_REAPER_INTERVAL_SECONDS,
+                    timeout=interval,
                 )
 
     async def expire_once(self) -> int:

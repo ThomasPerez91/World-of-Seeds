@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.12`.
+- Version applicative cible : `2.3.13`.
+
+## Release 2.3.13 — worker résilient aux pannes de connexion SQL
+
+- Trois régressions reproduites avec de vraies connexions asyncpg refusées : récupération, claim et boucle worker/TaskGroup voisin. Les boucles de polling, synchronisation et rétention prennent désormais en charge SQLAlchemyError et OSError brutes, sans traceback/SQL/secrets dans les journaux.
+- Initialisation des options worker retentée toutes les cinq secondes, sans valeurs de secours inventées ; SIGINT/SIGTERM installés avant la première connexion. Arrêt/annulation annule et attend la lecture SQL en cours ; Le même événement d'arrêt pilote le démarrage puis les tâches runtime, sans remplacement de handler signal ni fenêtre de perte d'arrêt. Redis/engine sont nettoyés par une seule sortie commune. Configuration invalide et erreurs inattendues restent visibles.
+- Échec de heartbeat traité comme perte de claim et annulation du handler. Échec/ambiguïté de finalisation laisse le claim durable à la récupération après expiration/backoff ; aucun replay immédiat ni libération non confirmée. Idempotence/réconciliation restent nécessaires pour les effets déjà exécutés.
+- Rétention : après une erreur SQL, retry après cinq secondes au lieu d'attendre une heure ; cadence horaire conservée après succès. Pas de chevauchement ni boucle rapide. Tests d'indisponibilité réelle puis reprise SQL, cadence, TaskGroup voisin, finalisation, heartbeat, démarrage, arrêt/annulation et erreurs inattendues.
+- +0.0.1 à 2.3.13 ; 3.0.0 réservée à la fin de l'audit. Sauvegardes et chargement opérateur des nouvelles alertes toujours reportés. Prochaine vérification : bornes de connexion/requête SQL pour limiter les attentes pendant les pannes silencieuses.
 
 ## Release 2.3.12 — claims expirés et tentatives obsolètes
 
