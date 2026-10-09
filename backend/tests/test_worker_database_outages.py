@@ -38,9 +38,11 @@ class OutageSessions(async_sessionmaker[AsyncSession]):
         self.unavailable = unavailable
         self.failures_left = 0
         self.calls: list[float] = []
+        self.called = asyncio.Event()
 
     def __call__(self, **local_kw: Any) -> AsyncSession:
         self.calls.append(monotonic())
+        self.called.set()
         if self.failures_left:
             self.failures_left -= 1
             return self.unavailable(**local_kw)
@@ -419,6 +421,41 @@ async def test_startup_cancellation_cleans_up_connection_task(
         with pytest.raises(asyncio.CancelledError):
             await task
         assert cancelled.is_set()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("already_stopped", [False, True])
+async def test_startup_stop_event_also_stops_runtime_worker_tasks(
+    outage_sessions: OutageSessions,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    already_stopped: bool,
+) -> None:
+    from app import worker as entrypoint
+    from app.core.config import Settings
+
+    monkeypatch.setattr(entrypoint, "session_factory", outage_sessions)
+    stop = asyncio.Event()
+    if already_stopped:
+        stop.set()
+    task = asyncio.create_task(
+        entrypoint._run_worker(
+            Settings(data_root=tmp_path),
+            RedisCoordinator.unconfigured(),
+            CONFIG,
+            stop,
+        )
+    )
+    try:
+        if not already_stopped:
+            await asyncio.wait_for(outage_sessions.called.wait(), 1)
+            stop.set()
+        await asyncio.wait_for(task, 2)
+        if already_stopped:
+            assert not outage_sessions.calls
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)

@@ -111,7 +111,7 @@ async def main() -> None:
     try:
         worker_config = await _load_worker_config(stop)
         if worker_config is not None and not stop.is_set():
-            await _run_worker(settings, redis, worker_config)
+            await _run_worker(settings, redis, worker_config, stop)
     finally:
         for signal_number in (signal.SIGINT, signal.SIGTERM):
             loop.remove_signal_handler(signal_number)
@@ -120,7 +120,10 @@ async def main() -> None:
 
 
 async def _run_worker(
-    settings: Settings, redis: RedisCoordinator, worker_config: TorrentWorkerConfig
+    settings: Settings,
+    redis: RedisCoordinator,
+    worker_config: TorrentWorkerConfig,
+    stop: asyncio.Event,
 ) -> None:
     if settings.integration_accounts_json is None:
         worker = TorrentWorker(
@@ -131,15 +134,14 @@ async def _run_worker(
             config=worker_config,
         )
         retention_reaper = TorrentRetentionReaper(session_factory, redis)
-        loop = asyncio.get_running_loop()
 
-        def request_stop() -> None:
+        async def wait_for_stop() -> None:
+            await stop.wait()
             worker.request_stop()
             retention_reaper.request_stop()
 
-        for signal_number in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(signal_number, request_stop)
         async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(wait_for_stop())
             tasks.create_task(worker.run())
             tasks.create_task(retention_reaper.run())
         return
@@ -177,16 +179,15 @@ async def _run_worker(
         )
         sync_enqueuer = TorrentSyncEnqueuer(session_factory, redis)
         retention_reaper = TorrentRetentionReaper(session_factory, redis)
-        loop = asyncio.get_running_loop()
 
-        def request_stop() -> None:
+        async def wait_for_stop() -> None:
+            await stop.wait()
             worker.request_stop()
             sync_enqueuer.request_stop()
             retention_reaper.request_stop()
 
-        for signal_number in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(signal_number, request_stop)
         async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(wait_for_stop())
             tasks.create_task(worker.run())
             tasks.create_task(sync_enqueuer.run())
             tasks.create_task(retention_reaper.run())
