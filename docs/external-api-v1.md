@@ -49,6 +49,15 @@ with the same client, key and payload does not create another user; it returns `
 and seed, `temporary_password: null`, and `idempotent_replay: true` because temporary passwords are
 not stored in recoverable form. Credential responses use `Cache-Control: no-store`.
 
+Before account creation, WOS rechecks the client's stored key fingerprint, active/revoked
+state and `users:create` scope after password preparation and after acquiring the quota
+mutex. It holds the client row lock until the creation transaction commits. A revocation
+that commits first prevents creation; if creation has already acquired that lock, it
+commits before the revocation can complete. After the revocation completes, new attempts
+are denied. Idempotent replays also recheck current authorization, without password work.
+Authorization failures roll back the transaction and return the existing 401/403 error
+codes without account, credential, idempotency or provisioning-audit creation.
+
 ### `GET /me/downloads?offset=0&limit=50`
 
 Requires `downloads:read` plus `X-WOS-User-Seed`. `limit` is bounded to 1–100. Only the resolved

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -53,6 +54,27 @@ async def authenticate_external_client(
     client.last_used_at = datetime.now(UTC)
     await db.commit()
     return client
+
+
+async def lock_external_client_authorization(
+    db: DbSession, *, client_id: UUID, key_hash: str, scope: str
+) -> None:
+    """Revalidate mutable credentials and hold their row until the mutation commits."""
+    client = await db.scalar(
+        select(ExternalApiClient)
+        .where(ExternalApiClient.id == client_id, ExternalApiClient.key_hash == key_hash)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if client is None:
+        await db.rollback()
+        raise ExternalApiError(401, "invalid_api_key", "Invalid API key")
+    if not client.is_active or client.revoked_at is not None:
+        await db.rollback()
+        raise ExternalApiError(401, "api_client_disabled", "API client is disabled")
+    if scope not in client.scopes:
+        await db.rollback()
+        raise ExternalApiError(403, "insufficient_scope", "Insufficient scope")
 
 
 def require_scope(scope: str) -> Callable[..., object]:
