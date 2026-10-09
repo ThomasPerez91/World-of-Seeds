@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.11` ;
+- version stable : `2.3.12` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -471,3 +471,9 @@ le périmètre reste l'API externe existante et sa sûreté transactionnelle.
 ## Reprise de la supervision périodique — 2.3.11
 
 `V2IntegrationObservabilityPublisher.run` absorbe les erreurs SQLAlchemy et OSError (y compris connexion socket/DNS/timeout brute asyncpg) au niveau du cycle, après rollback/fermeture des contextes de session, et attend la cadence configurée avant de refaire un cycle complet. Cela empêche une panne PostgreSQL de la supervision d'annuler le scheduler voisin dans le TaskGroup de `scheduler_service`. Le code de journal constant est `integration_observability_database_unavailable`, sans exception SQL ni secrets. Les observations existantes conservent leur validité originale ; les sets incomplets/périmés restent indisponibles. Les erreurs inattendues et CancelledError remontent ; request_stop réveille l'attente de reprise. Les garanties de slots et d'équité des téléchargements ne changent pas.
+
+## Claims de jobs et fencing de tentative — 2.3.12
+
+Les transitions d'un job RUNNING exigent un propriétaire et des échéances de claim/exécution strictement futures, comparées en UTC. Un worker retardé laisse le claim expiré à `recover_expired_torrent_jobs`, même si la récupération n'est pas encore passée. Chaque heartbeat et finalisation verrouille/recharge le job et compare également `attempt_count` au snapshot immuable : une tentative obsolète ne peut pas renouveler/finaliser le claim d'une nouvelle tentative du même worker. Une finalisation ayant perdu le claim sort sans écrire de transition ni d'état torrent, avec `torrent_worker_claim_lost`. L'heure de finalisation d'échec est lue après le verrou. Les effets externes déjà exécutés ne peuvent pas être défaits par ce fencing ; les règles d'idempotence/réconciliation existantes restent nécessaires.
+
+La récupération de claims expirés honore `cancel_requested_at` avant le retry ou l'épuisement des tentatives : le job devient CANCELLED et ne peut pas être réclamé/réexécuté.
