@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.12` ;
+- version stable : `2.3.13` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -477,3 +477,7 @@ le périmètre reste l'API externe existante et sa sûreté transactionnelle.
 Les transitions d'un job RUNNING exigent un propriétaire et des échéances de claim/exécution strictement futures, comparées en UTC. Un worker retardé laisse le claim expiré à `recover_expired_torrent_jobs`, même si la récupération n'est pas encore passée. Chaque heartbeat et finalisation verrouille/recharge le job et compare également `attempt_count` au snapshot immuable : une tentative obsolète ne peut pas renouveler/finaliser le claim d'une nouvelle tentative du même worker. Une finalisation ayant perdu le claim sort sans écrire de transition ni d'état torrent, avec `torrent_worker_claim_lost`. L'heure de finalisation d'échec est lue après le verrou. Les effets externes déjà exécutés ne peuvent pas être défaits par ce fencing ; les règles d'idempotence/réconciliation existantes restent nécessaires.
 
 La récupération de claims expirés honore `cancel_requested_at` avant le retry ou l'épuisement des tentatives : le job devient CANCELLED et ne peut pas être réclamé/réexécuté.
+
+## Pannes de connexion du worker — 2.3.13
+
+Le polling/récupération/claim, l'enqueue sync et la rétention tolèrent les SQLAlchemyError ainsi que les OSError brutes (socket/DNS/timeout asyncpg). Codes de log constants, sans détail SQL/connexion. Démarrage : options réessayées toutes les cinq secondes ; pas de worker/effet avant chargement valide. SIGINT/SIGTERM sont installés avant la connexion initiale ; arrêt/annulation annule puis attend la lecture ; le même événement d'arrêt pilote ensuite les tâches runtime sans remplacer les handlers signal. Redis/engine ferment dans la sortie commune. Erreurs inattendues et configuration invalide ne sont pas masquées. Un heartbeat indisponible annule le handler ; une finalisation indisponible laisse le claim à la récupération SQL après expiration/backoff. Les effets externes déjà exécutés restent soumis aux règles de réconciliation/idempotence. Rétention : cadence normale d'une heure, mais retry de cinq secondes après panne SQL ; sync/worker gardent leur cadence bornée habituelle. Aucune nouvelle migration ni modification de la politique des slots HTTP.
