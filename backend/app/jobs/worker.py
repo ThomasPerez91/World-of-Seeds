@@ -193,7 +193,7 @@ class TorrentWorker:
             self._last_recovery = now
             if recovered:
                 logger.info("torrent_worker_recovered_jobs", extra={"count": len(recovered)})
-        except SQLAlchemyError:
+        except (SQLAlchemyError, OSError):
             logger.warning("torrent_worker_database_unavailable")
 
     async def _claim_one(self) -> TorrentJob | None:
@@ -210,7 +210,7 @@ class TorrentWorker:
                     job_types=self._handlers,
                 )
             return job
-        except SQLAlchemyError:
+        except (SQLAlchemyError, OSError):
             logger.warning("torrent_worker_database_unavailable")
             return None
 
@@ -280,6 +280,10 @@ class TorrentWorker:
             # An expired/reassigned claim must be left to durable recovery, even when
             # the handler finishes before the next heartbeat can observe the loss.
             logger.warning("torrent_worker_claim_lost")
+        except (SQLAlchemyError, OSError):
+            # A failed/ambiguous finalization leaves the durable claim for recovery.
+            # Do not replay or change its state while persistence is unavailable.
+            logger.warning("torrent_worker_database_unavailable")
         finally:
             heartbeat_stop.set()
             if not handler_task.done():
@@ -306,7 +310,7 @@ class TorrentWorker:
                         now=self._clock(),
                         claim_ttl=self._config.claim_ttl,
                     )
-            except (SQLAlchemyError, TorrentJobTransitionError) as exc:
+            except (SQLAlchemyError, OSError, TorrentJobTransitionError) as exc:
                 raise TorrentJobClaimLostError("claim could not be renewed") from exc
 
     async def _finish_success(self, snapshot: TorrentJobSnapshot) -> None:
