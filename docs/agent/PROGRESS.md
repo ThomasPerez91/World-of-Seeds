@@ -4,7 +4,14 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.10`.
+- Version applicative cible : `2.3.11`.
+
+## Release 2.3.11 — reprise de la supervision après erreur SQL
+
+- Course de panne reproduite dans un TaskGroup : une erreur SQL lors d'une écriture de santé ou de la finalisation du cycle sortait de la boucle de supervision et annulait le scheduler voisin. Les erreurs SQLAlchemy sont désormais journalisées par un code constant, puis le cycle est retenté à la cadence configurée.
+- Les contextes de session assurent rollback et fermeture avant l'attente. Pas de chevauchement, pas de boucle rapide, pas de renouvellement artificiel de la fraîcheur des observations. Annulation et arrêt pendant l'attente restent immédiats ; une exception inattendue continue de remonter.
+- Tests avec transactions réelles et injection d'erreur sur les écritures, reprise d'une santé cohérente et de l'inventaire, TaskGroup voisin conservé, cadence, logs sans détail privé, annulation et arrêt pendant le délai de reprise.
+- +0.0.1 à 2.3.11 ; 3.0.0 réservée à la fin de l'audit. Sauvegardes/chargement opérateur des alertes restent reportés. Prochaine étape : vérifier les chemins de reprise des jobs durables lors d'une perte de claim ou d'une interruption worker.
 
 ## Release 2.3.10 — révocation pendant le provisioning externe
 
