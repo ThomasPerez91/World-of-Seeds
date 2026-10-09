@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.13` ;
+- version stable : `2.3.14` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -481,3 +481,7 @@ La récupération de claims expirés honore `cancel_requested_at` avant le retry
 ## Pannes de connexion du worker — 2.3.13
 
 Le polling/récupération/claim, l'enqueue sync et la rétention tolèrent les SQLAlchemyError ainsi que les OSError brutes (socket/DNS/timeout asyncpg). Codes de log constants, sans détail SQL/connexion. Démarrage : options réessayées toutes les cinq secondes ; pas de worker/effet avant chargement valide. SIGINT/SIGTERM sont installés avant la connexion initiale ; arrêt/annulation annule puis attend la lecture ; le même événement d'arrêt pilote ensuite les tâches runtime sans remplacer les handlers signal. Redis/engine ferment dans la sortie commune. Erreurs inattendues et configuration invalide ne sont pas masquées. Un heartbeat indisponible annule le handler ; une finalisation indisponible laisse le claim à la récupération SQL après expiration/backoff. Les effets externes déjà exécutés restent soumis aux règles de réconciliation/idempotence. Rétention : cadence normale d'une heure, mais retry de cinq secondes après panne SQL ; sync/worker gardent leur cadence bornée habituelle. Aucune nouvelle migration ni modification de la politique des slots HTTP.
+
+## Délais SQL runtime — 2.3.14
+
+L'engine partagé API/worker est créé par `create_database_engine(Settings)`. PostgreSQL/asyncpg : `WOS_DATABASE_POOL_TIMEOUT_SECONDS=5`, `WOS_DATABASE_CONNECT_TIMEOUT_SECONDS=5`, `WOS_DATABASE_COMMAND_TIMEOUT_SECONDS=15`. Réglages finis et strictement positifs, maximum 30 secondes chacun. Le délai driver commande couvre aussi les vérifications pré-ping, transactions et verrous. Un adaptateur SQLAlchemy/asyncpg borné ajoute une garde externe à délai commande + 1 s, termine synchroniquement la connexion avant annulation si le protocole ne répond plus, puis draine au maximum 1 s ; une connexion terminée est invalidée. Cet adaptateur est couplé aux versions verrouillées et doit conserver ses tests PostgreSQL lors des upgrades ; les attentes sont distinctes et cumulables, sans budget global de transaction. Aucun changement des tailles du pool ni des slots HTTP. SQLite garde sa configuration compatible. Migrations/backup utilisent leurs connexions propres. Après timeout, rollback et reprise restent requis ; un commit interrompu peut être ambigu et ne doit pas déclencher une réussite supposée ou un replay immédiat.

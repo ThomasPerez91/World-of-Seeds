@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.13`.
+- Version applicative cible : `2.3.14`.
+
+## Release 2.3.14 — délais SQL bornés
+
+- Fabrique commune de l'engine API/worker : attente du pool 5 s, connexion asyncpg 5 s, commandes 15 s (dont pré-ping, transactions et attentes de verrous), garde externe à 16 s puis drainage de cancellation au maximum 1 s. Capacité du pool inchangée. Trois réglages environnement WOS_DATABASE_CONNECT_TIMEOUT_SECONDS / WOS_DATABASE_COMMAND_TIMEOUT_SECONDS / WOS_DATABASE_POOL_TIMEOUT_SECONDS, positifs, finis et plafonnés à 30 s ; aucun argument PostgreSQL transmis aux tests SQLite.
+- Serveur TCP silencieux : timeout réel du driver et nouvelles tentatives possibles, y compris récupération/claim worker sans exception fatale ni détail privé. Régressions confirmées avec la fabrique précédente : délais non transmis et handshake ne terminant pas avant le watchdog. Tests PostgreSQL CI de requête lente, attente de verrou et pool épuisé, suivis de rollback/reprise.
+- Une commande interrompue n'implique ni réussite ni absence d'effet : finalisation et récupération durables 2.3.12/13 conservées. Ces délais sont par opération, pas un budget global de transaction ou de téléchargement. Migrations et scripts de sauvegarde restent sur leurs connexions propres.
+- La revue a identifié le cas d’une connexion établie perdant toute réponse, y compris annulation. Garde externe appliquée à tous les awaits de l’adaptateur : pré-ping, commandes, commit/rollback, fermeture et initialisation des codecs. Tests proxy TCP PostgreSQL coupant les deux directions après connexion, puis reprise du pool ; arrêt/annulation et erreurs inattendues conservés.
+- +0.0.1 à 2.3.14 ; 3.0.0 réservée à la fin de l'audit. Sauvegardes et chargement opérateur des alertes toujours différés. Prochain audit : gestion de la pression sur le pool et réponses HTTP en cas d'indisponibilité SQL.
 
 ## Release 2.3.13 — worker résilient aux pannes de connexion SQL
 

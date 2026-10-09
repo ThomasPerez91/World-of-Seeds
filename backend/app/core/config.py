@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     postgres_db: str = Field(default="world_of_seeds", pattern=_SAFE_POSTGRES_IDENTIFIER)
     postgres_user: str = Field(default="world_of_seeds", pattern=_SAFE_POSTGRES_IDENTIFIER)
     postgres_password: SecretStr = Field(default=SecretStr("world_of_seeds"), repr=False)
+    database_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=30, allow_inf_nan=False)
+    database_command_timeout_seconds: float = Field(default=15.0, gt=0, le=30, allow_inf_nan=False)
+    database_pool_timeout_seconds: float = Field(default=5.0, gt=0, le=30, allow_inf_nan=False)
     redis_url: SecretStr | None = Field(default=None, repr=False)
     redis_namespace: str = Field(
         default="wos:v2",
