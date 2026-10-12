@@ -37,6 +37,7 @@ from app.integrations.wos_restart import WosRestartStore
 from app.observability import MetricsRegistry, OperationalMetricsCache, RequestMetricsMiddleware
 from app.options import OptionsStore
 from app.torrents.downloads import DownloadRateLimiter
+from app.torrents.retry_reads import TorrentRetryReads
 from app.torrents.traffic import DownloadTrafficScheduler
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,8 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         application.state.request_drain.begin()
         if not await application.state.request_drain.wait_closed():
             logger.warning("API request cleanup exceeded its shutdown budget")
+        if not await application.state.torrent_retry_reads.wait_idle():
+            logger.warning("torrent_retry_reads_shutdown_timeout")
         if not await application.state.reconciliation_disk_reads.wait_idle():
             logger.warning("reconciliation_disk_cleanup_budget_exceeded")
         monitor.cancel()
@@ -100,6 +103,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     )
     application.state.settings = settings
     application.state.reconciliation_disk_reads = ReconciliationDiskReads()
+    application.state.torrent_retry_reads = TorrentRetryReads()
     application.state.network_throughput_collector = NetworkThroughputCollector(settings)
     application.state.request_drain = RequestDrain()
     application.state.external_services_monitor = ExternalServicesMonitor(settings)
