@@ -880,14 +880,17 @@ async def test_torrent_mutations_preserve_database_outage_contract(
         monkeypatch.setattr(torrents_v2, "cancel_owned_torrent_request", unavailable)
         response = await client.delete(f"/api/v2/torrents/{uuid.uuid4()}", headers=headers)
     else:
-        original = db_session.scalar
+        original = db_session.execute
 
-        async def scalar(statement: Any, *args: Any, **kwargs: Any) -> Any:
-            if getattr(statement, "_for_update_arg", None) is not None:
+        async def execute(statement: Any, *args: Any, **kwargs: Any) -> Any:
+            if any(
+                getattr(column, "name", None) == "storage_key"
+                for column in getattr(statement, "selected_columns", ())
+            ):
                 return await unavailable()
             return await original(statement, *args, **kwargs)
 
-        monkeypatch.setattr(db_session, "scalar", scalar)
+        monkeypatch.setattr(db_session, "execute", execute)
         response = await client.post(f"/api/v2/torrents/{uuid.uuid4()}/retry", headers=headers)
     assert called == 1
     assert response.status_code == 503
