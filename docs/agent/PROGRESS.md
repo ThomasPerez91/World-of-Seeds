@@ -1,10 +1,17 @@
 # World of Seeds — Progress
 
-## Etat courant — 9 octobre 2026
+## Etat courant — 12 octobre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.15`.
+- Version applicative cible : `2.3.16`.
+
+## Release 2.3.16 — réconciliation sans transaction pendant les lectures disque
+
+- Audit : les appels HTTP qBittorrent/NewGreedy du worker et du scheduler sont déjà hors transaction. Deux régressions confirmées dans le rapport admin : vérification des fichiers et inventaire disque retenaient la connexion de lecture SQL ; un second accès échouait avec un pool à une seule connexion.
+- La page base et les identités qBittorrent sont matérialisées en valeurs scalaires, puis rollback avant chaque phase disque. Aucun accès à une entité ORM expirée ne réouvre la transaction pendant les probes. La vérification de rétention des snapshots est terminée avant l’inventaire physique ; la comparaison SQL des clés reste après cet inventaire. Lecture finale également libérée.
+- 16 cas SQLite/PostgreSQL avec disque réellement suspendu et deuxième connexion : succès, erreur stockage, annulation et modification SQL concurrente, sur les deux phases. Pagination, anomalies, refus des snapshots expirés et revalidation des actions de récupération conservés. Le rapport reste une observation best-effort, pas une transaction atomique entre base et disque.
+- +0.0.1 à 2.3.16 ; 3.0.0 réservée à la fin de l’audit. Pas de migration/Compose/slots HTTP ni de modification des effets externes. Activation backups et chargement opérateur des alertes différés. Prochain audit : coût et concurrence des vérifications disque dans les rapports admin.
 
 ## Release 2.3.15 — réponses HTTP en indisponibilité SQL
 
