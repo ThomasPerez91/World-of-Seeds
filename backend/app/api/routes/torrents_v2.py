@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
@@ -98,6 +99,8 @@ from app.torrents.downloads import (
     download_snapshot_id,
 )
 from app.torrents.traffic import DownloadTrafficScheduler, DownloadWaitingLimit
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 UPLOAD_READ_CHUNK = 64 * 1024
@@ -1206,6 +1209,7 @@ async def create_torrent_request(
 
     staged_key: uuid.UUID | None = None
     job_created = False
+    transaction_body_finished = False
     retention_event_targets: tuple[tuple[uuid.UUID, uuid.UUID], ...] = ()
     try:
         async with db.begin():
@@ -1280,6 +1284,9 @@ async def create_torrent_request(
                         )
                     ).all()
                 )
+            # All body writes must be flushed before marking the commit boundary.
+            await db.flush()
+            transaction_body_finished = True
     except HTTPException:
         if staged_key is not None:
             await run_in_threadpool(payload_store.remove, staged_key)
@@ -1314,8 +1321,13 @@ async def create_torrent_request(
             "La demande de torrent est invalide.",
         )
     except (DatabaseUnavailableError, PoolTimeoutError):
-        # Commit may have succeeded before its acknowledgement was lost. Keep
-        # the staged payload for durable recovery; session cleanup still runs.
+        if staged_key is not None and not transaction_body_finished:
+            # The body failed before commit: no new/reactivated add job can
+            # use this prepared payload. Keep only an ambiguous commit payload.
+            try:
+                await run_in_threadpool(payload_store.remove, staged_key)
+            except TorrentPayloadStoreError:
+                logger.warning("torrent_payload_cleanup_failed")
         raise
     except (TorrentPayloadStoreError, IntegrityError, SQLAlchemyError):
         await db.rollback()
