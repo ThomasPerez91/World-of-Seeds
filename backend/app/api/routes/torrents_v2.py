@@ -45,7 +45,11 @@ from app.http_downloads import (
     parse_range_header,
 )
 from app.jobs.torrent_effects import ADD_TORRENT_JOB
-from app.jobs.torrent_payloads import TorrentPayloadStore, TorrentPayloadStoreError
+from app.jobs.torrent_payloads import (
+    OwnedTorrentPayload,
+    TorrentPayloadStore,
+    TorrentPayloadStoreError,
+)
 from app.models import (
     ManagedTorrent,
     ManagedTorrentState,
@@ -105,6 +109,7 @@ from app.torrents.retry_reads import (
     get_torrent_retry_reads,
 )
 from app.torrents.traffic import DownloadTrafficScheduler, DownloadWaitingLimit
+from app.torrents.upload_staging import cleanup_upload_payload, stage_upload_payload
 
 logger = logging.getLogger(__name__)
 
@@ -1213,7 +1218,7 @@ async def create_torrent_request(
             "Le stockage partagé est momentanément indisponible.",
         )
 
-    staged_key: uuid.UUID | None = None
+    owned_payload: OwnedTorrentPayload | None = None
     job_created = False
     transaction_body_finished = False
     retention_event_targets: tuple[tuple[uuid.UUID, uuid.UUID], ...] = ()
@@ -1245,14 +1250,13 @@ async def create_torrent_request(
                         "Tu as atteint le nombre maximal de téléchargements actifs.",
                     )
             if result.managed_torrent_created or result.managed_torrent_reactivated:
-                staged_key = result.managed_torrent.storage_key
-                staged = await run_in_threadpool(
-                    payload_store.stage,
+                owned_payload = await stage_upload_payload(
+                    payload_store,
                     parsed.content,
-                    storage_key=staged_key,
+                    storage_key=result.managed_torrent.storage_key,
                     max_total_size=max_total,
                 )
-                if staged.info_hash != parsed.info_hash:
+                if owned_payload.parsed.info_hash != parsed.info_hash:
                     raise TorrentPayloadStoreError("staged torrent hash changed")
                 db.add(
                     TorrentJob(
@@ -1294,8 +1298,6 @@ async def create_torrent_request(
             await db.flush()
             transaction_body_finished = True
     except HTTPException:
-        if staged_key is not None:
-            await run_in_threadpool(payload_store.remove, staged_key)
         raise
     except StorageAdmissionError as exc:
         code = exc.code
@@ -1327,23 +1329,21 @@ async def create_torrent_request(
             "La demande de torrent est invalide.",
         )
     except (DatabaseUnavailableError, PoolTimeoutError):
-        if staged_key is not None and not transaction_body_finished:
-            # The body failed before commit: no new/reactivated add job can
-            # use this prepared payload. Keep only an ambiguous commit payload.
-            try:
-                await run_in_threadpool(payload_store.remove, staged_key)
-            except TorrentPayloadStoreError:
-                logger.warning("torrent_payload_cleanup_failed")
         raise
     except (TorrentPayloadStoreError, IntegrityError, SQLAlchemyError):
         await db.rollback()
-        if staged_key is not None:
-            await run_in_threadpool(payload_store.remove, staged_key)
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "torrent_request_unavailable",
             "La demande n’a pas pu être enregistrée. Réessaie dans quelques instants.",
         )
+    finally:
+        if owned_payload is not None:
+            try:
+                if not transaction_body_finished:
+                    await cleanup_upload_payload(payload_store, owned_payload)
+            finally:
+                owned_payload.close()
 
     if job_created:
         await redis.signal_job_available()
