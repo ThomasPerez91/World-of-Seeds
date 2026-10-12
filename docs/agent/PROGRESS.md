@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.19`.
+- Version applicative cible : `2.3.20`.
+
+## Release 2.3.20 — sérialisation des admissions de stockage
+
+- Réconciliation : le verrou du ledger est désormais acquis avant l’agrégat des octets gérés. Un upload ou une purge ayant committé pendant l’attente du verrou ne peut plus être écrasé par un total calculé avant ce commit.
+- Relances : même verrou de ledger que les uploads et la purge, acquis avant l’agrégat des réservations actives et conservé jusqu’au commit. Plusieurs torrents ERROR distincts ne peuvent plus décider simultanément avec le même ancien total. Les états/comptages et plafonds existants sont conservés.
+- La primitive commune de verrou recharge également le compteur avec populate_existing : une identité ORM chargée avant un commit concurrent ne doit pas garder son ancienne valeur. Régression de compteur périmé reproduite localement sans ce rafraîchissement.
+- Six cas : compteur chargé puis modifié en transaction indépendante (SQLite/PostgreSQL), réconciliation concurrente avec upload ou purge, rafales de deux/huit relances via HTTP avec résultats SQL volontairement retardés. Les cas de verrouillage réel utilisent le service PostgreSQL isolé de CI.
+- +0.0.1 à 2.3.20 ; 3.0.0 réservée à la fin de l’audit. Pas de migration/Compose/slots HTTP. Activation backups et chargement opérateur des alertes différés. Prochain audit : ordre des verrous entre ajout, annulation et lifecycle partagé.
 
 ## Release 2.3.19 — propriété et nettoyage des uploads interrompus
 

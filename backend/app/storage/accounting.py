@@ -123,7 +123,7 @@ async def prepare_storage_accounting(
     physical_content_missing: bool | None = None,
 ) -> StorageAccountingContext:
     usage = await _usage_row(session, user_id, now=now)
-    ledger = await _ledger_row(session, now=now)
+    ledger = await lock_storage_ledger(session, now=now)
     existing_torrent = await session.scalar(
         select(ManagedTorrent).where(ManagedTorrent.info_hash == info_hash).with_for_update()
     )
@@ -292,12 +292,14 @@ async def reconcile_storage_counters(
             usage.logical_bytes = logical_bytes_by_user.get(user_id, 0)
             usage.updated_at = timestamp
 
+    # Serialize before taking the aggregate snapshot: otherwise a writer can
+    # commit while we wait for the ledger, then have its reservation overwritten.
+    ledger = await lock_storage_ledger(session, now=timestamp)
     managed_bytes = await session.scalar(
         select(func.coalesce(func.sum(ManagedTorrent.total_size), 0)).where(
             ManagedTorrent.state != ManagedTorrentState.PURGED
         )
     )
-    ledger = await _ledger_row(session, now=timestamp)
     ledger.managed_bytes = int(managed_bytes or 0)
     ledger.disk_total_bytes = disk.total_bytes
     ledger.disk_free_bytes = disk.free_bytes
@@ -327,8 +329,13 @@ async def _usage_row(
     return usage
 
 
-async def _ledger_row(session: AsyncSession, *, now: datetime) -> StorageLedger:
-    ledger = await session.get(StorageLedger, 1, with_for_update=True)
+async def lock_storage_ledger(session: AsyncSession, *, now: datetime) -> StorageLedger:
+    ledger = await session.get(
+        StorageLedger,
+        1,
+        with_for_update=True,
+        populate_existing=True,
+    )
     if ledger is None:
         ledger = StorageLedger(id=1, updated_at=now)
         session.add(ledger)
