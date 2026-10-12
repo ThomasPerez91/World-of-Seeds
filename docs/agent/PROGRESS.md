@@ -4,7 +4,16 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.18`.
+- Version applicative cible : `2.3.19`.
+
+## Release 2.3.19 — propriété et nettoyage des uploads interrompus
+
+- Annulation avant commit : le thread de staging est protégé et terminé avant rollback/libération des verrous, puis sa publication est nettoyée. Des annulations répétées ne détachent pas le writer. Aucun job/signal Redis n’est créé pour une tentative annulée.
+- Staging sous UUID privé de tentative puis publication atomique vers la clé stockage inchangée. Un descripteur ouvert identifie l’inode de cette publication et empêche sa réutilisation jusqu’à la fin de la tentative. Le nettoyage compare device/inode sous verrou de publication avant unlink ; il préserve une publication plus récente. Descripteurs fermés dans tous les chemins.
+- Publication et nettoyage conditionnel coordonnés par verrous bornés dans le runtime API mono-processus. Le staging conserve sa transaction actuelle : une annulation attend la fin réelle du syscall/thread, sans prétendre l’interrompre. Une panne du processus/disque peut encore laisser des reliquats ; erreurs de nettoyage journalisées sans détails privés et sans masquer l’erreur de requête.
+- Frontière de commit conservée : erreurs/annulations après le dernier flush du corps ne suppriment pas le payload dont le commit peut avoir réussi. Préparation privée nettoyée même après une erreur de fsync/publication.
+- Tests d’annulation avant écriture/après publication/avant commit sur création et réactivation, double annulation, nettoyage ancien versus publication nouvelle, fsync échoué et commit réellement effectué dont l’accusé est annulé. Tests d’indisponibilité SQL et commit ambigu 2.3.15 conservés.
+- +0.0.1 à 2.3.19 ; 3.0.0 réservée à la fin de l’audit. Activation backups et chargement opérateur des alertes différés. Prochain audit : sérialisation des admissions et réservations de stockage concurrentes.
 
 ## Release 2.3.18 — relance sans transaction pendant la lecture du torrent
 

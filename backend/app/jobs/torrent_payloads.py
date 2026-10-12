@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 import stat
+import threading
 import uuid
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
@@ -11,6 +14,24 @@ from app.torrents import ParsedTorrent, sanitize_torrent
 
 MAX_STAGED_TORRENT_BYTES = 32 * 1024 * 1024
 MAX_MANAGED_TORRENT_BYTES = 10_995_116_277_760
+
+
+# The API runs in one process. Serialize publish/conditional cleanup for a key,
+# with bounded lock storage; slow preparation uses a private attempt UUID.
+logger = logging.getLogger(__name__)
+_PUBLICATION_LOCKS = tuple(threading.Lock() for _ in range(256))
+
+
+@dataclass(slots=True)
+class OwnedTorrentPayload:
+    parsed: ParsedTorrent
+    storage_key: UUID
+    descriptor: int
+
+    def close(self) -> None:
+        if self.descriptor >= 0:
+            os.close(self.descriptor)
+            self.descriptor = -1
 
 
 class TorrentPayloadStoreError(RuntimeError):
@@ -91,6 +112,83 @@ class TorrentPayloadStore:
                 os.unlink(temporary_name, dir_fd=directory_fd)
             os.close(directory_fd)
         return parsed
+
+    def stage_owned(
+        self,
+        content: bytes,
+        *,
+        storage_key: UUID,
+        max_total_size: int | None = None,
+    ) -> OwnedTorrentPayload:
+        attempt_key = uuid.uuid4()
+        directory_fd: int | None = None
+        owned: OwnedTorrentPayload | None = None
+        published = False
+        try:
+            parsed = self.stage(content, storage_key=attempt_key, max_total_size=max_total_size)
+            directory_fd = self._open_root(create=False)
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(self._name(attempt_key), flags, dir_fd=directory_fd)
+            owned = OwnedTorrentPayload(parsed, storage_key, descriptor)
+            with self._publication_lock(storage_key):
+                os.replace(
+                    self._name(attempt_key),
+                    self._name(storage_key),
+                    src_dir_fd=directory_fd,
+                    dst_dir_fd=directory_fd,
+                )
+                published = True
+                os.fsync(directory_fd)
+            return owned
+        except BaseException as exc:
+            if published and owned is not None:
+                try:
+                    self.remove_owned(owned)
+                except TorrentPayloadStoreError:
+                    logger.warning("torrent_payload_cleanup_failed")
+            if isinstance(exc, OSError):
+                raise TorrentPayloadStoreError("torrent payload could not be published") from exc
+            raise
+        finally:
+            if owned is not None and not published:
+                owned.close()
+            if directory_fd is not None:
+                os.close(directory_fd)
+            # Also removes an attempt whose stage failed after its atomic rename.
+            try:
+                self.remove(attempt_key)
+            except TorrentPayloadStoreError:
+                logger.warning("torrent_payload_cleanup_failed")
+
+    def remove_owned(self, owned: OwnedTorrentPayload) -> None:
+        """Remove only this attempt's inode; an open FD prevents inode reuse."""
+        directory_fd: int | None = None
+        try:
+            directory_fd = self._open_root(create=False)
+            with self._publication_lock(owned.storage_key):
+                original = os.fstat(owned.descriptor)
+                try:
+                    current = os.stat(
+                        self._name(owned.storage_key),
+                        dir_fd=directory_fd,
+                        follow_symlinks=False,
+                    )
+                except FileNotFoundError:
+                    return
+                if (current.st_dev, current.st_ino) != (original.st_dev, original.st_ino):
+                    return
+                os.unlink(self._name(owned.storage_key), dir_fd=directory_fd)
+                os.fsync(directory_fd)
+        except OSError as exc:
+            raise TorrentPayloadStoreError("torrent payload could not be cleaned") from exc
+        finally:
+            if directory_fd is not None:
+                os.close(directory_fd)
+            owned.close()
+
+    @staticmethod
+    def _publication_lock(storage_key: UUID) -> threading.Lock:
+        return _PUBLICATION_LOCKS[storage_key.int % len(_PUBLICATION_LOCKS)]
 
     def read(self, storage_key: UUID) -> ParsedTorrent:
         directory_fd = self._open_root(create=False)
