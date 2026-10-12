@@ -59,6 +59,13 @@ def create_database_engine(
         def classify_driver_error(context: ExceptionContext) -> BaseException | None:
             error = context.sqlalchemy_exception or context.original_exception
             if context.is_disconnect or is_database_unavailable(error):
+                # The normalized SQLAlchemyError is not a DBAPI exception, so
+                # SQLAlchemy cannot infer disconnect from its type alone.
+                context.is_disconnect = True  # type: ignore[misc]
+                if isinstance(error, DatabaseUnavailableError):
+                    # A deadline makes this connection uncertain, not every
+                    # otherwise healthy connection already in the pool.
+                    context.invalidate_pool_on_disconnect = False  # type: ignore[misc]
                 return DatabaseUnavailableError()
             return None
 

@@ -61,6 +61,9 @@ class BoundedAsyncpgConnection(AsyncAdapt_asyncpg_connection):
                 )
             )
         except OSError as exc:
+            # A timeout may finish before cancellation is acknowledged. Never
+            # return that uncertain protocol state to the SQLAlchemy pool.
+            self.driver_connection.terminate()
             raise DatabaseUnavailableError() from exc
 
 

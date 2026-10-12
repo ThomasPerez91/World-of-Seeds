@@ -290,7 +290,8 @@ async def test_established_blackholed_connection_is_terminated_and_pool_recovers
     port = server.sockets[0].getsockname()[1]
     url = target.set(host="127.0.0.1", port=port).render_as_string(hide_password=False)
     engine = create_database_engine(
-        Settings(database_url=url), timeouts=DatabaseTimeouts(command_seconds=0.1)
+        Settings(database_url=url),
+        timeouts=DatabaseTimeouts(command_seconds=0.1, connect_seconds=0.1),
     )
     try:
         if phase == "pre_ping":
