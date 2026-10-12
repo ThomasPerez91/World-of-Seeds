@@ -936,3 +936,60 @@ async def test_acknowledgement_lost_after_torrent_commit_keeps_durable_payload(
     assert await db_session.scalar(select(func.count()).select_from(TorrentRequest)) == 1
     assert await db_session.scalar(select(func.count()).select_from(TorrentJob)) == 1
     assert len(list((data_root / "control" / "torrent-input").glob("*.torrent"))) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["connection", "pool"])
+async def test_precommit_outage_cleans_staged_payload_on_every_attempt(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    from typing import Any
+
+    from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+
+    from app.core.database_errors import DatabaseUnavailableError
+    from app.jobs.torrent_payloads import TorrentPayloadStore
+
+    await prepare_user(db_session)
+    headers = await login(client)
+    staged = False
+    stages = 0
+    original_stage = TorrentPayloadStore.stage
+    original_flush = db_session.flush
+
+    def stage(self: TorrentPayloadStore, *args: Any, **kwargs: Any) -> Any:
+        nonlocal staged, stages
+        result = original_stage(self, *args, **kwargs)
+        stages += 1
+        staged = True
+        return result
+
+    async def fail_job_flush(*args: Any, **kwargs: Any) -> None:
+        nonlocal staged
+        if staged:
+            staged = False
+            if failure == "connection":
+                raise DatabaseUnavailableError()
+            raise PoolTimeoutError("PRIVATE")
+        await original_flush(*args, **kwargs)
+
+    monkeypatch.setattr(TorrentPayloadStore, "stage", stage)
+    monkeypatch.setattr(db_session, "flush", fail_job_flush)
+    for attempt in range(2):
+        response = await client.post(
+            "/api/v2/torrents",
+            files={"torrent": ("test.torrent", torrent_content(), "application/x-bittorrent")},
+            headers=headers,
+        )
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "database_unavailable"
+        assert response.headers["retry-after"] == "5"
+        assert stages == attempt + 1
+        assert await db_session.scalar(select(func.count()).select_from(ManagedTorrent)) == 0
+        assert await db_session.scalar(select(func.count()).select_from(TorrentRequest)) == 0
+        assert await db_session.scalar(select(func.count()).select_from(TorrentJob)) == 0
+        assert list((data_root / "control" / "torrent-input").glob("*.torrent")) == []
