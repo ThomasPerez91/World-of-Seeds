@@ -114,21 +114,23 @@ class SharedContentStore:
         try:
             candidates: list[UUID] = []
             invalid = 0
-            for entry in os.scandir(content_fd):
-                name = entry.name
-                try:
-                    key = UUID(hex=name) if len(name) == 32 else None
-                    metadata = entry.stat(follow_symlinks=False)
-                    if key is None or not stat.S_ISDIR(metadata.st_mode):
+            with os.scandir(content_fd) as entries:
+                for entry in entries:
+                    name = entry.name
+                    try:
+                        key = UUID(hex=name) if len(name) == 32 else None
+                        # Directory-entry types avoid a mandatory stat per entry.
+                        # is_dir may stat on filesystems that report DT_UNKNOWN.
+                        if key is None or not entry.is_dir(follow_symlinks=False):
+                            invalid += 1
+                            continue
+                        if after is not None and key <= after:
+                            continue
+                        insort(candidates, key)
+                        if len(candidates) > limit + 1:
+                            candidates.pop()
+                    except (OSError, ValueError):
                         invalid += 1
-                        continue
-                    if after is not None and key <= after:
-                        continue
-                    insort(candidates, key)
-                    if len(candidates) > limit + 1:
-                        candidates.pop()
-                except (OSError, ValueError):
-                    invalid += 1
             return SharedContentInventory(
                 tuple(candidates[:limit]),
                 invalid,

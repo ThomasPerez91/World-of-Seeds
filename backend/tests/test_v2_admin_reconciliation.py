@@ -495,3 +495,66 @@ async def test_admin_reconciliation_selects_one_fresh_snapshot_for_every_account
     assert cursor is not None
     assert ReconciliationCursor.decode(cursor).phase == "storage"
     assert scanned == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["database", "storage"])
+async def test_concurrent_reconciliation_is_rejected_without_a_second_disk_read(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    import asyncio
+    import threading
+    from typing import Literal, cast
+
+    admin = User(
+        username="disk-gate-admin", password_hash=hash_password("test-password-long"), is_admin=True
+    )
+    torrent = _torrent(info_hash="f" * 40, storage_key=uuid.uuid4())
+    db_session.add_all([admin, torrent])
+    await db_session.commit()
+    assert (
+        await client.post(
+            "/api/v1/auth/login",
+            json={"username": admin.username, "password": "test-password-long"},
+        )
+    ).status_code == 200
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+    calls = 0
+
+    def pause() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            loop.call_soon_threadsafe(entered.set)
+            assert release.wait(5)
+
+    def contains(_store: SharedContentStore, key: uuid.UUID) -> bool:
+        pause()
+        return False
+
+    def inventory(
+        _store: SharedContentStore, *, limit: int, after: uuid.UUID | None
+    ) -> SharedContentInventory:
+        pause()
+        return SharedContentInventory((), 0, False)
+
+    monkeypatch.setattr(SharedContentStore, "contains", contains)
+    monkeypatch.setattr(SharedContentStore, "inventory_page", inventory)
+    cursor = ReconciliationCursor(cast(Literal["database", "storage"], phase)).encode()
+    params = {"cursor": cursor}
+    first = asyncio.create_task(client.get("/api/v2/admin/reconciliation", params=params))
+    try:
+        async with asyncio.timeout(2):
+            await entered.wait()
+            busy = await client.get("/api/v2/admin/reconciliation", params=params)
+        assert busy.status_code == 503
+        assert busy.json()["detail"]["code"] == "reconciliation_busy"
+        assert busy.headers["retry-after"] == "5"
+        assert busy.headers["cache-control"] == "no-store"
+        assert calls == 1
+    finally:
+        release.set()
+        await first
+    assert (await client.get("/api/v2/admin/reconciliation", params=params)).status_code == 200

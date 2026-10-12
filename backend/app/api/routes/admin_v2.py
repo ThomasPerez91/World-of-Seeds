@@ -1,12 +1,12 @@
 import uuid
 from datetime import UTC, datetime
+from functools import partial
 from typing import Annotated, Literal, Never
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
-from starlette.concurrency import run_in_threadpool
 
 from app.admin import (
     ADMIN_PURGE_STATES,
@@ -22,6 +22,7 @@ from app.admin import (
     schedule_admin_purge,
     serialize_recovery_snapshot,
 )
+from app.admin.disk_reads import ReconciliationDiskReads, get_reconciliation_disk_reads
 from app.auth.dependencies import (
     AppSettings,
     AuthContext,
@@ -517,6 +518,7 @@ async def update_admin_options(
 @router.get("/reconciliation", response_model=AdminV2ReconciliationReport)
 async def get_admin_reconciliation(
     db: DbSession,
+    disk_reads: Annotated[ReconciliationDiskReads, Depends(get_reconciliation_disk_reads)],
     settings: AppSettings,
     _: Annotated[AuthContext, Depends(require_current_admin)],
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
@@ -677,7 +679,7 @@ async def get_admin_reconciliation(
                 ManagedTorrentState.PURGED,
             }
             try:
-                storage_present = await run_in_threadpool(store.contains, torrent.storage_key)
+                storage_present = await disk_reads.run(partial(store.contains, torrent.storage_key))
             except SharedContentStoreError:
                 storage_present = None
             qb_item = by_identity.get((torrent.info_hash, torrent.qbittorrent_account_ref))
@@ -826,10 +828,10 @@ async def get_admin_reconciliation(
         await db.rollback()
         try:
             after = uuid.UUID(position.after) if position.after is not None else None
-            inventory = await run_in_threadpool(
-                SharedContentStore(settings.data_root).inventory_page,
-                limit=limit,
-                after=after,
+            inventory = await disk_reads.run(
+                partial(
+                    SharedContentStore(settings.data_root).inventory_page, limit=limit, after=after
+                )
             )
         except (SharedContentStoreError, ValueError) as exc:
             raise HTTPException(

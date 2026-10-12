@@ -14,6 +14,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response as StarletteResponse
 
 from app import __version__
+from app.admin.disk_reads import ReconciliationBusyError, ReconciliationDiskReads
 from app.api.external.errors import ExternalApiError
 from app.api.external.middleware import ExternalRequestIdMiddleware
 from app.api.external.rate_limit import ExternalApiRateLimiter
@@ -73,6 +74,8 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         application.state.request_drain.begin()
         if not await application.state.request_drain.wait_closed():
             logger.warning("API request cleanup exceeded its shutdown budget")
+        if not await application.state.reconciliation_disk_reads.wait_idle():
+            logger.warning("reconciliation_disk_cleanup_budget_exceeded")
         monitor.cancel()
         with suppress(asyncio.CancelledError):
             await monitor
@@ -96,6 +99,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = settings
+    application.state.reconciliation_disk_reads = ReconciliationDiskReads()
     application.state.network_throughput_collector = NetworkThroughputCollector(settings)
     application.state.request_drain = RequestDrain()
     application.state.external_services_monitor = ExternalServicesMonitor(settings)
@@ -176,6 +180,21 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
             headers={"Retry-After": "5", "Cache-Control": "no-store"},
         )
 
+    async def reconciliation_busy_handler(
+        request: Request, exc: ReconciliationBusyError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": {
+                    "code": "reconciliation_busy",
+                    "message": "Une vérification disque est en cours. Réessaie dans un instant.",
+                    "field": None,
+                }
+            },
+            headers={"Retry-After": "5", "Cache-Control": "no-store"},
+        )
+
     async def password_work_error_handler(
         request: Request, exc: PasswordWorkUnavailableError
     ) -> JSONResponse:
@@ -238,6 +257,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
 
         return await http_exception_handler(request, exc)
 
+    application.add_exception_handler(ReconciliationBusyError, reconciliation_busy_handler)  # type: ignore[arg-type]
     application.add_exception_handler(DatabaseUnavailableError, database_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(PoolTimeoutError, database_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(PasswordWorkUnavailableError, password_work_error_handler)  # type: ignore[arg-type]

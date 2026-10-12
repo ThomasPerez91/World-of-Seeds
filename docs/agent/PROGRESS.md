@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.16`.
+- Version applicative cible : `2.3.17`.
+
+## Release 2.3.17 — admission des lectures disque de réconciliation
+
+- Trois régressions reproduites : deux rapports pouvaient lancer leurs probes/inventaires en parallèle ; l’inventaire appelait explicitement stat pour toutes les entrées, même les noms non UUID.
+- Une seule opération disque de réconciliation en cours par application API, sans file d’attente : concurrente refusée en 503 reconciliation_busy, Retry-After 5, no-store. L’annulation du demandeur ne libère pas prématurément le slot : le thread réellement en cours doit finir. Erreurs propagées et consommées si le demandeur est parti. Attente de nettoyage au shutdown bornée à 2 s ; aucune prétention d’interrompre un syscall bloqué.
+- Inventaire : noms invalides éliminés avant métadonnées, type de répertoire via DirEntry.is_dir(follow_symlinks=False), fermeture explicite de scandir. Pas de stat imposé sur les filesystems fournissant le type ; fallback possible pour DT_UNKNOWN. Tri/cursor/compteur d’entrées invalides et mémoire limit+1 conservés. La pagination déterministe exige toujours un parcours complet du répertoire ; aucun cache de preuves disque périmées.
+- Tests des deux routes/phases occupées, rafale de vingt refus sans nouvelle lecture, annulation avec succès/erreur tardifs, reprise, isolation des applications et coût des métadonnées avec liens/fichiers/noms invalides. Tests 2.3.16 conservés : SQL reste libre pendant les opérations disque.
+- +0.0.1 à 2.3.17 ; 3.0.0 réservée à la fin de l’audit. Pas de changement Compose/migration/slots HTTP de téléchargement ni des effets worker. Activation backups et chargement opérateur des alertes différés. Prochain audit : contrôles de stockage dans les parcours d’upload et de relance torrent.
 
 ## Release 2.3.16 — réconciliation sans transaction pendant les lectures disque
 

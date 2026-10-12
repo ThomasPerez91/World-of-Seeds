@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.16` ;
+- version stable : `2.3.17` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -493,3 +493,7 @@ Les erreurs brutes de connexion/timeout asyncpg sont normalisées par l’adapta
 ## Réconciliation et occupation SQL — 2.3.16
 
 Le rapport admin copie les colonnes scalaires des torrents et des identités qB avant de terminer sa lecture SQL. Les vérifications `contains` et `inventory_page` du stockage tournent hors transaction ; rollback ne peut pas expirer ces valeurs et provoquer une requête ORM implicite. Un pool à une connexion reste disponible pendant une lecture disque bloquée. Les compteurs/anomalies/cursors et validations des snapshots restent inchangés ; la récupération durable revalide toujours l’état, le rapport ne constitue pas une autorisation figée ni un snapshot atomique SQL/disque. Les effets HTTP worker/scheduler sont déjà séparés des transactions et n’ont pas été modifiés.
+
+## Admission de réconciliation disque — 2.3.17
+
+Chaque application API possède ReconciliationDiskReads : une opération disque en thread en cours, aucune attente concurrente. Refus temporaire 503 reconciliation_busy / Retry-After 5 / no-store après authentification admin. La tâche est protégée de l’annulation du demandeur et garde l’admission jusqu’à la fin du thread ; fermeture attendue au shutdown avec budget 2 s. Aucun délai ne prétend tuer une lecture OS bloquée. Les autres usages du stockage et les slots de téléchargement n’utilisent pas ce limiteur. Pas de cache de résultats disque. L’inventaire utilise les types des entrées sans suivre de lien et ferme scandir ; DT_UNKNOWN peut encore exiger stat, et la sélection ordonnée de UUID exige toujours un scan complet. La connexion SQL reste libérée avant ces opérations.
