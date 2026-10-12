@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal, Never, cast
 
@@ -97,6 +98,11 @@ from app.torrents.downloads import (
     ManagedFileDownloader,
     ManagedFolderArchiver,
     download_snapshot_id,
+)
+from app.torrents.retry_reads import (
+    TorrentRetryBusyError,
+    TorrentRetryReads,
+    get_torrent_retry_reads,
 )
 from app.torrents.traffic import DownloadTrafficScheduler, DownloadWaitingLimit
 
@@ -1596,6 +1602,7 @@ async def retry_torrent_request(
     redis: RedisCoordinatorDependency,
     settings: Annotated[Settings, Depends(get_settings)],
     context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
+    retry_reads: Annotated[TorrentRetryReads, Depends(get_torrent_retry_reads)],
     torrent_request_id: uuid.UUID,
 ) -> TorrentRequestV2Response:
     user_id = context.user.id
@@ -1628,6 +1635,54 @@ async def retry_torrent_request(
     disk = StorageDiskSnapshot(total_bytes, free_bytes)
 
     try:
+        # Copy scalar identifiers, then return the connection before reading disk.
+        # The authoritative rights and lifecycle are rechecked under locks below.
+        snapshot = (
+            await db.execute(
+                select(
+                    ManagedTorrent.storage_key,
+                    ManagedTorrent.lifecycle_generation,
+                    ManagedTorrent.state,
+                )
+                .join(TorrentRequest, TorrentRequest.managed_torrent_id == ManagedTorrent.id)
+                .where(
+                    TorrentRequest.id == torrent_request_id,
+                    TorrentRequest.user_id == user_id,
+                    TorrentRequest.state.in_(
+                        (TorrentRequestState.REQUESTED, TorrentRequestState.ACTIVE)
+                    ),
+                )
+            )
+        ).one_or_none()
+        await db.rollback()
+        if snapshot is None:
+            _fail(
+                status.HTTP_404_NOT_FOUND,
+                "torrent_request_not_found",
+                "Demande introuvable.",
+            )
+        storage_key, lifecycle_generation, previous_state = snapshot
+        if previous_state is not ManagedTorrentState.ERROR:
+            _fail(
+                status.HTTP_409_CONFLICT,
+                "torrent_retry_not_allowed",
+                "Ce téléchargement n’est pas dans un état relançable.",
+            )
+        try:
+            parsed = await retry_reads.run(storage_key, partial(payload_store.read, storage_key))
+        except TorrentRetryBusyError:
+            _fail(
+                status.HTTP_409_CONFLICT,
+                "torrent_retry_in_progress",
+                "Une relance est déjà en cours.",
+            )
+        except TorrentPayloadStoreError:
+            _fail(
+                status.HTTP_409_CONFLICT,
+                "torrent_payload_unavailable",
+                "Le fichier torrent d’origine n’est plus disponible pour la relance.",
+            )
+
         async with db.begin():
             owned = await db.scalar(
                 select(TorrentRequest)
@@ -1657,7 +1712,11 @@ async def retry_torrent_request(
                     "torrent_request_not_found",
                     "Demande introuvable.",
                 )
-            if managed.state is not ManagedTorrentState.ERROR:
+            if (
+                managed.state is not ManagedTorrentState.ERROR
+                or managed.storage_key != storage_key
+                or managed.lifecycle_generation != lifecycle_generation
+            ):
                 _fail(
                     status.HTTP_409_CONFLICT,
                     "torrent_retry_not_allowed",
@@ -1721,14 +1780,6 @@ async def retry_torrent_request(
                     "La capacité réservée ne permet pas encore de relancer ce torrent.",
                 )
 
-            try:
-                parsed = await run_in_threadpool(payload_store.read, managed.storage_key)
-            except TorrentPayloadStoreError:
-                _fail(
-                    status.HTTP_409_CONFLICT,
-                    "torrent_payload_unavailable",
-                    "Le fichier torrent d’origine n’est plus disponible pour la relance.",
-                )
             if (
                 parsed.info_hash != managed.info_hash
                 or parsed.name != managed.name

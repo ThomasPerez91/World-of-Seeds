@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.17`.
+- Version applicative cible : `2.3.18`.
+
+## Release 2.3.18 — relance sans transaction pendant la lecture du torrent
+
+- Régression reproduite avec un pool réel à une connexion : la lecture du payload conservait la connexion SQL et les verrous métier ; une deuxième opération échouait pendant une attente disque.
+- La relance copie les identifiants scalaires d’une demande appartenant au compte, termine sa lecture SQL, puis lit et valide le payload hors transaction. Les droits actifs, l’état ERROR, la clé stockage et la génération sont revérifiés sous verrou avant toute mutation ; métadonnées, jobs et capacité sont ensuite validés dans cette transaction.
+- Une lecture de payload par clé stockage et application API (runtime mono-processus), sans attente des doublons : refus 409 torrent_retry_in_progress. L’annulation du demandeur conserve l’admission jusqu’à la fin réelle du thread ; erreurs tardives consommées, drainage shutdown borné à 2 s. Clés et applications indépendantes.
+- Quatorze cas SQLite/PostgreSQL avec disque suspendu : succès, erreur disque, annulation du demandeur, désabonnement concurrent, changement de génération, de clé et de métadonnées. Rafales concurrentes refusées sans seconde lecture, y compris après annulation ; tests de reprise après succès/erreur tardifs. Aucun job ni signal Redis en cas de refus/annulation. Les erreurs de disponibilité SQL restent 503 sans replay.
+- +0.0.1 à 2.3.18 ; 3.0.0 réservée à la fin de l’audit. Activation backups et chargement opérateur des alertes différés. Prochain audit : staging et nettoyage des uploads interrompus, puis sérialisation des admissions de stockage concurrentes.
 
 ## Release 2.3.17 — admission des lectures disque de réconciliation
 
