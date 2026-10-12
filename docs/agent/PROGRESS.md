@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.14`.
+- Version applicative cible : `2.3.15`.
+
+## Release 2.3.15 — réponses HTTP en indisponibilité SQL
+
+- Quatre régressions reproduites : connexions asyncpg refusées et pool réellement saturé renvoyaient HTTP 500, sur API interne/externe. Normalisation au seul bord du driver SQL et classification des déconnexions/SQLSTATE de disponibilité ; pool TimeoutError traité spécifiquement. OSError de fichiers, erreurs de contraintes, syntaxe et credentials SQL ne deviennent pas des indisponibilités.
+- Réponse 503 `database_unavailable`, Retry-After 5 s et no-store ; enveloppe interne `detail` conservée, enveloppe externe `error` avec request_id. Journal constant sans SQL, identifiant métier, secret ni traceback. Readiness garde son contrat 503 et ajoute les mêmes headers ; liveness reste indépendante de SQL.
+- Tests de refus/handshake silencieux/pool occupé et reprise, fermeture des sessions, login sans cookie, classification, rollback sans replay d’une mutation, plus pool PostgreSQL saturé et connexion rompue en CI. Aucun retry automatique, aucun budget de pool augmenté, aucune garantie d’absence d’effet si le commit a été interrompu.
+- Middleware request_id externe ne fabrique plus de 500 après le début d’un flux : interruption propagée et cleanup normal, jamais de seconde réponse HTTP.
+- +0.0.1 à 2.3.15 ; 3.0.0 réservée à la fin de l’audit. Pas de modification Compose/migration/slots HTTP. Activation backups et chargement opérateur des alertes différés. Prochain audit : transactions conservées pendant les appels externes et leur effet sur l’occupation du pool.
 
 ## Release 2.3.14 — délais SQL bornés
 

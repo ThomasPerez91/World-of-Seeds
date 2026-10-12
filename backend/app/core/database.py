@@ -2,7 +2,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from math import isfinite
 
-from sqlalchemy.engine import make_url
+from sqlalchemy import event
+from sqlalchemy.engine import ExceptionContext, make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import (
 
 from app.core.config import Settings, get_settings
 from app.core.database_driver import BoundedAsyncpgDBAPI
+from app.core.database_errors import DatabaseUnavailableError, is_database_unavailable
 
 settings = get_settings()
 
@@ -42,7 +44,7 @@ def create_database_engine(
     if make_url(url).drivername == "postgresql+asyncpg":
         # Pool admission, connection establishment and commands are separate waits.
         # command_timeout also covers pre-ping, transactions and lock waits.
-        return create_async_engine(
+        runtime_engine = create_async_engine(
             url,
             module=BoundedAsyncpgDBAPI(timeouts.command_seconds),
             pool_pre_ping=True,
@@ -52,6 +54,15 @@ def create_database_engine(
                 "command_timeout": timeouts.command_seconds,
             },
         )
+
+        @event.listens_for(runtime_engine.sync_engine, "handle_error", retval=True)
+        def classify_driver_error(context: ExceptionContext) -> BaseException | None:
+            error = context.sqlalchemy_exception or context.original_exception
+            if context.is_disconnect or is_database_unavailable(error):
+                return DatabaseUnavailableError()
+            return None
+
+        return runtime_engine
     # SQLite is used by isolated tests and does not accept asyncpg options.
     return create_async_engine(url, pool_pre_ping=True)
 

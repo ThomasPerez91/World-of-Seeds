@@ -15,6 +15,8 @@ from sqlalchemy.dialects.postgresql.asyncpg import (
 )
 from sqlalchemy.util.concurrency import await_only
 
+from app.core.database_errors import DatabaseUnavailableError, is_database_unavailable
+
 CANCELLATION_GRACE_SECONDS = 1.0
 
 
@@ -50,13 +52,16 @@ class BoundedAsyncpgConnection(AsyncAdapt_asyncpg_connection):
         self._operation_deadline = deadline
 
     def await_[T](self, operation: Awaitable[T]) -> T:
-        return await_only(
-            bounded_database_wait(
-                operation,
-                deadline_seconds=self._operation_deadline,
-                terminate=self.driver_connection.terminate,
+        try:
+            return await_only(
+                bounded_database_wait(
+                    operation,
+                    deadline_seconds=self._operation_deadline,
+                    terminate=self.driver_connection.terminate,
+                )
             )
-        )
+        except OSError as exc:
+            raise DatabaseUnavailableError() from exc
 
 
 class BoundedAsyncpgDBAPI(AsyncAdapt_asyncpg_dbapi):
@@ -70,7 +75,14 @@ class BoundedAsyncpgDBAPI(AsyncAdapt_asyncpg_dbapi):
         creator = kwargs.pop("async_creator_fn", asyncpg.connect)
         cache_size = kwargs.pop("prepared_statement_cache_size", 100)
         name_func = kwargs.pop("prepared_statement_name_func", None)
-        connection = await_only(creator(*args, **kwargs))
+        try:
+            connection = await_only(creator(*args, **kwargs))
+        except OSError as exc:
+            raise DatabaseUnavailableError() from exc
+        except asyncpg.PostgresError as exc:
+            if is_database_unavailable(exc):
+                raise DatabaseUnavailableError() from exc
+            raise
         return BoundedAsyncpgConnection(
             self,
             connection,

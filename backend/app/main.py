@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response as StarletteResponse
@@ -22,6 +23,7 @@ from app.auth.rate_limit import LoginIpRateLimiter
 from app.coordination import RedisCoordinator
 from app.core.config import Settings, get_settings
 from app.core.database import engine
+from app.core.database_errors import DatabaseUnavailableError
 from app.core.drain import RequestDrain, RequestDrainMiddleware
 from app.core.http_security import SecurityHeadersMiddleware
 from app.integrations import ExternalServicesMonitor
@@ -149,6 +151,31 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
             headers=headers,
         )
 
+    async def database_error_handler(
+        request: Request, exc: DatabaseUnavailableError | PoolTimeoutError
+    ) -> JSONResponse:
+        logger.warning("api_database_unavailable")
+        if request.url.path.startswith("/api/external/v1"):
+            response = await external_error_handler(
+                request,
+                ExternalApiError(
+                    503, "database_unavailable", "Database temporarily unavailable", 5
+                ),
+            )
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": {
+                    "code": "database_unavailable",
+                    "message": "Database temporarily unavailable",
+                    "field": None,
+                }
+            },
+            headers={"Retry-After": "5", "Cache-Control": "no-store"},
+        )
+
     async def password_work_error_handler(
         request: Request, exc: PasswordWorkUnavailableError
     ) -> JSONResponse:
@@ -211,6 +238,8 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
 
         return await http_exception_handler(request, exc)
 
+    application.add_exception_handler(DatabaseUnavailableError, database_error_handler)  # type: ignore[arg-type]
+    application.add_exception_handler(PoolTimeoutError, database_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(PasswordWorkUnavailableError, password_work_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(ExternalApiError, external_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
