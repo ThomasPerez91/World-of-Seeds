@@ -21,6 +21,7 @@ from fastapi import (
 )
 from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import (
@@ -34,6 +35,7 @@ from app.auth.dependencies import (
 from app.coordination import RedisSubscriptionUnavailable, TorrentEventType, TorrentRealtimeEvent
 from app.coordination.dependencies import RedisCoordinatorDependency
 from app.core.config import Settings, get_settings
+from app.core.database_errors import DatabaseUnavailableError
 from app.http_downloads import (
     ByteRange,
     RangeNotSatisfiableError,
@@ -1311,6 +1313,10 @@ async def create_torrent_request(
             "torrent_request_invalid",
             "La demande de torrent est invalide.",
         )
+    except (DatabaseUnavailableError, PoolTimeoutError):
+        # Commit may have succeeded before its acknowledgement was lost. Keep
+        # the staged payload for durable recovery; session cleanup still runs.
+        raise
     except (TorrentPayloadStoreError, IntegrityError, SQLAlchemyError):
         await db.rollback()
         if staged_key is not None:
@@ -1545,6 +1551,8 @@ async def cancel_torrent_request(
             "torrent_options_unavailable",
             "L’annulation est momentanément indisponible.",
         )
+    except (DatabaseUnavailableError, PoolTimeoutError):
+        raise
     except SQLAlchemyError:
         await db.rollback()
         _fail(
@@ -1742,6 +1750,8 @@ async def retry_torrent_request(
             await db.flush()
             response = _response(owned, managed)
     except HTTPException:
+        raise
+    except (DatabaseUnavailableError, PoolTimeoutError):
         raise
     except (IntegrityError, SQLAlchemyError):
         await db.rollback()
