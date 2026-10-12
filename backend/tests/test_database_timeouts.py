@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.coordination import RedisCoordinator
 from app.core.config import Settings
 from app.core.database import DatabaseTimeouts, create_database_engine
+from app.core.database_errors import DatabaseUnavailableError
 from app.jobs.worker import TorrentJobSnapshot, TorrentWorker
 
 
@@ -106,7 +107,7 @@ async def test_silent_postgres_handshake_times_out_and_can_retry(
             # The outer watchdog must not be the source of the expected timeout.
             async with asyncio.timeout(2):
                 if consumer == "connection":
-                    with pytest.raises(TimeoutError):
+                    with pytest.raises(DatabaseUnavailableError):
                         async with engine.connect():
                             pytest.fail("A silent server cannot supply a SQL connection")
                 elif consumer == "worker_claim":
@@ -149,7 +150,7 @@ async def test_postgres_command_deadline_rolls_back_and_pool_recovers(operation:
             async with engine.connect() as connection:
                 started = monotonic()
                 async with asyncio.timeout(3):
-                    with pytest.raises(TimeoutError):
+                    with pytest.raises(DatabaseUnavailableError):
                         if operation == "slow_query":
                             await connection.execute(text("SELECT pg_sleep(5)"))
                         else:
@@ -289,7 +290,8 @@ async def test_established_blackholed_connection_is_terminated_and_pool_recovers
     port = server.sockets[0].getsockname()[1]
     url = target.set(host="127.0.0.1", port=port).render_as_string(hide_password=False)
     engine = create_database_engine(
-        Settings(database_url=url), timeouts=DatabaseTimeouts(command_seconds=0.1)
+        Settings(database_url=url),
+        timeouts=DatabaseTimeouts(command_seconds=0.1, connect_seconds=0.1),
     )
     try:
         if phase == "pre_ping":
@@ -297,7 +299,7 @@ async def test_established_blackholed_connection_is_terminated_and_pool_recovers
                 assert await primed.scalar(text("SELECT 1")) == 1
             blackhole.set()
             async with asyncio.timeout(4):
-                with pytest.raises(TimeoutError):
+                with pytest.raises(DatabaseUnavailableError):
                     async with engine.connect():
                         pytest.fail("A blackholed pre-ping must fail")
         else:
@@ -308,7 +310,7 @@ async def test_established_blackholed_connection_is_terminated_and_pool_recovers
                 assert driver is not None
                 blackhole.set()
                 async with asyncio.timeout(4):
-                    with pytest.raises(TimeoutError):
+                    with pytest.raises(DatabaseUnavailableError):
                         if phase == "query":
                             await connection.execute(text("SELECT 2"))
                         elif phase == "commit":

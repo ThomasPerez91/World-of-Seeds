@@ -840,3 +840,99 @@ async def test_v2_cancellation_cannot_cross_owner_boundary(
     response = await client.delete(f"/api/v2/torrents/{request.id}", headers=headers)
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "cancel", "retry"])
+@pytest.mark.parametrize("failure", ["connection", "pool"])
+async def test_torrent_mutations_preserve_database_outage_contract(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    failure: str,
+) -> None:
+    from typing import Any
+
+    from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+
+    from app.api.routes import torrents_v2
+    from app.core.database_errors import DatabaseUnavailableError
+
+    await prepare_user(db_session)
+    headers = await login(client)
+    error = DatabaseUnavailableError() if failure == "connection" else PoolTimeoutError("PRIVATE")
+    called = 0
+
+    async def unavailable(*args: Any, **kwargs: Any) -> Any:
+        nonlocal called
+        called += 1
+        raise error
+
+    if operation == "create":
+        monkeypatch.setattr(torrents_v2, "create_or_get_torrent_request", unavailable)
+        response = await client.post(
+            "/api/v2/torrents",
+            files={"torrent": ("test.torrent", torrent_content(), "application/x-bittorrent")},
+            headers=headers,
+        )
+    elif operation == "cancel":
+        monkeypatch.setattr(torrents_v2, "cancel_owned_torrent_request", unavailable)
+        response = await client.delete(f"/api/v2/torrents/{uuid.uuid4()}", headers=headers)
+    else:
+        original = db_session.scalar
+
+        async def scalar(statement: Any, *args: Any, **kwargs: Any) -> Any:
+            if getattr(statement, "_for_update_arg", None) is not None:
+                return await unavailable()
+            return await original(statement, *args, **kwargs)
+
+        monkeypatch.setattr(db_session, "scalar", scalar)
+        response = await client.post(f"/api/v2/torrents/{uuid.uuid4()}/retry", headers=headers)
+    assert called == 1
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "database_unavailable"
+    assert response.headers["retry-after"] == "5"
+    assert response.headers["cache-control"] == "no-store"
+    assert "PRIVATE" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_acknowledgement_lost_after_torrent_commit_keeps_durable_payload(
+    client: AsyncClient, db_session: AsyncSession, data_root: Path
+) -> None:
+    from sqlalchemy import event
+
+    from app.core.database_errors import DatabaseUnavailableError
+
+    await prepare_user(db_session)
+    headers = await login(client)
+    commits = 0
+
+    def lose_acknowledgement(session: object) -> None:
+        nonlocal commits
+        commits += 1
+        # First commit is read-only authentication; second is the torrent transaction.
+        if commits == 2:
+            raise DatabaseUnavailableError()
+
+    event.listen(db_session.sync_session, "after_commit", lose_acknowledgement)
+    try:
+        response = await client.post(
+            "/api/v2/torrents",
+            files={"torrent": ("test.torrent", torrent_content(), "application/x-bittorrent")},
+            headers=headers,
+        )
+    finally:
+        event.remove(db_session.sync_session, "after_commit", lose_acknowledgement)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "database_unavailable"
+    assert commits == 2
+    # Production get_db_session closes this uncertain request session before
+    # the next caller reads the durable state. The shared fixture needs that
+    # same close explicitly after simulating a lost commit acknowledgement.
+    await db_session.close()
+    assert await db_session.scalar(select(func.count()).select_from(ManagedTorrent)) == 1
+    assert await db_session.scalar(select(func.count()).select_from(TorrentRequest)) == 1
+    assert await db_session.scalar(select(func.count()).select_from(TorrentJob)) == 1
+    assert len(list((data_root / "control" / "torrent-input").glob("*.torrent"))) == 1

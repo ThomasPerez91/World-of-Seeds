@@ -21,8 +21,12 @@ class ExternalRequestIdMiddleware:
         )
         scope.setdefault("state", {})["external_request_id"] = request_id
 
+        response_started = False
+
         async def send_with_request_id(message: Message) -> None:
+            nonlocal response_started
             if message["type"] == "http.response.start":
+                response_started = True
                 response_headers = list(message.get("headers", []))
                 response_headers.append((b"x-request-id", request_id.encode("ascii")))
                 message["headers"] = response_headers
@@ -31,6 +35,8 @@ class ExternalRequestIdMiddleware:
         try:
             await self.app(scope, receive, send_with_request_id)
         except Exception:
+            if response_started:
+                raise
             await JSONResponse(
                 status_code=500,
                 content={
