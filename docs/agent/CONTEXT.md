@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.14` ;
+- version stable : `2.3.15` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -485,3 +485,7 @@ Le polling/récupération/claim, l'enqueue sync et la rétention tolèrent les S
 ## Délais SQL runtime — 2.3.14
 
 L'engine partagé API/worker est créé par `create_database_engine(Settings)`. PostgreSQL/asyncpg : politique fixe `DatabaseTimeouts`, pool 5 s, connexion 5 s, commandes 15 s. Aucun override environnement annoncé : le canal Rise2 interdit les modifications de Compose. La politique est raccourcie uniquement dans les tests isolés. Le délai driver commande couvre aussi les vérifications pré-ping, transactions et verrous. Un adaptateur SQLAlchemy/asyncpg borné ajoute une garde externe à délai commande + 1 s, termine synchroniquement la connexion avant annulation si le protocole ne répond plus, puis draine au maximum 1 s ; une connexion terminée est invalidée. Cet adaptateur est couplé aux versions verrouillées et doit conserver ses tests PostgreSQL lors des upgrades ; les attentes sont distinctes et cumulables, sans budget global de transaction. Aucun changement des tailles du pool ni des slots HTTP. SQLite garde sa configuration compatible. Migrations/backup utilisent leurs connexions propres. Après timeout, rollback et reprise restent requis ; un commit interrompu peut être ambigu et ne doit pas déclencher une réussite supposée ou un replay immédiat.
+
+## Indisponibilité SQL HTTP — 2.3.15
+
+Les erreurs brutes de connexion/timeout asyncpg sont normalisées par l’adaptateur, les déconnexions et SQLSTATE 08*, 57P01/02/03 et 53300 par le bord SQLAlchemy. `DatabaseUnavailableError` reste une SQLAlchemyError, donc les boucles worker gardent leurs reprises. Le pool TimeoutError est traité séparément par FastAPI. Réponse 503 `database_unavailable`, Retry-After 5, no-store ; contrats detail/error conservés et request_id externe. Aucune capture globale d’OSError ou de toutes les erreurs SQL. Pas de retry/replay applicatif ; le client ne doit retenter une mutation qu’avec le contrat d’idempotence prévu. Un commit perdu reste ambigu. Une réponse déjà commencée ne peut être remplacée : le middleware externe propage l’interruption sans émettre une seconde réponse.

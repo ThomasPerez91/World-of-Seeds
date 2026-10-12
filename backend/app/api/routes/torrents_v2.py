@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
@@ -21,6 +22,7 @@ from fastapi import (
 )
 from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import (
@@ -34,6 +36,7 @@ from app.auth.dependencies import (
 from app.coordination import RedisSubscriptionUnavailable, TorrentEventType, TorrentRealtimeEvent
 from app.coordination.dependencies import RedisCoordinatorDependency
 from app.core.config import Settings, get_settings
+from app.core.database_errors import DatabaseUnavailableError
 from app.http_downloads import (
     ByteRange,
     RangeNotSatisfiableError,
@@ -96,6 +99,8 @@ from app.torrents.downloads import (
     download_snapshot_id,
 )
 from app.torrents.traffic import DownloadTrafficScheduler, DownloadWaitingLimit
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 UPLOAD_READ_CHUNK = 64 * 1024
@@ -1204,6 +1209,7 @@ async def create_torrent_request(
 
     staged_key: uuid.UUID | None = None
     job_created = False
+    transaction_body_finished = False
     retention_event_targets: tuple[tuple[uuid.UUID, uuid.UUID], ...] = ()
     try:
         async with db.begin():
@@ -1278,6 +1284,9 @@ async def create_torrent_request(
                         )
                     ).all()
                 )
+            # All body writes must be flushed before marking the commit boundary.
+            await db.flush()
+            transaction_body_finished = True
     except HTTPException:
         if staged_key is not None:
             await run_in_threadpool(payload_store.remove, staged_key)
@@ -1311,6 +1320,15 @@ async def create_torrent_request(
             "torrent_request_invalid",
             "La demande de torrent est invalide.",
         )
+    except (DatabaseUnavailableError, PoolTimeoutError):
+        if staged_key is not None and not transaction_body_finished:
+            # The body failed before commit: no new/reactivated add job can
+            # use this prepared payload. Keep only an ambiguous commit payload.
+            try:
+                await run_in_threadpool(payload_store.remove, staged_key)
+            except TorrentPayloadStoreError:
+                logger.warning("torrent_payload_cleanup_failed")
+        raise
     except (TorrentPayloadStoreError, IntegrityError, SQLAlchemyError):
         await db.rollback()
         if staged_key is not None:
@@ -1545,6 +1563,8 @@ async def cancel_torrent_request(
             "torrent_options_unavailable",
             "L’annulation est momentanément indisponible.",
         )
+    except (DatabaseUnavailableError, PoolTimeoutError):
+        raise
     except SQLAlchemyError:
         await db.rollback()
         _fail(
@@ -1742,6 +1762,8 @@ async def retry_torrent_request(
             await db.flush()
             response = _response(owned, managed)
     except HTTPException:
+        raise
+    except (DatabaseUnavailableError, PoolTimeoutError):
         raise
     except (IntegrityError, SQLAlchemyError):
         await db.rollback()

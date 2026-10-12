@@ -32,6 +32,7 @@ async def readiness(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Service unavailable",
+            headers={"Retry-After": "5", "Cache-Control": "no-store"},
         ) from exc
     return HealthResponse(status="ok")
 
