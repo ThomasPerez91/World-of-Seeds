@@ -1000,7 +1000,9 @@ async def test_precommit_outage_cleans_staged_payload_on_every_attempt(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("original_state", [TorrentJobState.COMPLETED, None])
+@pytest.mark.parametrize(
+    "original_state", [TorrentJobState.COMPLETED, None, TorrentJobState.FAILED]
+)
 async def test_sync_error_is_refused_without_reading_a_removed_payload(
     client: AsyncClient,
     db_session: AsyncSession,
@@ -1028,6 +1030,20 @@ async def test_sync_error_is_refused_without_reading_a_removed_payload(
     else:
         job.state = original_state
         job.finished_at = datetime.now(UTC)
+    if original_state is TorrentJobState.FAILED:
+        # A newer successful retry supersedes the old failed ADD.
+        db_session.add(
+            TorrentJob(
+                managed_torrent_id=managed.id,
+                torrent_request_id=job.torrent_request_id,
+                job_type=job.job_type,
+                idempotency_key=f"completed-retry:{managed.id}",
+                state=TorrentJobState.COMPLETED,
+                available_at=datetime.now(UTC),
+                created_at=job.created_at + timedelta(seconds=1),
+                finished_at=datetime.now(UTC),
+            )
+        )
     await db_session.commit()
     redis.signals = 0
     redis.events.clear()

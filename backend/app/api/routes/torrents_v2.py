@@ -1643,13 +1643,14 @@ async def retry_torrent_request(
                     ManagedTorrent.storage_key,
                     ManagedTorrent.lifecycle_generation,
                     ManagedTorrent.state,
-                    select(TorrentJob.id)
+                    select(TorrentJob.state)
                     .where(
                         TorrentJob.managed_torrent_id == ManagedTorrent.id,
                         TorrentJob.job_type == ADD_TORRENT_JOB,
-                        TorrentJob.state == TorrentJobState.FAILED,
                     )
-                    .exists(),
+                    .order_by(TorrentJob.created_at.desc(), TorrentJob.id.desc())
+                    .limit(1)
+                    .scalar_subquery(),
                 )
                 .join(TorrentRequest, TorrentRequest.managed_torrent_id == ManagedTorrent.id)
                 .where(
@@ -1668,14 +1669,14 @@ async def retry_torrent_request(
                 "torrent_request_not_found",
                 "Demande introuvable.",
             )
-        storage_key, lifecycle_generation, previous_state, has_failed_add = snapshot
+        storage_key, lifecycle_generation, previous_state, latest_add_state = snapshot
         if previous_state is not ManagedTorrentState.ERROR:
             _fail(
                 status.HTTP_409_CONFLICT,
                 "torrent_retry_not_allowed",
                 "Ce téléchargement n’est pas dans un état relançable.",
             )
-        if not has_failed_add:
+        if latest_add_state is not TorrentJobState.FAILED:
             _fail(
                 status.HTTP_409_CONFLICT,
                 "torrent_retry_not_allowed",
@@ -1735,17 +1736,16 @@ async def retry_torrent_request(
                     "torrent_retry_not_allowed",
                     "Ce téléchargement n’est pas dans un état relançable.",
                 )
-            failed_add = await db.scalar(
+            latest_add = await db.scalar(
                 select(TorrentJob)
                 .where(
                     TorrentJob.managed_torrent_id == managed.id,
                     TorrentJob.job_type == ADD_TORRENT_JOB,
-                    TorrentJob.state == TorrentJobState.FAILED,
                 )
-                .order_by(TorrentJob.updated_at.desc(), TorrentJob.id.desc())
+                .order_by(TorrentJob.created_at.desc(), TorrentJob.id.desc())
                 .limit(1)
             )
-            if failed_add is None:
+            if latest_add is None or latest_add.state is not TorrentJobState.FAILED:
                 _fail(
                     status.HTTP_409_CONFLICT,
                     "torrent_retry_not_allowed",
