@@ -1643,6 +1643,13 @@ async def retry_torrent_request(
                     ManagedTorrent.storage_key,
                     ManagedTorrent.lifecycle_generation,
                     ManagedTorrent.state,
+                    select(TorrentJob.id)
+                    .where(
+                        TorrentJob.managed_torrent_id == ManagedTorrent.id,
+                        TorrentJob.job_type == ADD_TORRENT_JOB,
+                        TorrentJob.state == TorrentJobState.FAILED,
+                    )
+                    .exists(),
                 )
                 .join(TorrentRequest, TorrentRequest.managed_torrent_id == ManagedTorrent.id)
                 .where(
@@ -1661,12 +1668,18 @@ async def retry_torrent_request(
                 "torrent_request_not_found",
                 "Demande introuvable.",
             )
-        storage_key, lifecycle_generation, previous_state = snapshot
+        storage_key, lifecycle_generation, previous_state, has_failed_add = snapshot
         if previous_state is not ManagedTorrentState.ERROR:
             _fail(
                 status.HTTP_409_CONFLICT,
                 "torrent_retry_not_allowed",
                 "Ce téléchargement n’est pas dans un état relançable.",
+            )
+        if not has_failed_add:
+            _fail(
+                status.HTTP_409_CONFLICT,
+                "torrent_retry_not_allowed",
+                "Cette erreur ne peut pas être relancée automatiquement.",
             )
         try:
             parsed = await retry_reads.run(storage_key, partial(payload_store.read, storage_key))

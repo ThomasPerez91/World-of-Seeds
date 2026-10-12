@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Never
 
 import pytest
 from httpx import AsyncClient
@@ -996,3 +997,50 @@ async def test_precommit_outage_cleans_staged_payload_on_every_attempt(
         assert await db_session.scalar(select(func.count()).select_from(TorrentRequest)) == 0
         assert await db_session.scalar(select(func.count()).select_from(TorrentJob)) == 0
         assert list((data_root / "control" / "torrent-input").glob("*.torrent")) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("original_state", [TorrentJobState.COMPLETED, None])
+async def test_sync_error_is_refused_without_reading_a_removed_payload(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    original_state: TorrentJobState | None,
+) -> None:
+    from app.jobs.torrent_payloads import TorrentPayloadStore
+
+    await prepare_user(db_session)
+    headers = await login(client)
+    redis = RecordingRedis()
+    app.state.redis_coordinator = redis
+    uploaded = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+    assert uploaded.status_code == 201
+    managed = await db_session.scalar(select(ManagedTorrent))
+    job = await db_session.scalar(select(TorrentJob))
+    assert managed is not None and job is not None
+    managed.state = ManagedTorrentState.ERROR
+    if original_state is None:
+        await db_session.delete(job)
+    else:
+        job.state = original_state
+        job.finished_at = datetime.now(UTC)
+    await db_session.commit()
+    redis.signals = 0
+    redis.events.clear()
+
+    def read(_store: TorrentPayloadStore, _key: uuid.UUID) -> Never:
+        pytest.fail("An ineligible retry must not read the payload")
+
+    monkeypatch.setattr(TorrentPayloadStore, "read", read)
+    response = await client.post(
+        f"/api/v2/torrents/{uploaded.json()['id']}/retry",
+        headers=headers,
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "torrent_retry_not_allowed"
+    assert redis.signals == 0
+    assert redis.events == []
