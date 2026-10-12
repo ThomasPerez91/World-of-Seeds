@@ -110,9 +110,12 @@ async def test_retry_releases_sql_during_disk_read_and_revalidates_before_writin
     release = threading.Event()
     finished = threading.Event()
     loop = asyncio.get_running_loop()
+    calls = 0
     original_read = TorrentPayloadStore.read
 
     def read_payload(payload_store: TorrentPayloadStore, storage_key: uuid.UUID) -> ParsedTorrent:
+        nonlocal calls
+        calls += 1
         loop.call_soon_threadsafe(entered.set)
         try:
             if not release.wait(5):
@@ -144,6 +147,15 @@ async def test_retry_releases_sql_during_disk_read_and_revalidates_before_writin
             )
             async with asyncio.timeout(2):
                 await entered.wait()
+            # A burst must not start a second disk operation for the same payload.
+            for _ in range(5):
+                duplicate = await client.post(
+                    f"/api/v2/torrents/{request.id}/retry",
+                    headers={"X-CSRF-Token": token},
+                )
+                assert duplicate.status_code == 409
+                assert duplicate.json()["detail"]["code"] == "torrent_retry_in_progress"
+            assert calls == 1
             # A genuine independent checkout and commit while the disk thread is paused.
             async with engine.begin() as independent:
                 assert await independent.scalar(text("SELECT 1")) == 1
@@ -175,6 +187,13 @@ async def test_retry_releases_sql_during_disk_read_and_revalidates_before_writin
                 task.cancel()
                 with pytest.raises(asyncio.CancelledError):
                     await task
+                duplicate = await client.post(
+                    f"/api/v2/torrents/{request.id}/retry",
+                    headers={"X-CSRF-Token": token},
+                )
+                assert duplicate.status_code == 409
+                assert duplicate.json()["detail"]["code"] == "torrent_retry_in_progress"
+                assert calls == 1
                 release.set()
             else:
                 release.set()

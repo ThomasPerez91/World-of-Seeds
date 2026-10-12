@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal, Never, cast
 
@@ -97,6 +98,11 @@ from app.torrents.downloads import (
     ManagedFileDownloader,
     ManagedFolderArchiver,
     download_snapshot_id,
+)
+from app.torrents.retry_reads import (
+    TorrentRetryBusyError,
+    TorrentRetryReads,
+    get_torrent_retry_reads,
 )
 from app.torrents.traffic import DownloadTrafficScheduler, DownloadWaitingLimit
 
@@ -1596,6 +1602,7 @@ async def retry_torrent_request(
     redis: RedisCoordinatorDependency,
     settings: Annotated[Settings, Depends(get_settings)],
     context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
+    retry_reads: Annotated[TorrentRetryReads, Depends(get_torrent_retry_reads)],
     torrent_request_id: uuid.UUID,
 ) -> TorrentRequestV2Response:
     user_id = context.user.id
@@ -1662,7 +1669,13 @@ async def retry_torrent_request(
                 "Ce téléchargement n’est pas dans un état relançable.",
             )
         try:
-            parsed = await run_in_threadpool(payload_store.read, storage_key)
+            parsed = await retry_reads.run(storage_key, partial(payload_store.read, storage_key))
+        except TorrentRetryBusyError:
+            _fail(
+                status.HTTP_409_CONFLICT,
+                "torrent_retry_in_progress",
+                "Une relance est déjà en cours.",
+            )
         except TorrentPayloadStoreError:
             _fail(
                 status.HTTP_409_CONFLICT,
