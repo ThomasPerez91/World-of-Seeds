@@ -619,7 +619,19 @@ async def get_admin_reconciliation(
     database_scanned = qbittorrent_scanned = storage_scanned = external_torrents = 0
     next_position: ReconciliationCursor | None = None
     if position.phase == "database":
-        statement = select(ManagedTorrent).order_by(ManagedTorrent.id).limit(limit + 1)
+        # Copy scalar values: rollback expires ORM objects and would otherwise
+        # reopen a transaction when the disk phase reads their attributes.
+        statement = (
+            select(
+                ManagedTorrent.id,
+                ManagedTorrent.info_hash,
+                ManagedTorrent.storage_key,
+                ManagedTorrent.state,
+                ManagedTorrent.qbittorrent_account_ref,
+            )
+            .order_by(ManagedTorrent.id)
+            .limit(limit + 1)
+        )
         if position.after is not None:
             try:
                 statement = statement.where(ManagedTorrent.id > uuid.UUID(position.after))
@@ -628,7 +640,7 @@ async def get_admin_reconciliation(
                     status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail={"code": "reconciliation_cursor_invalid"},
                 ) from exc
-        rows = list((await db.scalars(statement)).all())
+        rows = list((await db.execute(statement)).all())
         page = rows[:limit]
         database_scanned = len(page)
         snapshot_items = (
@@ -636,7 +648,8 @@ async def get_admin_reconciliation(
                 (
                     await db.execute(
                         select(
-                            QBittorrentInventoryItem,
+                            QBittorrentInventoryItem.info_hash,
+                            QBittorrentInventoryItem.storage_key,
                             QBittorrentInventorySnapshot.account_ref,
                         )
                         .join(
@@ -655,7 +668,8 @@ async def get_admin_reconciliation(
             if page and position.snapshot_ids
             else []
         )
-        by_identity = {(item.info_hash, account_ref): item for item, account_ref in snapshot_items}
+        by_identity = {(item.info_hash, item.account_ref): item for item in snapshot_items}
+        await db.rollback()
         store = SharedContentStore(settings.data_root)
         for torrent in page:
             expects_physical = torrent.state not in {
@@ -808,6 +822,8 @@ async def get_admin_reconciliation(
             else:
                 next_position = ReconciliationCursor("storage", snapshot_ids=position.snapshot_ids)
     else:
+        # Snapshot-retention checks above may have opened a read transaction.
+        await db.rollback()
         try:
             after = uuid.UUID(position.after) if position.after is not None else None
             inventory = await run_in_threadpool(
@@ -858,6 +874,7 @@ async def get_admin_reconciliation(
                 "storage", str(inventory.keys[-1]), position.snapshot_ids
             )
 
+    await db.rollback()
     return AdminV2ReconciliationReport(
         database_scanned=database_scanned,
         qbittorrent_scanned=qbittorrent_scanned,

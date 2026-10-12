@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.15` ;
+- version stable : `2.3.16` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -489,3 +489,7 @@ L'engine partagé API/worker est créé par `create_database_engine(Settings)`. 
 ## Indisponibilité SQL HTTP — 2.3.15
 
 Les erreurs brutes de connexion/timeout asyncpg sont normalisées par l’adaptateur, les déconnexions et SQLSTATE 08*, 57P01/02/03 et 53300 par le bord SQLAlchemy. `DatabaseUnavailableError` reste une SQLAlchemyError, donc les boucles worker gardent leurs reprises. Le pool TimeoutError est traité séparément par FastAPI. Réponse 503 `database_unavailable`, Retry-After 5, no-store ; contrats detail/error conservés et request_id externe. Aucune capture globale d’OSError ou de toutes les erreurs SQL. Pas de retry/replay applicatif ; le client ne doit retenter une mutation qu’avec le contrat d’idempotence prévu. Un commit perdu reste ambigu. Une réponse déjà commencée ne peut être remplacée : le middleware externe propage l’interruption sans émettre une seconde réponse.
+
+## Réconciliation et occupation SQL — 2.3.16
+
+Le rapport admin copie les colonnes scalaires des torrents et des identités qB avant de terminer sa lecture SQL. Les vérifications `contains` et `inventory_page` du stockage tournent hors transaction ; rollback ne peut pas expirer ces valeurs et provoquer une requête ORM implicite. Un pool à une connexion reste disponible pendant une lecture disque bloquée. Les compteurs/anomalies/cursors et validations des snapshots restent inchangés ; la récupération durable revalide toujours l’état, le rapport ne constitue pas une autorisation figée ni un snapshot atomique SQL/disque. Les effets HTTP worker/scheduler sont déjà séparés des transactions et n’ont pas été modifiés.
