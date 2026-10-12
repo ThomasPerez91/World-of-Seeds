@@ -332,3 +332,53 @@ async def test_postgres_http_pressure_and_disconnect_recover(tmp_path: Path, fai
     finally:
         await asyncio.gather(*(connection.close() for connection in occupied))
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_connect_cancellation_is_not_normalized_as_unavailability() -> None:
+    from sqlalchemy import event
+
+    engine = create_database_engine(
+        Settings(database_url="postgresql+asyncpg://fake:private-secret@127.0.0.1/fake")
+    )
+
+    @event.listens_for(engine.sync_engine, "do_connect")
+    def cancel_connect(*args: object) -> None:
+        raise asyncio.CancelledError()
+
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            async with engine.connect():
+                pytest.fail("Cancelled connection cannot be admitted")
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not os.environ.get("WOS_DATABASE_URL", "").startswith("postgresql+asyncpg"),
+    reason="Requires isolated PostgreSQL CI service",
+)
+async def test_postgres_query_cancellation_remains_cancellation_and_pool_recovers() -> None:
+    from sqlalchemy import event
+
+    engine = create_database_engine(Settings())
+    started = asyncio.Event()
+
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def command_started(*args: object) -> None:
+        started.set()
+
+    try:
+        async with engine.connect() as connection:
+            task = asyncio.create_task(connection.execute(text("SELECT pg_sleep(5)")))
+            async with asyncio.timeout(4):
+                await started.wait()
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            await connection.invalidate()
+        async with engine.connect() as recovered:
+            assert await recovered.scalar(text("SELECT 1")) == 1
+    finally:
+        await engine.dispose()

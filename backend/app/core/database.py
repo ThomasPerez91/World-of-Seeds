@@ -58,6 +58,10 @@ def create_database_engine(
         @event.listens_for(runtime_engine.sync_engine, "handle_error", retval=True)
         def classify_driver_error(context: ExceptionContext) -> BaseException | None:
             error = context.sqlalchemy_exception or context.original_exception
+            if not isinstance(error, Exception):
+                # SQLAlchemy also marks task cancellation as a disconnect.
+                # Preserve control-flow exceptions while it cleans the connection.
+                return None
             if context.is_disconnect or is_database_unavailable(error):
                 # The normalized SQLAlchemyError is not a DBAPI exception, so
                 # SQLAlchemy cannot infer disconnect from its type alone.
