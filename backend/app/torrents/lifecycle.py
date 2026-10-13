@@ -151,46 +151,72 @@ async def expire_ready_torrents_batch(
     _validate_lifecycle_hours(retention_hours, name="torrent retention")
     if not 1 <= limit <= 500:
         raise ValueError("expiration batch limit must be between 1 and 500")
+    # Discover bounded candidates without locking rights before their torrents.
+    due = (
+        TorrentRequest.state == TorrentRequestState.READY,
+        TorrentRequest.unsubscribe_at.is_not(None),
+        TorrentRequest.unsubscribe_at <= _database_timestamp(now),
+    )
+    candidates = tuple(
+        (
+            await session.execute(
+                select(TorrentRequest.id, TorrentRequest.managed_torrent_id)
+                .where(*due)
+                .order_by(TorrentRequest.unsubscribe_at, TorrentRequest.id)
+                .limit(limit)
+            )
+        ).all()
+    )
+    torrent_ids = tuple({candidate.managed_torrent_id for candidate in candidates})
+    torrents = {
+        torrent.id: torrent
+        for torrent in (
+            await session.scalars(
+                select(ManagedTorrent)
+                .where(ManagedTorrent.id.in_(torrent_ids))
+                .order_by(ManagedTorrent.id)
+                .with_for_update(skip_locked=True)
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+    }
     due_requests = tuple(
         (
             await session.scalars(
                 select(TorrentRequest)
                 .where(
-                    TorrentRequest.state == TorrentRequestState.READY,
-                    TorrentRequest.unsubscribe_at.is_not(None),
-                    TorrentRequest.unsubscribe_at <= _database_timestamp(now),
+                    *due,
+                    TorrentRequest.id.in_(tuple(candidate.id for candidate in candidates)),
+                    TorrentRequest.managed_torrent_id.in_(tuple(torrents)),
                 )
                 .order_by(TorrentRequest.unsubscribe_at, TorrentRequest.id)
                 .with_for_update(skip_locked=True)
-                .limit(limit)
+                .execution_options(populate_existing=True)
             )
         ).all()
     )
     by_torrent: dict[uuid.UUID, list[TorrentRequest]] = {}
     for request in due_requests:
         by_torrent.setdefault(request.managed_torrent_id, []).append(request)
+    # Lock every usage in one global order before processing any torrent.
+    # Different batches can share accounts even when their torrents are distinct.
+    user_ids = tuple({request.user_id for request in due_requests})
+    usages = {
+        usage.user_id: usage
+        for usage in (
+            await session.scalars(
+                select(UserStorageUsage)
+                .where(UserStorageUsage.user_id.in_(user_ids))
+                .order_by(UserStorageUsage.user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+    }
     results: list[TorrentExpirationResult] = []
     for torrent_id in sorted(by_torrent, key=str):
-        torrent = await session.get(ManagedTorrent, torrent_id, with_for_update=True)
-        if torrent is None:
-            continue
+        torrent = torrents[torrent_id]
         requests = tuple(by_torrent[torrent_id])
-        user_ids = tuple(dict.fromkeys(request.user_id for request in requests))
-        usages = {
-            usage.user_id: usage
-            for usage in (
-                (
-                    await session.scalars(
-                        select(UserStorageUsage)
-                        .where(UserStorageUsage.user_id.in_(user_ids))
-                        .order_by(UserStorageUsage.user_id)
-                        .with_for_update()
-                    )
-                ).all()
-                if user_ids
-                else ()
-            )
-        }
         for request in requests:
             request.state = TorrentRequestState.EXPIRED
             request.expires_at = now
@@ -251,8 +277,18 @@ async def cancel_owned_torrent_request(
     )
     if request is None:
         return None
-    torrent = await session.get(ManagedTorrent, request.managed_torrent_id, with_for_update=True)
-    request = await session.get(TorrentRequest, request.id, with_for_update=True)
+    torrent = await session.get(
+        ManagedTorrent,
+        request.managed_torrent_id,
+        with_for_update=True,
+        populate_existing=True,
+    )
+    request = await session.get(
+        TorrentRequest,
+        request.id,
+        with_for_update=True,
+        populate_existing=True,
+    )
     if torrent is None or request is None:
         return None
     if request.state is TorrentRequestState.CANCELLED:
