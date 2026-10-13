@@ -82,6 +82,7 @@ from app.storage import (
     StorageDiskSnapshot,
     managed_reservation_capacity,
 )
+from app.storage.accounting import lock_storage_ledger
 from app.torrents import (
     TorrentDeduplicationError,
     TorrentMetadataConflictError,
@@ -1767,6 +1768,9 @@ async def retry_torrent_request(
                     "Une relance est déjà en cours.",
                 )
 
+            # Upload admissions, purge accounting and retries share this lock.
+            # Aggregate only after admission has been serialized.
+            await lock_storage_ledger(db, now=datetime.now(UTC))
             committed_states = (
                 ManagedTorrentState.PENDING,
                 ManagedTorrentState.ADDING,
