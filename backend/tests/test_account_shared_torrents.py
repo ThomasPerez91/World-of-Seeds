@@ -21,6 +21,7 @@ from app.models import (
     User,
     UserStorageUsage,
 )
+from app.options import PostgresOptionsRegistry
 from app.torrents import create_or_get_torrent_request
 from app.torrents.deduplication import TorrentRequestOwnerError
 from app.torrents.downloads import DownloadLeaseManager, ManagedDownloadError
@@ -168,6 +169,7 @@ async def test_download_waiting_on_account_sees_admin_revocation(
     sessions, prefix = postgres_storage
     now = datetime.now(UTC)
     async with sessions() as seed:
+        await PostgresOptionsRegistry().initialize(seed)
         owner = User(username=prefix, password_hash="hash")
         torrent = ManagedTorrent(
             info_hash=uuid.uuid4().hex + "00000000",
@@ -215,7 +217,12 @@ async def test_download_waiting_on_account_sees_admin_revocation(
             )
         )
         try:
-            await asyncio.wait_for(reached.wait(), 2)
+            try:
+                await asyncio.wait_for(reached.wait(), 2)
+            except TimeoutError:
+                if task.done():
+                    task.result()
+                raise
             locked.is_active = False
             locked.deleted_at = now if revocation == "delete" else None
             await admin.commit()
@@ -245,6 +252,7 @@ async def test_deletion_waits_for_all_parents_before_locking_usage(
     now = datetime.now(UTC)
     first_id = uuid.uuid4().int >> 1
     async with sessions() as seed:
+        await PostgresOptionsRegistry().initialize(seed)
         owner = User(username=prefix, password_hash="hash")
         parents = [
             ManagedTorrent(
@@ -290,7 +298,12 @@ async def test_deletion_waits_for_all_parents_before_locking_usage(
         assert await expiration.get(ManagedTorrent, second_id, with_for_update=True) is not None
         task = asyncio.create_task(remove())
         try:
-            await asyncio.wait_for(reached.wait(), 2)
+            try:
+                await asyncio.wait_for(reached.wait(), 2)
+            except TimeoutError:
+                if task.done():
+                    task.result()
+                raise
             # Expiration already owns a parent and must still be able to take usage.
             usage = await asyncio.wait_for(
                 expiration.get(UserStorageUsage, owner_id, with_for_update=True), 2
