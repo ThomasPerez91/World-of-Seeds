@@ -1,10 +1,18 @@
 # World of Seeds — Progress
 
-## Etat courant — 12 octobre 2026
+## Etat courant — 13 octobre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.20`.
+- Version applicative cible : `2.3.21`.
+
+## Release 2.3.21 — ordre des verrous sur les droits torrent
+
+- Relance : la prélecture matérialise aussi l’identité canonique du torrent. La transaction verrouille maintenant ManagedTorrent avant TorrentRequest, comme ajout/annulation/READY, puis revérifie propriétaire, association, état, génération et payload. Elle ne retient plus un droit en attendant son torrent.
+- Expiration READY : torrents ayant des droits dus sélectionnés/verrouillés selon leur première échéance avec SKIP LOCKED, puis droits encore dus revérifiés/verrouillés, et usages utilisateurs verrouillés en un ordre global avant traitement. La limite s’applique après exclusion des torrents occupés, puis aux droits effectivement traités ; un torrent occupé partagé par de nombreux comptes ne bloque pas les candidats libres suivants. Les torrents occupés sont laissés au passage suivant ; la maintenance ne verrouille pas leurs droits avant d’attendre leur torrent. Rétention, plafonds de batch, quotas, événements et idempotence conservés.
+- Annulation : torrent et droit sont explicitement rafraîchis sous verrou. Une expiration survenue pendant l’attente ne peut plus être remplacée par une annulation fondée sur l’identité ORM périmée.
+- Six scénarios PostgreSQL isolés : relance attendant un torrent pendant son annulation ; expiration face à un torrent occupé avec annulation, réupload ou simple libération ; droit expiré pendant l’attente d’une annulation ; page remplie par les droits d’un torrent occupé suivie d’un torrent libre. Vérifications des états, quotas, jobs et absence de signal de relance invalide.
+- +0.0.1 à 2.3.21 ; 3.0.0 réservée à la fin de l’audit. Pas de migration/Compose/slots HTTP. Activation backups et chargement opérateur des alertes différés. Prochain audit : ordre des verrous entre lifecycle et claims/finalisations des jobs worker.
 
 ## Release 2.3.20 — sérialisation des admissions de stockage
 

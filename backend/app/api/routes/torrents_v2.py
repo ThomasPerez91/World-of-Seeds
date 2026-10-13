@@ -1641,6 +1641,7 @@ async def retry_torrent_request(
         snapshot = (
             await db.execute(
                 select(
+                    ManagedTorrent.id,
                     ManagedTorrent.storage_key,
                     ManagedTorrent.lifecycle_generation,
                     ManagedTorrent.state,
@@ -1670,7 +1671,7 @@ async def retry_torrent_request(
                 "torrent_request_not_found",
                 "Demande introuvable.",
             )
-        storage_key, lifecycle_generation, previous_state, latest_add_state = snapshot
+        managed_id, storage_key, lifecycle_generation, previous_state, latest_add_state = snapshot
         if previous_state is not ManagedTorrentState.ERROR:
             _fail(
                 status.HTTP_409_CONFLICT,
@@ -1699,29 +1700,27 @@ async def retry_torrent_request(
             )
 
         async with db.begin():
+            # Canonical order shared with upload/cancellation: torrent, then right.
+            managed = await db.scalar(
+                select(ManagedTorrent)
+                .where(ManagedTorrent.id == managed_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
             owned = await db.scalar(
                 select(TorrentRequest)
                 .where(
                     TorrentRequest.id == torrent_request_id,
                     TorrentRequest.user_id == user_id,
+                    TorrentRequest.managed_torrent_id == managed_id,
                     TorrentRequest.state.in_(
                         (TorrentRequestState.REQUESTED, TorrentRequestState.ACTIVE)
                     ),
                 )
                 .with_for_update()
+                .execution_options(populate_existing=True)
             )
-            if owned is None:
-                _fail(
-                    status.HTTP_404_NOT_FOUND,
-                    "torrent_request_not_found",
-                    "Demande introuvable.",
-                )
-            managed = await db.scalar(
-                select(ManagedTorrent)
-                .where(ManagedTorrent.id == owned.managed_torrent_id)
-                .with_for_update()
-            )
-            if managed is None:
+            if managed is None or owned is None:
                 _fail(
                     status.HTTP_404_NOT_FOUND,
                     "torrent_request_not_found",
