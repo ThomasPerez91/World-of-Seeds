@@ -360,11 +360,14 @@ class DownloadLeaseManager:
             )
             if global_lock is None:
                 raise ManagedDownloadError("global download concurrency option is missing")
-            locked_user_id = await self._session.scalar(
-                select(User.id).where(User.id == user_id).with_for_update()
+            owner = await self._session.scalar(
+                select(User)
+                .where(User.id == user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
-            if locked_user_id is None:
-                raise ManagedDownloadError("download owner is missing")
+            if owner is None or not owner.is_active or owner.deleted_at is not None:
+                raise ManagedDownloadError("download owner is missing or inactive")
             locked_right_id = await self._session.scalar(
                 select(TorrentRequest.id)
                 .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
@@ -429,18 +432,24 @@ class DownloadLeaseManager:
             candidate = await self._session.get(DownloadLease, lease_id)
             if candidate is None:
                 raise ManagedDownloadError("download lease was lost")
-            user = await self._session.get(User, candidate.user_id, with_for_update=True)
+            user = await self._session.get(
+                User, candidate.user_id, with_for_update=True, populate_existing=True
+            )
             managed = await self._session.get(
                 ManagedTorrent,
                 candidate.managed_torrent_id,
                 with_for_update=True,
+                populate_existing=True,
             )
-            lease = await self._session.get(DownloadLease, lease_id, with_for_update=True)
+            lease = await self._session.get(
+                DownloadLease, lease_id, with_for_update=True, populate_existing=True
+            )
             request = (
                 await self._session.get(
                     TorrentRequest,
                     candidate.torrent_request_id,
                     with_for_update=True,
+                    populate_existing=True,
                 )
                 if lease is not None
                 else None

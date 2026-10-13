@@ -304,7 +304,9 @@ async def cancel_owned_torrent_request(
     request.state = TorrentRequestState.CANCELLED
     request.cancelled_at = timestamp
     request.updated_at = timestamp
-    usage = await session.get(UserStorageUsage, user_id, with_for_update=True)
+    usage = await session.get(
+        UserStorageUsage, user_id, with_for_update=True, populate_existing=True
+    )
     if usage is not None:
         usage.logical_bytes = max(0, usage.logical_bytes - torrent.total_size)
         usage.updated_at = timestamp
