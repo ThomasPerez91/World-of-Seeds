@@ -322,3 +322,67 @@ async def test_resubscribe_before_forced_stop_ack_revokes_old_override(tmp_path:
     ).run_once()
     assert cycle.selected_torrent_ids == (torrent.id,)
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_new_admin_resume_during_stop_ack_is_preserved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import uuid
+    from typing import Any
+
+    from app.admin.qbittorrent import force_resume_admin_torrent
+    from app.integrations.qbittorrent_v2 import QBittorrentV2ControlResult
+
+    engine, sessions = await _database(tmp_path)
+    torrent = await _torrent(
+        sessions, username="concurrent-admin-resume", info_hash="9" * 40, size=100, progress=0.4
+    )
+    async with sessions() as session, session.begin():
+        stored = await session.get(ManagedTorrent, torrent.id)
+        assert stored is not None
+        stored.admin_forced_active = True
+        stored.qbittorrent_account_ref = uuid.uuid4()
+    await cancel_last(sessions, torrent.id)
+    gateway = FakeGateway()
+    original = gateway.apply_managed_controls
+    resumed = False
+
+    async def apply(
+        controls: Any, *, allow_missing_stopped: bool = False
+    ) -> QBittorrentV2ControlResult:
+        nonlocal resumed
+        result = await original(controls, allow_missing_stopped=allow_missing_stopped)
+        if not resumed:
+            async with sessions() as session, session.begin():
+                before = await session.get(ManagedTorrent, torrent.id)
+                assert before is not None
+                generation = before.lifecycle_generation
+                await force_resume_admin_torrent(
+                    session,
+                    torrent_id=torrent.id,
+                    retention_hours=48,
+                    now=NOW + timedelta(seconds=1),
+                )
+                # The existing queued purge job means this public action keeps its generation.
+                assert before.lifecycle_generation == generation
+            resumed = True
+        return result
+
+    monkeypatch.setattr(gateway, "apply_managed_controls", apply)
+    runtime = SchedulerRuntime(
+        sessions, gateway, scheduler_id="concurrent-admin", clock=lambda: NOW
+    )
+    await runtime.run_once()
+    async with sessions() as session:
+        stored = await session.get(ManagedTorrent, torrent.id)
+        assert stored is not None
+        assert stored.admin_forced_active is True
+        assert stored.purge_stop_pending is False
+        assert stored.purge_after is not None
+    await runtime.run_once()
+    assert any(
+        c.info_hash == torrent.info_hash and c.run_state == "running" for c in gateway.calls[-1]
+    )
+    await engine.dispose()

@@ -129,7 +129,7 @@ class SchedulerRuntime:
             forced_torrents = tuple(
                 torrent
                 for torrent in torrents
-                if torrent.admin_forced_active and torrent.purge_after is None
+                if torrent.admin_forced_active and not torrent.purge_stop_pending
             )
             forced_torrent_ids = {torrent.id for torrent in forced_torrents}
             # Retention keeps the data, not an unowned download slot.
@@ -222,7 +222,7 @@ class SchedulerRuntime:
                 torrent.id: torrent.lifecycle_generation
                 for torrent in schedulable_torrents
                 if torrent.admin_forced_active
-                and torrent.purge_after is not None
+                and torrent.purge_stop_pending
                 and not torrent.desired_active
             }
 
@@ -284,10 +284,11 @@ class SchedulerRuntime:
                 for torrent in stopped_forced:
                     if (
                         torrent.lifecycle_generation == forced_stop_generations[torrent.id]
-                        and torrent.purge_after is not None
+                        and torrent.purge_stop_pending
                         and not torrent.desired_active
                     ):
                         torrent.admin_forced_active = False
+                        torrent.purge_stop_pending = False
                         torrent.updated_at = applied_at
             if purge_stop_generations:
                 stopped = tuple(

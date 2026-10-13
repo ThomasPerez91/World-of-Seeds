@@ -153,6 +153,7 @@ async def create_or_get_torrent_request(
         # even if the deadline has elapsed but the purge worker has not won the lock.
         # A new right revokes the pending orphan stop and its old forced-resume marker.
         managed_torrent.admin_forced_active = False
+        managed_torrent.purge_stop_pending = False
         managed_torrent.lifecycle_generation += 1
         managed_torrent.purge_after = None
         managed_torrent.updated_at = timestamp
