@@ -376,14 +376,8 @@ async def _schedule_deferred_purge(
     """Schedule physical deletion without changing the current qB lifecycle."""
 
     torrent.lifecycle_generation += 1
-    if torrent.state in {
-        ManagedTorrentState.PENDING,
-        ManagedTorrentState.ADDING,
-        ManagedTorrentState.DOWNLOADING,
-        ManagedTorrentState.PAUSED,
-        ManagedTorrentState.RETRY_WAIT,
-    }:
-        torrent.admin_forced_active = False
+    # A previous forced-resume marker stays eligible for mandatory control until
+    # the scheduler acknowledges STOP, even if desired_active is still false.
     torrent.purge_after = purge_after
     torrent.updated_at = now
     purge_job = TorrentJob(

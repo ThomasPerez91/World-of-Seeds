@@ -56,8 +56,8 @@ async def test_last_unsubscribe_stops_partial_and_preserves_retention(
     async with sessions() as session, session.begin():
         stored = await session.get(ManagedTorrent, torrent.id)
         assert stored is not None
-        stored.desired_active = True
-        stored.desired_priority = 0
+        stored.desired_active = not forced
+        stored.desired_priority = None if forced else 0
         stored.admin_forced_active = forced
         stored.qb_state = "stalledDL" if stalled else "downloading"
         stored.stall_count = 1 if stalled else 0
@@ -236,4 +236,89 @@ async def test_stop_is_replayed_after_gateway_failure(tmp_path: Path) -> None:
         sessions, recovered, scheduler_id="gateway-replay", clock=lambda: NOW
     ).run_once()
     assert recovered.calls[0][0].run_state == "stopped"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_forced_orphan_is_stopped_outside_the_200_row_cursor_window(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    torrent = await _torrent(
+        sessions, username="forced-only", info_hash="7" * 40, size=100, progress=0.4
+    )
+    async with sessions() as session, session.begin():
+        stored = await session.get(ManagedTorrent, torrent.id)
+        assert stored is not None
+        stored.admin_forced_active = True
+        assert stored.desired_active is False
+        session.add_all(
+            [
+                ManagedTorrent(
+                    info_hash=f"{i:040x}",
+                    name=f"older-waiting-{i}",
+                    total_size=1,
+                    state=ManagedTorrentState.PAUSED,
+                    created_at=NOW - timedelta(days=1),
+                )
+                for i in range(201)
+            ]
+        )
+    await cancel_last(sessions, torrent.id)
+    failing = FakeGateway(fail=True)
+    with pytest.raises(RuntimeError, match="qb_unavailable"):
+        await SchedulerRuntime(
+            sessions, failing, scheduler_id="forced-window", clock=lambda: NOW
+        ).run_once()
+    assert any(
+        c.info_hash == torrent.info_hash and c.run_state == "stopped" for c in failing.calls[0]
+    )
+    async with sessions() as session:
+        pending = await session.get(ManagedTorrent, torrent.id)
+        assert pending is not None and pending.admin_forced_active is True
+        assert pending.desired_active is False
+    gateway = FakeGateway()
+    await SchedulerRuntime(
+        sessions, gateway, scheduler_id="forced-window", clock=lambda: NOW
+    ).run_once()
+    assert any(
+        c.info_hash == torrent.info_hash and c.run_state == "stopped" for c in gateway.calls[0]
+    )
+    async with sessions() as session:
+        stored = await session.get(ManagedTorrent, torrent.id)
+        assert stored is not None and stored.desired_active is False
+        assert stored.admin_forced_active is False
+        assert stored.progress == 0.4
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_resubscribe_before_forced_stop_ack_revokes_old_override(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    torrent = await _torrent(
+        sessions, username="forced-return", info_hash="8" * 40, size=100, progress=0.4
+    )
+    async with sessions() as session, session.begin():
+        stored = await session.get(ManagedTorrent, torrent.id)
+        assert stored is not None
+        stored.admin_forced_active = True
+    await cancel_last(sessions, torrent.id)
+    async with sessions() as session, session.begin():
+        right = await session.scalar(
+            select(TorrentRequest).where(TorrentRequest.managed_torrent_id == torrent.id)
+        )
+        assert right is not None
+        joined = await create_or_get_torrent_request(
+            session,
+            user_id=right.user_id,
+            info_hash=torrent.info_hash,
+            name=torrent.name,
+            total_size=100,
+            now=NOW,
+        )
+        assert joined.managed_torrent.admin_forced_active is False
+        assert joined.managed_torrent.purge_after is None
+        assert joined.managed_torrent.progress == 0.4
+    cycle = await SchedulerRuntime(
+        sessions, FakeGateway(), scheduler_id="forced-return", clock=lambda: NOW
+    ).run_once()
+    assert cycle.selected_torrent_ids == (torrent.id,)
     await engine.dispose()

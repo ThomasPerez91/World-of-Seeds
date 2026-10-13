@@ -126,7 +126,11 @@ class SchedulerRuntime:
             dynamic_config = DynamicConcurrencyConfig.from_options(options)
             purge_stops = await self._load_purge_stops(session)
             torrents = await self._load_control_set(session, state)
-            forced_torrents = tuple(torrent for torrent in torrents if torrent.admin_forced_active)
+            forced_torrents = tuple(
+                torrent
+                for torrent in torrents
+                if torrent.admin_forced_active and torrent.purge_after is None
+            )
             forced_torrent_ids = {torrent.id for torrent in forced_torrents}
             # Retention keeps the data, not an unowned download slot.
             schedulable_torrents = tuple(
@@ -214,6 +218,14 @@ class SchedulerRuntime:
             _persist_desired_controls(
                 schedulable_torrents, scheduled_controls, generation=generation
             )
+            forced_stop_generations = {
+                torrent.id: torrent.lifecycle_generation
+                for torrent in schedulable_torrents
+                if torrent.admin_forced_active
+                and torrent.purge_after is not None
+                and not torrent.desired_active
+            }
+
             measured_ids = {
                 *(decision.candidate.torrent_id for decision in selection.selected),
                 *(torrent.id for torrent in forced_torrents),
@@ -258,6 +270,25 @@ class SchedulerRuntime:
                 generation=generation,
                 now=applied_at,
             )
+            if forced_stop_generations:
+                stopped_forced = tuple(
+                    (
+                        await session.scalars(
+                            select(ManagedTorrent)
+                            .where(ManagedTorrent.id.in_(forced_stop_generations))
+                            .with_for_update()
+                            .execution_options(populate_existing=True)
+                        )
+                    ).all()
+                )
+                for torrent in stopped_forced:
+                    if (
+                        torrent.lifecycle_generation == forced_stop_generations[torrent.id]
+                        and torrent.purge_after is not None
+                        and not torrent.desired_active
+                    ):
+                        torrent.admin_forced_active = False
+                        torrent.updated_at = applied_at
             if purge_stop_generations:
                 stopped = tuple(
                     (
