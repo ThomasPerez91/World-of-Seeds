@@ -92,7 +92,12 @@ async def create_or_get_torrent_request(
     if not 1 <= auto_unsubscribe_hours <= 2160:
         raise TorrentDeduplicationError("torrent auto unsubscribe duration is invalid")
 
-    owner = await session.scalar(select(User).where(User.id == user_id).with_for_update())
+    owner = await session.scalar(
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if owner is None or not owner.is_active or owner.deleted_at is not None:
         raise TorrentRequestOwnerError("the torrent request owner is missing or inactive")
 

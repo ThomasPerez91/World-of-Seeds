@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.22`.
+- Version applicative cible : `2.3.23`.
+
+## Release 2.3.23 — comptes révoqués et torrents partagés
+
+- Le partage reste le fonctionnement prévu : supprimer un compte annule ses droits et libère son quota logique, sans supprimer le torrent demandé par un autre compte. La suspension conserve ses droits/quota pour la reprise, tout en bloquant ses accès ; droits et téléchargements des autres comptes conservés.
+- Admission d’un slot HTTP : le compte est désormais chargé, rafraîchi et revérifié sous verrou après le contrôle initial de la route. Une suspension/suppression committée pendant l’attente interdit la création du lease. Renouvellement : compte, torrent, droit et lease rechargés sous leurs verrous ; aucune continuation fondée sur une identité ORM périmée. Admission torrent et mutations administratives rafraîchissent également le compte verrouillé.
+- Suppression multi-torrents : tous les parents sont verrouillés en ordre UUID avant les annulations et leur verrou de quota. Cela évite de retenir un quota en attendant un autre parent qu’une expiration possède déjà. Le quota annulé est rafraîchi sous verrou.
+- Dix cas SQLite (révocations face à un compte préchargé, compte déjà supprimé, partage avec un téléchargement survivant) et trois cas PostgreSQL réels (slot attendant un compte révoqué, suppression attendant un second torrent sans retenir le quota). Ancien code rejette mal les admissions suspendues, reproduit localement.
+- +0.0.1 à 2.3.23 ; 3.0.0 réservée à la fin de l’audit. Pas de migration/Compose ni de changement de déduplication ou de politique de slots. Backups et alertes opérateur toujours différés. Prochain audit : ordre des verrous et renouvellement des leases de téléchargement HTTP face au lifecycle.
 
 ## Release 2.3.22 — finalisation worker et lifecycle
 
