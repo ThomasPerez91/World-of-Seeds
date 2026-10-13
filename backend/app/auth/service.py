@@ -16,7 +16,14 @@ from app.auth.security import (
     throttle_key,
 )
 from app.core.config import Settings
-from app.models import LoginThrottle, TorrentRequest, TorrentRequestState, User, UserSession
+from app.models import (
+    LoginThrottle,
+    ManagedTorrent,
+    TorrentRequest,
+    TorrentRequestState,
+    User,
+    UserSession,
+)
 from app.options import PostgresOptionsRegistry
 from app.scheduler.queue_visibility import user_active_status_changes_ranked_queue
 from app.torrents import cancel_owned_torrent_request
@@ -369,7 +376,12 @@ async def set_managed_user_active(
     user_id: UUID,
     is_active: bool,
 ) -> ManagedUserStatusResult:
-    user = await db.scalar(select(User).where(User.id == user_id).with_for_update())
+    user = await db.scalar(
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if user is None or user.deleted_at is not None:
         raise ManagedUserNotFoundError
     if user.is_admin:
@@ -393,7 +405,12 @@ async def set_managed_user_active(
 
 
 async def delete_managed_user(db: AsyncSession, *, user_id: UUID) -> bool:
-    user = await db.scalar(select(User).where(User.id == user_id).with_for_update())
+    user = await db.scalar(
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if user is None or user.deleted_at is not None:
         raise ManagedUserNotFoundError
     if user.is_admin:
@@ -427,6 +444,22 @@ async def delete_managed_user(db: AsyncSession, *, user_id: UUID) -> bool:
             now=now,
         )
     )
+    # Acquire all parents before any cancellation takes a usage lock. Otherwise an
+    # expiration holding a later parent can wait on our usage while we wait on it.
+    if request_ids:
+        await db.scalars(
+            select(ManagedTorrent)
+            .where(
+                ManagedTorrent.id.in_(
+                    select(TorrentRequest.managed_torrent_id).where(
+                        TorrentRequest.id.in_(request_ids)
+                    )
+                )
+            )
+            .order_by(ManagedTorrent.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     for request_id in request_ids:
         await cancel_owned_torrent_request(
             db,
