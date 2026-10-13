@@ -351,7 +351,6 @@ class DownloadLeaseManager:
             raise ValueError("download concurrency limit is invalid")
         if max_concurrent_global is not None and not 1 <= max_concurrent_global <= 20:
             raise ValueError("global download concurrency limit is invalid")
-        now = self._clock()
         async with self._session.begin():
             global_lock = await self._session.scalar(
                 select(DatabaseOption)
@@ -363,29 +362,48 @@ class DownloadLeaseManager:
             owner = await self._session.scalar(
                 select(User)
                 .where(User.id == user_id)
-                .with_for_update()
+                # Serialize account changes while allowing FK KEY SHARE checks
+                # from expiration, which already holds the torrent parent.
+                .with_for_update(key_share=True)
                 .execution_options(populate_existing=True)
             )
             if owner is None or not owner.is_active or owner.deleted_at is not None:
                 raise ManagedDownloadError("download owner is missing or inactive")
-            locked_right_id = await self._session.scalar(
-                select(TorrentRequest.id)
-                .join(ManagedTorrent, ManagedTorrent.id == TorrentRequest.managed_torrent_id)
-                .join(TorrentFile, TorrentFile.managed_torrent_id == ManagedTorrent.id)
+            # Same parent-before-right order as expiration and cancellation.
+            managed = await self._session.get(
+                ManagedTorrent,
+                managed_torrent_id,
+                with_for_update=True,
+                populate_existing=True,
+            )
+            request = await self._session.scalar(
+                select(TorrentRequest)
                 .where(
                     TorrentRequest.id == torrent_request_id,
                     TorrentRequest.user_id == user_id,
                     TorrentRequest.managed_torrent_id == managed_torrent_id,
-                    TorrentRequest.state == TorrentRequestState.READY,
-                    TorrentRequest.unsubscribe_at.is_not(None),
-                    TorrentRequest.unsubscribe_at > now,
-                    ManagedTorrent.id == managed_torrent_id,
-                    ManagedTorrent.state == ManagedTorrentState.READY,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            file_id = await self._session.scalar(
+                select(TorrentFile.id)
+                .where(
                     TorrentFile.id == torrent_file_id,
+                    TorrentFile.managed_torrent_id == managed_torrent_id,
                 )
                 .with_for_update()
             )
-            if locked_right_id is None:
+            now = self._clock()
+            if (
+                managed is None
+                or managed.state is not ManagedTorrentState.READY
+                or request is None
+                or request.state is not TorrentRequestState.READY
+                or request.unsubscribe_at is None
+                or _as_utc(request.unsubscribe_at) <= _as_utc(now)
+                or file_id is None
+            ):
                 raise ManagedDownloadError("download right is no longer ready")
             await self._session.execute(
                 delete(DownloadLease).where(
@@ -427,13 +445,12 @@ class DownloadLeaseManager:
         return lease
 
     async def renew(self, lease_id: uuid.UUID) -> None:
-        now = self._clock()
         async with self._session.begin():
             candidate = await self._session.get(DownloadLease, lease_id)
             if candidate is None:
                 raise ManagedDownloadError("download lease was lost")
             user = await self._session.get(
-                User, candidate.user_id, with_for_update=True, populate_existing=True
+                User, candidate.user_id, with_for_update={"key_share": True}, populate_existing=True
             )
             managed = await self._session.get(
                 ManagedTorrent,
@@ -441,19 +458,16 @@ class DownloadLeaseManager:
                 with_for_update=True,
                 populate_existing=True,
             )
+            request = await self._session.get(
+                TorrentRequest,
+                candidate.torrent_request_id,
+                with_for_update=True,
+                populate_existing=True,
+            )
             lease = await self._session.get(
                 DownloadLease, lease_id, with_for_update=True, populate_existing=True
             )
-            request = (
-                await self._session.get(
-                    TorrentRequest,
-                    candidate.torrent_request_id,
-                    with_for_update=True,
-                    populate_existing=True,
-                )
-                if lease is not None
-                else None
-            )
+            now = self._clock()
             owner_can_download = user is not None and user.is_active and user.deleted_at is None
             ready_right = (
                 managed is not None
@@ -482,7 +496,12 @@ class DownloadLeaseManager:
                 and request.state is TorrentRequestState.CANCELLED
             )
             can_finish = ready_right or finishing_expired_download or finishing_cancelled_download
-            if lease is None or not owner_can_download or not can_finish:
+            if (
+                lease is None
+                or _as_utc(lease.expires_at) <= _as_utc(now)
+                or not owner_can_download
+                or not can_finish
+            ):
                 raise ManagedDownloadError("download lease was lost")
             lease.renewed_at = now
             lease.expires_at = now + timedelta(seconds=self._lease_seconds)
