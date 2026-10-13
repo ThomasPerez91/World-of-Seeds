@@ -336,6 +336,16 @@ class TorrentWorker:
         realtime_events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
         queue_changed = False
         async with self._session_factory() as session, session.begin():
+            # Lifecycle mutations lock the torrent before its jobs. Do not hold
+            # a job (or block its heartbeat) while waiting for the parent lock.
+            managed = None
+            if torrent_state is not None:
+                managed = await session.get(
+                    ManagedTorrent,
+                    snapshot.managed_torrent_id,
+                    with_for_update=True,
+                    populate_existing=True,
+                )
             job = await self._owned_job(session, snapshot)
             now = self._clock()
             if job.cancel_requested_at is not None:
@@ -361,51 +371,51 @@ class TorrentWorker:
                     available_at=now + timedelta(seconds=delay),
                     error_code=error_code,
                 )
-            if torrent_state is not None:
-                managed = await session.get(
-                    ManagedTorrent,
-                    snapshot.managed_torrent_id,
-                    with_for_update=True,
-                )
-                if managed is not None:
-                    was_ranked = await is_ranked_queue_member(session, managed, now=now)
-                    if job.state is TorrentJobState.FAILED:
-                        managed.state = ManagedTorrentState.ERROR
-                        managed.retry_at = None
-                    else:
-                        managed.state = torrent_state
-                        managed.retry_at = job.available_at
-                    managed.updated_at = now
-                    if job.state is TorrentJobState.FAILED:
-                        requests = tuple(
-                            (
-                                await session.scalars(
-                                    select(TorrentRequest).where(
-                                        TorrentRequest.managed_torrent_id == managed.id,
-                                        TorrentRequest.state.in_(
-                                            (
-                                                TorrentRequestState.REQUESTED,
-                                                TorrentRequestState.ACTIVE,
-                                                TorrentRequestState.READY,
-                                            )
-                                        ),
-                                    )
+            # A cancelled attempt no longer owns lifecycle decisions. Preserve
+            # any purge or revival that requested cancellation while we waited.
+            if (
+                managed is not None
+                and torrent_state is not None
+                and job.state is not TorrentJobState.CANCELLED
+            ):
+                was_ranked = await is_ranked_queue_member(session, managed, now=now)
+                if job.state is TorrentJobState.FAILED:
+                    managed.state = ManagedTorrentState.ERROR
+                    managed.retry_at = None
+                else:
+                    managed.state = torrent_state
+                    managed.retry_at = job.available_at
+                managed.updated_at = now
+                if job.state is TorrentJobState.FAILED:
+                    requests = tuple(
+                        (
+                            await session.scalars(
+                                select(TorrentRequest).where(
+                                    TorrentRequest.managed_torrent_id == managed.id,
+                                    TorrentRequest.state.in_(
+                                        (
+                                            TorrentRequestState.REQUESTED,
+                                            TorrentRequestState.ACTIVE,
+                                            TorrentRequestState.READY,
+                                        )
+                                    ),
                                 )
-                            ).all()
-                        )
-                        realtime_events.extend(
-                            (
-                                request.user_id,
-                                TorrentRealtimeEvent(TorrentEventType.FAILED, request.id, now),
                             )
-                            for request in requests
-                        )
-                    await session.flush()
-                    queue_changed = was_ranked != await is_ranked_queue_member(
-                        session,
-                        managed,
-                        now=now,
+                        ).all()
                     )
+                    realtime_events.extend(
+                        (
+                            request.user_id,
+                            TorrentRealtimeEvent(TorrentEventType.FAILED, request.id, now),
+                        )
+                        for request in requests
+                    )
+                await session.flush()
+                queue_changed = was_ranked != await is_ranked_queue_member(
+                    session,
+                    managed,
+                    now=now,
+                )
         for user_id, event in realtime_events:
             await self._redis.publish_torrent_event(user_id, event)
         if queue_changed:
@@ -413,7 +423,10 @@ class TorrentWorker:
 
     async def _owned_job(self, session: AsyncSession, snapshot: TorrentJobSnapshot) -> TorrentJob:
         job = await session.scalar(
-            select(TorrentJob).where(TorrentJob.id == snapshot.id).with_for_update()
+            select(TorrentJob)
+            .where(TorrentJob.id == snapshot.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if (
             job is None

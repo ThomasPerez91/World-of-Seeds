@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.21`.
+- Version applicative cible : `2.3.22`.
+
+## Release 2.3.22 — finalisation worker et lifecycle
+
+- La finalisation d’un échec nécessitant une transition torrent prend désormais le verrou ManagedTorrent avant le verrou TorrentJob, comme l’activation de purge. Les chemins job seul (claim, heartbeat, récupération, succès et échec sans transition torrent) n’acquièrent pas de verrou parent inutile.
+- Un worker attendant le torrent ne retient plus son job : heartbeat, récupération de claim et annulation de purge peuvent progresser. Propriétaire, tentative et échéances restent revérifiés après l’attente ; l’horloge de finalisation est lue après acquisition des verrous. Identité ORM du job rechargée sous verrou.
+- Un job finalisé CANCELLED ne modifie plus l’état, les échéances ou la génération du torrent et ne publie pas d’échec de lifecycle. Régression reproduite localement avec l’ancien worker, qui remplaçait notamment PURGED/READY par RETRY_WAIT après annulation.
+- Douze cas : huit SQLite (échecs permanent/transitoire contre quatre états de lifecycle annulé) et quatre PostgreSQL réels (heartbeat/annulation pendant l’attente parent, claim expiré ou tentative remplacée avant finalisation). Les limites de claim et l’absence de replay externe 2.3.12/15 restent conservées.
+- +0.0.1 à 2.3.22 ; 3.0.0 réservée à la fin de l’audit. Pas de migration/Compose/slots HTTP. Activation backups et chargement opérateur des alertes différés. Prochain audit : suppression et suspension de comptes face aux droits torrent partagés.
 
 ## Release 2.3.21 — ordre des verrous sur les droits torrent
 
