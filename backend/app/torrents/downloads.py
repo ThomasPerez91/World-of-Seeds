@@ -362,7 +362,9 @@ class DownloadLeaseManager:
             owner = await self._session.scalar(
                 select(User)
                 .where(User.id == user_id)
-                .with_for_update()
+                # Serialize account changes while allowing FK KEY SHARE checks
+                # from expiration, which already holds the torrent parent.
+                .with_for_update(key_share=True)
                 .execution_options(populate_existing=True)
             )
             if owner is None or not owner.is_active or owner.deleted_at is not None:
@@ -448,7 +450,7 @@ class DownloadLeaseManager:
             if candidate is None:
                 raise ManagedDownloadError("download lease was lost")
             user = await self._session.get(
-                User, candidate.user_id, with_for_update=True, populate_existing=True
+                User, candidate.user_id, with_for_update={"key_share": True}, populate_existing=True
             )
             managed = await self._session.get(
                 ManagedTorrent,

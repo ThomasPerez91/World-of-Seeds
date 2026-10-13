@@ -278,4 +278,4 @@ async def test_renewal_revalidates_after_parent_wait(
         persisted = await check.get(DownloadLease, lease_id)
         assert persisted is not None
         expected = NOW + timedelta(seconds=80 if outcome == "expired_right" else 60)
-        assert persisted.expires_at == expected
+        assert persisted.expires_at.replace(tzinfo=UTC) == expected
