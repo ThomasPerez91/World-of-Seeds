@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.23`.
+- Version applicative cible : `2.3.24`.
+
+## Release 2.3.24 — leases HTTP face au lifecycle
+
+- Admission HTTP : verrou ManagedTorrent explicite avant TorrentRequest puis TorrentFile, comme le lifecycle qui prend le parent avant les droits. Compte, association propriétaire/torrent/fichier, état READY et deadline du droit revérifiés sous les verrous. Horloge lue après toutes les attentes, avant nettoyage des leases expirés, comptage et création du lease.
+- Renouvellement : compte, parent, droit puis lease verrouillés/rechargés ; heure lue après les attentes. Un lease dont expires_at est atteint n’est plus ressuscité. Trois régressions de deadline reproduites avec l’ancien code (admission après échéance, renouvellement à échéance déjà atteinte ou atteinte pendant l’attente).
+- Les transferts valides conservent leur lease jusqu’à la fin/déconnexion tant que les heartbeats le renouvellent : un droit EXPIRED/CANCELLED sur READY/PURGE_PENDING permet de finir, mais aucune nouvelle admission. PURGING/PURGED ou révocation du compte refusent le renouvellement. Pas de rotation périodique ni de changement des slots/poids/bande passante.
+- Onze cas nouveaux : sept SQLite (échéances et continuité après désabonnement/expiration) et quatre PostgreSQL (admission attendant le parent sans retenir le droit ; renouvellement après attente avec lease expiré, droit expiré ou passage PURGING). Test existant de purge différée par un lease actif conservé.
+- +0.0.1 à 2.3.24 ; 3.0.0 après validation finale de l’audit. Pas de migration/Compose. Sauvegardes et alertes opérateur toujours reportées. Prochaine étape : passe finale de validation des parcours et bilan des limites connues avant 3.0.0.
 
 ## Release 2.3.23 — comptes révoqués et torrents partagés
 
