@@ -305,3 +305,70 @@ async def test_cancellation_reloads_a_right_changed_while_waiting_for_its_torren
             if not cancellation_task.done():
                 cancellation_task.cancel()
             await asyncio.gather(cancellation_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_a_busy_shared_torrent_does_not_fill_the_expiration_page(
+    postgres_storage: tuple[async_sessionmaker[AsyncSession], str],
+    tmp_path: Path,
+) -> None:
+    sessions, prefix = postgres_storage
+    busy_owner, busy, busy_right = await seed_torrent(
+        sessions, prefix + "-busy", tmp_path, ready=True
+    )
+    free_owner, free, free_right = await seed_torrent(
+        sessions, prefix + "-free", tmp_path, ready=True
+    )
+    other_owner = User(id=uuid.uuid4(), username=prefix + "-other", password_hash="hash")
+    async with sessions() as session, session.begin():
+        session.add(other_owner)
+        await session.flush()
+        session.add_all(
+            [
+                TorrentRequest(
+                    user_id=other_owner.id,
+                    managed_torrent_id=busy.id,
+                    state=TorrentRequestState.READY,
+                    ready_at=busy_right.ready_at,
+                    unsubscribe_at=busy_right.unsubscribe_at,
+                ),
+                UserStorageUsage(user_id=other_owner.id, logical_bytes=600),
+            ]
+        )
+    now = datetime.now(UTC)
+    async with sessions() as blocker, blocker.begin():
+        assert await blocker.get(ManagedTorrent, busy.id, with_for_update=True) is not None
+        async with sessions() as maintenance, maintenance.begin():
+            async with asyncio.timeout(2):
+                results = await expire_ready_torrents_batch(maintenance, now=now, limit=2)
+            assert sum(len(item.requests) for item in results) <= 2
+            assert any(item.managed_torrent_id == free.id for item in results)
+            assert all(item.managed_torrent_id != busy.id for item in results)
+        async with sessions() as session:
+            assert (
+                await session.scalar(
+                    select(TorrentRequest.state).where(
+                        TorrentRequest.id == free_right.id,
+                    )
+                )
+                is TorrentRequestState.EXPIRED
+            )
+            assert (
+                await session.scalar(
+                    select(TorrentRequest.state).where(
+                        TorrentRequest.id == busy_right.id,
+                    )
+                )
+                is TorrentRequestState.READY
+            )
+            usage = await session.get(UserStorageUsage, free_owner.id)
+            assert usage is not None and usage.logical_bytes == 0
+    async with sessions() as maintenance, maintenance.begin():
+        results = await expire_ready_torrents_batch(maintenance, now=now, limit=2)
+        assert any(
+            item.managed_torrent_id == busy.id and len(item.requests) == 2 for item in results
+        )
+    async with sessions() as session:
+        for user_id in (busy_owner.id, other_owner.id):
+            usage = await session.get(UserStorageUsage, user_id)
+            assert usage is not None and usage.logical_bytes == 0

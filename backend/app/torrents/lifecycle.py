@@ -151,31 +151,31 @@ async def expire_ready_torrents_batch(
     _validate_lifecycle_hours(retention_hours, name="torrent retention")
     if not 1 <= limit <= 500:
         raise ValueError("expiration batch limit must be between 1 and 500")
-    # Discover bounded candidates without locking rights before their torrents.
     due = (
         TorrentRequest.state == TorrentRequestState.READY,
         TorrentRequest.unsubscribe_at.is_not(None),
         TorrentRequest.unsubscribe_at <= _database_timestamp(now),
     )
-    candidates = tuple(
-        (
-            await session.execute(
-                select(TorrentRequest.id, TorrentRequest.managed_torrent_id)
-                .where(*due)
-                .order_by(TorrentRequest.unsubscribe_at, TorrentRequest.id)
-                .limit(limit)
-            )
-        ).all()
+    # Limit available torrents, not rights belonging to unavailable torrents.
+    # A busy torrent shared by many owners must not fill the candidate page.
+    due_torrents = (
+        select(
+            TorrentRequest.managed_torrent_id,
+            func.min(TorrentRequest.unsubscribe_at).label("first_deadline"),
+        )
+        .where(*due)
+        .group_by(TorrentRequest.managed_torrent_id)
+        .subquery()
     )
-    torrent_ids = tuple({candidate.managed_torrent_id for candidate in candidates})
     torrents = {
         torrent.id: torrent
         for torrent in (
             await session.scalars(
                 select(ManagedTorrent)
-                .where(ManagedTorrent.id.in_(torrent_ids))
-                .order_by(ManagedTorrent.id)
-                .with_for_update(skip_locked=True)
+                .join(due_torrents, due_torrents.c.managed_torrent_id == ManagedTorrent.id)
+                .order_by(due_torrents.c.first_deadline, ManagedTorrent.id)
+                .with_for_update(of=ManagedTorrent, skip_locked=True)
+                .limit(limit)
                 .execution_options(populate_existing=True)
             )
         ).all()
@@ -186,11 +186,11 @@ async def expire_ready_torrents_batch(
                 select(TorrentRequest)
                 .where(
                     *due,
-                    TorrentRequest.id.in_(tuple(candidate.id for candidate in candidates)),
                     TorrentRequest.managed_torrent_id.in_(tuple(torrents)),
                 )
                 .order_by(TorrentRequest.unsubscribe_at, TorrentRequest.id)
                 .with_for_update(skip_locked=True)
+                .limit(limit)
                 .execution_options(populate_existing=True)
             )
         ).all()
