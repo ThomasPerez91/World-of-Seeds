@@ -376,6 +376,10 @@ async def _schedule_deferred_purge(
     """Schedule physical deletion without changing the current qB lifecycle."""
 
     torrent.lifecycle_generation += 1
+    # Retain forced-stop eligibility until acknowledgement; a later admin resume
+    # explicitly clears this stop marker and supersedes the orphan stop.
+    if torrent.admin_forced_active:
+        torrent.purge_stop_pending = True
     torrent.purge_after = purge_after
     torrent.updated_at = now
     purge_job = TorrentJob(
