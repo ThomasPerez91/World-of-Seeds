@@ -128,17 +128,9 @@ class SchedulerRuntime:
             torrents = await self._load_control_set(session, state)
             forced_torrents = tuple(torrent for torrent in torrents if torrent.admin_forced_active)
             forced_torrent_ids = {torrent.id for torrent in forced_torrents}
-            grace_torrents = tuple(
-                torrent
-                for torrent in torrents
-                if torrent.id not in forced_torrent_ids
-                and torrent.desired_active
-                and torrent.purge_after is not None
-                and _utc(torrent.purge_after) > _utc(now)
-            )
-            grace_torrent_ids = {torrent.id for torrent in (*forced_torrents, *grace_torrents)}
+            # Retention keeps the data, not an unowned download slot.
             schedulable_torrents = tuple(
-                torrent for torrent in torrents if torrent.id not in grace_torrent_ids
+                torrent for torrent in torrents if torrent.id not in forced_torrent_ids
             )
             requests = await self._load_active_requests(session, schedulable_torrents)
             cooldown_released = _release_elapsed_cooldowns(schedulable_torrents, requests, now=now)
@@ -173,7 +165,7 @@ class SchedulerRuntime:
                 selection_candidates,
                 policy=policy,
                 now=now,
-                active_global=len(forced_torrents) + len(grace_torrents),
+                active_global=len(forced_torrents),
                 active_by_user={},
                 ledger=ledger,
                 fairness_user_order=fairness_user_order,
@@ -191,7 +183,7 @@ class SchedulerRuntime:
             scheduled_controls = build_qbittorrent_control_plan(
                 selection, identities, options=options
             )
-            grace_controls = tuple(
+            forced_controls = tuple(
                 QBittorrentV2DesiredControl(
                     info_hash=torrent.info_hash,
                     storage_key=torrent.storage_key,
@@ -199,9 +191,9 @@ class SchedulerRuntime:
                     download_limit_bytes_per_second=torrent.desired_download_limit,
                     qbittorrent_account_ref=torrent.qbittorrent_account_ref,
                 )
-                for torrent in (*forced_torrents, *grace_torrents)
+                for torrent in forced_torrents
             )
-            controls = (*grace_controls, *scheduled_controls)
+            controls = (*forced_controls, *scheduled_controls)
             purge_controls = tuple(
                 QBittorrentV2DesiredControl(
                     info_hash=torrent.info_hash,
@@ -225,7 +217,6 @@ class SchedulerRuntime:
             measured_ids = {
                 *(decision.candidate.torrent_id for decision in selection.selected),
                 *(torrent.id for torrent in forced_torrents),
-                *(torrent.id for torrent in grace_torrents),
             }
             align_measurement_after_selection(
                 state,

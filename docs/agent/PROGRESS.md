@@ -4,7 +4,15 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.24`.
+- Version applicative cible : `2.3.25`.
+
+## Release 2.3.25 — arrêt des téléchargements sans abonné
+
+- Le délai de rétention conserve les données, pas un slot qBittorrent : suppression de l’exception RUNNING des torrents actifs avec purge_after future. Au prochain cycle du scheduler, le torrent sans demande active reçoit STOPPED et libère la capacité ; la commande passe toujours hors transaction via le gateway propriétaire existant. Aucun arrêt direct HTTP/SQL ni suppression disque immédiate.
+- Au retrait de la dernière demande, une ancienne activation forcée d’un torrent incomplet est retirée. Une nouvelle action administrative explicite reste disponible. Si un autre abonné actif reste présent, son téléchargement et son quota sont conservés.
+- Données partielles, progress et storage_key conservés jusqu’à la purge différée. Un réabonnement pendant la rétention annule le job de purge et réutilise le même contenu, avec reprise par le scheduler. Les délais de stall 60 s puis 3/5/10 minutes des torrents encore demandés restent inchangés ; les orphelins ne contournent plus ces pauses pour occuper un slot.
+- Huit scénarios supplémentaires : dernier désabonnement avec/sans stall et ancienne activation forcée, capacité libérée sous plafond unique, abonné survivant, réabonnement et arrêt réappliqué après panne gateway. Ancien test de maintien RUNNING pendant la grâce remplacé par l’arrêt attendu. Six régressions reproduites avec l’ancien code.
+- +0.0.1 à 2.3.25 ; aucun changement Compose/migration/slots HTTP. Sauvegardes et alertes opérateur reportées. Validation finale avant 3.0.0 après ces vérifications produit supplémentaires.
 
 ## Release 2.3.24 — leases HTTP face au lifecycle
 
