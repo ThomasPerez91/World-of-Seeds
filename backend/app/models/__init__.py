@@ -1,6 +1,7 @@
 from app.models.auth import LoginThrottle, User, UserSession
 from app.models.base import Base
 from app.models.external_api import (
+    DiscordAccountLink,
     ExternalApiAudit,
     ExternalApiClient,
     ExternalApiIdempotency,
@@ -38,6 +39,7 @@ __all__ = [
     "DatabaseOption",
     "DatabaseOptionAudit",
     "DownloadLease",
+    "DiscordAccountLink",
     "ExternalApiAudit",
     "ExternalApiClient",
     "ExternalApiIdempotency",

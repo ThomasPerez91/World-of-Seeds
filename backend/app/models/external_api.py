@@ -22,6 +22,21 @@ if TYPE_CHECKING:
     from app.models.auth import User
 
 
+class DiscordAccountLink(Base):
+    __tablename__ = "discord_account_links"
+
+    discord_user_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), unique=True, nullable=False
+    )
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("external_api_clients.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
 class ExternalApiClient(Base):
     __tablename__ = "external_api_clients"
     __table_args__ = (
