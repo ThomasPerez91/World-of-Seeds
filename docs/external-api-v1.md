@@ -1,6 +1,6 @@
 # External API v1
 
-World of Seeds 2.2.3 exposes a deliberately small, stable server-to-server API under
+World of Seeds 2.3.26 exposes a deliberately small, stable server-to-server API under
 `/api/external/v1`. It is separate from the browser APIs under `/api/v1` and `/api/v2`.
 
 ## Authentication and scopes
@@ -16,6 +16,8 @@ Available scopes:
 
 - `users:create`: create a normal WOS account;
 - `downloads:read`: read downloads belonging to the resolved account.
+- `users:read`: inspect account capacity and account status by Discord ID (no credentials).
+- `users:recover`: replace undelivered initial credentials for accounts provisioned by this API client.
 
 Never put either credential in a URL. Production clients must use the normal HTTPS ingress.
 
@@ -33,7 +35,8 @@ No authentication is required. Returns `{"status":"ok","api_version":"1"}`.
 ### `POST /users`
 
 Requires `users:create` and an `Idempotency-Key` header (8–200 characters). The optional JSON
-body is `{"username":"example-user"}`; omit `username` to let WOS generate it. A normal,
+body is `{"username":"example-user","discord_user_id":"123456789012345678"}`; omit `username` to let WOS generate it. Send `{}` for legacy non-Discord creation.
+Discord IDs are decimal strings of 17–20 digits, never JSON numbers. A normal,
 non-admin account is created through the same quota-protected provisioning service as the admin UI.
 
 ```sh
@@ -87,3 +90,84 @@ records contain only IDs, timestamps, request IDs and a short hash fingerprint o
 
 Future capabilities will be added under this versioned namespace or a new major API version without
 aliasing internal frontend routes.
+
+
+## Discord onboarding (2.3.26)
+
+### `GET /capacity`
+
+Requires `users:read`. Returns `used`, `maximum`, `available` (at least zero), and
+`reached`. Accounts suspended but not deleted still occupy a place, and administrator
+accounts count too, matching the administration panel. The response is advisory:
+`POST /users` always checks the quota again while holding the creation mutex.
+All capacity and account status responses use `Cache-Control: no-store`.
+
+### Discord identity during `POST /users`
+
+Supply `discord_user_id` from the authenticated Discord interaction's author ID,
+not an ID entered by another member. WOS trusts the bot to authenticate Discord
+members; the API key alone does not prove which human initiated a request.
+
+The association is created in the same transaction as the account, idempotency
+record and audit. A globally unique Discord ID and a unique WOS user ID prevent
+duplicate bindings. Creation is serialized across clients. A different command or
+API client targeting an already linked identity receives `409 discord_account_exists`.
+Replaying the original command with its original payload and idempotency key retains
+its existing `200` behavior, without returning a password.
+
+Bindings survive suspension and soft deletion. A deleted account cannot be replaced
+by silently creating another account for the same Discord ID. Existing accounts are
+not automatically linked or matched by username; this release creates bindings only
+during new account provisioning, and provides no unauthenticated rebind endpoint.
+Legacy clients omitting Discord ID keep their previous request hash/replay behavior.
+
+### `GET /users/discord/{discord_user_id}`
+
+Requires `users:read`. Returns only `id`, `username`, `is_active`, `deleted` and
+`must_change_credentials`. A deleted account reports `is_active: false`.
+Unknown identities return `404 discord_account_not_found`. Passwords and authentication
+seeds are never returned by this route. Use the stable WOS UUID for local references:
+the member can subsequently change their WOS username.
+
+### `POST /users/discord/{discord_user_id}/initial-credentials`
+
+Requires `users:recover`. This endpoint handles a lost creation response or a failed
+Discord private-message delivery. It only works for an active, non-admin account
+created with a Discord binding by **this same API client**, before its first successful
+login and while `must_change_credentials` remains true. Another API client cannot
+recover it, even with the same scope. Creating a replacement API client does not
+transfer recovery ownership; that case requires operator assistance.
+
+Returns the same shape as the creation response, with a **new** temporary password
+and the existing authentication seed. The previous temporary password is invalidated;
+existing sessions are revoked. Successful recoveries are audited without credentials.
+This is deliberately not a general password-reset API. A claimed, suspended, deleted
+or admin account returns `409 initial_credentials_unavailable`; a missing or
+foreign-client binding returns `404 discord_account_not_found`.
+
+Each successful call replaces the password again. If its response is lost, call it
+again and deliver only the latest result. Serialize onboarding/recovery commands per
+Discord member in the bot to avoid delivering concurrent responses out of order.
+Key revocation and scope changes are rechecked after hashing; account status and first
+login are rechecked while holding the user lock, which is also used by website login.
+
+### Recommended bot flow
+
+1. Acknowledge the interaction privately; obtain the invoking Discord member ID.
+2. Check account status. If already linked, do not create another account or display
+   secrets publicly. A suspended/deleted account must not regain access through onboarding.
+3. Check `/capacity` to show availability, then call `/users` with the Discord ID,
+   an empty/generated username choice and a stable `Idempotency-Key` for this operation.
+4. Deliver initial credentials by private message or an ephemeral interaction only.
+   Keep API keys, seeds and passwords out of logs and public channels. Use persistent
+   bot storage for the WOS UUID and any user seed needed for `/me/downloads`.
+5. After a timeout, retry the same creation request. If the reply has no password,
+   use initial recovery. Handle `409 initial_credentials_unavailable` without an
+   endless retry loop: the account may already have been used.
+6. Use status checks to reflect site-admin suspensions/deletions. Download notifications
+   use bounded polling of `/me/downloads` with `downloads:read` and that user's seed;
+   there is no webhook in this version. A user rotating their seed must update the bot.
+
+The bot token needs the new scopes explicitly. Existing tokens gain no permissions
+automatically. Configure a dedicated Discord client with the required scopes in
+Administration > Services > External APIs before starting onboarding.

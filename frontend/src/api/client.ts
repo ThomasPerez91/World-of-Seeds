@@ -44,7 +44,7 @@ export interface ExternalApiClient {
   name: string;
   key_prefix: string;
   is_active: boolean;
-  scopes: Array<"users:create" | "downloads:read">;
+  scopes: Array<"users:create" | "downloads:read" | "users:read" | "users:recover">;
   created_at: string;
   updated_at: string;
   last_used_at: string | null;

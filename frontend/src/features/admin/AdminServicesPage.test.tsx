@@ -31,6 +31,8 @@ describe("AdminServicesPage", () => {
     expect(within(newgreedy).queryByText("1.7.5")).toBeNull();
     expect(screen.getByRole("checkbox", { name: "users:create" }).classList.contains("admin-checkbox")).toBe(true);
     expect(screen.getByRole("checkbox", { name: "downloads:read" }).classList.contains("admin-checkbox")).toBe(true);
+    expect(screen.getByRole("checkbox", { name: "users:read" }).classList.contains("admin-checkbox")).toBe(true);
+    expect(screen.getByRole("checkbox", { name: "users:recover" }).classList.contains("admin-checkbox")).toBe(true);
   });
 
   it("affiche les deux versions de repli lorsque le runtime ne les fournit pas", async () => {

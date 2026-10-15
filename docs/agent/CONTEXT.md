@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.25` ;
+- version stable : `2.3.26` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -497,3 +497,15 @@ Le rapport admin copie les colonnes scalaires des torrents et des identités qB 
 ## Admission de réconciliation disque — 2.3.17
 
 Chaque application API possède ReconciliationDiskReads : une opération disque en thread en cours, aucune attente concurrente. Refus temporaire 503 reconciliation_busy / Retry-After 5 / no-store après authentification admin. La tâche est protégée de l’annulation du demandeur et garde l’admission jusqu’à la fin du thread ; fermeture attendue au shutdown avec budget 2 s. Aucun délai ne prétend tuer une lecture OS bloquée. Les autres usages du stockage et les slots de téléchargement n’utilisent pas ce limiteur. Pas de cache de résultats disque. L’inventaire utilise les types des entrées sans suivre de lien et ferme scandir ; DT_UNKNOWN peut encore exiger stat, et la sélection ordonnée de UUID exige toujours un scan complet. La connexion SQL reste libérée avant ces opérations.
+
+
+### API Discord 2.3.26
+
+L’API externe accepte `discord_user_id` à la création et enregistre une association
+unique durable, conservée après suppression logique. `users:read` ouvre `/capacity`
+et `/users/discord/{id}` sans secrets ; `users:recover` ouvre la récupération des
+accès initiaux, avant première connexion et seulement par le client créateur.
+Cette récupération prend le verrou client puis User, revérifie l’état après attente,
+remplace le mot de passe et révoque les sessions. Aucun reset général ni rattachement
+implicite d’un ancien compte. Les nouvelles permissions sont explicites, les anciennes
+clés restent inchangées. Contrat et parcours : `docs/external-api-v1.md`.

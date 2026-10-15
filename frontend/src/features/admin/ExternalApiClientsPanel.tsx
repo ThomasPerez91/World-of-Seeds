@@ -9,7 +9,7 @@ import {
 import { Badge, Button, Card, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
 
-const allScopes: ExternalApiClient["scopes"] = ["users:create", "downloads:read"];
+const allScopes: ExternalApiClient["scopes"] = ["users:create", "downloads:read", "users:read", "users:recover"];
 
 export function ExternalApiClientsPanel({
   onSessionExpired,

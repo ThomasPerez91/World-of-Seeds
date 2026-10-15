@@ -1,10 +1,20 @@
 # World of Seeds — Progress
 
-## Etat courant — 13 octobre 2026
+## Etat courant — 15 octobre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.25`.
+- Version applicative cible : `2.3.26`.
+
+## Release 2.3.26 — finalisation de l’API Discord
+
+- Association Discord/WoS créée atomiquement avec le compte, unique par Discord et par compte, conservée après suspension/suppression. ID snowflake transmis comme chaîne, distinct du username modifiable. Création concurrente sérialisée par le mutex existant ; ancien contrat sans ID Discord et hash d’idempotence conservés. Migration additive `20261015_36`, réversible.
+- `GET /api/external/v1/capacity` et `GET /api/external/v1/users/discord/{id}` sous nouveau scope `users:read`. Capacité indicative, contrôle transactionnel définitif conservé dans POST users. État sans secrets, y compris comptes désactivés/supprimés.
+- `POST /api/external/v1/users/discord/{id}/initial-credentials` sous scope `users:recover` : nouveau mot de passe temporaire uniquement avant toute connexion, pour un compte actif non administrateur créé par ce même client. Autorisation client revérifiée après hachage, compte rafraîchi/verrouillé comme le login ; sessions révoquées et audit sans secrets. Aucun reset de compte déjà utilisé, aucune réactivation ni liaison implicite d’anciens comptes. Une nouvelle récupération invalide la précédente.
+- Permissions sélectionnables dans l’administration, aucun élargissement automatique des clés existantes. Documentation du parcours Discord, confidentialité des messages, retries, seed et absence de webhook. Le bot reste responsable de vérifier l’auteur Discord et de sérialiser les livraisons par membre ; aucun message Discord envoyé par cette mise à jour.
+- Tests d’intégration API et concurrence PostgreSQL : doublons inter-clients, capacité épuisée, états et secrets, récupérations répétées, première connexion, révocation, ID invalides et mutations pendant attente de verrou.
+- Validation locale : 1 075 tests backend réussis, 69 ignorés (services PostgreSQL/Redis/Docker absents) ; Ruff/format/mypy 247 sources, frontend 204 tests réussis et build production. Concurrence PostgreSQL et migrations vérifiées en CI avant promotion.
+- +0.0.1 à 2.3.26 ; 3.0.0 reste réservée à la validation finale. Aucun changement Compose/infra ; sauvegardes et alertes opérateur toujours reportées.
 
 ## Release 2.3.25 — arrêt des téléchargements sans abonné
 
