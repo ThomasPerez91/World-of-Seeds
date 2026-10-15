@@ -1,10 +1,11 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ExternalScope = Literal["users:create", "downloads:read"]
+ExternalScope = Literal["users:create", "downloads:read", "users:read", "users:recover"]
+DiscordUserId = Annotated[str, Field(pattern=r"^[1-9][0-9]{16,19}$")]
 
 
 class ExternalHealthResponse(BaseModel):
@@ -15,6 +16,22 @@ class ExternalHealthResponse(BaseModel):
 class ExternalUserCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str | None = Field(default=None, min_length=3, max_length=32)
+    discord_user_id: DiscordUserId | None = None
+
+
+class ExternalUserStatusResponse(BaseModel):
+    id: UUID
+    username: str
+    is_active: bool
+    deleted: bool
+    must_change_credentials: bool
+
+
+class ExternalCapacityResponse(BaseModel):
+    used: int
+    maximum: int
+    available: int
+    reached: bool
 
 
 class ExternalUserCreateResponse(BaseModel):
@@ -53,7 +70,7 @@ class ExternalDownloadsPage(BaseModel):
 class ExternalApiClientCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=128)
-    scopes: list[ExternalScope] = Field(min_length=1, max_length=2)
+    scopes: list[ExternalScope] = Field(min_length=1, max_length=4)
 
 
 class ExternalApiClientResponse(BaseModel):
