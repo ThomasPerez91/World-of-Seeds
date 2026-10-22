@@ -14,6 +14,12 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class PasswordResetConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$", repr=False)
+    new_password: Password = Field(repr=False)
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -171,3 +171,38 @@ login are rechecked while holding the user lock, which is also used by website l
 The bot token needs the new scopes explicitly. Existing tokens gain no permissions
 automatically. Configure a dedicated Discord client with the required scopes in
 Administration > Services > External APIs before starting onboarding.
+
+
+## General password reset — 2.3.28
+
+`users:reset-password` is a new, explicit privileged scope. Existing keys are unchanged.
+It allows the trusted Discord bot to issue reset grants for any eligible Discord-linked
+account, including those created by an earlier API client. It does not attach old accounts
+by username. `users:recover` and its creator/first-login restrictions remain unchanged.
+
+`POST /users/discord/{discord_user_id}/password-reset` returns
+`{"token":"<secret>","expires_in":900}` with `Cache-Control: no-store`. The bot must
+use the actual interaction author's identity, never an identity supplied by another user.
+The bot delivers `https://world-of-seeds.fr/#reset-password=<token>` by DM or ephemeral
+reply only, disables embeds and never logs/persists the token. Do not retry an ambiguous
+issuance automatically: wait for the 60-second per-account cooldown before a new grant.
+That new grant invalidates the previous one. No account/password/session changes at issuance.
+
+Public `POST /api/v1/auth/password-reset/confirm` accepts token and `new_password`
+(12–256 characters) in the JSON body. Success is 204, no-store, clears browser auth cookies,
+revokes all target sessions and consumes the grant atomically. No automatic login, username
+or seed change. Mandatory first-access personalization is retained. The site strips the
+fragment immediately, never saves it to browser storage and uses a no-referrer policy.
+Invalid/expired/used links and revoked issuer permissions return the same public
+`password_reset_unavailable` error. Validation responses never echo tokens or passwords.
+
+Only token hashes are stored, one grant per user. TTL 15 minutes, per-account issuance
+cooldown 60 seconds plus API and public IP budgets. Locks client → User → grant; bounded
+Argon2 work outside SQL transaction. Password fingerprint, expiry, current token, active
+account and issuer key/scope are revalidated after locks. A password change, superseding
+grant, suspension, revoked issuer or consumed/expired grant denies redemption. Admins,
+suspended/deleted users and accounts without a Discord association require operator help.
+
+The standalone bot sources and operator upgrade steps are in `discord-bot/README.md`.
+A new key with users:create, users:read and users:reset-password is sufficient for the new
+panel; downloads:read is not required. The bot is not redeployed by the application workflow.

@@ -16,6 +16,20 @@ type Params = Record<string, string | number>;
 
 const messages = {
   fr: {
+    "admin.resetScopeInfo": "users:reset-password permet de délivrer des liens pour les comptes liés à Discord, même créés par une autre clé. À réserver au bot de confiance.",
+    "reset.forgot": "Mot de passe oublié ?",
+    "reset.title": "Réinitialiser ton mot de passe",
+    "reset.instructions": "Dans le salon WoS sur Discord, clique sur « Réinitialiser mon mot de passe ». Le bot vérifiera ton compte Discord et t’enverra un lien privé valable 15 minutes.",
+    "reset.discord": "Ouvrir le salon WoS sur Discord",
+    "reset.support": "Utilise le compte Discord associé à ton compte WoS. Si tu n’y as plus accès ou si ton compte WoS n’est pas lié à Discord, contacte l’administrateur.",
+    "reset.choose": "Choisis un nouveau mot de passe de 12 à 256 caractères. Tes sessions ouvertes seront déconnectées après validation.",
+    "reset.submit": "Enregistrer le nouveau mot de passe",
+    "reset.back": "Retour à la connexion",
+    "reset.successTitle": "Mot de passe modifié",
+    "reset.success": "Tu peux maintenant te connecter avec ton nom d’utilisateur habituel et ton nouveau mot de passe.",
+    "reset.invalid": "Ce lien est expiré, déjà utilisé ou indisponible. Demande un nouveau lien au bot Discord.",
+    "reset.throttled": "Trop de tentatives. Patiente avant de réessayer.",
+
     "preferences.title": "Préférences",
     "preferences.intro": "Personnalise la langue de ton espace.",
     "language.label": "Langue",
@@ -670,6 +684,20 @@ const messages = {
     "downloads.unsubscribeTooltip": "{remaining} — {date}",
   },
   en: {
+    "admin.resetScopeInfo": "users:reset-password can issue recovery links for Discord-linked accounts, including those created by another key. Grant it only to the trusted bot.",
+    "reset.forgot": "Forgot password?",
+    "reset.title": "Reset your password",
+    "reset.instructions": "In the WoS Discord channel, click “Réinitialiser mon mot de passe”. The bot will verify your Discord account and send you a private link valid for 15 minutes.",
+    "reset.discord": "Open the WoS Discord channel",
+    "reset.support": "Use the Discord account linked to your WoS account. If you no longer have access or your WoS account is not linked to Discord, contact the administrator.",
+    "reset.choose": "Choose a new password with 12–256 characters. Your active sessions will be signed out after confirmation.",
+    "reset.submit": "Save new password",
+    "reset.back": "Back to sign in",
+    "reset.successTitle": "Password changed",
+    "reset.success": "You can now sign in with your existing username and your new password.",
+    "reset.invalid": "This link has expired, has already been used or is unavailable. Request a new link from the Discord bot.",
+    "reset.throttled": "Too many attempts. Please wait before trying again.",
+
     "preferences.title": "Preferences",
     "preferences.intro": "Choose the language for your space.",
     "language.label": "Language",
@@ -1369,6 +1397,8 @@ function interpolate(template: string, params: Params = {}): string {
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {
+  password_reset_unavailable: "reset.invalid",
+  password_reset_throttled: "reset.throttled",
   authentication_failed: "login.failed",
   authentication_throttled: "login.throttled",
   current_password_invalid: "error.currentPassword",

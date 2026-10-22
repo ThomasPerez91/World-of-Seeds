@@ -19,6 +19,7 @@ from app.core.config import Settings
 from app.models import (
     LoginThrottle,
     ManagedTorrent,
+    PasswordReset,
     TorrentRequest,
     TorrentRequestState,
     User,
@@ -394,6 +395,7 @@ async def set_managed_user_active(
     user.is_active = is_active
     user.updated_at = now
     if not is_active:
+        await db.execute(delete(PasswordReset).where(PasswordReset.user_id == user.id))
         await db.execute(
             update(UserSession)
             .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))

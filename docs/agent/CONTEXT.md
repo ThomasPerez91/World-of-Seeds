@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.3.27` ;
+- version stable : `2.3.28` ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.
@@ -509,3 +509,33 @@ Cette récupération prend le verrou client puis User, revérifie l’état apr�
 remplace le mot de passe et révoque les sessions. Aucun reset général ni rattachement
 implicite d’un ancien compte. Les nouvelles permissions sont explicites, les anciennes
 clés restent inchangées. Contrat et parcours : `docs/external-api-v1.md`.
+
+
+### Récupération des mots de passe — 2.3.28
+
+Le login propose Mot de passe oublié et guide vers le salon Discord configuré dans le
+frontend. Le bot identifié par sa clé API et l’ID réel de l’auteur du clic délivre un lien
+à fragment HTTPS ; aucun username saisi ne constitue une preuve d’identité. Nouveau scope
+explicite `users:reset-password`, jamais ajouté automatiquement aux clés existantes. Il
+permet les comptes Discord associés, indépendamment du client qui les a créés ; ce pouvoir
+est réservé à un client bot de confiance. Ancien `users:recover` inchangé, limité à la
+livraison initiale par le client créateur. Comptes sans Discord/admin : récupération opérateur.
+
+Table `password_resets` additive (migration 20261022_37) : une ligne par utilisateur,
+jeton 256 bits haché, durée 15 min, délai d’émission persistant 60 s. Ordre des verrous :
+client API, User, grant. Validation après le calcul Argon2 hors transaction et après attente
+des verrous : clé/scope actifs, compte actif non admin/non supprimé, empreinte du mot de
+passe inchangée, jeton actuel non consommé et non expiré. Un nouveau lien remplace l’ancien.
+Une suspension efface le grant, y compris avant réactivation. Confirmation révoque toutes
+les sessions, sans login automatique, sans changer le username, la seed ou l’obligation de
+personnalisation initiale. Erreurs publiques sans écho des entrées et contrôle IP avant crypto.
+Le fragment est retiré immédiatement de l’historique, aussi dans un onglet déjà chargé ;
+pas de localStorage/sessionStorage des tokens, de mots de passe dans Discord ou de mail ajouté.
+
+Sources du bot autonome désormais dans `discord-bot/`, CI hors ligne et smoke de lecture
+non-root de son image. Le déploiement applicatif Rise2 ne met pas à jour ce conteneur
+indépendant. L’opérateur doit installer son paquet et renseigner une clé portant le nouveau
+scope ; aucune modification distante de .env ni supposition de bot déjà mis à jour.
+`DISCORD_REGISTRATION_ROLE_ID` permet une approbation des inscriptions via un rôle attribué
+manuellement. Variable vide : inscription libre. Ce contrôle ne prouve pas une personne
+unique ; la liaison native garantit un compte WoS par ID Discord, pas par personne physique.
