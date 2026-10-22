@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from app.auth.dependencies import (
     require_current_credentials,
     require_current_credentials_csrf,
 )
+from app.auth.password_reset import ResetUnavailable, confirm_password_reset
 from app.auth.security import generate_auth_seed
 from app.auth.service import (
     AuthenticationFailedError,
@@ -35,10 +37,42 @@ from app.schemas.auth import (
     ChangePasswordRequest,
     ChangeUsernameRequest,
     LoginRequest,
+    PasswordResetConfirmRequest,
     UserResponse,
 )
 
 router = APIRouter()
+
+
+@router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password(
+    payload: PasswordResetConfirmRequest,
+    request: Request,
+    response: Response,
+    db: DbSession,
+    settings: AppSettings,
+) -> None:
+    ip = request.client.host if request.client is not None else "unknown"
+    retry = request.app.state.login_ip_rate_limiter.consume(f"password-reset:{ip}")
+    if retry is not None:
+        raise HTTPException(
+            429,
+            detail=_detail("password_reset_throttled", "Try again later"),
+            headers={"Retry-After": str(retry), "Cache-Control": "no-store"},
+        )
+    try:
+        await confirm_password_reset(
+            db, token=payload.token, password=payload.new_password, request_id=uuid4().hex
+        )
+    except ResetUnavailable as exc:
+        await db.rollback()
+        raise HTTPException(
+            400,
+            detail=_detail("password_reset_unavailable", "Recovery link unavailable"),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    clear_auth_cookies(response, settings)
+    response.headers["Cache-Control"] = "no-store"
 
 
 def _detail(code: str, message: str, field: str | None = None) -> dict[str, str | None]:

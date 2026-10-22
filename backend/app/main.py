@@ -224,6 +224,17 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     async def validation_error_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        if request.url.path == "/api/v1/auth/password-reset/confirm":
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": {
+                        "code": "password_reset_unavailable",
+                        "message": "Invalid recovery request",
+                    }
+                },
+                headers={"Cache-Control": "no-store"},
+            )
         if request.url.path.startswith("/api/external/v1"):
             request_id = getattr(request.state, "external_request_id", "unknown")
             return JSONResponse(

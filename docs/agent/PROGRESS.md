@@ -4,7 +4,35 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.27`.
+- Version applicative cible : `2.3.28`.
+
+## Release 2.3.28 — mot de passe oublié sur le site et via Discord
+
+- Login : aide Mot de passe oublié vers le bon salon Discord ; lien privé du bot vers
+  un formulaire Forest FR/EN. Jeton uniquement dans le fragment, retiré immédiatement
+  de l’historique, y compris dans un onglet déjà chargé ; aucun stockage navigateur.
+  Confirmation du mot de passe, erreurs et réussite sans connexion automatique.
+- Nouvelle permission explicite `users:reset-password` et délivrance par Discord ID
+  vérifié par le bot. Anciennes clés non élargies ; client émetteur revalidé lors de
+  l’utilisation, même après calcul crypto/attente des verrous. `users:recover` reste
+  strictement limité à l’ancien parcours initial. Aucun reset anonyme par username.
+- Grant haché, durée 15 minutes, usage unique, émission limitée à une par minute et
+  par compte. Nouveau lien remplaçant le précédent, révocation de clé, changement de
+  password et suspension invalidant le lien. Comptes admin/supprimés/suspendus refusés.
+  Toutes les sessions révoquées à la validation ; seed et username conservés.
+- Migration additive 20261022_37 ; verrous client → User → grant et crypto hors SQL.
+  Tests PostgreSQL : double consommation, émission concurrente et expiration pendant
+  le calcul du mot de passe. Validation CI des migrations et rollback avant promotion.
+- Bot versionné dans `discord-bot/`, tests sans Discord réel et smoke Docker non-root.
+  Seed expliquée dans le message privé. Mode d’inscription après validation via rôle
+  Discord optionnel ; inscription libre si non configuré. Un ID Discord ne garantit
+  pas une personne unique. Installation du bot et nouveau scope requis côté opérateur.
+- Validation locale : 209 tests frontend réussis, trois ignorés, build TypeScript/Vite ;
+  1 091 tests backend réussis et 72 ignorés faute de services externes, plus régression
+  suspension/réactivation ciblée ; 27 tests bot. Rendu Chromium FR/EN de 320 à 1440 px,
+  aide/formulaire/erreur/succès. Ruff et mypy sur le périmètre applicatif.
+- +0.0.1 à 2.3.28 ; aucun changement d’infrastructure Rise2, qB, scheduler ou slots.
+  Sauvegardes et alertes opérateur toujours reportées ; 3.0.0 après validation finale.
 
 ## Release 2.3.27 — première connexion harmonisée avec le login
 

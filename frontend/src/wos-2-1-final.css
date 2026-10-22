@@ -896,3 +896,36 @@
     padding: 1rem !important;
   }
 }
+
+/* Recovery uses the same compact authentication surface. */
+.login-card .auth-text-button {
+  width: auto;
+  min-height: 44px;
+  align-self: center;
+  margin: 0.3rem 0;
+  padding: 0.5rem;
+  color: #bcd4c7;
+  background: transparent;
+  font-size: 0.78rem;
+}
+.password-reset-help { display: grid; gap: 0.8rem; }
+.password-reset-help .ui-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 47px;
+  padding: 0.65rem 0.8rem;
+  color: #042316 !important;
+  border: 1px solid rgba(152, 255, 199, 0.58);
+  border-radius: 10px;
+  background: linear-gradient(135deg, #73f2aa, #52e896 54%, #66f3a6);
+  font-size: 0.9rem;
+  font-weight: 800;
+  white-space: normal;
+  text-align: center;
+  text-decoration: none !important;
+}
+.password-reset-help .ui-button:focus-visible {
+  outline: 2px solid var(--wos21-green);
+  outline-offset: 3px;
+}
