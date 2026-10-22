@@ -82,6 +82,11 @@ La commande SSH de CI est forcée et n’autorise pas l’installation d’un he
 Il faut installer la copie corrigée depuis un commit validé, par un accès opérateur déjà autorisé, avant la première promotion master.
 Ne pas profiter du preflight exécuté en root pour contourner cette restriction. Tant que cette installation n’est pas prouvée, ne pas annoncer C1/C2 actifs sur Rise2 et ne pas promouvoir la 2.4.1.
 
+Le job SSH dispose de 240 minutes pour inclure la sauvegarde synchrone (dump,
+restauration isolée et chiffrement, opérations externes bornées à 15 minutes chacune),
+puis le déploiement et une éventuelle récupération applicative. La limite précédente
+était de 20 minutes et pouvait interrompre une sauvegarde valide.
+
 ### Vérifications et statut
 
 Branche : `fix/audit-2.4.1-deployment`. [PR #396](https://github.com/ThomasPerez91/World-of-Seeds/pull/396) intégrée dans develop (`dd258e843ce16c9ca96d58153c59b101d6491ce2`).

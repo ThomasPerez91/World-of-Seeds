@@ -127,7 +127,9 @@ jobs:
     needs: build
     if: needs.build.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Include the mandatory dump, isolated restore and encryption (15 minutes
+    # per external operation), then rollout and possible application recovery.
+    timeout-minutes: 240
     environment:
       name: rise2-production
     permissions:
