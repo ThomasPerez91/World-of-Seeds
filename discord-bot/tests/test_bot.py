@@ -338,7 +338,7 @@ class DiscordTests(unittest.IsolatedAsyncioTestCase):
     async def test_persistent_buttons_survive_and_foreign_guild_is_refused(self):
         view = RegistrationView(self.bot)
         self.assertTrue(view.is_persistent())
-        self.assertEqual(len({button.custom_id for button in view.children}), 3)
+        self.assertEqual(len({button.custom_id for button in view.children}), 5)
         for interaction in (self.interaction(guild=123), self.interaction(channel=123)):
             self.assertFalse(await view.interaction_check(interaction))
             self.assertTrue(
