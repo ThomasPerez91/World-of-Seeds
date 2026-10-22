@@ -7,6 +7,78 @@
   --wos21-login-input-focus-bg: #083324;
 }
 
+/* First access shares the login artwork, language toggle and input surfaces.
+ * Keep four fields compact without clipping content on short/mobile screens.
+ */
+.login-page.credential-page {
+  padding: 1.25rem 1rem !important;
+}
+
+.credential-change-card .credential-heading {
+  margin-bottom: 0.9rem;
+}
+
+.credential-change-card .credential-heading .eyebrow {
+  margin: 0 0 0.35rem;
+  color: #bcd4c7;
+  font-size: 0.68rem;
+  letter-spacing: 0.2em;
+}
+
+.credential-change-card .credential-heading h1 {
+  max-width: none;
+  margin: 0;
+  font-size: clamp(1.25rem, 4vw, 1.5rem);
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+}
+
+.credential-change-card .credential-heading .form-intro {
+  margin: 0.45rem 0 0;
+  color: var(--wos21-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.credential-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem 1rem;
+}
+
+.credential-field {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 0.3rem;
+}
+
+.credential-change-card .credential-field label {
+  margin: 0;
+  color: #c9d8d0;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.credential-change-card .field-hint {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.credential-change-card .form-message:empty {
+  display: none;
+}
+
+@media (min-width: 600px) {
+  .credential-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Let the original artwork breathe a little more without filtering the image. */
 #root::before {
   background:

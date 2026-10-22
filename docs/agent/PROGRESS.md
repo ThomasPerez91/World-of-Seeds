@@ -1,10 +1,30 @@
 # World of Seeds — Progress
 
-## Etat courant — 15 octobre 2026
+## Etat courant — 21 octobre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.26`.
+- Version applicative cible : `2.3.27`.
+
+## Release 2.3.27 — première connexion harmonisée avec le login
+
+- La personnalisation obligatoire du premier accès réutilise la carte Forest du login,
+  son logo complet `/title.webp`, le même en-tête partagé et le sélecteur de langue
+  compact à drapeau. Suppression du petit ancien logo et du sélecteur pleine largeur.
+- Titres, espacements et aides resserrés ; quatre champs sur deux rangées dès 600 px,
+  une colonne en dessous. Aucun masquage du formulaire pour réduire sa hauteur.
+  Champs et bouton principal reprennent les surfaces et styles de connexion ;
+  visibilité indépendante des mots de passe, labels et aides accessibles conservés.
+- Le changement FR/EN conserve les saisies et persiste la préférence existante ;
+  le bouton de langue est désactivé pendant l’enregistrement. Validation des mots
+  de passe, erreurs API et passage au Dashboard après succès conservent le contrat.
+- Validation : 205 tests frontend réussis, trois ignorés, build TypeScript/Vite et
+  16 tests des miroirs de version. Contrôle Chromium du build de production en
+  FR/EN à 320, 390, 820 et 1440 px sans débordement horizontal ; à 320 px, le
+  formulaire français reste défilable verticalement sans couper les contrôles.
+- +0.0.1 à 2.3.27, miroirs de version synchronisés. Aucun changement API,
+  provisioning Discord, migration ou infrastructure. Création de compte Discord
+  confirmée fonctionnelle par Thomas sur Rise2.
 
 ## Release 2.3.26 — finalisation de l’API Discord
 

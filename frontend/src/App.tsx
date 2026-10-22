@@ -50,6 +50,59 @@ function BrandMark() {
   );
 }
 
+function AuthBrandRow({
+  disabled = false,
+  onLocaleChange,
+}: {
+  disabled?: boolean;
+  onLocaleChange?: (locale: Locale) => void | Promise<void>;
+}) {
+  return (
+    <div className="login-brand-row">
+      <img className="login-title-image" src="/title.webp?rev=a9c84cc" alt="" aria-hidden="true" />
+      <LanguageSelector variant="flag-toggle" disabled={disabled} onChange={onLocaleChange} />
+    </div>
+  );
+}
+
+function InitialPasswordField({ id, label, invalid, minLength }: {
+  id: string;
+  label: string;
+  invalid: boolean;
+  minLength?: number;
+}) {
+  const { t } = useI18n();
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="credential-field">
+      <label htmlFor={id}>{label}</label>
+      <div className="login-input login-password-input">
+        <LockKeyhole aria-hidden="true" />
+        <input
+          id={id}
+          name={id}
+          type={visible ? "text" : "password"}
+          autoComplete={id === "current-password" ? "current-password" : "new-password"}
+          minLength={minLength}
+          aria-describedby="credential-error"
+          aria-invalid={invalid}
+          required
+        />
+        <button
+          type="button"
+          className="password-visibility"
+          aria-label={visible ? t("login.hidePassword") : t("login.showPassword")}
+          aria-controls={id}
+          aria-pressed={visible}
+          onClick={() => setVisible((value) => !value)}
+        >
+          {visible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ServiceHealth() {
   const { t } = useI18n();
   const [health, setHealth] = useState<"pending" | "healthy" | "unavailable">("pending");
@@ -138,10 +191,7 @@ function LoginScreen({
       </p>
 
       <section className="login-card" aria-labelledby="login-title">
-      <div className="login-brand-row">
-        <img className="login-title-image" src="/title.webp?rev=a9c84cc" alt="" aria-hidden="true" />
-        <LanguageSelector variant="flag-toggle" />
-      </div>
+      <AuthBrandRow />
       <h1 className="visually-hidden">World of Seeds</h1>
       <p className="brand-copy">{t("login.tagline")}</p>
       <div className="login-divider" />
@@ -213,14 +263,18 @@ function CredentialChangeScreen({
   const { apiError, locale, setLocale, t } = useI18n();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [localeSaving, setLocaleSaving] = useState(false);
 
   async function changeLocale(nextLocale: typeof locale) {
     setError("");
+    setLocaleSaving(true);
     try {
       onChanged(await api.changeLocale(nextLocale));
     } catch (caught) {
       setLocale(user.preferred_locale ?? "fr");
       setError(apiError(caught, "language.saveFailed"));
+    } finally {
+      setLocaleSaving(false);
     }
   }
 
@@ -228,6 +282,7 @@ function CredentialChangeScreen({
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const newPassword = String(form.get("new-password"));
+    if (submitting || localeSaving) return;
     if (newPassword !== String(form.get("password-confirmation"))) {
       setError(t("credentials.mismatch"));
       return;
@@ -249,65 +304,55 @@ function CredentialChangeScreen({
   }
 
   return (
-    <main className="centered-page">
-      <section className="credential-card" aria-labelledby="credential-title">
-        <BrandMark />
-        <LanguageSelector onChange={(nextLocale) => void changeLocale(nextLocale)} />
-        <p className="eyebrow">{t("credentials.eyebrow")}</p>
-        <h1 id="credential-title" className="compact-title">
-          {t("credentials.title")}
-        </h1>
-        <p className="form-intro">
-          {t("credentials.intro")}
-        </p>
-        <form onSubmit={handleSubmit}>
-          <label htmlFor="current-password">{t("credentials.initialPassword")}</label>
-          <input
-            id="current-password"
-            name="current-password"
-            type="password"
-            autoComplete="current-password"
-            aria-describedby="credential-error"
-            aria-invalid={error !== ""}
-            required
-          />
-          <label htmlFor="new-username">{t("account.username")}</label>
-          <input
-            id="new-username"
-            name="username"
-            defaultValue={user.username}
-            pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}"
-            autoComplete="username"
-            aria-describedby="new-username-hint credential-error"
-            aria-invalid={error !== ""}
-            required
-          />
-          <p id="new-username-hint" className="field-hint">
-            {t("account.usernameHint")}
-          </p>
-          <label htmlFor="new-password">{t("credentials.newPassword")}</label>
-          <input
-            id="new-password"
-            name="new-password"
-            type="password"
-            minLength={12}
-            autoComplete="new-password"
-            aria-describedby="credential-error"
-            aria-invalid={error !== ""}
-            required
-          />
-          <label htmlFor="password-confirmation">{t("credentials.confirmPassword")}</label>
-          <input
-            id="password-confirmation"
-            name="password-confirmation"
-            type="password"
-            minLength={12}
-            autoComplete="new-password"
-            aria-describedby="credential-error"
-            aria-invalid={error !== ""}
-            required
-          />
-          <Button type="submit" disabled={submitting}>
+    <main className="login-page credential-page">
+      <section className="login-card credential-change-card" aria-labelledby="credential-title">
+        <AuthBrandRow disabled={localeSaving || submitting} onLocaleChange={changeLocale} />
+        <div className="login-divider" />
+        <header className="credential-heading">
+          <p className="eyebrow">{t("credentials.eyebrow")}</p>
+          <h1 id="credential-title">{t("credentials.title")}</h1>
+          <p className="form-intro">{t("credentials.intro")}</p>
+        </header>
+        <form className="credential-form" onSubmit={handleSubmit}>
+          <div className="credential-fields">
+            <InitialPasswordField
+              id="current-password"
+              label={t("credentials.initialPassword")}
+              invalid={error !== ""}
+            />
+            <div className="credential-field">
+              <label htmlFor="new-username">{t("account.username")}</label>
+              <div className="login-input">
+                <UserRound aria-hidden="true" />
+                <input
+                  id="new-username"
+                  name="username"
+                  defaultValue={user.username}
+                  pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}"
+                  autoComplete="username"
+                  aria-describedby="new-username-hint credential-error"
+                  aria-invalid={error !== ""}
+                  required
+                />
+              </div>
+              <p id="new-username-hint" className="field-hint">
+                {t("account.usernameHint")}
+              </p>
+            </div>
+            <InitialPasswordField
+              id="new-password"
+              label={t("credentials.newPassword")}
+              invalid={error !== ""}
+              minLength={12}
+            />
+            <InitialPasswordField
+              id="password-confirmation"
+              label={t("credentials.confirmPassword")}
+              invalid={error !== ""}
+              minLength={12}
+            />
+          </div>
+          <Button type="submit" disabled={submitting || localeSaving}>
             {submitting ? t("credentials.submitting") : t("credentials.submit")}
           </Button>
           <p id="credential-error" className="form-message error-message" role="alert">
