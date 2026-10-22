@@ -206,3 +206,31 @@ suspended/deleted users and accounts without a Discord association require opera
 The standalone bot sources and operator upgrade steps are in `discord-bot/README.md`.
 A new key with users:create, users:read and users:reset-password is sufficient for the new
 panel; downloads:read is not required. The bot is not redeployed by the application workflow.
+
+
+## Discord download visibility and notices — 2.3.29
+
+New explicit privileged scope `downloads:read-discord`; grant only to the trusted bot.
+Existing keys do not gain it automatically. No user seed is disclosed or stored by the bot.
+
+- `GET /users/discord/{discord_user_id}/downloads?offset=0&limit=8` returns the same
+  personal page as `/me/downloads`. The bot must use the actual interaction author ID.
+  Unknown/deleted/admin bindings return 404; suspended accounts return 403 `user_disabled`.
+- `GET /discord/download-notices?limit=25&after=<request UUID>` returns a keyset page of
+  live READY subscriptions for active, non-deleted, non-admin Discord-linked accounts.
+  `items`: request_id, discord_user_id, name, ready_at, unsubscribe_at, warning_at.
+  `next_after` is the last included request UUID if another page exists, otherwise null.
+  Restart a full scan without `after` after the last page. This is a current-state feed,
+  not an acknowledged event outbox: cancellation, suspension and expiry remove entries.
+
+`queue_position` now uses the site's shared physical backlog estimate (null when unranked),
+not a FIFO promise. `/me/downloads` keeps its original key + seed authorization unchanged.
+Both personal list contracts add `access_warning_at` and `access_expiring_soon`.
+Warning threshold = ready_at + 2/3 * (unsubscribe_at - ready_at), using each request's own
+UTC dates; missing/invalid dates never fabricate a warning. Expired rights are reported
+expired even before lifecycle workers process them. All responses remain no-store.
+
+The standalone bot scans bounded pages, privately sends completion/last-third alerts and
+persists deduplication/preferences/cursor in its own volume. See discord-bot/README.md for
+polling delay, initial catch-up and best-effort, at-most-one-attempt delivery semantics.
+No production credentials are used by tests and site deployment does not upgrade the bot.

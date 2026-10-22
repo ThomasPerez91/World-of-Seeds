@@ -16,6 +16,7 @@ type Params = Record<string, string | number>;
 
 const messages = {
   fr: {
+    "admin.discordDownloadsScopeInfo": "downloads:read-discord donne accès aux téléchargements des comptes liés à Discord pour les listes privées et les alertes. À réserver au bot de confiance.",
     "admin.resetScopeInfo": "users:reset-password permet de délivrer des liens pour les comptes liés à Discord, même créés par une autre clé. À réserver au bot de confiance.",
     "reset.forgot": "Mot de passe oublié ?",
     "reset.title": "Réinitialiser ton mot de passe",
@@ -684,6 +685,7 @@ const messages = {
     "downloads.unsubscribeTooltip": "{remaining} — {date}",
   },
   en: {
+    "admin.discordDownloadsScopeInfo": "downloads:read-discord grants access to Discord-linked downloads for private lists and alerts. Grant it only to the trusted bot.",
     "admin.resetScopeInfo": "users:reset-password can issue recovery links for Discord-linked accounts, including those created by another key. Grant it only to the trusted bot.",
     "reset.forgot": "Forgot password?",
     "reset.title": "Reset your password",

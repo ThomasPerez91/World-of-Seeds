@@ -10,12 +10,15 @@ import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+
+from downloads import DeliveryState, download_embed, notice_embed, timestamp
 from pathlib import Path
 
 import discord
 from wos import Credentials, Onboarding, UserError, WosApi, discord_id
 
-BOT_VERSION = "2.3.28"
+BOT_VERSION = "2.3.29"
 LOG = logging.getLogger("wos_discord")
 
 
@@ -125,9 +128,9 @@ class AccessGate:
             )
         self.active.add(member)
 
-    def leave(self, member: int):
+    def leave(self, member: int, cooldown: float = 10):
         self.active.discard(member)
-        self.cooldown[member] = time.monotonic() + 10
+        self.cooldown[member] = time.monotonic() + cooldown
 
 
 class RegistrationView(discord.ui.View):
@@ -180,9 +183,79 @@ class RegistrationView(discord.ui.View):
             view=RecoveryConfirmation(self.bot, interaction.user.id),
         )
 
+    @discord.ui.button(
+        label="Mes téléchargements",
+        style=discord.ButtonStyle.primary,
+        custom_id="wos:downloads:v1",
+    )
+    async def downloads(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        await self.bot.execute(interaction, "downloads")
+
+    @discord.ui.button(
+        label="Alertes privées : activer / désactiver",
+        style=discord.ButtonStyle.secondary,
+        custom_id="wos:notifications:v1",
+        row=1,
+    )
+    async def notifications(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        await self.bot.execute(interaction, "notifications")
+
     async def on_error(self, interaction, error, item):
         # Never log exception strings/tracebacks that may contain HTTP bodies or credentials.
         LOG.error("Interaction interrompue (%s)", type(error).__name__)
+
+
+class DownloadsView(discord.ui.View):
+    def __init__(self, bot, member, page):
+        super().__init__(timeout=180)
+        self.bot, self.member, self.offset = bot, member, page["offset"]
+        self.previous.disabled = self.offset == 0
+        self.next.disabled = self.offset + page["limit"] >= page["total"]
+
+    async def interaction_check(self, interaction):
+        return (
+            interaction.user.id == self.member
+            and interaction.guild_id == int(self.bot.settings.guild)
+            and interaction.channel_id == int(self.bot.settings.channel)
+        )
+
+    async def show(self, interaction, offset):
+        await interaction.response.defer()
+        entered = False
+        try:
+            self.bot.gate.enter(self.member)
+            entered = True
+            page = await self.bot.api.downloads(str(self.member), offset)
+            await interaction.edit_original_response(
+                embed=download_embed(page, self.bot.settings.url),
+                view=DownloadsView(self.bot, self.member, page),
+            )
+        except MemberBusy as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+        except UserError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+        finally:
+            if entered:
+                self.bot.gate.leave(self.member, cooldown=0)
+
+    @discord.ui.button(label="Précédent", style=discord.ButtonStyle.secondary)
+    async def previous(self, interaction, button):
+        await self.show(interaction, max(0, self.offset - 8))
+
+    @discord.ui.button(label="Actualiser", style=discord.ButtonStyle.secondary)
+    async def refresh(self, interaction, button):
+        await self.show(interaction, self.offset)
+
+    @discord.ui.button(label="Suivant", style=discord.ButtonStyle.secondary)
+    async def next(self, interaction, button):
+        await self.show(interaction, self.offset + 8)
+
+    async def on_error(self, interaction, error, item):
+        LOG.error("Liste interrompue (%s)", type(error).__name__)
 
 
 class RecoveryConfirmation(discord.ui.View):
@@ -250,12 +323,60 @@ class RegistrationBot(discord.Client):
         self.gate = AccessGate()
         self.panel_lock = asyncio.Lock()
         self.heartbeat_task = None
+        self.notifier_task = None
+        self.deliveries = DeliveryState(settings.data)
 
     async def setup_hook(self):
         await self.api.capacity()  # Fail early on a revoked key or missing users:read.
         self.panel = RegistrationView(self)
         self.add_view(self.panel)
         self.heartbeat_task = asyncio.create_task(self.heartbeat())
+        self.notifier_task = asyncio.create_task(self.notify_downloads())
+
+    async def notification_cycle(self):
+        page = await self.api.notices(self.deliveries.cursor())
+        for item in page["items"]:
+            now = datetime.now(UTC)
+            member = item["discord_user_id"]
+            if (
+                not self.deliveries.enabled(member)
+                or timestamp(item["unsubscribe_at"]) <= now
+            ):
+                continue
+            # If both events became due during downtime, send only the useful red warning.
+            warning = (
+                item["warning_at"] is not None and timestamp(item["warning_at"]) <= now
+            )
+            kind = "warning" if warning else "ready"
+            if warning:
+                self.deliveries.claim(item, "ready")
+            if not self.deliveries.claim(item, kind):
+                continue
+            try:
+                user = await self.fetch_user(int(member))
+                await user.send(
+                    embed=notice_embed(item, kind, self.settings.url),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException as exc:
+                # Ambiguous delivery must not become a recurring DM spam loop.
+                LOG.warning(
+                    "Alerte privée non confirmée (%s) ; vérifier les MP via le bouton Mes téléchargements.",
+                    type(exc).__name__,
+                )
+        self.deliveries.advance(page["next_after"])
+
+    async def notify_downloads(self):
+        await self.wait_until_ready()
+        while not self.is_closed():
+            try:
+                await self.notification_cycle()
+            except Exception as exc:  # noqa: BLE001 - no HTTP bodies, titles or identities in logs.
+                LOG.warning(
+                    "Synchronisation des alertes interrompue (%s). Vérifier la permission downloads:read-discord et l’API.",
+                    type(exc).__name__,
+                )
+            await asyncio.sleep(5 if self.deliveries.cursor() else 60)
 
     async def heartbeat(self):
         while True:
@@ -349,6 +470,23 @@ class RegistrationBot(discord.Client):
                     )
             self.gate.enter(member)
             entered = True
+            if action == "downloads":
+                page = await self.api.downloads(str(member))
+                await interaction.edit_original_response(
+                    embed=download_embed(page, self.settings.url),
+                    view=DownloadsView(self, member, page),
+                )
+                return
+            if action == "notifications":
+                enabled = self.deliveries.toggle(str(member))
+                await interaction.edit_original_response(
+                    content=(
+                        "Alertes privées activées : fichier prêt et dernier tiers de ton abonnement. Autorise les MP du serveur."
+                        if enabled
+                        else "Alertes privées désactivées. Ta liste reste disponible via Mes téléchargements."
+                    )
+                )
+                return
             if action == "status":
                 await interaction.edit_original_response(
                     content=await self.service.status(str(member))
@@ -386,9 +524,17 @@ class RegistrationBot(discord.Client):
                 )
         finally:
             if entered:
-                self.gate.leave(member)
+                self.gate.leave(
+                    member,
+                    cooldown=0 if action in {"downloads", "notifications"} else 10,
+                )
 
     async def close(self):
+        if self.notifier_task is not None:
+            self.notifier_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self.notifier_task
+            self.notifier_task = None
         if self.heartbeat_task is not None:
             self.heartbeat_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -396,6 +542,7 @@ class RegistrationBot(discord.Client):
             self.heartbeat_task = None
         with suppress(OSError):
             (self.settings.data / "heartbeat").unlink(missing_ok=True)
+        self.deliveries.close()
         await self.api.close()
         await super().close()
 

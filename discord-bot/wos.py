@@ -27,6 +27,7 @@ class ApiError(UserError):
                 "La récupération initiale est indisponible. Si tu t’es déjà connecté, "
                 "elle ne peut plus remplacer ton mot de passe. Contacte l’administrateur."
             ),
+            "user_disabled": "Ton compte WoS est suspendu. Contacte l’administrateur.",
             "password_reset_unavailable": "La récupération est indisponible pour ce compte. Contacte l’administrateur.",
             "discord_account_not_found": "Aucun compte récupérable par ce bot. Contacte l’administrateur.",
         }
@@ -151,6 +152,7 @@ class WosApi:
                     "password_reset_unavailable",
                     "discord_account_not_found",
                     "rate_limit_exceeded",
+                    "user_disabled",
                 }
                 code = code if isinstance(code, str) and code in allowed else "unknown"
                 try:
@@ -171,6 +173,18 @@ class WosApi:
             if not isinstance(data, dict):
                 raise UserError("Réponse WoS inattendue. Contacte l’administrateur.")
             return data
+
+    async def downloads(self, member: str, offset: int = 0):
+        member = discord_id(member)
+        return await self.request(
+            "GET", f"users/discord/{member}/downloads?offset={offset}&limit=8"
+        )
+
+    async def notices(self, after=None):
+        from uuid import UUID
+
+        suffix = f"&after={UUID(after)}" if after else ""
+        return await self.request("GET", f"discord/download-notices?limit=25{suffix}")
 
     async def capacity(self):
         data = await self.request("GET", "capacity")

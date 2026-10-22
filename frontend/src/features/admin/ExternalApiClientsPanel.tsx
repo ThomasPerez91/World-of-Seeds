@@ -9,7 +9,7 @@ import {
 import { Badge, Button, Card, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
 
-const allScopes: ExternalApiClient["scopes"] = ["users:create", "downloads:read", "users:read", "users:recover", "users:reset-password"];
+const allScopes: ExternalApiClient["scopes"] = ["users:create", "downloads:read", "users:read", "users:recover", "users:reset-password", "downloads:read-discord"];
 
 export function ExternalApiClientsPanel({
   onSessionExpired,
@@ -141,6 +141,7 @@ export function ExternalApiClientsPanel({
           ))}
         </fieldset>
         <p className="field-hint">{t("admin.resetScopeInfo")}</p>
+        <p className="field-hint">{t("admin.discordDownloadsScopeInfo")}</p>
         <Button
           type="button"
           disabled={submitting || name.trim() === "" || scopes.length === 0}

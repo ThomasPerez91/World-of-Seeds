@@ -4,7 +4,26 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.28`.
+- Version applicative cible : `2.3.29`.
+
+## Release 2.3.29 — téléchargements et alertes privées Discord
+
+- Revue avant publication : priorité de l’échéance personnelle même si le torrent est
+  passé en ERROR, test de régression des deux cas ; guide du bot corrigé pour exiger API 2.3.29.
+
+- Nouveau scope explicite downloads:read-discord, lecture personnelle par liaison Discord
+  et flux READY paginé par UUID pour le bot de confiance. Les anciennes clés restent inchangées.
+- Liste privée paginée, positions estimées identiques au site, états du cycle de vie ; aucun
+  titre d'un autre utilisateur, aucune seed stockée par le bot. Erreur physique ne masque
+  plus un désabonnement/une expiration ; échéance dépassée visible avant passage du worker.
+- Alerte verte READY, rouge au dernier tiers de ready_at → unsubscribe_at de chaque demande.
+  Préférences et déduplication persistantes, bouton de désactivation des MP, rattrapage sans
+  double message, aucune notification publique. Livraison au mieux : une tentative durable
+  par alerte ; MP bloqués/crash ambigu peuvent perdre une alerte. Voir README du bot.
+- Pas de migration, changement de scheduler, quota, infrastructure ou tâche de purge.
+  Le conteneur bot reste une installation séparée avec nouvelle clé à quatre scopes.
+- Validation locale : backend 1097 réussis / 72 ignorés (services absents), frontend
+  209 réussis / 3 ignorés, bot 36 réussis ; Ruff, mypy (252 sources), TypeScript et build verts.
 
 ## Release 2.3.28 — mot de passe oublié sur le site et via Discord
 
