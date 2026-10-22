@@ -210,3 +210,17 @@ def test_warning_is_exactly_last_third_and_terminal_state_survives_physical_erro
     assert _state(request, torrent, now) == "expired"
     request.ready_at = None
     assert warning_at(request) is None
+
+
+@pytest.mark.parametrize("deadline_passed", [False, True])
+def test_ready_access_deadline_has_priority_over_physical_error(deadline_passed: bool) -> None:
+    now = datetime.now(UTC)
+    request = TorrentRequest(
+        user_id=uuid4(),
+        managed_torrent_id=uuid4(),
+        state=TorrentRequestState.READY,
+        ready_at=now - timedelta(hours=1),
+        unsubscribe_at=now + timedelta(seconds=-1 if deadline_passed else 1),
+    )
+    torrent = ManagedTorrent(state=ManagedTorrentState.ERROR)
+    assert _state(request, torrent, now) == ("expired" if deadline_passed else "error")
