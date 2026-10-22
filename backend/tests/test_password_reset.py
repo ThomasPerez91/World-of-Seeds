@@ -3,7 +3,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from test_discord_onboarding import DISCORD_ID, create
@@ -13,7 +13,7 @@ from app.api.external.rate_limit import ExternalApiRateLimiter
 from app.auth.rate_limit import LoginIpRateLimiter
 from app.auth.security import hash_password, hash_token, verify_password
 from app.main import app
-from app.models import ExternalApiAudit, ExternalApiClient, PasswordReset, User
+from app.models import ExternalApiAudit, ExternalApiClient, PasswordReset, User, UserSession
 
 ROOT = "/api/external/v1"
 CONFIRM = "/api/v1/auth/password-reset/confirm"
@@ -243,3 +243,40 @@ async def test_suspension_invalidates_link_even_after_reactivation(
         CONFIRM, json={"token": token, "new_password": "replacement-password"}
     )
     assert result.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_reset_revokes_sessions_on_two_devices_without_clearing_their_cookies(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    raw, account = await setup(client, db_session)
+    credentials = {
+        "username": account["username"],
+        "password": account["temporary_password"],
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as second:
+        assert (await client.post("/api/v1/auth/login", json=credentials)).status_code == 200
+        assert (await second.post("/api/v1/auth/login", json=credentials)).status_code == 200
+        cookies = [device.cookies.get("wos_session") for device in (client, second)]
+        assert cookies[0] and cookies[1] and cookies[0] != cookies[1]
+        for device in (client, second):
+            assert (await device.get("/api/v1/auth/me")).status_code == 200
+        sessions = (
+            await db_session.scalars(
+                select(UserSession).where(UserSession.user_id == UUID(account["id"]))
+            )
+        ).all()
+        assert len(sessions) == 2 and all(row.revoked_at is None for row in sessions)
+        token = await issue(client, raw)
+        # A third client consumes the token: its cookie deletion cannot log out either device.
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as reset:
+            result = await reset.post(
+                CONFIRM, json={"token": token, "new_password": "replacement-password-456"}
+            )
+            assert result.status_code == 204, result.text
+        for device, cookie in zip((client, second), cookies, strict=True):
+            assert device.cookies.get("wos_session") == cookie
+            assert (await device.get("/api/v1/auth/me")).status_code == 401
+        for row in sessions:
+            await db_session.refresh(row)
+            assert row.revoked_at is not None
