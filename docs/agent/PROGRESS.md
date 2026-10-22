@@ -1,6 +1,6 @@
 # World of Seeds — Progress
 
-## Etat courant — 21 octobre 2026
+## Etat courant — 22 octobre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
@@ -14,9 +14,12 @@ applicatif conditionné à une empreinte de schéma identique ou une transition
 transactionnelle explicitement compatible. Aucun downgrade/restauration automatique.
 Avant changement de head : sauvegarde chiffrée + restauration isolée obligatoires,
 via l’outil de la révision précédente. Sans changement de head : pas de migration.
-Le helper root installé doit être remplacé par l’opérateur avant première promotion
-master ; la clé SSH CI forcée ne le permet pas. Aucun contournement par preflight.
-Cette livraison n’est pas annoncée déployée avant preuve du bootstrap et du rollout.
+Bootstrap opérateur confirmé le 22 octobre : helper installé depuis
+`093e79d2029cabda79bef5585ce91e3f472cd8e3`, SHA-256
+`9d60b2f57f54f61bccb85e0be5caf2a88e588eef4d6813fb7c1a09c6abfc63c4` conforme.
+Ne pas répéter l’installation. La clé SSH CI reste limitée au déploiement forcé.
+#396 intégrée ; promotion #397 en attente des contrôles GitHub, puis du rollout réel.
+La production applicative reste 2.3.29 tant que ce rollout n’est pas vérifié.
 
 ## Release 2.3.29 — téléchargements et alertes privées Discord
 
