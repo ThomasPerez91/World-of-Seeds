@@ -1,7 +1,7 @@
 # WoS — bot Discord 2.3.29
 
 Paquet autonome, même serveur et salon que le bot initial. Aucun secret dans les sources.
-Il faut d’abord déployer l’API WoS 2.3.28 et sa migration additive des liens de récupération.
+Il faut d’abord déployer l’API WoS 2.3.29 et sa migration additive des liens de récupération.
 
 ## Clé API et installation
 

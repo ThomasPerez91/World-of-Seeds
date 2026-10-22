@@ -8,6 +8,9 @@ World of Seeds V2 est désormais la ligne de production active.
 
 ## Release 2.3.29 — téléchargements et alertes privées Discord
 
+- Revue avant publication : priorité de l’échéance personnelle même si le torrent est
+  passé en ERROR, test de régression des deux cas ; guide du bot corrigé pour exiger API 2.3.29.
+
 - Nouveau scope explicite downloads:read-discord, lecture personnelle par liaison Discord
   et flux READY paginé par UUID pour le bot de confiance. Les anciennes clés restent inchangées.
 - Liste privée paginée, positions estimées identiques au site, états du cycle de vie ; aucun

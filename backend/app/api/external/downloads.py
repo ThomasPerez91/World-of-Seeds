@@ -49,11 +49,14 @@ def _state(
         return "cancelled"
     if request.state is TorrentRequestState.EXPIRED:
         return "expired"
+    if request.state is TorrentRequestState.READY:
+        end = _utc(request.unsubscribe_at)
+        if end is not None and end <= now:
+            return "expired"
     if torrent.state is ManagedTorrentState.ERROR:
         return "error"
     if request.state is TorrentRequestState.READY:
-        end = _utc(request.unsubscribe_at)
-        return "expired" if end is not None and end <= now else "ready"
+        return "ready"
     return torrent_queue_status(torrent, now=now) or "waiting"
 
 
