@@ -149,13 +149,70 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByRole("heading", { name: "Personnalise ton accès" });
-    await user.selectOptions(screen.getByRole("combobox", { name: "Langue" }), "en");
+    await user.clear(screen.getByLabelText("Nom d’utilisateur"));
+    await user.type(screen.getByLabelText("Nom d’utilisateur"), "chosen-name");
+    await user.type(screen.getByLabelText("Nouveau mot de passe"), "preview-password-123");
+    await user.click(screen.getByRole("button", { name: "Langue : Français" }));
 
     await screen.findByRole("heading", { name: "Personalize your account" });
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByLabelText("Username")).toHaveProperty("value", "chosen-name");
+    expect(screen.getByLabelText("New password")).toHaveProperty("value", "preview-password-123");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/locale",
       expect.objectContaining({ method: "PATCH" }),
     );
+  });
+
+  it("préserve le parcours du premier accès : visibilité, erreur, correction et validation", async () => {
+    const guest = {
+      id: "bc68aa7c-d753-4db7-8698-acf8d09045a3", username: "guest-preview",
+      is_admin: false, is_active: true, must_change_credentials: true, preferred_locale: "fr",
+    };
+    let attempts = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/auth/me") return response({ user: guest }, 200);
+      if (url === "/api/v1/auth/credentials" && init?.method === "PATCH") {
+        attempts += 1;
+        expect(JSON.parse(String(init.body))).toEqual({
+          current_password: "initial-password", username: "chosen-name", new_password: "new-password-123",
+        });
+        return attempts === 1
+          ? response({ detail: "Temporarily unavailable" }, 503)
+          : response({ user: { ...guest, username: "chosen-name", must_change_credentials: false } }, 200);
+      }
+      if (url === "/api/v2/storage") return storageResponse();
+      const listing = emptyTorrentListing(url);
+      if (listing !== null) return listing;
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    const view = render(<App />);
+    await screen.findByRole("heading", { name: "Personnalise ton accès" });
+    expect(document.querySelector('.login-brand-row img')?.getAttribute("src")).toBe("/title.webp?rev=a9c84cc");
+    expect(await auditAccessibility(view.container)).toMatchObject({ violations: [] });
+    await user.type(screen.getByLabelText("Mot de passe initial"), "initial-password");
+    await user.clear(screen.getByLabelText("Nom d’utilisateur"));
+    await user.type(screen.getByLabelText("Nom d’utilisateur"), "chosen-name");
+    await user.type(screen.getByLabelText("Nouveau mot de passe"), "new-password-123");
+    await user.type(screen.getByLabelText("Confirmer le mot de passe"), "other-password-123");
+    await user.click(screen.getAllByRole("button", { name: "Afficher le mot de passe" })[1]);
+    expect(screen.getByLabelText("Nouveau mot de passe")).toHaveProperty("type", "text");
+    expect(screen.getByLabelText("Mot de passe initial")).toHaveProperty("type", "password");
+    await user.click(screen.getByRole("button", { name: "Enregistrer mes identifiants" }));
+    await screen.findByText("Les deux nouveaux mots de passe ne correspondent pas.");
+    expect(attempts).toBe(0);
+    await user.clear(screen.getByLabelText("Confirmer le mot de passe"));
+    await user.type(screen.getByLabelText("Confirmer le mot de passe"), "new-password-123");
+    await user.click(screen.getByRole("button", { name: "Enregistrer mes identifiants" }));
+    await waitFor(() => expect(attempts).toBe(1));
+    await waitFor(() => expect(document.querySelector('#credential-error')?.textContent).not.toBe(""));
+    expect(screen.getByLabelText("Nouveau mot de passe")).toHaveProperty("value", "new-password-123");
+    await user.click(screen.getByRole("button", { name: "Enregistrer mes identifiants" }));
+    await screen.findByRole("heading", { name: "Dashboard" });
+    expect(attempts).toBe(2);
   });
 
   it("restaure la langue anglaise et épure le menu du compte", async () => {
