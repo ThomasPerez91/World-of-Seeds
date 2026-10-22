@@ -25,6 +25,10 @@ World of Seeds V2 est désormais la ligne de production active.
 - +0.0.1 à 2.3.27, miroirs de version synchronisés. Aucun changement API,
   provisioning Discord, migration ou infrastructure. Création de compte Discord
   confirmée fonctionnelle par Thomas sur Rise2.
+- Le contrôle CI a détecté GHSA-6q48-6c7w-9gw2 dans le bundle de certificats
+  existant : mise à jour ciblée de certifi 2026.7.22 vers 2026.10.19 dans uv.lock
+  et l’export Docker haché. Aucun autre paquet modifié, aucun contournement du
+  contrôle de sécurité ; correction incluse dans la même livraison 2.3.27.
 
 ## Release 2.3.26 — finalisation de l’API Discord
 
