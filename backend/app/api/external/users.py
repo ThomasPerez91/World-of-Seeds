@@ -13,11 +13,18 @@ from app.api.external.schemas import (
     DiscordUserId,
     ExternalCapacityResponse,
     ExternalErrorResponse,
+    ExternalPasswordResetResponse,
     ExternalUserCreateRequest,
     ExternalUserCreateResponse,
     ExternalUserStatusResponse,
 )
 from app.auth.dependencies import DbSession
+from app.auth.password_reset import (
+    RESET_SCOPE,
+    ResetThrottled,
+    ResetUnavailable,
+    issue_password_reset,
+)
 from app.auth.security import hash_token
 from app.models import (
     DiscordAccountLink,
@@ -285,3 +292,33 @@ async def recover_initial_credentials(
     await db.commit()
     response.headers["Cache-Control"] = "no-store"
     return result
+
+
+@router.post(
+    "/users/discord/{discord_user_id}/password-reset", response_model=ExternalPasswordResetResponse
+)
+async def create_password_reset(
+    discord_user_id: DiscordUserId,
+    request: Request,
+    response: Response,
+    db: DbSession,
+    client: Annotated[ExternalApiClient, Depends(require_scope(RESET_SCOPE))],
+) -> ExternalPasswordResetResponse:
+    try:
+        token = await issue_password_reset(
+            db,
+            client_id=client.id,
+            key_hash=client.key_hash,
+            discord_id=discord_user_id,
+            request_id=request.state.external_request_id,
+        )
+    except ResetUnavailable as exc:
+        await db.rollback()
+        raise ExternalApiError(
+            409, "password_reset_unavailable", "Password recovery unavailable"
+        ) from exc
+    except ResetThrottled as exc:
+        await db.rollback()
+        raise ExternalApiError(429, "rate_limit_exceeded", "Try again later", 60) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return ExternalPasswordResetResponse(token=token)

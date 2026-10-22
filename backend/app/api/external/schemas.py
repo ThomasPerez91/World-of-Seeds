@@ -4,13 +4,20 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ExternalScope = Literal["users:create", "downloads:read", "users:read", "users:recover"]
+ExternalScope = Literal[
+    "users:create", "downloads:read", "users:read", "users:recover", "users:reset-password"
+]
 DiscordUserId = Annotated[str, Field(pattern=r"^[1-9][0-9]{16,19}$")]
 
 
 class ExternalHealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     api_version: Literal["1"] = "1"
+
+
+class ExternalPasswordResetResponse(BaseModel):
+    token: str = Field(repr=False)
+    expires_in: int = 900
 
 
 class ExternalUserCreateRequest(BaseModel):
@@ -70,7 +77,7 @@ class ExternalDownloadsPage(BaseModel):
 class ExternalApiClientCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=128)
-    scopes: list[ExternalScope] = Field(min_length=1, max_length=4)
+    scopes: list[ExternalScope] = Field(min_length=1, max_length=5)
 
 
 class ExternalApiClientResponse(BaseModel):

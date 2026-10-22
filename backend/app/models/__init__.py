@@ -8,6 +8,7 @@ from app.models.external_api import (
     UserProvisioningAudit,
 )
 from app.models.options_v2 import DatabaseOption, DatabaseOptionAudit
+from app.models.password_reset import PasswordReset
 from app.models.torrent import UserTorrent
 from app.models.torrent_v2 import (
     DownloadLease,
@@ -35,6 +36,7 @@ from app.models.torrent_v2 import (
 from app.models.v1_import import V1ImportItem, V1ImportRun, V1ImportRunStatus
 
 __all__ = [
+    "PasswordReset",
     "Base",
     "DatabaseOption",
     "DatabaseOptionAudit",

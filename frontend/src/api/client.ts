@@ -44,7 +44,7 @@ export interface ExternalApiClient {
   name: string;
   key_prefix: string;
   is_active: boolean;
-  scopes: Array<"users:create" | "downloads:read" | "users:read" | "users:recover">;
+  scopes: Array<"users:create" | "downloads:read" | "users:read" | "users:recover" | "users:reset-password">;
   created_at: string;
   updated_at: string;
   last_used_at: string | null;
@@ -604,6 +604,12 @@ export const api = {
 
   logout(): Promise<void> {
     return request<void>("/auth/logout", { method: "POST" });
+  },
+
+  async confirmPasswordReset(token: string, newPassword: string): Promise<void> {
+    await request<void>("/auth/password-reset/confirm", {
+      method: "POST", body: JSON.stringify({ token, new_password: newPassword }),
+    });
   },
 
   async changeCredentials(

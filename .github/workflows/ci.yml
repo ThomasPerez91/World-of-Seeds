@@ -93,6 +93,24 @@ jobs:
       - run: npm run test
       - run: npm run build
 
+  discord-bot:
+    name: Discord bot
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: discord-bot
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --require-hashes -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - name: Verify non-root image can read the application
+        run: |
+          docker build -t wos-discord-bot-ci .
+          docker run --rm wos-discord-bot-ci python -c 'import app, wos'
+
   security:
     name: Dependency and image security
     runs-on: ubuntu-latest
@@ -115,6 +133,14 @@ jobs:
           --requirement backend/requirements.lock
           --no-deps --disable-pip --format json
           --output "$RUNNER_TEMP/security-reports/python.json"
+      - name: Audit Discord bot dependencies
+        # The independently deployed bot has its own locked runtime.
+        # Keep its credentials off CI; only its dependencies are audited here.
+        run: >-
+          uvx --from pip-audit==2.10.1 pip-audit
+          --requirement discord-bot/requirements.txt
+          --no-deps --disable-pip --format json
+          --output "$RUNNER_TEMP/security-reports/discord-bot.json"
       - name: Audit frontend production dependencies
         working-directory: frontend
         run: |

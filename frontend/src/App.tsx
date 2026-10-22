@@ -17,6 +17,9 @@ import { AdminNewGreedyPage } from "./features/admin/AdminNewGreedyPage";
 import { AdminCleanupPage } from "./features/admin/AdminCleanupPage";
 import { UserDashboardPage } from "./features/dashboard/UserDashboardPage";
 import { AccountMenuIcon, AdminIcon, BackIcon, HomeIcon, SettingsIcon } from "./components/icons";
+import { AuthBrandRow } from "./components/AuthBrandRow";
+import { AuthPasswordField } from "./components/AuthPasswordField";
+import { PasswordResetScreen, readResetToken } from "./components/PasswordResetScreen";
 import { LanguageSelector } from "./components/LanguageSelector";
 import {
   LegalLinks,
@@ -46,59 +49,6 @@ function BrandMark() {
   return (
     <div className="brand-mark" aria-hidden="true">
       <img src="/brand-mark.svg" alt="" />
-    </div>
-  );
-}
-
-function AuthBrandRow({
-  disabled = false,
-  onLocaleChange,
-}: {
-  disabled?: boolean;
-  onLocaleChange?: (locale: Locale) => void | Promise<void>;
-}) {
-  return (
-    <div className="login-brand-row">
-      <img className="login-title-image" src="/title.webp?rev=a9c84cc" alt="" aria-hidden="true" />
-      <LanguageSelector variant="flag-toggle" disabled={disabled} onChange={onLocaleChange} />
-    </div>
-  );
-}
-
-function InitialPasswordField({ id, label, invalid, minLength }: {
-  id: string;
-  label: string;
-  invalid: boolean;
-  minLength?: number;
-}) {
-  const { t } = useI18n();
-  const [visible, setVisible] = useState(false);
-  return (
-    <div className="credential-field">
-      <label htmlFor={id}>{label}</label>
-      <div className="login-input login-password-input">
-        <LockKeyhole aria-hidden="true" />
-        <input
-          id={id}
-          name={id}
-          type={visible ? "text" : "password"}
-          autoComplete={id === "current-password" ? "current-password" : "new-password"}
-          minLength={minLength}
-          aria-describedby="credential-error"
-          aria-invalid={invalid}
-          required
-        />
-        <button
-          type="button"
-          className="password-visibility"
-          aria-label={visible ? t("login.hidePassword") : t("login.showPassword")}
-          aria-controls={id}
-          aria-pressed={visible}
-          onClick={() => setVisible((value) => !value)}
-        >
-          {visible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
-        </button>
-      </div>
     </div>
   );
 }
@@ -149,8 +99,10 @@ function ServiceHealth() {
 function LoginScreen({
   onLogin,
   onOpenLegal,
+  onForgotPassword,
 }: {
   onLogin: (user: User) => void;
+  onForgotPassword: () => void;
   onOpenLegal: (document: LegalDocument) => void;
 }) {
   const { apiError, locale, t } = useI18n();
@@ -245,6 +197,7 @@ function LoginScreen({
             </p>
           </form>
         </Card>
+        <button type="button" className="auth-text-button" onClick={onForgotPassword}>{t("reset.forgot")}</button>
         <LegalLinks onOpen={onOpenLegal} />
       </section>
     </main>
@@ -315,7 +268,7 @@ function CredentialChangeScreen({
         </header>
         <form className="credential-form" onSubmit={handleSubmit}>
           <div className="credential-fields">
-            <InitialPasswordField
+            <AuthPasswordField
               id="current-password"
               label={t("credentials.initialPassword")}
               invalid={error !== ""}
@@ -339,13 +292,13 @@ function CredentialChangeScreen({
                 {t("account.usernameHint")}
               </p>
             </div>
-            <InitialPasswordField
+            <AuthPasswordField
               id="new-password"
               label={t("credentials.newPassword")}
               invalid={error !== ""}
               minLength={12}
             />
-            <InitialPasswordField
+            <AuthPasswordField
               id="password-confirmation"
               label={t("credentials.confirmPassword")}
               invalid={error !== ""}
@@ -915,6 +868,24 @@ function UnavailableScreen({ onRetry }: { onRetry: () => void }) {
 function AppContent() {
   const { setLocale, t } = useI18n();
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
+  const [resetToken, setResetToken] = useState(readResetToken);
+  const [recoveryOpen, setRecoveryOpen] = useState(() => readResetToken() !== null);
+  const [resetComplete, setResetComplete] = useState(false);
+
+  useEffect(() => {
+    function captureRecoveryLink() {
+      const token = readResetToken();
+      if (token !== null) {
+        setResetToken(token);
+        setResetComplete(false);
+        setRecoveryOpen(true);
+        window.history.replaceState({}, "", window.location.pathname + window.location.search);
+      }
+    }
+    captureRecoveryLink();
+    window.addEventListener("hashchange", captureRecoveryLink);
+    return () => window.removeEventListener("hashchange", captureRecoveryLink);
+  }, []);
   const [legalDocument, setLegalDocument] = useState<LegalDocument | null>(null);
   const handleSessionExpired = useCallback(() => {
     clearLegacyFilePathFromUrl();
@@ -950,6 +921,11 @@ function AppContent() {
   }
 
   function renderScreen() {
+    if (recoveryOpen && legalDocument === null) {
+      return <PasswordResetScreen key={resetToken ?? "help"} token={resetToken} complete={resetComplete}
+        onBack={() => { setRecoveryOpen(false); setResetToken(null); setResetComplete(false); }}
+        onCompleted={() => { setResetComplete(true); handleSessionExpired(); }} onOpenLegal={setLegalDocument} />;
+    }
     if (auth.status === "authenticated" && !auth.user.must_change_credentials) {
       return (
         <>
@@ -995,6 +971,7 @@ function AppContent() {
       return (
         <LoginScreen
           onLogin={(user) => setAuth({ status: "authenticated", user })}
+          onForgotPassword={() => setRecoveryOpen(true)}
           onOpenLegal={setLegalDocument}
         />
       );
