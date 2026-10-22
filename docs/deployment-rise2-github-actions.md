@@ -179,3 +179,62 @@ SSH restreint wosdeploy
 ```
 
 Un CI rouge, un SHA obsolète, un historique non fast-forward ou un changement d'infrastructure sensible doit empêcher le déploiement.
+
+## Bootstrap de sécurité 2.4.1 (opérateur)
+
+Les deux fichiers sous `/usr/local/sbin` sont des copies root, indépendantes du
+checkout. Une fusion GitHub ne remplace pas le helper installé. **Avant la première
+promotion 2.4.1 vers master**, installer `deploy/deploy-world-of-seeds-v2-rise2` depuis
+un commit dont la CI a réussi, avec `scripts/rise2_v2_deploy_helper_install.sh`.
+L’installateur attend le SHA Git exact et le SHA-256 des octets du helper, vérifie
+la syntaxe Bash, refuse une installation pendant un déploiement et publie le fichier
+atomiquement, root:root 0755. Il ne change ni le checkout ni les services.
+
+La clé SSH de CI reste limitée à sa commande forcée : ne pas lui ajouter un shell,
+ne pas utiliser le preflight root comme moyen d’installer implicitement le helper.
+L’opérateur utilise son accès administratif habituel. Les commandes concrètes doivent
+être épinglées au commit validé et aux deux empreintes (installateur + helper) de la PR.
+Après installation, conserver la sortie de checksum comme preuve du bootstrap.
+
+### Migrations et récupération à partir de 2.4.1
+
+- Verrou `flock` hôte pendant tout le déploiement et son rollback.
+- Gestion de INT, TERM et HUP ; SIGKILL/panne hôte ne peuvent être interceptés.
+- Comparaison du head réel PostgreSQL au head de l’image précédente avant arrêt.
+- Empreinte DDL de la base complète avant/après interruption, hors clés aléatoires `pg_dump` restrict/unrestrict ; aucune donnée métier dans les logs.
+- Head cible identique : pas de migration exécutée, donc pas de sauvegarde imposée
+  par ce déploiement sans changement de schéma.
+- Head différent : entrée **revue** obligatoire dans `deploy/migration-policy.json`,
+  migration transactionnelle, sauvegarde chiffrée et restauration isolée vérifiée
+  par le helper de la révision précédemment déployée, avant arrêt.
+- Recipient et prérequis `age` doivent être installés auparavant ; leur absence fait
+  échouer le déploiement avant arrêt. Ceci ne prouve pas une copie hors hôte (C3).
+- Aucun downgrade automatique et aucune restauration automatique de données réelles.
+- Échec avec head/DDL inchangés : retour de configuration et remise en service de
+  l’image précédente, avec contrôle API/ingress/workers/scheduler.
+- Migration validée explicitement compatible avec l’application précédente : retour
+  applicatif possible sans modifier le schéma. Cette déclaration doit être prouvée par
+  des tests sur base peuplée et une revue des migrations, jamais générée aveuglément.
+- Schéma inconnu/incompatible : runtime partiel arrêté, environnement de récupération
+  et journal de sauvegarde conservés ; intervention opérateur nécessaire.
+- Un échec de restauration applicative reste un échec, clairement journalisé.
+
+Exemple de politique (exemple uniquement, non activé dans la version sans migration) :
+
+```json
+{
+  "schema": 1,
+  "upgrades": {
+    "ancienne_revision->nouvelle_revision": {
+      "transactional": true,
+      "backward_compatible": false
+    }
+  }
+}
+```
+
+Une migration non transactionnelle ou absente de cette liste exige un plan opérateur
+séparé. La déclaration de compatibilité est un engagement de revue, pas une preuve
+automatique tirée du seul numéro Alembic. La remise en service automatique reste
+conditionnée aux observations réelles du schéma ; la sauvegarde n’est jamais restaurée
+aveuglément sur production pour faire disparaître un échec.

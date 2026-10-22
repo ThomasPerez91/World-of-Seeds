@@ -552,3 +552,17 @@ Préférences, curseur et empreintes persistés dans le volume bot SQLite ; pas 
 table PostgreSQL. MP uniquement, opt-out disponible, déduplication avant envoi et livraison
 au mieux (une tentative par alerte), sans garantie exactement-une-fois. Voir README bot
 pour délais de scan et limites de livraison. Le déploiement web ne remplace pas le bot.
+
+
+## Campagne audit 2.4.x
+
+Suivi : docs/audits/CORRECTIFS_2.4.md. Les constats sont validés sur la base réelle
+2.3.29 et corrigés par livraisons successives, en commençant par C1/C2 (2.4.1).
+Les copies root du helper sont indépendantes du checkout ; installer explicitement
+la révision revue avec scripts/rise2_v2_deploy_helper_install.sh avant première
+promotion. Aucun détour par les scripts preflight pour élargir la clé SSH CI.
+Les changements de head Alembic automatiques exigent une entrée revue dans
+`deploy/migration-policy.json`, une sauvegarde chiffrée restaurée en isolation et
+une migration déclarée transactionnelle. Aucun downgrade automatique de production.
+Une incompatibilité/empreinte inconnue bloque le retour applicatif et préserve les
+éléments de récupération opérateur. Aucun head différent : pas d’Alembic upgrade.

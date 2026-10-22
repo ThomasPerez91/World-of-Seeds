@@ -4,7 +4,19 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.3.29`.
+- Version applicative cible : `2.4.1` (préparation ; production 2.3.29).
+
+## Campagne audit 2.4.x — préparation de 2.4.1
+
+Journal complet : `docs/audits/CORRECTIFS_2.4.md`. Audit PDF lu intégralement ; base
+réelle 2.3.29 conservée. Priorité C1/C2 : déploiement verrouillé, signaux et rollback
+applicatif conditionné à une empreinte de schéma identique ou une transition
+transactionnelle explicitement compatible. Aucun downgrade/restauration automatique.
+Avant changement de head : sauvegarde chiffrée + restauration isolée obligatoires,
+via l’outil de la révision précédente. Sans changement de head : pas de migration.
+Le helper root installé doit être remplacé par l’opérateur avant première promotion
+master ; la clé SSH CI forcée ne le permet pas. Aucun contournement par preflight.
+Cette livraison n’est pas annoncée déployée avant preuve du bootstrap et du rollout.
 
 ## Release 2.3.29 — téléchargements et alertes privées Discord
 
