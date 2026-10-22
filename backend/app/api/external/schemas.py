@@ -5,7 +5,12 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 ExternalScope = Literal[
-    "users:create", "downloads:read", "users:read", "users:recover", "users:reset-password"
+    "users:create",
+    "downloads:read",
+    "users:read",
+    "users:recover",
+    "users:reset-password",
+    "downloads:read-discord",
 ]
 DiscordUserId = Annotated[str, Field(pattern=r"^[1-9][0-9]{16,19}$")]
 
@@ -59,6 +64,8 @@ class ExternalDownloadResponse(BaseModel):
     progress_percent: float = Field(ge=0, le=100)
     size_bytes: int = Field(ge=0)
     queue_position: int | None = Field(default=None, ge=1)
+    access_warning_at: datetime | None = None
+    access_expiring_soon: bool = False
     created_at: datetime
     updated_at: datetime
     ready_at: datetime | None
@@ -77,7 +84,7 @@ class ExternalDownloadsPage(BaseModel):
 class ExternalApiClientCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=128)
-    scopes: list[ExternalScope] = Field(min_length=1, max_length=5)
+    scopes: list[ExternalScope] = Field(min_length=1, max_length=6)
 
 
 class ExternalApiClientResponse(BaseModel):
@@ -104,3 +111,17 @@ class ExternalErrorDetail(BaseModel):
 
 class ExternalErrorResponse(BaseModel):
     error: ExternalErrorDetail
+
+
+class ExternalDownloadNotice(BaseModel):
+    request_id: UUID
+    discord_user_id: DiscordUserId
+    name: str
+    ready_at: datetime
+    unsubscribe_at: datetime
+    warning_at: datetime | None
+
+
+class ExternalDownloadNoticesPage(BaseModel):
+    items: list[ExternalDownloadNotice]
+    next_after: UUID | None

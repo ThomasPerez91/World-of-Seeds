@@ -539,3 +539,16 @@ scope ; aucune modification distante de .env ni supposition de bot déjà mis à
 `DISCORD_REGISTRATION_ROLE_ID` permet une approbation des inscriptions via un rôle attribué
 manuellement. Variable vide : inscription libre. Ce contrôle ne prouve pas une personne
 unique ; la liaison native garantit un compte WoS par ID Discord, pas par personne physique.
+
+
+## Extension Discord — 2.3.29
+
+Le bot de confiance utilise le scope explicite downloads:read-discord pour la liste
+personnelle par Discord ID et le scan borné /discord/download-notices (keyset UUID).
+Il ne persiste aucune seed. L'ancien /me/downloads reste clé + seed, avec positions
+estimées calculées par le même module que le site. Les alertes READY/dernier tiers
+utilisent les dates propres de TorrentRequest, jamais le délai d'un autre propriétaire.
+Préférences, curseur et empreintes persistés dans le volume bot SQLite ; pas de nouvelle
+table PostgreSQL. MP uniquement, opt-out disponible, déduplication avant envoi et livraison
+au mieux (une tentative par alerte), sans garantie exactement-une-fois. Voir README bot
+pour délais de scan et limites de livraison. Le déploiement web ne remplace pas le bot.

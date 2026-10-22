@@ -1,4 +1,4 @@
-# WoS — bot Discord 2.3.28
+# WoS — bot Discord 2.3.29
 
 Paquet autonome, même serveur et salon que le bot initial. Aucun secret dans les sources.
 Il faut d’abord déployer l’API WoS 2.3.28 et sa migration additive des liens de récupération.
@@ -9,7 +9,8 @@ Dans Administration → Services → API externes, créer une clé dédiée avec
 
 - `users:create` ;
 - `users:read` ;
-- **`users:reset-password`**.
+- `users:reset-password` ;
+- **`downloads:read-discord`**.
 
 Cette dernière permission autorise le bot de confiance à délivrer des liens pour les comptes
 Discord associés, y compris ceux créés par une ancienne clé. Les clés existantes ne sont pas
@@ -24,7 +25,7 @@ Transférer l’archive dans ce répertoire puis :
 ```bash
 cd ~/wos-discord-bot
 sudo docker compose stop bot
-python3 -m zipfile -e wos-discord-bot-2.3.28.zip .
+python3 -m zipfile -e wos-discord-bot-2.3.29.zip .
 chmod 600 .env
 sudo docker compose config --quiet
 sudo docker compose build
@@ -96,3 +97,38 @@ Un test manuel Créer mon compte crée un vrai compte et occupe une place.
 Ne pas afficher `docker compose config` sans `--quiet`, ni utiliser `down -v` pour redémarrer.
 Le healthcheck contrôle la connexion Discord récente ; il ne garantit pas WoS disponible
 à tout instant. Un seul bot par volume, aucun port publié et aucun accès au stockage des torrents.
+
+
+## Mes téléchargements et alertes privées — 2.3.29
+
+Le bouton **Mes téléchargements** affiche une liste éphémère personnelle, huit demandes par
+page, avec Précédent / Suivant / Actualiser. États : attente, téléchargement, absence de
+progression, nouvelle tentative différée, prêt, erreur, désabonné et expiré. La position
+est une estimation de la file physique partagée, identique au site, pas une promesse de FIFO.
+Les titres des autres utilisateurs ne sont jamais affichés. Aucune seed n'est demandée au membre.
+
+La nouvelle permission explicite `downloads:read-discord` est privilégiée : elle permet au
+bot de confiance de lire les demandes des comptes Discord associés et leur flux d'alertes.
+Elle n'est pas ajoutée automatiquement aux anciennes clés. Les chemins membres utilisent
+uniquement l'identité authentifiée de l'auteur du clic ; le flux global est réservé au bot.
+
+Les alertes sont activées par défaut pour les comptes liés actifs non administrateurs :
+MP vert quand un fichier est prêt, puis MP rouge quand les deux premiers tiers de la durée
+personnelle `ready_at` → `unsubscribe_at` se sont écoulés (exemple : 9 jours → alerte après
+6 jours). La liste affiche aussi cet avertissement. Un bouton permet de désactiver/réactiver
+ces MP. Les dates sont propres à chaque abonnement, même pour un torrent partagé.
+
+Le bot scrute au maximum 25 abonnements READY par page. Une passe est répétée après
+60 secondes, avec 5 secondes entre pages ; un gros backlog allonge donc le délai d'alerte.
+Aucun torrent n'est relancé, aucun slot n'est interrompu. Les comptes suspendus/supprimés,
+abonnements annulés/expirés et torrents non prêts sont exclus du flux à la lecture.
+Les fichiers déjà prêts à l'installation reçoivent aussi un premier rappel ; après une panne,
+si l'avertissement est déjà dû, seul le message rouge est envoyé, sans doubler le MP vert.
+
+Le volume existant contient désormais `notifications.sqlite3` : préférences, curseur de
+lecture et empreintes de déduplication persistantes, sans seed, mot de passe ou titre.
+Une nouvelle période d'accès peut recevoir ses propres alertes. Ne pas effacer ce volume.
+Une alerte est réservée durablement avant la tentative Discord pour éviter les doublons après
+redémarrage. **Livraison au mieux, une tentative par alerte** : MP bloqués, réponse Discord
+ambiguë ou arrêt entre réservation et envoi peuvent empêcher sa réception. Aucun repli public,
+aucune boucle de renvoi. La liste privée et le site restent la référence ; autoriser les MP.
