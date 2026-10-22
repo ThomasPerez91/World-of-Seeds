@@ -4,9 +4,9 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.4.2` (préparation ; production 2.4.1 vérifiée).
+- Version de production vérifiée : `2.4.2`. Prochaine cible : 2.4.3, S1 non publié.
 
-## Campagne audit 2.4.x — 2.4.1 déployée, préparation de 2.4.2
+## Campagne audit 2.4.x — 2.4.2 déployée, S1 interrompu
 
 Journal complet : `docs/audits/CORRECTIFS_2.4.md`. Audit PDF lu intégralement.
 2.4.1 : #396, #398 et #399 intégrées ; #397 promue sur master
@@ -19,10 +19,19 @@ automatique. Sauvegarde chiffrée et restauration isolée avant changement de he
 pas d’Alembic si head inchangé. Fenêtre SSH adaptée à la sauvegarde vérifiée.
 C3/C4 (hors hôte/alertes reçues) restent à traiter.
 
-2.4.2 en préparation : T1/M5 (reset et deux appareils conservant leurs cookies),
+2.4.2 déployée : T1/M5 (reset et deux appareils conservant leurs cookies),
 T2/M9 (toutes les mutations admin avec CSRF valide/invalide et rôles), T2/M11
 (seed d’un compte supprimé encore actif). Protections existantes vérifiées par
-les tests ; PR/CI/déploiement de cette nouvelle version pas encore réalisés.
+les tests. #400 et #401 fusionnées ; master `0be962b3f183a621631b1bba1addc229a2602086`.
+CI master 39852047968 : 1291 tests backend réussis / 2 ignorés, six contrôles verts.
+Déploiement 39852799747 réussi ; contrôles publics indépendants live/ready/page/bundle
+HTTP 200, version 2.4.2. Voir le journal pour le digest et les preuves complètes.
+
+Prochaine cible : S1, validation torrent quadratique. Prototype local et benchmarks
+(30000 fichiers : 0,728226 s) non publiés, tests encore incomplets. Environnement de
+travail devenu indisponible ; ne pas déclarer S1 corrigé et ne pas déployer ce prototype.
+À la reprise, vérifier les fichiers locaux éventuels et compléter les tests de collision,
+saturation, annulation, responsiveness et propriété du staging. Aucun bootstrap à refaire.
 
 ## Release 2.3.29 — téléchargements et alertes privées Discord
 
