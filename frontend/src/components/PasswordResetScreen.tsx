@@ -13,8 +13,9 @@ export function readResetToken(): string | null {
   return new URLSearchParams(window.location.hash.slice(1)).get("reset-password");
 }
 
-export function PasswordResetScreen({ token, onBack, onCompleted, onOpenLegal }: {
+export function PasswordResetScreen({ token, complete, onBack, onCompleted, onOpenLegal }: {
   token: string | null;
+  complete: boolean;
   onBack: () => void;
   onCompleted: () => void;
   onOpenLegal: (document: LegalDocument) => void;
@@ -22,7 +23,6 @@ export function PasswordResetScreen({ token, onBack, onCompleted, onOpenLegal }:
   const { t, apiError } = useI18n();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [complete, setComplete] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,7 +37,6 @@ export function PasswordResetScreen({ token, onBack, onCompleted, onOpenLegal }:
     setError("");
     try {
       await api.confirmPasswordReset(token, password);
-      setComplete(true);
       onCompleted();
     } catch (caught) {
       setError(apiError(caught, "error.temporary"));
