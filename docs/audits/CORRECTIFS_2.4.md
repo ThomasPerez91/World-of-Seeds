@@ -7,7 +7,7 @@
 - Cycle : tests isolés → PR develop → CI → merge → PR master → CI → merge/déploiement → contrôles réels → mise à jour du journal → livraison suivante.
 - Tests : comportementaux, PostgreSQL/Redis/Docker en CI selon disponibilité ; aucun test destructif sur production. Limites métier users, protections techniques pour tous, exemptions admin vérifiées côté serveur.
 - Audit lu intégralement (15 pages) : les constats [V], [S] et les preuves runtime manquantes restent distingués.
-- Branches : master et develop ont actuellement le même contenu 2.3.29 ; master contient en plus son commit de promotion.
+- État au 22 octobre : develop contient la préparation 2.4.1 (#396) ; promotion master suivie dans #397, production encore à vérifier.
 
 ## Matrice de suivi
 
@@ -31,8 +31,8 @@
 | B10 | I/O disque hors verrou global | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | B11 | Rétention sessions/throttles et réconciliation | P2 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | B12 | URL Alembic, dates et downgrade peuplé | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| C1 | Déploiement interrompu après stop/migration | P0 | Corrigé et testé (activation hôte requise) | 2.4.1 | À renseigner après publication | 21 tests exécutables de déploiement |
-| C2 | Sauvegarde préalable et rollback non destructif | P0 | Corrigé et testé (activation hôte requise) | 2.4.1 | À renseigner après publication | 21 tests exécutables de déploiement |
+| C1 | Déploiement interrompu après stop/migration | P0 | Corrigé et testé ; helper hôte installé, déploiement à vérifier | 2.4.1 | #396 / #397 | 21 tests exécutables de déploiement |
+| C2 | Sauvegarde préalable et rollback non destructif | P0 | Corrigé et testé ; helper hôte installé, déploiement à vérifier | 2.4.1 | #396 / #397 | 21 tests exécutables de déploiement |
 | C3 | Sauvegardes configuration et hors hôte | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | C4 | Alertmanager, routage et réception prouvée | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | C5 | Durcissement infrastructure et workflows | P2 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -84,7 +84,21 @@ Ne pas profiter du preflight exécuté en root pour contourner cette restriction
 
 ### Vérifications et statut
 
-Branche : `fix/audit-2.4.1-deployment`. PR, commits, résultats CI et déploiement à renseigner avec les preuves réelles.
+Branche : `fix/audit-2.4.1-deployment`. [PR #396](https://github.com/ThomasPerez91/World-of-Seeds/pull/396) intégrée dans develop (`dd258e843ce16c9ca96d58153c59b101d6491ce2`).
+Promotion : [PR #397](https://github.com/ThomasPerez91/World-of-Seeds/pull/397), passée prête après confirmation opérateur.
+
+Preuve opérateur reçue le 22 octobre 2026 : installateur validé par `sha256sum --check`,
+helper installé depuis `093e79d2029cabda79bef5585ce91e3f472cd8e3` ; empreinte finale
+`9d60b2f57f54f61bccb85e0be5caf2a88e588eef4d6813fb7c1a09c6abfc63c4`, identique à la source revue.
+Ce résultat confirme l’installation du helper, pas encore le déploiement applicatif.
+
+[CI source](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39791637717) et
+[CI de promotion](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39793037306)
+réussies : les six contrôles passent ; backend source 1190 réussis / 2 ignorés.
+L’ancien lancement push develop `39792883500` reste marqué en cours sur l’installation du
+prérequis de sauvegarde ; GitHub refuse la fusion avec « Required status check backend is in progress ».
+Aucune protection n’est désactivée. La présente preuve documentaire repasse le cycle normal de PR et de CI.
+Le résultat réel du déploiement et des contrôles publics reste à renseigner après exécution.
 Validation locale : backend 1120 réussis / 72 ignorés (services non disponibles), frontend
 209 réussis / 3 ignorés, bot 36 réussis ; Ruff, mypy strict (253 sources), TypeScript et build réussis.
 21 tests exécutables pour C1/C2, dont preflight, configuration, sauvegarde, arrêt partiel,
