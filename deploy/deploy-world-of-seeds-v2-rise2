@@ -16,7 +16,14 @@ PREVIOUS_IMAGE=""
 PREVIOUS_DB_HEAD=""
 TARGET_REVISION=""
 TARGET_IMAGE=""
+MIGRATION_STARTED=0
 MIGRATION_APPLIED=0
+PREVIOUS_SCHEMA=""
+TARGET_DB_HEAD=""
+MIGRATION_MODE="same"
+BACKUP_HELPER=""
+BACKUP_LOG=""
+PRESERVE_RECOVERY=0
 RUNTIME_CHANGED=0
 ROLLBACK_ENABLED=0
 COMPOSE=()
@@ -33,7 +40,10 @@ cleanup() {
   if [[ -n "${DOCKER_CONFIG_DIR}" && -d "${DOCKER_CONFIG_DIR}" ]]; then
     rm -rf -- "${DOCKER_CONFIG_DIR}"
   fi
-  if [[ -n "${ENV_BACKUP}" && -e "${ENV_BACKUP}" ]]; then
+  if [[ -n "${BACKUP_HELPER}" && -e "${BACKUP_HELPER}" ]]; then
+    rm -f -- "${BACKUP_HELPER}"
+  fi
+  if [[ "${PRESERVE_RECOVERY}" != "1" && -n "${ENV_BACKUP}" && -e "${ENV_BACKUP}" ]]; then
     rm -f -- "${ENV_BACKUP}"
   fi
 }
@@ -123,54 +133,100 @@ write_state() {
   mv -f -- "${tmp}" "${STATE_FILE}"
 }
 
+database_head() {
+  docker exec "${PG_BEFORE}" sh -ec \
+    'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -v ON_ERROR_STOP=1 -At -c "SELECT version_num FROM alembic_version ORDER BY version_num"'
+}
+
+database_schema() {
+  # PostgreSQL 17 pg_dump adds a random restrict key: exclude only those
+  # guards, never actual DDL, before comparing schema fingerprints.
+  docker exec "${PG_BEFORE}" sh -ec \
+    'exec pg_dump --schema-only --no-owner --no-privileges --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' \
+    | python3 -c 'import hashlib,re,sys; lines=(l for l in sys.stdin.buffer if not re.match(rb"\\(?:un)?restrict ",l)); print(hashlib.sha256(b"".join(lines)).hexdigest())'
+}
+
 rollback() {
   local status="${1:-$?}"
-  trap - ERR
+  local actual_head="" actual_schema="" compatible=0 failed=0
+  trap - ERR INT TERM HUP
   set +e
-
+  [[ "${status}" != "0" ]] || status=1
   if [[ "${ROLLBACK_ENABLED}" != "1" ]]; then
     exit "${status}"
   fi
+  ROLLBACK_ENABLED=0
+  printf '\nDéploiement V2 échoué (code %s). Évaluation du rollback applicatif sans downgrade.\n' "${status}" >&2
 
-  printf '\nDéploiement V2 échoué (code %s). Tentative de rollback applicatif.\n' "${status}" >&2
-
-  if [[ -n "${ENV_BACKUP}" && -f "${ENV_BACKUP}" ]]; then
-    cp --preserve=mode,ownership,timestamps -- "${ENV_BACKUP}" "${ENV_FILE}"
+  if [[ "${RUNTIME_CHANGED}" != "1" ]]; then
+    compatible=1
+  else
+    actual_head="$(database_head)" && actual_schema="$(database_schema)"
+    if [[ $? == 0 && "${actual_head}" == "${PREVIOUS_DB_HEAD}" && "${actual_schema}" == "${PREVIOUS_SCHEMA}" ]]; then
+      compatible=1
+    elif [[ "${MIGRATION_STARTED}" == "1" && "${MIGRATION_MODE}" == "transactional-compatible" && "${actual_head}" == "${TARGET_DB_HEAD}" ]]; then
+      compatible=1
+    fi
   fi
 
-  if [[ -n "${PREVIOUS_REVISION}" ]]; then
-    repo_git checkout --detach "${PREVIOUS_REVISION}" >/dev/null 2>&1
+  if [[ "${compatible}" != "1" ]]; then
+    PRESERVE_RECOVERY=1
+    # Stop any partially started target runtime; never run old code against an
+    # unknown/incompatible schema and never automatically restore production data.
+    "${COMPOSE[@]}" stop api worker scheduler >&2 || true
+    printf 'Schéma inconnu/incompatible : aucun downgrade ni restauration automatique. Intervention opérateur requise.\nEnvironnement de récupération : %s\nSauvegarde vérifiée avant migration : %s\n' "${ENV_BACKUP}" "${BACKUP_LOG:-aucune migration commencée}" >&2
+    exit "${status}"
   fi
 
+  cp --preserve=mode,ownership,timestamps -- "${ENV_BACKUP}" "${ENV_FILE}" || failed=1
+  repo_git checkout --detach "${PREVIOUS_REVISION}" >/dev/null 2>&1 || failed=1
   COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
-
-  if [[ "${MIGRATION_APPLIED}" == "1" && -n "${PREVIOUS_DB_HEAD}" ]]; then
-    # The target migration tree is still available in TARGET_IMAGE. Use it to
-    # return the database to the previous application head before restoring the
-    # previous runtime image.
-    set_env_image "${TARGET_IMAGE}"
-    repo_git checkout --detach "${TARGET_REVISION}" >/dev/null 2>&1
-    COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
-    "${COMPOSE[@]}" run --rm --no-deps migrate \
-      alembic -c alembic.ini downgrade "${PREVIOUS_DB_HEAD}" >&2
-
-    cp --preserve=mode,ownership,timestamps -- "${ENV_BACKUP}" "${ENV_FILE}"
-    repo_git checkout --detach "${PREVIOUS_REVISION}" >/dev/null 2>&1
-    COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  if [[ "${failed}" == 0 && "${RUNTIME_CHANGED}" == 1 ]]; then
+    "${COMPOSE[@]}" up --detach --no-deps --force-recreate api worker scheduler ingress >&2 || failed=1
+    if [[ "${failed}" == 0 ]]; then
+      local recovered=0 expected_workers running_workers ingress_state
+      expected_workers="$("${COMPOSE[@]}" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["worker"].get("deploy", {}).get("replicas", 1))')"
+      [[ "${expected_workers}" =~ ^[1-9][0-9]*$ ]] || failed=1
+      for attempt in $(seq 1 30); do
+        running_workers="$("${COMPOSE[@]}" ps --status running -q worker | wc -l | tr -d ' ')"
+        ingress_state="$(container_health ingress 2>/dev/null)"
+        if [[ "$(container_health api 2>/dev/null)" == healthy ]] \
+          && [[ "${running_workers}" == "${expected_workers}" ]] \
+          && [[ "${ingress_state}" == running || "${ingress_state}" == healthy ]] \
+          && [[ -n "$("${COMPOSE[@]}" ps --status running -q scheduler)" ]]; then
+          recovered=1
+          break
+        fi
+        sleep 2
+      done
+      [[ "${recovered}" == 1 ]] || failed=1
+    fi
   fi
-
-  if [[ "${RUNTIME_CHANGED}" == "1" ]]; then
-    "${COMPOSE[@]}" up --detach --no-deps --force-recreate \
-      api worker scheduler ingress >&2
+  if [[ "${failed}" != 0 ]]; then
+    PRESERVE_RECOVERY=1
+    printf 'Rollback applicatif incomplet : intervention opérateur requise ; environnement préservé : %s\n' "${ENV_BACKUP}" >&2
+  elif [[ "${RUNTIME_CHANGED}" == 1 ]]; then
+    printf 'Rollback applicatif vérifié ; schéma conservé, aucune donnée restaurée automatiquement.\n' >&2
+  else
+    printf 'Aucun runtime arrêté ; configuration précédente restaurée.\n' >&2
   fi
-
-  printf '\nEtat après rollback :\n' >&2
   "${COMPOSE[@]}" ps api worker scheduler ingress postgres redis qbittorrent newgreedy >&2
   exit "${status}"
 }
 
+on_error() {
+  local status="$1"
+  # A failing command substitution must unwind to the owning shell; only that
+  # shell may restore services (ERR is inherited because errtrace is enabled).
+  if (( BASH_SUBSHELL > 0 )); then exit "${status}"; fi
+  rollback "${status}"
+}
+
 trap cleanup EXIT
-trap rollback ERR
+trap 'on_error $?' ERR
+trap 'rollback 130' INT
+trap 'rollback 143' TERM
+trap 'rollback 129' HUP
 
 [[ ${EUID} -eq 0 ]] || fail "ce script doit être exécuté par root via sudo."
 [[ $# -eq 3 ]] || fail "usage: deploy-world-of-seeds-v2-rise2 <revision> <sha256:digest> <github-actor>"
@@ -194,10 +250,15 @@ ENV_MODE="$(stat -c '%a' "${ENV_FILE}")"
 [[ "${ENV_MODE}" == "600" || "${ENV_MODE}" == "400" ]] || fail "l'environnement doit être en mode 600 ou 400."
 mountpoint -q "${DATA_MOUNT}" || fail "le stockage V2 n'est pas monté sur ${DATA_MOUNT}."
 
-for command in docker curl findmnt git mktemp mountpoint python3 stat; do
+for command in docker curl findmnt flock git mktemp mountpoint python3 stat; do
   command -v "${command}" >/dev/null || fail "commande requise absente: ${command}"
 done
 docker compose version >/dev/null
+
+# Host-wide lock is held until EXIT, including recovery. No user-controlled path.
+install -d -m 700 -o root -g root "${STATE_DIR}"
+exec {DEPLOY_LOCK_FD}>"${STATE_DIR}/deployment.lock"
+flock --nonblock "${DEPLOY_LOCK_FD}" || fail "un autre déploiement est déjà en cours."
 
 [[ -z "$(repo_git status --porcelain --untracked-files=no)" ]] \
   || fail "le checkout Rise2 contient des modifications suivies."
@@ -213,6 +274,7 @@ repo_git merge-base --is-ancestor "${PREVIOUS_REVISION}" "${TARGET_REVISION}" \
   || fail "le déploiement refuse un historique non fast-forward."
 
 readonly BLOCKED_CHANGES="$(repo_git diff --name-only "${PREVIOUS_REVISION}..${TARGET_REVISION}" -- \
+  scripts/rise2_v2_preflight.sh \
   deploy/compose.rise2.v2.yaml \
   deploy/qbittorrent.rise2.conf \
   deploy/world-of-seeds-v2-rise2.service \
@@ -252,8 +314,12 @@ readonly ACTUAL_VERSION="$(docker image inspect --format '{{index .Config.Labels
 
 PREVIOUS_DB_HEAD="$(docker run --rm --pull=never --entrypoint alembic \
   --workdir /app/backend "${PREVIOUS_IMAGE}" -c alembic.ini heads 2>/dev/null \
-  | awk 'NR == 1 {print $1}')"
+  | awk 'NF {print $1}')"
 [[ "${PREVIOUS_DB_HEAD}" =~ ^[0-9A-Za-z_]+$ ]] || fail "impossible de déterminer le head Alembic précédent."
+TARGET_DB_HEAD="$(docker run --rm --network=none --pull=never --entrypoint alembic   --workdir /app/backend "${TARGET_IMAGE}" -c alembic.ini heads 2>/dev/null)"
+TARGET_DB_HEAD="$(printf '%s\n' "${TARGET_DB_HEAD}" | awk 'NF {print $1}')"
+[[ "${TARGET_DB_HEAD}" =~ ^[0-9A-Za-z_]+$ ]] || fail "le schéma cible doit avoir un head unique."
+
 
 ENV_BACKUP="$(mktemp /etc/world-of-seeds-v2/.environment.pre-deploy.XXXXXX)"
 cp --preserve=mode,ownership,timestamps -- "${ENV_FILE}" "${ENV_BACKUP}"
@@ -275,11 +341,41 @@ for cid in "${QB_BEFORE}" "${NG_BEFORE}" "${PG_BEFORE}" "${REDIS_BEFORE}"; do
   [[ -n "${cid}" ]] || fail "un service persistant requis est absent."
 done
 
-"${COMPOSE[@]}" stop api worker scheduler
-"${COMPOSE[@]}" run --rm --no-deps migrate
-MIGRATION_APPLIED=1
+docker exec "${PG_BEFORE}" sh -ec 'exec pg_isready --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' >/dev/null
+readonly ACTUAL_DB_HEAD="$(database_head)"
+[[ "${ACTUAL_DB_HEAD}" == "${PREVIOUS_DB_HEAD}" ]] || fail "le schéma réel ne correspond pas à l’image précédente; intervention opérateur requise."
+PREVIOUS_SCHEMA="$(database_schema)"
+[[ "${PREVIOUS_SCHEMA}" =~ ^[0-9a-f]{64}$ ]] || fail "empreinte du schéma invalide."
 
+if [[ "${TARGET_DB_HEAD}" != "${PREVIOUS_DB_HEAD}" ]]; then
+  # Every automatic schema transition needs an explicit reviewed transactional
+  # policy. Non-transactional/unknown migrations require a separate operator plan.
+  MIGRATION_MODE="$(repo_git show "${TARGET_REVISION}:deploy/migration-policy.json" \
+    | python3 -c 'import json,sys; p=json.load(sys.stdin); entry=p["upgrades"][sys.argv[1]+"->"+sys.argv[2]]; assert p["schema"]==1 and entry["transactional"] is True and type(entry["backward_compatible"]) is bool; print("transactional-compatible" if entry["backward_compatible"] else "transactional-forward-only")' "${PREVIOUS_DB_HEAD}" "${TARGET_DB_HEAD}")"
+  BACKUP_HELPER="$(mktemp "${STATE_DIR}/.backup-helper.XXXXXX.py")"
+  # Execute the previously deployed, reviewed helper, never a target-supplied hook.
+  repo_git show "${PREVIOUS_REVISION}:scripts/rise2_v2_database_backup.py" >"${BACKUP_HELPER}"
+  chmod 600 "${BACKUP_HELPER}"
+  BACKUP_LOG="$(mktemp "${STATE_DIR}/pre-migration-backup.XXXXXX.log")"
+  chmod 600 "${BACKUP_LOG}"
+  python3 "${BACKUP_HELPER}" backup --recipient-file /etc/world-of-seeds-v2/backup-recipient \
+    >"${BACKUP_LOG}" || fail "sauvegarde chiffrée/restauration isolée échouée ; runtime précédent conservé."
+  cat "${BACKUP_LOG}"
+fi
+
+# Mark intent BEFORE stop: stop itself may partially succeed before failing.
 RUNTIME_CHANGED=1
+"${COMPOSE[@]}" stop api worker scheduler
+# Seal a quiescent schema fingerprint too (no application DDL should race this).
+[[ "$(database_head)" == "${PREVIOUS_DB_HEAD}" && "$(database_schema)" == "${PREVIOUS_SCHEMA}" ]] \
+  || fail "schéma modifié pendant le préflight ; intervention opérateur requise."
+if [[ "${TARGET_DB_HEAD}" != "${PREVIOUS_DB_HEAD}" ]]; then
+  MIGRATION_STARTED=1
+  "${COMPOSE[@]}" run --rm --no-deps migrate
+  MIGRATION_APPLIED=1
+  [[ "$(database_head)" == "${TARGET_DB_HEAD}" ]] || fail "head Alembic réel incorrect après migration."
+fi
+
 "${COMPOSE[@]}" up --detach --no-deps --force-recreate \
   api worker scheduler
 "${COMPOSE[@]}" up --detach --no-deps --force-recreate ingress
@@ -340,6 +436,6 @@ readonly HTTPS_CODE="$(curl --silent --show-error --output /dev/null --write-out
 
 write_state
 ROLLBACK_ENABLED=0
-trap - ERR
+trap - ERR INT TERM HUP
 printf 'World of Seeds V2 déployé avec succès : revision=%s image=%s\n' \
   "${TARGET_REVISION}" "${TARGET_IMAGE}"
