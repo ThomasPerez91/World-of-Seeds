@@ -4,22 +4,25 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.4.1` (préparation ; production 2.3.29).
+- Version applicative cible : `2.4.2` (préparation ; production 2.4.1 vérifiée).
 
-## Campagne audit 2.4.x — préparation de 2.4.1
+## Campagne audit 2.4.x — 2.4.1 déployée, préparation de 2.4.2
 
-Journal complet : `docs/audits/CORRECTIFS_2.4.md`. Audit PDF lu intégralement ; base
-réelle 2.3.29 conservée. Priorité C1/C2 : déploiement verrouillé, signaux et rollback
-applicatif conditionné à une empreinte de schéma identique ou une transition
-transactionnelle explicitement compatible. Aucun downgrade/restauration automatique.
-Avant changement de head : sauvegarde chiffrée + restauration isolée obligatoires,
-via l’outil de la révision précédente. Sans changement de head : pas de migration.
-Bootstrap opérateur confirmé le 22 octobre : helper installé depuis
-`093e79d2029cabda79bef5585ce91e3f472cd8e3`, SHA-256
-`9d60b2f57f54f61bccb85e0be5caf2a88e588eef4d6813fb7c1a09c6abfc63c4` conforme.
-Ne pas répéter l’installation. La clé SSH CI reste limitée au déploiement forcé.
-#396 intégrée ; promotion #397 en attente des contrôles GitHub, puis du rollout réel.
-La production applicative reste 2.3.29 tant que ce rollout n’est pas vérifié.
+Journal complet : `docs/audits/CORRECTIFS_2.4.md`. Audit PDF lu intégralement.
+2.4.1 : #396, #398 et #399 intégrées ; #397 promue sur master
+`92a16cefb47c9b9f2ac8898eba8b78262b0d50e6`. CI 39848967140 verte
+(1190 tests backend réussis / 2 ignorés), déploiement 39849514346 réussi.
+Contrôles publics indépendants : live/ready, page et bundle HTTP 200, version 2.4.1.
+Helper root installé et vérifié par l’opérateur ; ne pas répéter le bootstrap.
+Déploiement verrouillé, rollback conditionné au schéma, aucun downgrade/restauration
+automatique. Sauvegarde chiffrée et restauration isolée avant changement de head ;
+pas d’Alembic si head inchangé. Fenêtre SSH adaptée à la sauvegarde vérifiée.
+C3/C4 (hors hôte/alertes reçues) restent à traiter.
+
+2.4.2 en préparation : T1/M5 (reset et deux appareils conservant leurs cookies),
+T2/M9 (toutes les mutations admin avec CSRF valide/invalide et rôles), T2/M11
+(seed d’un compte supprimé encore actif). Protections existantes vérifiées par
+les tests ; PR/CI/déploiement de cette nouvelle version pas encore réalisés.
 
 ## Release 2.3.29 — téléchargements et alertes privées Discord
 

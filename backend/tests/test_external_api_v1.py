@@ -481,3 +481,20 @@ async def test_external_downloads_are_isolated_and_normalized(
     )
     assert invalid_seed.status_code == 401
     assert invalid_seed.json()["error"]["code"] == "invalid_user_seed"
+
+
+@pytest.mark.asyncio
+async def test_deleted_account_seed_is_rejected_even_if_account_is_still_active(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    app.state.external_api_rate_limiter = ExternalApiRateLimiter()
+    owner = await _user(db_session, "deleted-active-seed")
+    _, raw = await _api_client(db_session, scopes=["downloads:read"])
+    headers = _headers(raw, owner.auth_seed)
+    assert (await client.get("/api/external/v1/me/downloads", headers=headers)).status_code == 200
+    owner.deleted_at = datetime.now(UTC)
+    assert owner.is_active
+    await db_session.commit()
+    response = await client.get("/api/external/v1/me/downloads", headers=headers)
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_user_seed"
