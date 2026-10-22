@@ -870,12 +870,14 @@ function AppContent() {
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
   const [resetToken, setResetToken] = useState(readResetToken);
   const [recoveryOpen, setRecoveryOpen] = useState(() => readResetToken() !== null);
+  const [resetComplete, setResetComplete] = useState(false);
 
   useEffect(() => {
     function captureRecoveryLink() {
       const token = readResetToken();
       if (token !== null) {
         setResetToken(token);
+        setResetComplete(false);
         setRecoveryOpen(true);
         window.history.replaceState({}, "", window.location.pathname + window.location.search);
       }
@@ -920,9 +922,9 @@ function AppContent() {
 
   function renderScreen() {
     if (recoveryOpen && legalDocument === null) {
-      return <PasswordResetScreen key={resetToken ?? "help"} token={resetToken}
-        onBack={() => { setRecoveryOpen(false); setResetToken(null); }}
-        onCompleted={handleSessionExpired} onOpenLegal={setLegalDocument} />;
+      return <PasswordResetScreen key={resetToken ?? "help"} token={resetToken} complete={resetComplete}
+        onBack={() => { setRecoveryOpen(false); setResetToken(null); setResetComplete(false); }}
+        onCompleted={() => { setResetComplete(true); handleSessionExpired(); }} onOpenLegal={setLegalDocument} />;
     }
     if (auth.status === "authenticated" && !auth.user.must_change_credentials) {
       return (

@@ -61,6 +61,12 @@ describe("Password recovery", () => {
     await user.type(screen.getByLabelText("Confirmer le mot de passe"), "replacement-password");
     await user.click(screen.getByRole("button",{name:"Enregistrer le nouveau mot de passe"}));
     await screen.findByRole("heading",{name:"Mot de passe modifié"});
+    for (const document of ["Mentions légales", "Conditions d’utilisation"]) {
+      await user.click(screen.getByRole("button", { name: document }));
+      await user.click(screen.getByRole("button", { name: "Retour" }));
+      await screen.findByRole("heading", { name: "Mot de passe modifié" });
+      expect(screen.queryByLabelText("Nouveau mot de passe")).toBeNull();
+    }
     const calls = fetchMock.mock.calls.filter(([path])=>String(path).includes("/confirm"));
     expect(calls).toHaveLength(1);
     expect(JSON.parse(String(calls[0][1]?.body))).toEqual({token:TOKEN,new_password:"replacement-password"});
