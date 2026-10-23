@@ -13,7 +13,7 @@
 
 | Référence | Problème | Priorité | Statut | Version | PR | Tests |
 |---|---|---|---|---|---|---|
-| S1 | Validation torrent quadratique | P0 | Corrigé et testé localement ; CI/déploiement à suivre | 2.4.3 | À publier | Collisions, budget/cancel, boucle async, benchmark 30k |
+| S1 | Validation torrent quadratique | P0 | Corrigé et testé localement ; CI/déploiement à suivre | 2.4.3 | À publier | Collisions, mémoire chemins profonds, budget/cancel, async, 30k |
 | S2 | Limiteur externe non borné | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S3 | Saturation login/reset | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S4 | Métadonnées réseau et périmètre C411 | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -201,7 +201,7 @@ puis reprendre S1 pour la future 2.4.3. Aucun nouveau bootstrap root nécessaire
 ## 2.4.3 — validation torrent bornée et chemins sans scan quadratique (préparation)
 
 Cause : chaque entrée comparait son chemin à tous les fichiers déjà rencontrés.
-Les ensembles de fichiers et de préfixes de répertoires remplacent ce scan ; les
+Un arbre de chemins normalisés partage les préfixes et remplace ce scan ; les
 collisions fichier/répertoire dans les deux sens, Unicode NFC et casse restent refusées.
 Le dictionnaire info brut et l’infohash ne changent pas. Les limites de profondeur,
 éléments, chemins et métadonnées restent en place.
@@ -221,7 +221,7 @@ message FR/EN ; aucun torrent créé. Worker : erreur transitoire RETRY_WAIT, pa
 conservé, pas d’ADD qB. Le pool est fermé à l’arrêt de l’API/worker avant fermeture DB.
 Aucune migration ou modification d’infrastructure protégée ; version applicative 2.4.3.
 
-Tests ciblés : 91 réussis. Cas ajoutés : collisions inverses/NFC/casse, budget threads
+Tests ciblés après correction de revue : 92 réussis. Cas ajoutés : collisions inverses/NFC/casse, budget threads
 et file, boucle async réactive, annulation active/en attente, saturation user/admin,
 gateway sans appel qB, surcharge worker relançable, exceptions/fermeture/redémarrage.
 Les tests existants de propriété des payloads et nettoyage après annulation passent.
@@ -231,17 +231,32 @@ scripts/benchmark_torrent_validation.py ; mesures locales du 23 octobre (seconde
 
 | Fichiers | Avant | Après |
 |---|---:|---:|
-| 1000 | 0,098456 | 0,018503 |
-| 5000 | 2,245008 | 0,132767 |
-| 10000 | Non mesuré | 0,187378 |
-| 30000 | Non mesuré | 0,749661 |
+| 1000 | 0,098456 | 0,018167 |
+| 5000 | 2,245008 | 0,132538 |
+| 10000 | Non mesuré | 0,225523 |
+| 30000 | Non mesuré | 0,647664 |
 
 Chaque mesure vérifie nombre de fichiers, taille et infohash conservé. À 5000 fichiers,
 le gain observé est d’environ 17 fois ; aucune extrapolation de mesure 30000 avant.
 Le benchmark exclut la génération du torrent et ne garantit pas une latence production.
 
-Validation locale : backend 1240 réussis / 72 ignorés (services externes absents),
+Première validation locale avant correction mémoire : backend 1240 réussis / 72 ignorés (services externes absents),
 frontend 209 réussis / 3 ignorés ; Ruff/formatage (294 fichiers), mypy strict (256 sources),
 TypeScript et build verts. Script de benchmark linté et exécutable. Le code de validation
 retrouve exactement ses octets après la comparaison temporaire à l’ancien algorithme.
 Les contrôles CI et le déploiement restent à prouver avant de déclarer S1 livré.
+
+
+### Revue de promotion — mémoire des chemins profonds
+
+La revue de #404 a relevé que le premier correctif avec tuples de préfixes copiait
+encore O(profondeur²) références par chemin. Cas confirmé : 50 chemins distincts de
+1000 composants, valides sous les limites existantes, pic Python tracé de 207940561
+bytes. Le correctif final utilise un arbre de nœuds partageant les préfixes ; ce même
+cas mesure 14452689 bytes, infohash conservé. Il s’agit d’allocations Python tracées,
+pas d’une mesure de RSS totale du processus.
+
+Le benchmark accepte --depth et --memory et refuse de générer un cas hors budget
+d’éléments du parser. Un nouveau test isolé impose un pic sous 64 MiB, avec une
+deadline de 20 secondes. Les 92 tests ciblés passent après correction ; Ruff et mypy
+restent verts. Le contrôle complet CI est relancé avant toute promotion master.

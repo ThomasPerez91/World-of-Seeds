@@ -27,11 +27,11 @@ CI master 39852047968 : 1291 tests backend réussis / 2 ignorés, six contrôles
 Déploiement 39852799747 réussi ; contrôles publics indépendants live/ready/page/bundle
 HTTP 200, version 2.4.2. Voir le journal pour le digest et les preuves complètes.
 
-2.4.3 en préparation, reprise le 23 octobre : scan quadratique remplacé par des
-ensembles de fichiers/répertoires. Pool dédié (2 threads, 4 travaux admis par processus)
+2.4.3 en préparation, reprise le 23 octobre : scan quadratique remplacé par un
+arbre de chemins partageant les préfixes. Pool dédié (2 threads, 4 travaux admis par processus)
 pour validation/staging/lecture spool/normalisation C411, avec capacité conservée lors
 d’annulations jusqu’à la fin effective. API 503 temporaire FR/EN ; worker RETRY_WAIT
-et payload conservé. 91 tests ciblés réussis ; suite locale backend 1240 / 72 ignorés, frontend 209 / 3 ignorés,
+et payload conservé. 92 tests ciblés après correction mémoire de revue ; première suite locale backend 1240 / 72 ignorés, frontend 209 / 3 ignorés,
 Ruff/mypy/TypeScript/build verts. CI et déploiement à suivre.
 L’environnement est de nouveau disponible ; pas de bootstrap root ou migration requis.
 La version ne sera déclarée déployée qu’après les contrôles réels sur Rise2.
