@@ -140,6 +140,11 @@ def test_torrent_rejects_symlink_and_executable_attributes() -> None:
         [[b"Film.mkv"], [b"Film.mkv"]],
         [[b"Film.mkv"], [b"film.MKV"]],
         [[b"Film.mkv"], [b"Film.mkv", b"subtitle.srt"]],
+        [[b"Film.mkv", b"subtitle.srt"], [b"Film.mkv"]],
+        [[b"DATA", b"game.bin"], [b"data"]],
+        [[b"data"], [b"DATA", b"game.bin"]],
+        [["Été".encode(), b"game.bin"], ["Été".encode()]],
+        [["Été".encode()], ["Été".encode(), b"game.bin"]],
     ],
 )
 def test_torrent_rejects_exact_normalized_and_prefix_path_collisions(

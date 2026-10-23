@@ -23,13 +23,16 @@ from app.observability import OperationalMetricsCache
 from app.options import OptionsStore
 from app.torrents.downloads import DownloadRateLimiter
 from app.torrents.traffic import DownloadTrafficScheduler
+from app.torrents.validation_work import torrent_validation_pool
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def password_pool_lifecycle() -> AsyncIterator[None]:
     password_work_pool.start()
+    torrent_validation_pool.start()
     yield
     await password_work_pool.aclose()
+    await torrent_validation_pool.aclose()
 
 
 @pytest.fixture

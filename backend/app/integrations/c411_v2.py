@@ -1,5 +1,6 @@
 import re
 from collections.abc import Sequence
+from functools import partial
 from typing import Protocol
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -10,6 +11,7 @@ from pydantic import SecretStr
 from app.integrations.http import IntegrationRequestError, read_limited_json
 from app.integrations.qbittorrent_v2 import QBittorrentV2AddResult
 from app.torrents import normalize_torrent
+from app.torrents.validation_work import torrent_validation_pool
 
 MAX_NEWGREEDY_HEALTH_BYTES = 64 * 1024
 _SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -126,11 +128,14 @@ class C411NewGreedyV2Gateway:
         # Check the internal proxy before injecting the infrastructure passkey, keeping the
         # normalized secret-bearing metainfo lifetime limited to the immediate qB request.
         await self._newgreedy.require_ready()
-        normalized = normalize_torrent(
-            content,
-            passkey=self._passkey.get_secret_value(),
-            allowed_tracker_hosts=list(self._allowed_tracker_hosts),
-            max_total_size=self._max_total_size,
+        normalized = await torrent_validation_pool.run(
+            partial(
+                normalize_torrent,
+                content,
+                passkey=self._passkey.get_secret_value(),
+                allowed_tracker_hosts=list(self._allowed_tracker_hosts),
+                max_total_size=self._max_total_size,
+            )
         )
         if normalized.info_hash != expected_info_hash:
             raise C411V2PayloadError("Torrent metainfo does not match the managed torrent")

@@ -1,10 +1,13 @@
+import asyncio
 import hashlib
+import threading
 from uuid import UUID
 
 import httpx
 import pytest
 from pydantic import SecretStr
 
+from app.integrations import c411_v2
 from app.integrations.c411_v2 import (
     C411NewGreedyV2Gateway,
     C411V2ConfigurationError,
@@ -16,7 +19,8 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2AddResult,
     QBittorrentV2AddState,
 )
-from app.torrents import TorrentValidationError
+from app.torrents import ParsedTorrent, TorrentValidationError, normalize_torrent
+from app.torrents.validation_work import TorrentValidationBusyError, TorrentValidationPool
 
 INFO = {
     b"length": 5,
@@ -237,3 +241,58 @@ def test_gateway_rejects_invalid_infrastructure_configuration(
             allowed_tracker_hosts=hosts,
             max_total_size=max_total_size,
         )
+
+
+@pytest.mark.asyncio
+async def test_gateway_normalization_keeps_the_event_loop_responsive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entered, release = threading.Event(), threading.Event()
+    original = normalize_torrent
+
+    def normalize() -> ParsedTorrent:
+        entered.set()
+        assert release.wait(2), "normalization blocked the event loop"
+        return original(
+            _torrent(),
+            passkey="test-passkey-123",
+            allowed_tracker_hosts=["c411.org", "tk.c411.tw"],
+            max_total_size=1000,
+        )
+
+    monkeypatch.setattr(c411_v2, "normalize_torrent", lambda *args, **kwargs: normalize())
+    qb = FakeQBittorrent()
+    task = asyncio.create_task(
+        _gateway(qb, FakeNewGreedy()).add_torrent(
+            _torrent(),
+            expected_info_hash=INFO_HASH,
+            storage_key=STORAGE_KEY,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        await asyncio.sleep(0.01)
+        assert not task.done() and not qb.calls
+        release.set()
+        await task
+        assert len(qb.calls) == 1
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_gateway_busy_budget_does_not_call_qbittorrent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = TorrentValidationPool(workers=1, max_pending=1)
+    await pool.aclose()
+    monkeypatch.setattr(c411_v2, "torrent_validation_pool", pool)
+    qb = FakeQBittorrent()
+    with pytest.raises(TorrentValidationBusyError):
+        await _gateway(qb, FakeNewGreedy()).add_torrent(
+            _torrent(),
+            expected_info_hash=INFO_HASH,
+            storage_key=STORAGE_KEY,
+        )
+    assert not qb.calls

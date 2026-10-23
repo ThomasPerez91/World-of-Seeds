@@ -4,9 +4,9 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version de production vérifiée : `2.4.2`. Prochaine cible : 2.4.3, S1 non publié.
+- Version de production vérifiée : `2.4.2`. Cible en préparation : 2.4.3, S1.
 
-## Campagne audit 2.4.x — 2.4.2 déployée, S1 interrompu
+## Campagne audit 2.4.x — 2.4.2 déployée, préparation de 2.4.3
 
 Journal complet : `docs/audits/CORRECTIFS_2.4.md`. Audit PDF lu intégralement.
 2.4.1 : #396, #398 et #399 intégrées ; #397 promue sur master
@@ -27,11 +27,14 @@ CI master 39852047968 : 1291 tests backend réussis / 2 ignorés, six contrôles
 Déploiement 39852799747 réussi ; contrôles publics indépendants live/ready/page/bundle
 HTTP 200, version 2.4.2. Voir le journal pour le digest et les preuves complètes.
 
-Prochaine cible : S1, validation torrent quadratique. Prototype local et benchmarks
-(30000 fichiers : 0,728226 s) non publiés, tests encore incomplets. Environnement de
-travail devenu indisponible ; ne pas déclarer S1 corrigé et ne pas déployer ce prototype.
-À la reprise, vérifier les fichiers locaux éventuels et compléter les tests de collision,
-saturation, annulation, responsiveness et propriété du staging. Aucun bootstrap à refaire.
+2.4.3 en préparation, reprise le 23 octobre : scan quadratique remplacé par des
+ensembles de fichiers/répertoires. Pool dédié (2 threads, 4 travaux admis par processus)
+pour validation/staging/lecture spool/normalisation C411, avec capacité conservée lors
+d’annulations jusqu’à la fin effective. API 503 temporaire FR/EN ; worker RETRY_WAIT
+et payload conservé. 91 tests ciblés réussis ; suite locale backend 1240 / 72 ignorés, frontend 209 / 3 ignorés,
+Ruff/mypy/TypeScript/build verts. CI et déploiement à suivre.
+L’environnement est de nouveau disponible ; pas de bootstrap root ou migration requis.
+La version ne sera déclarée déployée qu’après les contrôles réels sur Rise2.
 
 ## Release 2.3.29 — téléchargements et alertes privées Discord
 

@@ -7,13 +7,13 @@
 - Cycle : tests isolés → PR develop → CI → merge → PR master → CI → merge/déploiement → contrôles réels → mise à jour du journal → livraison suivante.
 - Tests : comportementaux, PostgreSQL/Redis/Docker en CI selon disponibilité ; aucun test destructif sur production. Limites métier users, protections techniques pour tous, exemptions admin vérifiées côté serveur.
 - Audit lu intégralement (15 pages) : les constats [V], [S] et les preuves runtime manquantes restent distingués.
-- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.2 déployée après contrôles réels réussis ; S1 en cours, environnement de travail indisponible.
+- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.2 déployée après contrôles réels réussis ; préparation de 2.4.3, S1 repris le 23 octobre.
 
 ## Matrice de suivi
 
 | Référence | Problème | Priorité | Statut | Version | PR | Tests |
 |---|---|---|---|---|---|---|
-| S1 | Validation torrent quadratique | P0 | Confirmé ; correction locale non publiée, validation interrompue | — | — | Benchmarks locaux consignés ci-dessous |
+| S1 | Validation torrent quadratique | P0 | Corrigé et testé localement ; CI/déploiement à suivre | 2.4.3 | À publier | Collisions, budget/cancel, boucle async, benchmark 30k |
 | S2 | Limiteur externe non borné | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S3 | Saturation login/reset | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S4 | Métadonnées réseau et périmètre C411 | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -173,7 +173,7 @@ Contrôles publics indépendants : live/ready HTTP 200 avec version 2.4.2,
 page et bundle `/assets/index-BVzATqB2.js` HTTP 200, version frontend 2.4.2.
 Aucune migration ; bot autonome inchangé. C3/C4 restent non validés opérationnellement.
 
-## S1 — travail suivant interrompu avant publication
+## S1 — point de reprise initial du 22 octobre (historique)
 
 Le scan de tous les chemins précédents dans `metainfo.py` est confirmé quadratique.
 La première validation API est déjà déportée par `run_in_threadpool`, de même que la
@@ -196,3 +196,52 @@ de la saturation, de l’annulation sans libération prématurée des slots, de 
 async et de la propriété des payloads doivent encore être écrits/exécutés. Repartir de
 la branche distante validée, vérifier si les changements locaux sont récupérables,
 puis reprendre S1 pour la future 2.4.3. Aucun nouveau bootstrap root nécessaire.
+
+
+## 2.4.3 — validation torrent bornée et chemins sans scan quadratique (préparation)
+
+Cause : chaque entrée comparait son chemin à tous les fichiers déjà rencontrés.
+Les ensembles de fichiers et de préfixes de répertoires remplacent ce scan ; les
+collisions fichier/répertoire dans les deux sens, Unicode NFC et casse restent refusées.
+Le dictionnaire info brut et l’infohash ne changent pas. Les limites de profondeur,
+éléments, chemins et métadonnées restent en place.
+
+La validation initiale API et la lecture du spool worker étaient déjà déportées :
+le constat async de l’audit est donc partiellement infirmé. La normalisation C411
+était encore exécutée sur la boucle async et est désormais déportée. Validation,
+staging possédé, lecture/validation du spool et normalisation partagent un pool
+technique par processus : deux threads, quatre travaux admis au total (exécutés ou
+mis en file). Ce budget technique s’applique aux administrateurs comme aux users.
+L’annulation ne rend pas la capacité avant la fin réelle du thread ou le retrait de
+l’entrée annulée de la file ; une rafale d’annulations ne peut pas agrandir cette file.
+La protection existante du staging et de son nettoyage après annulation est conservée.
+
+Saturation : API 503 torrent_validation_busy, Retry-After: 1, Cache-Control: no-store,
+message FR/EN ; aucun torrent créé. Worker : erreur transitoire RETRY_WAIT, payload
+conservé, pas d’ADD qB. Le pool est fermé à l’arrêt de l’API/worker avant fermeture DB.
+Aucune migration ou modification d’infrastructure protégée ; version applicative 2.4.3.
+
+Tests ciblés : 91 réussis. Cas ajoutés : collisions inverses/NFC/casse, budget threads
+et file, boucle async réactive, annulation active/en attente, saturation user/admin,
+gateway sans appel qB, surcharge worker relançable, exceptions/fermeture/redémarrage.
+Les tests existants de propriété des payloads et nettoyage après annulation passent.
+Un sous-processus borné à 10 secondes valide 30000 fichiers pour détecter une régression
+quadratique sans bloquer la suite. Le script de benchmark reproductible se trouve dans
+scripts/benchmark_torrent_validation.py ; mesures locales du 23 octobre (secondes, aucune opération réseau) :
+
+| Fichiers | Avant | Après |
+|---|---:|---:|
+| 1000 | 0,098456 | 0,018503 |
+| 5000 | 2,245008 | 0,132767 |
+| 10000 | Non mesuré | 0,187378 |
+| 30000 | Non mesuré | 0,749661 |
+
+Chaque mesure vérifie nombre de fichiers, taille et infohash conservé. À 5000 fichiers,
+le gain observé est d’environ 17 fois ; aucune extrapolation de mesure 30000 avant.
+Le benchmark exclut la génération du torrent et ne garantit pas une latence production.
+
+Validation locale : backend 1240 réussis / 72 ignorés (services externes absents),
+frontend 209 réussis / 3 ignorés ; Ruff/formatage (294 fichiers), mypy strict (256 sources),
+TypeScript et build verts. Script de benchmark linté et exécutable. Le code de validation
+retrouve exactement ses octets après la comparaison temporaire à l’ancien algorithme.
+Les contrôles CI et le déploiement restent à prouver avant de déclarer S1 livré.

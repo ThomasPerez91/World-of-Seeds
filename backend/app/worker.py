@@ -29,6 +29,7 @@ from app.jobs.torrent_payloads import MAX_MANAGED_TORRENT_BYTES, TorrentPayloadS
 from app.jobs.worker import TorrentWorker, TorrentWorkerConfig
 from app.options import PostgresOptionsRegistry
 from app.storage import SharedContentStore
+from app.torrents.validation_work import torrent_validation_pool
 
 logger = logging.getLogger(__name__)
 WORKER_DATABASE_RETRY_SECONDS = 5.0
@@ -101,6 +102,7 @@ async def _load_worker_config(stop: asyncio.Event) -> TorrentWorkerConfig | None
 
 
 async def main() -> None:
+    torrent_validation_pool.start()
     settings = get_settings()
     validate_worker_runtime(settings)
     redis = RedisCoordinator.from_settings(settings)
@@ -115,6 +117,7 @@ async def main() -> None:
     finally:
         for signal_number in (signal.SIGINT, signal.SIGTERM):
             loop.remove_signal_handler(signal_number)
+        await torrent_validation_pool.aclose()
         await redis.aclose()
         await engine.dispose()
 
