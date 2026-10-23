@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from starlette.requests import ClientDisconnect
 from starlette.types import Message, Scope
 from test_http_lease_lifecycle import seed_ready
 from test_storage_admission_concurrency import postgres_storage as postgres_storage
@@ -316,7 +317,7 @@ async def test_queue_abort_never_sends_success_or_leaves_a_ticket(
                     assert owner is not None
                     owner.is_active = False
                 domain.ticks.ticks.put_nowait(None)
-                with pytest.raises(ExceptionGroup, match="TaskGroup"):
+                with pytest.raises(ManagedDownloadError, match="lease was lost"):
                     await asyncio.wait_for(task, 2)
             assert not connection.messages
             assert await domain.count() == 0
@@ -426,9 +427,13 @@ async def test_rollback_expired_orm_never_masks_initial_error(
 
                 monkeypatch.setattr(manager, "release", release_then_fail)
             domain.ticks.ticks.put_nowait(None)
-            with pytest.raises(ExceptionGroup) as failure:
+            expected = ManagedDownloadError if kind == "archive" else ExceptionGroup
+            with pytest.raises(expected) as failure:
                 await asyncio.wait_for(task, 3)
-            assert "initial renewal failure" in str(failure.value.exceptions[0])
+            primary = failure.value
+            if isinstance(primary, ExceptionGroup):
+                primary = primary.exceptions[0]
+            assert "initial renewal failure" in str(primary)
             assert "MissingGreenlet" not in repr(failure.value)
             assert await domain.count() == 0
             if kind == "file":
@@ -512,7 +517,7 @@ async def test_lease_rechecked_before_success_headers(domain: Domain) -> None:
             assert owner is not None
             owner.is_active = False
         connection = Connection()
-        with pytest.raises(ExceptionGroup):
+        with pytest.raises(ManagedDownloadError):
             await asyncio.wait_for(connection.run(response), 2)
         assert not connection.messages
         assert await domain.count() == 0
@@ -776,3 +781,66 @@ async def test_cancel_drains_running_zip_reader_before_closing_generator_or_slot
             if not task.done():
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("version", ["2.0", "2.4"])
+@pytest.mark.parametrize("phase", ["http.response.start", "http.response.body"])
+async def test_send_disconnect_preserves_asgi_semantics_and_cleans_every_resource(
+    domain: Domain, version: str, phase: str
+) -> None:
+    async with domain.sessions() as session:
+        manager = domain.manager(session)
+        lease = await domain.lease(manager)
+        response = domain.response(manager, lease)
+        connection = Connection()
+
+        async def send(message: Message) -> None:
+            if message["type"] == phase:
+                raise OSError("client socket closed")
+            await connection.send(message)
+
+        scope = cast(Scope, {"type": "http", "asgi": {"spec_version": version}})
+        if version == "2.4":
+            with pytest.raises(ClientDisconnect) as error:
+                await response(scope, connection.receive, send)
+            assert isinstance(error.value.__cause__, OSError)
+        else:
+            with pytest.raises(OSError, match="client socket closed"):
+                await response(scope, connection.receive, send)
+        assert await domain.count() == 0
+        assert response._heartbeat is not None and response._heartbeat.done()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain", ["implicit", "explicit", "suppressed"])
+async def test_unwrapped_archive_error_preserves_original_exception_context(
+    domain: Domain, chain: str
+) -> None:
+    async with domain.sessions() as session:
+        manager = domain.manager(session)
+        lease = await domain.lease(manager)
+        response = domain.response(manager, lease)
+        connection = Connection()
+
+        async def send(_message: Message) -> None:
+            try:
+                raise OSError("original transport failure")
+            except OSError as original:
+                if chain == "explicit":
+                    raise RuntimeError("send wrapper failure") from original
+                if chain == "suppressed":
+                    raise RuntimeError("send wrapper failure") from None
+                raise RuntimeError("send wrapper failure")  # noqa: B904 - intentional implicit chain
+
+        scope = cast(Scope, {"type": "http", "asgi": {"spec_version": "2.0"}})
+        with pytest.raises(RuntimeError, match="send wrapper failure") as error:
+            await response(scope, connection.receive, send)
+        if chain == "suppressed":
+            assert error.value.__cause__ is None
+            assert error.value.__suppress_context__
+        else:
+            assert isinstance(error.value.__cause__, OSError)
+            assert str(error.value.__cause__) == "original transport failure"
+        assert await domain.count() == 0
+        assert response._heartbeat is not None and response._heartbeat.done()

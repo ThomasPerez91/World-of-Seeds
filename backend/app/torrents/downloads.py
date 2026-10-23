@@ -22,6 +22,7 @@ import anyio
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 from starlette.responses import StreamingResponse
 from starlette.types import Message, Receive, Scope, Send
 
@@ -856,12 +857,22 @@ class ManagedArchiveStreamingResponse(StreamingResponse):
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        version = tuple(map(int, scope.get("asgi", {}).get("spec_version", "2.0").split(".")))
+
+        async def checked_send(message: Message) -> None:
+            try:
+                await send(message)
+            except OSError as error:
+                if version >= (2, 4):
+                    raise ClientDisconnect from error
+                raise
+
         async def stream() -> None:
             await self._archiver.acquire()
             # Recheck after the queue, before sending even the success headers.
             assert self._lease_id is not None
             await self._leases.renew_independent(self._lease_id)
-            await self.stream_response(send)
+            await self.stream_response(checked_send)
 
         try:
             # SQL admission stays BEFORE the FIFO, under this response's lifetime.
@@ -877,6 +888,16 @@ class ManagedArchiveStreamingResponse(StreamingResponse):
                     transfer.cancel()
                 disconnected.cancel()
                 heartbeat.cancel()
+        except BaseExceptionGroup as error:
+            # Match StreamingResponse's single-error semantics; keep genuine
+            # simultaneous independent failures grouped.
+            cause: BaseException = error
+            while isinstance(cause, BaseExceptionGroup) and len(cause.exceptions) == 1:
+                cause = cause.exceptions[0]
+            if cause is not error:
+                context = None if cause.__suppress_context__ else cause.__context__
+                raise cause from cause.__cause__ or context
+            raise
         finally:
             operations: list[Callable[[], Awaitable[None]]] = [
                 self._body.aclose,
