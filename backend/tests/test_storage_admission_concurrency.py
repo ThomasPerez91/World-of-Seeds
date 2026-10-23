@@ -13,7 +13,6 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from test_v2_torrent_api import RecordingRedis, torrent_content
 
-from app.api.routes import torrents_v2
 from app.auth.security import hash_password
 from app.core.config import Settings, get_settings
 from app.core.database import get_db_session
@@ -32,7 +31,7 @@ from app.models import (
 )
 from app.options import PostgresOptionsRegistry
 from app.storage import SharedContentStore, StorageAdmissionPolicy, StorageDiskSnapshot, accounting
-from app.torrents import create_or_get_torrent_request
+from app.torrents import create_or_get_torrent_request, retry_reads
 from app.torrents.validation_work import TorrentValidationPool
 
 
@@ -180,7 +179,7 @@ async def retry_validation_capacity(
     # This test exercises serialized storage admission, after payload validation.
     # Admit all contenders here; production pool saturation has dedicated tests.
     pool = TorrentValidationPool(workers=2, max_pending=count)
-    monkeypatch.setattr(torrents_v2, "torrent_validation_pool", pool)
+    monkeypatch.setattr(retry_reads, "torrent_validation_pool", pool)
     try:
         yield
     finally:
