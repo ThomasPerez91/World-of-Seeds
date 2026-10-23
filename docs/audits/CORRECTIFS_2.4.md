@@ -7,7 +7,7 @@
 - Cycle : tests isolés → PR develop → CI → merge → PR master → CI → merge/déploiement → contrôles réels → mise à jour du journal → livraison suivante.
 - Tests : comportementaux, PostgreSQL/Redis/Docker en CI selon disponibilité ; aucun test destructif sur production. Limites métier users, protections techniques pour tous, exemptions admin vérifiées côté serveur.
 - Audit lu intégralement (15 pages) : les constats [V], [S] et les preuves runtime manquantes restent distingués.
-- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.5 déployée et vérifiée le 23 octobre ; S1, S2 et S3 livrés ; ZIP1 prioritaire en préparation pour 2.4.6.
+- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.5 déployée et vérifiée le 23 octobre ; S1, S2 et S3 livrés ; ZIP1 livré en 2.4.6 ; S4 reste le prochain correctif.
 
 ## Matrice de suivi
 
@@ -16,7 +16,7 @@
 | S1 | Validation torrent quadratique | P0 | Corrigé, testé et déployé | 2.4.3 | #403 / #405 / #406 / #404 | 21 tests ajoutés ; collisions, mémoire, budget/cancel, async, relance, 30k |
 | S2 | Limiteur externe non borné | P0 | Corrigé, testé et déployé | 2.4.4 | #408 / #410 / #409 | 100k IPv6, expiration, non-éviction, budgets/concurrence/HTTP |
 | S3 | Saturation login/reset | P0 | Corrigé, testé et déployé | 2.4.5 | #412 / #414 / #413 | Connexion/reset avec table pleine, budgets IP/identité/global, IPv6, mémoire, expiration |
-| ZIP1 | Lease ZIP expirée en FIFO et nettoyage MissingGreenlet | P0 | Corrigé ; validation en cours | 2.4.6 | À publier | Attente > TTL, send bloqué, purge, UUID expiré, annulation, 8/9 leases et PostgreSQL |
+| ZIP1 | Lease ZIP expirée en FIFO et nettoyage MissingGreenlet | P0 | Corrigé, testé et déployé ; ZIP privé production à confirmer | 2.4.6 | #416 / #418 / #417 | Attente > TTL, send bloqué, purge, UUID expiré, annulation, 8/9 leases et PostgreSQL |
 | S4 | Métadonnées réseau et périmètre C411 | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S5 | Passkeys exposées en clair | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S6 | Limite authentifiée et cache santé | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -455,7 +455,7 @@ Prochaine priorité S4 : métadonnées réseau des torrents et périmètre C411 
 les fixtures réelles et la configuration qB avant toute modification sensible.
 S6 et C3/C4 restent ouverts, sans présumer de validation opérationnelle.
 
-## 2.4.6 — leases ZIP pendant l’attente FIFO (préparation prioritaire)
+## 2.4.6 — leases ZIP pendant l’attente FIFO (déployée)
 
 Nouveau P0 ZIP1, demandé avant S4. Workspace propre et branches actualisées ;
 base develop 2.4.5 après #415, master 2.4.5 après #413. Aucun test local de Claude
@@ -504,12 +504,21 @@ ZIP final valide ; erreur de renouvellement avant en-têtes ; arrêt/déconnexio
 FIFO/streaming ; UUID ORM expiré après rollback pour ZIP/fichier ; erreur secondaire
 de cleanup ; annulation répétée ; réponse annulée avant démarrage ; lecture disque
 en cours ; annulation juste après commit ; huit leases et neuvième refusée, plusieurs
-comptes ; admissions concurrentes réelles PostgreSQL prévues en CI.
+comptes ; admissions concurrentes réelles PostgreSQL exécutées en CI.
 
-Première validation des sept suites : 69 réussis / 4 ignorés avant les derniers cas.
-Les deux cas supplémentaires d’annulation passent ; Ruff/format et mypy strict
-259 sources verts. Suite backend complète, frontend et CI en cours. Aucune migration
-ou infrastructure protégée modifiée. Version 2.4.6 ; livraison à vérifier avant ZIP1 livré.
+Validation locale des sept suites demandées après correction ASGI : 79 réussis /
+5 ignorés (services PostgreSQL absents). Après ajout des trois cas de contexte,
+test_archive_queue_lease.py : 28 réussis / 1 ignoré. Ruff/format, mypy strict
+259 sources et build frontend verts. La suite backend globale locale a été interrompue
+sous contention ; le cas d’autorisation concerné repasse seul. Des timeouts frontend
+locaux ne sont pas présentés comme une réussite : aucun délai de test n’a été augmenté pour
+les masquer. La CI complète, services PostgreSQL/Redis disponibles, fait foi.
+
+CI finale du correctif : source 7730cdcabc064d696104b5291d43b2224401f2a2,
+run 39951809442, 1381 réussis / 2 ignorés ; Ruff/format et mypy strict verts.
+Frontend, bot, image, audit sécurité et garde-fou de déploiement également verts.
+29 cas ont été ajoutés, dont le cas PostgreSQL d’admission simultanée de neuf demandes.
+Aucune migration ou infrastructure protégée modifiée ; version 2.4.6.
 
 Revue de promotion : préservation de la traduction Starlette ASGI 2.4, OSError
 de send devient ClientDisconnect, sans l’enfermer seul dans un ExceptionGroup.
@@ -521,3 +530,34 @@ Revue complémentaire : le dégroupement conserve la cause explicite ou, à déf
 le contexte implicite non supprimé, conformément au helper Starlette installé.
 Trois cas vérifient la chaîne implicite, explicite et from None volontaire, tout en
 vérifiant la libération de la lease et du slot.
+
+
+### Preuves de livraison 2.4.6
+
+Correctif #416 et ajustements de revue #418 fusionnés dans develop
+5a78acb953c62217839269afb5605bc382ff5941. Promotion #417 fusionnée sur master
+68d66a0a4d2429fec27a6805ff53cee7f717a99d après douze contrôles verts
+(CI push 39952720342 et PR 39952725887, plus politiques de déploiement).
+Les deux remarques de revue ont été corrigées et leurs fils résolus.
+
+CI master 39953318062 verte : 1381 tests backend réussis / 2 ignorés,
+Ruff/format et mypy strict, frontend/tests/build, bot, image et audit sécurité verts.
+Garde-fou de déploiement 39953318104 vert.
+Déploiement automatique Rise2 39953976497 réussi le 23 octobre 2026 à
+12:33:10 UTC (14:33:10 Paris), job 120415521390. Révision exacte :
+68d66a0a4d2429fec27a6805ff53cee7f717a99d.
+Image : ghcr.io/thomasperez91/world-of-seeds-v2@sha256:7da268cc706891a87aaf5ce2b5f79754390fae8c130a47bd53dfa7d2911d11ab.
+
+Contrôles publics indépendants après livraison, le 23 octobre à 12:33 UTC :
+/api/v1/health/live et /api/v1/health/ready HTTP 200, status ok, version 2.4.6.
+Page et bundle /assets/index-C9Uz78gi.js HTTP 200, version frontend 2.4.6.
+Les deux routes download-archive et download-folder-archive refusent une requête
+non authentifiée avec HTTP 401 / not_authenticated, sans en-têtes de succès ZIP.
+
+Limite de preuve : aucun compte/session de production n’est disponible dans cet
+environnement. Aucun téléchargement ZIP privé authentifié n’a donc été effectué
+sur Rise2 ; ce contrôle utilisateur reste à confirmer. Les transferts authentifiés,
+attentes au-delà du TTL et ZIP finaux valides sont vérifiés dans les tests isolés
+et la CI, pas présentés comme un transfert privé réellement exécuté en production.
+ZIP1 est corrigé et déployé ; S4 reste le prochain sujet. L’ordonnanceur fichiers,
+les 429 sans Retry-After, le bot et l’infrastructure n’ont pas été modifiés.
