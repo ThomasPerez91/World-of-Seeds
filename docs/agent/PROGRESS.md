@@ -4,9 +4,9 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version de production vérifiée : `2.4.2`. Cible en préparation : 2.4.3, S1.
+- Version de production vérifiée : `2.4.3`. Prochaine cible : S2 (limiteur externe borné).
 
-## Campagne audit 2.4.x — 2.4.2 déployée, préparation de 2.4.3
+## Campagne audit 2.4.x — 2.4.3 déployée, S2 à traiter
 
 Journal complet : `docs/audits/CORRECTIFS_2.4.md`. Audit PDF lu intégralement.
 2.4.1 : #396, #398 et #399 intégrées ; #397 promue sur master
@@ -27,14 +27,19 @@ CI master 39852047968 : 1291 tests backend réussis / 2 ignorés, six contrôles
 Déploiement 39852799747 réussi ; contrôles publics indépendants live/ready/page/bundle
 HTTP 200, version 2.4.2. Voir le journal pour le digest et les preuves complètes.
 
-2.4.3 en préparation, reprise le 23 octobre : scan quadratique remplacé par un
-arbre de chemins partageant les préfixes. Pool dédié (2 threads, 4 travaux admis par processus)
-pour validation/staging/lecture spool/normalisation C411, avec capacité conservée lors
-d’annulations jusqu’à la fin effective. API 503 temporaire FR/EN ; worker RETRY_WAIT
-et payload conservé. 92 tests ciblés après correction mémoire de revue ; première suite locale backend 1240 / 72 ignorés, frontend 209 / 3 ignorés,
-Ruff/mypy/TypeScript/build verts. CI et déploiement à suivre.
-L’environnement est de nouveau disponible ; pas de bootstrap root ou migration requis.
-La version ne sera déclarée déployée qu’après les contrôles réels sur Rise2.
+2.4.3 livrée : S1 corrigé avec arbre de chemins partageant les préfixes (y compris
+les cas profonds), pool dédié (2 threads / 4 travaux par processus), garde de capacité
+après annulation, API 503 FR/EN, worker transitoire et relances dans le même budget.
+#403, #405, #406 intégrées ; promotion #404 fusionnée sur master
+`69b10c028cfc370c93381f39c2c3724385516663`. CI master 39910474087 :
+1312 tests backend réussis / 2 ignorés, six contrôles verts.
+Déploiement 39910869671 réussi ; live/ready/page/bundle HTTP 200, version 2.4.3.
+Benchmark local : 30000 fichiers 0,647664 s ; cas profond : pic Python tracé
+207940561 → 14452689 bytes, infohash conservé. Voir journal pour les limites de mesure.
+Aucun bootstrap root, migration ou mise à jour du bot nécessaires.
+
+Prochaine priorité : S2, limiter mémoire/expiration de l’API externe et agréger IPv6.
+Ne pas le déclarer corrigé : le code de limitation actuel est encore à traiter.
 
 ## Release 2.3.29 — téléchargements et alertes privées Discord
 
