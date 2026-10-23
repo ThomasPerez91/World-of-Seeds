@@ -666,6 +666,23 @@ describe("RecursiveDownloadController", () => {
     expect(updates.at(-1)).toMatchObject({ status: "completed", downloadedBytes: 3 });
   });
 
+  it("signale une session expirée au lieu d’un contenu modifié sur un 401", async () => {
+    const updates: RecursiveTransferProgress[] = [];
+    const controller = new RecursiveDownloadController({
+      torrentRequestId: "request",
+      firstPage: { ...snapshot(), file_count: 1, total_size: 3, items: [snapshot().items[0]] },
+      directory: new MemoryDirectory(),
+      loadManifestPage: vi.fn(),
+      concurrency: 1,
+      fetcher: vi.fn(async () => new Response("{}", { status: 401 })),
+      onProgress: (progress) => updates.push(progress),
+    });
+
+    await controller.start();
+
+    expect(updates.at(-1)).toMatchObject({ status: "error", error: "session_expired" });
+  });
+
   it("échoue fermé si le snapshot d’une page suivante change", async () => {
     const firstPage = { ...snapshot(), file_count: 3, total_size: 9, limit: 2 };
     const updates: RecursiveTransferProgress[] = [];

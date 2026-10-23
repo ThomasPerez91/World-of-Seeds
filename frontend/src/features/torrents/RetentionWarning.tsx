@@ -8,6 +8,8 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 export const RETENTION_WARNING_MS = 48 * HOUR_MS;
+// Browsers fire a timer immediately when its delay exceeds a signed 32-bit integer.
+const MAX_TIMER_MS = 2_147_483_647;
 export const RETENTION_DANGER_MS = 24 * HOUR_MS;
 
 export type RetentionWarningTier = "normal" | "warning" | "danger" | "elapsed";
@@ -59,7 +61,7 @@ function nextUpdateDelay(retentionExpiresAt: string, nowMs: number): number | nu
   const remainingMs = deadlineMs - nowMs;
   if (remainingMs <= 0) return null;
   if (remainingMs > RETENTION_WARNING_MS) {
-    return Math.max(1, remainingMs - RETENTION_WARNING_MS);
+    return Math.min(MAX_TIMER_MS, Math.max(1, remainingMs - RETENTION_WARNING_MS));
   }
   const minuteBoundary = remainingMs % MINUTE_MS || MINUTE_MS;
   const tierBoundary = remainingMs > RETENTION_DANGER_MS

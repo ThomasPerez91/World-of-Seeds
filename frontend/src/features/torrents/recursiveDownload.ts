@@ -8,6 +8,7 @@ const MAX_MANIFEST_PAGE_SIZE = 500;
 const MAX_BUFFERED_MANIFEST_PAGES = 2;
 const MAX_VISIBLE_QUEUE_ITEMS = 8;
 const MAX_DOWNLOAD_BUSY_RETRIES = 6;
+const PROGRESS_EMIT_INTERVAL_MS = 250;
 const MAX_RECOVERY_RETRIES = 8;
 const SIZE_PRIORITY_BURST = 3;
 export const DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY = 2;
@@ -79,6 +80,7 @@ export type RecursiveTransferErrorCode =
   | "local_write_denied"
   | "local_destination_missing"
   | "download_busy"
+  | "session_expired"
   | "download_unavailable"
   | "download_interrupted"
   | "local_transfer_failed";
@@ -181,6 +183,8 @@ export class RecursiveDownloadController {
   private status: RecursiveTransferStatus = "paused";
   private error: RecursiveTransferErrorCode | null = null;
   private downloadedBytes = 0;
+  private lastProgressEmit = 0;
+  private progressTimer: ReturnType<typeof setTimeout> | null = null;
   private completedFiles = 0;
   private nextManifestOffset: number;
   private manifestComplete: boolean;
@@ -440,6 +444,12 @@ export class RecursiveDownloadController {
         }
         await waitForDownloadSlot(attempt, controller.signal);
       }
+      if (response.status === 401) {
+        // The session is absolute (it does not follow the lease heartbeat): say so instead
+        // of reporting a changed manifest.
+        await response.body?.cancel().catch(() => undefined);
+        throw new TransferFailure("session_expired");
+      }
       if (response.status === 404 || response.status === 410) {
         await response.body?.cancel().catch(() => undefined);
         throw new TransferFailure("download_unavailable");
@@ -489,7 +499,7 @@ export class RecursiveDownloadController {
           await writer.write(result.value);
           written += result.value.byteLength;
           this.setOffset(file.id, written);
-          this.emit();
+          this.emitProgress();
         }
       } catch (error) {
         if (reader === null) {
@@ -608,7 +618,28 @@ export class RecursiveDownloadController {
     return "local_transfer_failed";
   }
 
+  // A network chunk is 16-64 KiB: at tens of MB/s that would re-render the page thousands of
+  // times per second. Byte progress is sampled (leading edge, then one trailing emit); every
+  // state change still emits at once and carries the exact count.
+  private emitProgress(): void {
+    const wait = PROGRESS_EMIT_INTERVAL_MS - (Date.now() - this.lastProgressEmit);
+    if (wait <= 0) {
+      this.emit();
+      return;
+    }
+    if (this.progressTimer !== null) return;
+    this.progressTimer = setTimeout(() => {
+      this.progressTimer = null;
+      this.emit();
+    }, wait);
+  }
+
   private emit(error: RecursiveTransferErrorCode | null = this.error): void {
+    if (this.progressTimer !== null) {
+      clearTimeout(this.progressTimer);
+      this.progressTimer = null;
+    }
+    this.lastProgressEmit = Date.now();
     this.onProgress({
       status: this.status,
       downloadedBytes: this.downloadedBytes,

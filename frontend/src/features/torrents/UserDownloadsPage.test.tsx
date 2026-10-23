@@ -85,6 +85,12 @@ class MockWebSocket {
   }
 }
 
+vi.mock("./resilience", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./resilience")>()),
+  // Upload retries wait for the server-advised delay: skip the real wait in tests.
+  sleep: () => Promise.resolve(),
+}));
+
 describe("UserDownloadsPage", () => {
   it("mappe les états métier vers les quatre statuts UX et conserve uniquement une vraie position de file", () => {
     const request = (overrides: Record<string, unknown>) =>
@@ -1430,7 +1436,9 @@ describe("UserDownloadsPage", () => {
     await user.click(screen.getByRole("button", { name: "Suivant" }));
     expect(screen.getByText("Troisième page.mkv")).toBeTruthy();
     await user.type(screen.getByRole("searchbox", { name: "Rechercher un torrent" }), "Troisième");
-    expect(screen.getByText("Page 1 sur 1 · 1 demande")).toBeTruthy();
+    expect(await screen.findByText("Page 1 sur 1 · 1 demande")).toBeTruthy();
+    // Nine keystrokes, one search request.
+    expect(calls.filter((url) => url.includes("search=")).length).toBe(1);
     expect(calls.some((url) => url.includes("offset=0") && url.includes("limit=25"))).toBe(true);
     expect(calls.some((url) => url.includes("offset=25") && url.includes("limit=25"))).toBe(true);
     expect(calls.some((url) => url.includes("offset=50") && url.includes("limit=25"))).toBe(true);
@@ -1781,14 +1789,12 @@ describe("UserDownloadsPage", () => {
     expect(postCalls).toHaveLength(3);
   });
 
-  it("classe 409, 413, 422, quota, 503 et erreur réseau sans arrêter les autres envois", async () => {
+  it("classe 409, 413, 422 et erreur réseau sans arrêter les autres envois", async () => {
     const files = [
       "ok-before.torrent",
       "conflict-409.torrent",
       "large-413.torrent",
       "invalid-422.torrent",
-      "quota-507.torrent",
-      "service-503.torrent",
       "network.torrent",
       "ok-after.torrent",
     ].map((name, index) => new File([`payload-${index}`], name));
@@ -1801,13 +1807,10 @@ describe("UserDownloadsPage", () => {
         }
         const file = (init.body as FormData).get("torrent") as File;
         if (file.name === "network.torrent") throw new TypeError("network unavailable");
-        const status = Number(file.name.match(/-(409|413|422|507|503)\./)?.[1] ?? 0);
+        const status = Number(file.name.match(/-(409|413|422)\./)?.[1] ?? 0);
         if (status !== 0) {
           return response({
-            detail: {
-              code: status === 507 ? "user_quota_exceeded" : `upload_${status}`,
-              message: "rejected",
-            },
+            detail: { code: `upload_${status}`, message: "rejected" },
           }, status);
         }
         successful.push(file.name);
@@ -1828,6 +1831,70 @@ describe("UserDownloadsPage", () => {
     expect(successful).toEqual(["ok-before.torrent", "ok-after.torrent"]);
     expect(screen.getAllByText("Échec de l’ajout")).toHaveLength(2);
     expect(screen.getByText("Stockage sous pression")).toBeTruthy();
+  });
+
+  it("réessaie un 503 occupé avec le délai serveur puis classe l’échec durable", async () => {
+    const attempts: Record<string, number> = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method !== "POST") {
+          return response({ items: [], offset: 0, limit: 10, total: 0 });
+        }
+        const file = (init.body as FormData).get("torrent") as File;
+        attempts[file.name] = (attempts[file.name] ?? 0) + 1;
+        const busyUntil = file.name === "busy-then-ok.torrent" ? 2 : Number.POSITIVE_INFINITY;
+        if (attempts[file.name] <= busyUntil) {
+          return new Response(
+            JSON.stringify({ detail: { code: "torrent_validation_busy", message: "busy" } }),
+            { status: 503, headers: { "Content-Type": "application/json", "Retry-After": "1" } },
+          );
+        }
+        return response({ ...torrent({ name: file.name }), created: true, storage_pressure: "normal" }, 201);
+      }),
+    );
+    const view = renderPage();
+    await screen.findByText("Aucun téléchargement pour le moment.");
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(input, {
+      target: { files: [new File(["a"], "busy-then-ok.torrent"), new File(["b"], "always-busy.torrent")] },
+    });
+
+    await waitFor(() => expect(attempts["always-busy.torrent"]).toBe(4));
+    expect(attempts["busy-then-ok.torrent"]).toBe(3);
+    expect(await screen.findByText("Torrent ajouté")).toBeTruthy();
+    expect(await screen.findByText("Échec de l’ajout")).toBeTruthy();
+  });
+
+  it("arrête le lot sur un refus de quota et le signale une seule fois", async () => {
+    const sent: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method !== "POST") {
+          return response({ items: [], offset: 0, limit: 10, total: 0 });
+        }
+        const file = (init.body as FormData).get("torrent") as File;
+        sent.push(file.name);
+        if (file.name === "quota.torrent") {
+          return response({ detail: { code: "user_quota_exceeded", message: "full" } }, 507);
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 30));
+        return response({ ...torrent({ name: file.name }), created: true, storage_pressure: "normal" }, 201);
+      }),
+    );
+    const view = renderPage();
+    await screen.findByText("Aucun téléchargement pour le moment.");
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    const names = ["quota", "ok-1", "ok-2", "skipped-1", "skipped-2", "skipped-3"];
+
+    fireEvent.change(input, {
+      target: { files: names.map((name) => new File([name], `${name}.torrent`)) },
+    });
+
+    expect(await screen.findByText("Lot interrompu : 3 fichier(s) non envoyé(s).")).toBeTruthy();
+    expect(sent.sort()).toEqual(["ok-1.torrent", "ok-2.torrent", "quota.torrent"]);
   });
 
   it("désactive les entrées pendant un envoi lent et réutilise picker puis drop", async () => {

@@ -517,9 +517,23 @@ export class ApiError extends Error {
     message: string,
     public readonly code: string | null = null,
     public readonly field: string | null = null,
+    public readonly retryAfterMs: number | null = null,
   ) {
     super(message);
   }
+}
+
+const MAX_RETRY_AFTER_MS = 60_000;
+
+/** Retry-After is either a number of seconds or an HTTP date. */
+export function parseRetryAfter(value: string | null, now: number = Date.now()): number | null {
+  if (value === null || value.trim() === "") return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) {
+    return seconds < 0 ? null : Math.min(MAX_RETRY_AFTER_MS, Math.round(seconds * 1_000));
+  }
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? null : Math.min(MAX_RETRY_AFTER_MS, Math.max(0, date - now));
 }
 
 function readCookie(name: string): string | null {
@@ -574,7 +588,13 @@ async function requestAt<T>(prefix: string, path: string, init: RequestInit = {}
     } catch {
       // Keep the generic message for non-JSON failures.
     }
-    throw new ApiError(response.status, message, code, field);
+    throw new ApiError(
+      response.status,
+      message,
+      code,
+      field,
+      parseRetryAfter(response.headers.get("Retry-After")),
+    );
   }
   if (response.status === 204) {
     return undefined as T;

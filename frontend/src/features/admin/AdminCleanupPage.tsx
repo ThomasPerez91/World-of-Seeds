@@ -100,7 +100,14 @@ export function AdminCleanupPage({ onBack, onNavigate, onSessionExpired }: {
     try {
       const result = await api.purgeAdminCleanup(purgeSelection.map((item) => item.id));
       setPurgeSelection(null);
-      setMessage(t("admin.cleanupPurgeScheduled", { count: formatNumber(result.scheduled) }));
+      setMessage(
+        result.skipped_ids.length > 0
+          ? t("admin.cleanupPurgePartial", {
+            count: formatNumber(result.scheduled),
+            skipped: formatNumber(result.skipped_ids.length),
+          })
+          : t("admin.cleanupPurgeScheduled", { count: formatNumber(result.scheduled) }),
+      );
       await load();
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) return onSessionExpired();
