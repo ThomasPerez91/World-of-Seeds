@@ -254,6 +254,40 @@ class DeploymentAccountRouter:
                 raise AccountRoutingError("managed_torrent_route_unavailable")
             return assigned_route
 
+    async def resolve_inspector(
+        self,
+        managed_torrent_id: uuid.UUID,
+        info_hash: str,
+    ) -> _TorrentInspector:
+        """Return only the qBittorrent inspector of one torrent.
+
+        Observing or purging a torrent needs its qBittorrent account, never its tracker
+        account. This read takes no lock and loads no options, so emptying a tracker slot
+        can no longer make already added torrents unobservable or unpurgeable.
+        """
+        if _SHA1.fullmatch(info_hash) is None:
+            raise AccountRoutingError("managed_torrent_route_invalid")
+        async with self._session_factory() as session:
+            row = (
+                await session.execute(
+                    select(ManagedTorrent.info_hash, ManagedTorrent.qbittorrent_account_ref).where(
+                        ManagedTorrent.id == managed_torrent_id
+                    )
+                )
+            ).one_or_none()
+        if row is None or row.info_hash != info_hash:
+            raise AccountRoutingError("managed_torrent_route_invalid")
+        qb_ref = row.qbittorrent_account_ref
+        if qb_ref is None:
+            if self._shared is not None:
+                return self._shared.qbittorrent
+            # Explicit multi-route deployments assign the route on first use.
+            return (await self.resolve(managed_torrent_id, info_hash)).inspector
+        inspector = self._qb_by_ref.get(qb_ref)
+        if inspector is None:
+            raise AccountRoutingError("managed_torrent_route_unavailable")
+        return inspector
+
     async def _routes_for_session(self, session: AsyncSession) -> _SessionRoutes:
         if self._shared is None:
             return _SessionRoutes(self._ordered, None)
@@ -311,10 +345,13 @@ class DeploymentAccountRouter:
         if len(info_hashes) != len(set(info_hashes)):
             raise AccountRoutingError("qbittorrent_control_route_invalid")
         groups: dict[uuid.UUID, list[QBittorrentV2DesiredControl]] = {}
+        skipped: list[str] = []
         for control in controls:
             account_ref = control.qbittorrent_account_ref
             if account_ref is None or account_ref not in self._qb_by_ref:
-                raise AccountRoutingError("qbittorrent_control_route_unavailable")
+                # A stale account reference must not block the control of every other torrent.
+                skipped.append(control.info_hash)
+                continue
             groups.setdefault(account_ref, []).append(control)
 
         started: list[str] = []
@@ -330,11 +367,13 @@ class DeploymentAccountRouter:
             stopped.extend(result.stopped)
             limits_updated.extend(result.limits_updated)
             priorities_applied.extend(result.priorities_applied)
+            skipped.extend(result.skipped)
         return QBittorrentV2ControlResult(
             tuple(started),
             tuple(stopped),
             tuple(limits_updated),
             tuple(priorities_applied),
+            tuple(skipped),
         )
 
     async def managed_torrent_is_present(

@@ -1165,3 +1165,122 @@ async def test_dynamic_completion_cooldown_preserves_remaining_active_set(
     assert active is not None and active.desired_active is True
     assert queued is not None and queued.desired_active is False
     await engine.dispose()
+
+
+class PurgeFailingGateway(FakeGateway):
+    """Fails only the stop batch (allow_missing_stopped=True) used for purges and errors."""
+
+    async def apply_managed_controls(
+        self,
+        controls: Sequence[QBittorrentV2DesiredControl],
+        *,
+        allow_missing_stopped: bool = False,
+    ) -> QBittorrentV2ControlResult:
+        if allow_missing_stopped:
+            self.calls.append(tuple(controls))
+            self.allow_missing_stopped.append(allow_missing_stopped)
+            raise RuntimeError("qb_stop_failed")
+        return await super().apply_managed_controls(
+            controls, allow_missing_stopped=allow_missing_stopped
+        )
+
+
+@pytest.mark.asyncio
+async def test_errored_torrent_that_was_still_active_is_stopped_in_qb_and_released(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    errored = await _torrent(
+        sessions,
+        username="errored",
+        info_hash="e" * 40,
+        size=10,
+        state=ManagedTorrentState.ERROR,
+    )
+    healthy = await _torrent(sessions, username="healthy", info_hash="f" * 40, size=10)
+    async with sessions() as session, session.begin():
+        row = await session.get(ManagedTorrent, errored.id)
+        assert row is not None
+        row.desired_active = True
+        row.desired_priority = 0
+    gateway = FakeGateway()
+    runtime = SchedulerRuntime(sessions, gateway, scheduler_id="scheduler-a", clock=lambda: NOW)
+
+    result = await runtime.run_once()
+
+    assert result.selected_torrent_ids == (healthy.id,)
+    stop_batches = [
+        batch
+        for batch, allow in zip(gateway.calls, gateway.allow_missing_stopped, strict=True)
+        if allow
+    ]
+    assert [[control.info_hash for control in batch] for batch in stop_batches] == [["e" * 40]]
+    assert all(control.run_state == "stopped" for control in stop_batches[0])
+    async with sessions() as session:
+        row = await session.get(ManagedTorrent, errored.id)
+    assert row is not None
+    assert row.state is ManagedTorrentState.ERROR
+    assert row.desired_active is False
+    assert row.desired_priority is None
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_failed_stop_batch_does_not_prevent_the_schedule_and_keeps_the_stop_pending(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    errored = await _torrent(
+        sessions,
+        username="errored",
+        info_hash="e" * 40,
+        size=10,
+        state=ManagedTorrentState.ERROR,
+    )
+    healthy = await _torrent(sessions, username="healthy", info_hash="f" * 40, size=10)
+    async with sessions() as session, session.begin():
+        row = await session.get(ManagedTorrent, errored.id)
+        assert row is not None
+        row.desired_active = True
+        row.desired_priority = 0
+    gateway = PurgeFailingGateway()
+    runtime = SchedulerRuntime(sessions, gateway, scheduler_id="scheduler-a", clock=lambda: NOW)
+
+    with pytest.raises(RuntimeError, match="qb_stop_failed"):
+        await runtime.run_once()
+
+    scheduled = [
+        batch
+        for batch, allow in zip(gateway.calls, gateway.allow_missing_stopped, strict=True)
+        if not allow
+    ]
+    assert [[control.info_hash for control in batch] for batch in scheduled] == [["f" * 40]]
+    async with sessions() as session:
+        state = await session.get(SchedulerState, 1)
+        row = await session.get(ManagedTorrent, errored.id)
+        scheduled_row = await session.get(ManagedTorrent, healthy.id)
+    assert state is not None and state.applied_generation == state.desired_generation == 1
+    assert scheduled_row is not None and scheduled_row.desired_active is True
+    assert row is not None and row.desired_active is True
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_cycle_failure_is_logged_with_the_exception_class_only(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    await _torrent(sessions, username="first", info_hash="a" * 40, size=10)
+    runtime = SchedulerRuntime(
+        sessions, FakeGateway(fail=True), scheduler_id="scheduler-a", clock=lambda: NOW
+    )
+
+    with caplog.at_level("WARNING", logger="app.scheduler.runtime"):
+        interval = await runtime._run_guarded_cycle()
+
+    assert interval <= 5.0
+    record = next(r for r in caplog.records if r.message == "scheduler_cycle_failed")
+    assert record.__dict__["cause_type"] == "RuntimeError"
+    assert "qb_unavailable" not in caplog.text
+    await engine.dispose()

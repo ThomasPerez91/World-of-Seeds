@@ -407,7 +407,8 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     _integer(
         "WOS_TORRENT_MAX_RETRY_ATTEMPTS",
         "Tentatives maximales",
-        "Nombre de reprises automatiques avant passage en erreur durable.",
+        "Reprises automatiques d’un ajout en échec avant erreur durable. Une indisponibilité de "
+        "qBittorrent ou de NewGreedy n’en consomme pas.",
         5,
         "torrents",
         minimum=0,
@@ -417,7 +418,7 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     _integer(
         "WOS_TORRENT_RETRY_BASE_SECONDS",
         "Base du délai de reprise",
-        "Délai initial du backoff exponentiel du worker.",
+        "Délai initial du backoff exponentiel des reprises, relu à chaque échec.",
         30,
         "torrents",
         minimum=1,
@@ -427,7 +428,7 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     _integer(
         "WOS_WORKER_CONCURRENCY",
         "Concurrence du worker",
-        "Nombre d’opérations torrent traitées en parallèle par le futur worker.",
+        "Nombre d’opérations torrent traitées en parallèle par chaque worker (au redémarrage).",
         2,
         "performance",
         minimum=1,

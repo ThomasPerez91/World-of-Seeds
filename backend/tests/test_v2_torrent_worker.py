@@ -56,12 +56,16 @@ async def create_job(
     claim_expires_at: datetime | None = None,
     timeout_at: datetime | None = None,
     available_at: datetime = NOW,
+    max_attempts: int = 3,
+    torrent_state: ManagedTorrentState = ManagedTorrentState.PENDING,
+    created_at: datetime | None = None,
 ) -> uuid.UUID:
     async with sessions() as session, session.begin():
         torrent = ManagedTorrent(
             info_hash=uuid.uuid4().hex + "00000000",
             name="Worker test torrent",
             total_size=1,
+            state=torrent_state,
         )
         job = TorrentJob(
             managed_torrent=torrent,
@@ -69,11 +73,14 @@ async def create_job(
             idempotency_key=f"test-{uuid.uuid4().hex}",
             state=state,
             available_at=available_at,
+            max_attempts=max_attempts,
             attempt_count=1 if state is TorrentJobState.RUNNING else 0,
             claimed_by=claimed_by,
             claim_expires_at=claim_expires_at,
             timeout_at=timeout_at,
         )
+        if created_at is not None:
+            job.created_at = created_at
         session.add(job)
         await session.flush()
         return job.id
@@ -608,3 +615,138 @@ async def test_worker_does_not_replay_cancelled_abandoned_job(
     assert job.state is TorrentJobState.CANCELLED
     assert job.finished_at is not None
     assert job.attempt_count == 1
+
+
+@pytest.mark.asyncio
+async def test_waiting_failure_does_not_consume_the_attempt_budget(
+    worker_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    job_id = await create_job(worker_sessions, max_attempts=2)
+
+    async def handler(_snapshot: TorrentJobSnapshot) -> None:
+        raise TransientTorrentJobError("integration_unavailable", waiting=True)
+
+    for _ in range(5):
+        async with worker_sessions() as session, session.begin():
+            job = await session.get(TorrentJob, job_id)
+            assert job is not None
+            job.available_at = NOW
+        await worker(worker_sessions, handler).process_once()
+
+    job = await load_job(worker_sessions, job_id)
+    assert job.state is TorrentJobState.QUEUED
+    assert job.attempt_count == 0
+    assert job.last_error_code == "integration_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_waiting_failure_consumes_attempts_once_the_wait_budget_is_spent(
+    worker_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    job_id = await create_job(
+        worker_sessions,
+        max_attempts=1,
+        created_at=NOW - timedelta(days=8),
+    )
+
+    async def handler(_snapshot: TorrentJobSnapshot) -> None:
+        raise TransientTorrentJobError("integration_unavailable", waiting=True)
+
+    await worker(worker_sessions, handler).process_once()
+
+    job = await load_job(worker_sessions, job_id)
+    assert job.state is TorrentJobState.FAILED
+    assert job.attempt_count == 1
+
+
+@pytest.mark.asyncio
+async def test_unexpected_error_on_the_last_add_attempt_leaves_the_adding_state(
+    worker_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    job_id = await create_job(
+        worker_sessions,
+        job_type="ADD_TORRENT",
+        max_attempts=1,
+        torrent_state=ManagedTorrentState.ADDING,
+    )
+
+    async def handler(_snapshot: TorrentJobSnapshot) -> None:
+        raise ValueError("unexpected")
+
+    add_worker = TorrentWorker(
+        worker_sessions,
+        RedisCoordinator.unconfigured(),
+        {"ADD_TORRENT": handler},
+        worker_id="test-worker",
+        config=CONFIG,
+        clock=lambda: NOW,
+        jitter=lambda lower, _upper: lower,
+    )
+    await add_worker.process_once()
+
+    job = await load_job(worker_sessions, job_id)
+    assert job.state is TorrentJobState.FAILED
+    async with worker_sessions() as session:
+        torrent = await session.get(ManagedTorrent, job.managed_torrent_id)
+        assert torrent is not None
+        assert torrent.state is ManagedTorrentState.ERROR
+
+
+@pytest.mark.asyncio
+async def test_abandoned_add_job_moves_its_torrent_to_error_during_recovery(
+    worker_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    job_id = await create_job(
+        worker_sessions,
+        job_type="ADD_TORRENT",
+        state=TorrentJobState.RUNNING,
+        claimed_by="crashed-worker",
+        claim_expires_at=NOW - timedelta(seconds=1),
+        timeout_at=NOW + timedelta(minutes=5),
+        max_attempts=1,
+        torrent_state=ManagedTorrentState.ADDING,
+    )
+
+    async def handler(_snapshot: TorrentJobSnapshot) -> None:
+        raise AssertionError("no job should be claimed")
+
+    await worker(worker_sessions, handler).process_once()
+
+    job = await load_job(worker_sessions, job_id)
+    assert job.state is TorrentJobState.FAILED
+    assert job.last_error_code == "claim_expired"
+    async with worker_sessions() as session:
+        torrent = await session.get(ManagedTorrent, job.managed_torrent_id)
+        assert torrent is not None
+        assert torrent.state is ManagedTorrentState.ERROR
+
+
+@pytest.mark.asyncio
+async def test_retry_backoff_honors_the_administrable_base_option(
+    worker_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    from app.models import DatabaseOption
+
+    async with worker_sessions() as session, session.begin():
+        session.add(
+            DatabaseOption(
+                key="WOS_TORRENT_RETRY_BASE_SECONDS",
+                value_type="integer",
+                integer_value=45,
+                minimum_value=1,
+                maximum_value=3600,
+                choices=[],
+                editable=True,
+                restart_required=False,
+                version=1,
+            )
+        )
+    job_id = await create_job(worker_sessions)
+
+    async def handler(_snapshot: TorrentJobSnapshot) -> None:
+        raise TransientTorrentJobError("integration_unavailable")
+
+    await worker(worker_sessions, handler).process_once()
+
+    job = await load_job(worker_sessions, job_id)
+    assert as_utc(job.available_at) == NOW + timedelta(seconds=45)

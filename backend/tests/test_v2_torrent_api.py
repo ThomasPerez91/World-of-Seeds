@@ -1003,7 +1003,7 @@ async def test_precommit_outage_cleans_staged_payload_on_every_attempt(
 @pytest.mark.parametrize(
     "original_state", [TorrentJobState.COMPLETED, None, TorrentJobState.FAILED]
 )
-async def test_sync_error_is_refused_without_reading_a_removed_payload(
+async def test_sync_error_is_retried_by_observation_without_reading_a_removed_payload(
     client: AsyncClient,
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -1056,7 +1056,37 @@ async def test_sync_error_is_refused_without_reading_a_removed_payload(
         f"/api/v2/torrents/{uploaded.json()['id']}/retry",
         headers=headers,
     )
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "torrent_retry_not_allowed"
+    if original_state is None:
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "torrent_retry_not_allowed"
+        assert redis.signals == 0
+        assert redis.events == []
+        return
+    # The ADD job completed: the ERROR came from synchronization, so the torrent is observed
+    # again in qBittorrent instead of replaying a payload that no longer exists.
+    assert response.status_code == 200
+    assert response.json()["state"] != "error"
     assert redis.signals == 0
-    assert redis.events == []
+    assert len(redis.events) == 1
+    await db_session.refresh(managed)
+    assert managed.state is ManagedTorrentState.PAUSED
+    assert managed.desired_active is False
+
+
+@pytest.mark.asyncio
+async def test_add_job_attempt_budget_follows_the_retry_option(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+    uploaded = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+    assert uploaded.status_code == 201
+    job = await db_session.scalar(select(TorrentJob))
+    assert job is not None
+    # WOS_TORRENT_MAX_RETRY_ATTEMPTS defaults to 5 retries, so six attempts in total.
+    assert job.max_attempts == 6

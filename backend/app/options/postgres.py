@@ -22,6 +22,9 @@ from app.options.store import (
     validate_cross_options,
 )
 
+QB_GLOBAL_LIMIT_OPTION = "WOS_QB_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL"
+MIN_QB_GLOBAL_LIMIT_BYTES = 1_048_576
+
 
 class DatabaseOptionsDriftError(RuntimeError):
     """Raised when SQL option metadata no longer matches the code registry."""
@@ -108,6 +111,19 @@ class PostgresOptionsRegistry:
                     field=key,
                 )
             normalized = normalize_option_value(spec, candidate)
+            if (
+                key == QB_GLOBAL_LIMIT_OPTION
+                and type(normalized) is int
+                and 0 < normalized < MIN_QB_GLOBAL_LIMIT_BYTES
+                and values.get(key) != normalized
+            ):
+                # Written values below 1 MiB/s are almost certainly a unit mistake (5 meant
+                # as 5 MB/s would throttle every torrent to a few bytes per second).
+                raise OptionsValidationError(
+                    "Le débit global qBittorrent doit valoir 0 (illimité) ou au moins 1 Mio/s.",
+                    code="inconsistent_options",
+                    field=key,
+                )
             normalized_changes[key] = normalized
             values[key] = normalized
 
