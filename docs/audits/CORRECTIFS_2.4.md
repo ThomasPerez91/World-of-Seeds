@@ -7,14 +7,14 @@
 - Cycle : tests isolés → PR develop → CI → merge → PR master → CI → merge/déploiement → contrôles réels → mise à jour du journal → livraison suivante.
 - Tests : comportementaux, PostgreSQL/Redis/Docker en CI selon disponibilité ; aucun test destructif sur production. Limites métier users, protections techniques pour tous, exemptions admin vérifiées côté serveur.
 - Audit lu intégralement (15 pages) : les constats [V], [S] et les preuves runtime manquantes restent distingués.
-- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.3 déployée et vérifiée le 23 octobre ; S1 livré, S2 reste à traiter.
+- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.3 déployée et vérifiée le 23 octobre ; S1 livré ; S2 en préparation pour 2.4.4.
 
 ## Matrice de suivi
 
 | Référence | Problème | Priorité | Statut | Version | PR | Tests |
 |---|---|---|---|---|---|---|
 | S1 | Validation torrent quadratique | P0 | Corrigé, testé et déployé | 2.4.3 | #403 / #405 / #406 / #404 | 21 tests ajoutés ; collisions, mémoire, budget/cancel, async, relance, 30k |
-| S2 | Limiteur externe non borné | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
+| S2 | Limiteur externe non borné | P0 | Corrigé ; validation locale en cours, CI/déploiement à suivre | 2.4.4 | À publier | 100k IPv6, expiration, non-éviction, budgets/concurrence/HTTP |
 | S3 | Saturation login/reset | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S4 | Métadonnées réseau et périmètre C411 | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S5 | Passkeys exposées en clair | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -295,3 +295,45 @@ Le blocage d’environnement du 22 octobre est résolu. Prochaine priorité S2 :
 la mémoire et l’expiration du limiteur externe, agréger les préfixes IPv6 et préserver
 les budgets sans contournement par éviction. S2 n’est pas encore corrigé. C3/C4
 (sauvegardes hors hôte/alertes reçues) restent non validés opérationnellement.
+
+
+## 2.4.4 — limiteur externe borné (préparation)
+
+Cause confirmée : defaultdict(deque) créait une entrée par adresse avant validation
+API ; une adresse jamais revue ne bénéficiait d’aucune collecte d’expiration.
+
+Le limiteur conserve un dictionnaire ordonné par dernier événement accepté, et
+collecte les identités inactives sur chaque appel sans parcourir tous les budgets
+actifs. Les fenêtres restent glissantes, avec expiration exacte et Retry-After entier
+positif arrondi au plafond. Un accès refusé ne prolonge pas le budget ni sa rétention.
+Aucune entrée active n’est évincée pour faire place à une autre : à capacité, les
+nouvelles identités reçoivent 429 jusqu’à libération d’une entrée. Les entrées déjà
+présentes conservent leurs compteurs. La rotation d’adresse ne réinitialise pas
+le budget d’une clé cliente existante.
+
+Bornes par processus : 10000 identités au maximum, 60 événements par budget IP/client
+sur 60 secondes (valeurs existantes), budget global technique de 6000 admissions IP
+sur cette fenêtre. Le passage IP avant authentification charge ce budget ; le passage
+client après recherche de clé ne le charge pas une deuxième fois. Les requêtes déjà
+refusées par leur budget IP ne déclenchent pas la recherche de clé. Ce budget n’est
+pas une limite métier par user et s’applique aux intégrations privilégiées aussi.
+
+IPv6 : préfixe /64 commun ; écritures équivalentes et identifiants de zone ne créent
+pas de nouveau budget. IPv4-mappée en IPv6 et IPv4 littérale partagent le même budget.
+Les adresses invalides/absentes partagent une identité inconnue ; pas de croissance
+avec des métadonnées arbitraires. Les identités conservées sont hachées, pas des IP brutes.
+Le budget client reste stable après changement de réseau et les scopes ne changent pas.
+
+Tests : bornes invalides, fenêtre/Retry-After aux limites, collecte des adresses jamais
+revues, préservation des budgets actifs, absence d’éviction sous pression, IPv6/alias,
+budgets IP/client distincts, global avant auth, concurrence, 100000 préfixes IPv6 avec
+plafond de pic Python tracé à 32 MiB, récupération après expiration et réponses HTTP.
+Première validation ciblée : 33 réussis / 1 ignoré (PostgreSQL), Ruff et mypy strict
+257 sources verts. Suite backend complète : 1259 réussis / 72 ignorés (services
+indisponibles localement) ; frontend : 209 réussis / 3 ignorés, TypeScript et build
+réussis. CI et déploiement restent à vérifier avant de déclarer S2 livré.
+
+Version 2.4.4, aucune migration ou modification d’infrastructure protégée. Limiteur
+local au processus, API unique exigée par le déploiement ; les budgets sont réinitialisés
+au redémarrage. Le problème de saturation login/reset (S3) et le réglage métier
+WOS_REQUEST_RATE_LIMIT_PER_MINUTE (S6) restent séparés et non déclarés corrigés.
