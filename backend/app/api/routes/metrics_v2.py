@@ -3,7 +3,7 @@ from time import perf_counter
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from app.auth.dependencies import AppSettings, DbSession
 from app.coordination.dependencies import RedisCoordinatorDependency
@@ -55,13 +55,30 @@ async def _collect_operational_metrics(
                 await db.execute(select(TorrentJob.state, func.count()).group_by(TorrentJob.state))
             ).all()
         )
+        # A job waiting for a future retry or a deferred purge is not stuck: only jobs that
+        # are already claimable count towards the oldest-queued age.
         oldest_queued = await db.scalar(
-            select(func.min(TorrentJob.created_at)).where(
-                TorrentJob.state == TorrentJobState.QUEUED
+            select(func.min(TorrentJob.available_at)).where(
+                TorrentJob.state == TorrentJobState.QUEUED,
+                TorrentJob.available_at <= now.astimezone(UTC).replace(tzinfo=None),
             )
         )
+        # Attempts beyond the first only: a job executed once is not a retry.
         retries = int(
-            await db.scalar(select(func.coalesce(func.sum(TorrentJob.attempt_count), 0))) or 0
+            await db.scalar(
+                select(
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (TorrentJob.attempt_count > 1, TorrentJob.attempt_count - 1),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    )
+                )
+            )
+            or 0
         )
         finished_rows = (
             await db.execute(

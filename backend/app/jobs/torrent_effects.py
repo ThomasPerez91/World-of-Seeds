@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any, Literal, Protocol, cast
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
@@ -47,6 +47,7 @@ from app.jobs.worker import (
     TorrentJobSnapshot,
     TransientTorrentJobError,
 )
+from app.maintenance import PruneResult, prune_stale_rows
 from app.models import (
     DatabaseOption,
     DownloadLease,
@@ -86,6 +87,9 @@ SYNC_JOB_MAX_ATTEMPTS = 5
 MAX_SYNC_BATCH = 200
 MAX_RETENTION_BATCH = 200
 RETENTION_REAPER_INTERVAL_SECONDS = 3600
+# READY torrents only need a slow heartbeat: they are seeding, not progressing. Polling
+# them as often as downloads created most of the SYNC jobs for no scheduling benefit.
+READY_SYNC_INTERVAL_SECONDS = 60
 DATABASE_RETRY_SECONDS = 5.0
 SYNC_INTERVAL_OPTION = "WOS_QB_SYNC_INTERVAL_SECONDS"
 STALL_TIMEOUT = timedelta(seconds=60)
@@ -656,10 +660,14 @@ class TorrentEffectHandlers:
         async with self._session_factory() as session, session.begin():
             # SchedulerRuntime takes the singleton scheduler lock before any torrent rows.
             # READY transitions must follow the same order to avoid a PostgreSQL deadlock.
+            first_ready = False
+            if state is ManagedTorrentState.READY:
+                current_state = await session.scalar(
+                    select(ManagedTorrent.state).where(ManagedTorrent.id == managed_torrent_id)
+                )
+                first_ready = current_state is not ManagedTorrentState.READY
             scheduler_state = (
-                await session.get(SchedulerState, 1, with_for_update=True)
-                if state is ManagedTorrentState.READY
-                else None
+                await session.get(SchedulerState, 1, with_for_update=True) if first_ready else None
             )
             torrent = await session.get(
                 ManagedTorrent,
@@ -830,6 +838,7 @@ class TorrentSyncEnqueuer:
                 )
                 .exists()
             )
+            ready_cutoff = now - timedelta(seconds=max(READY_SYNC_INTERVAL_SECONDS, interval))
             torrent_ids = tuple(
                 (
                     await session.scalars(
@@ -843,8 +852,18 @@ class TorrentSyncEnqueuer:
                                 )
                             ),
                             ~active_sync_exists,
+                            or_(
+                                ManagedTorrent.state != ManagedTorrentState.READY,
+                                ManagedTorrent.updated_at <= ready_cutoff,
+                            ),
                         )
-                        .order_by(ManagedTorrent.updated_at, ManagedTorrent.id)
+                        # Downloads first: a large READY population must never delay the
+                        # detection of completions and stalls.
+                        .order_by(
+                            case((ManagedTorrent.state == ManagedTorrentState.READY, 1), else_=0),
+                            ManagedTorrent.updated_at,
+                            ManagedTorrent.id,
+                        )
                         .limit(MAX_SYNC_BATCH)
                     )
                 ).all()
@@ -905,11 +924,19 @@ class TorrentRetentionReaper:
             except (SQLAlchemyError, OSError):
                 logger.warning("torrent_retention_reaper_database_unavailable")
                 interval = DATABASE_RETRY_SECONDS
+            try:
+                await self.prune_once()
+            except (SQLAlchemyError, OSError):
+                logger.warning("torrent_maintenance_database_unavailable")
             with suppress(TimeoutError):
                 await asyncio.wait_for(
                     self._stop.wait(),
                     timeout=interval,
                 )
+
+    async def prune_once(self) -> PruneResult:
+        """Bound the tables that grow with every sync, login attempt and session."""
+        return await prune_stale_rows(self._session_factory, now=self._clock())
 
     async def expire_once(self) -> int:
         async with self._session_factory() as session, session.begin():
