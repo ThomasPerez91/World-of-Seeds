@@ -1,5 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, Eye, EyeOff } from "lucide-react";
+import { ChevronRight, Eye, EyeOff, Trash2, Undo2 } from "lucide-react";
 
 import {
   api,
@@ -75,6 +75,21 @@ function parsedValue(field: OptionField, draft: DraftValue): OptionValue {
   return draft;
 }
 
+// Stored secrets are never sent back to the browser: an empty draft means "keep the current
+// value" unless the administrator explicitly asked to erase it.
+function pendingChange(
+  field: OptionField,
+  draft: DraftValue,
+  erased: ReadonlySet<string>,
+): { value: OptionValue } | null {
+  if (field.input_type === "secret") {
+    if (typeof draft === "string" && draft !== "") return { value: draft };
+    return erased.has(field.key) ? { value: "" } : null;
+  }
+  const value = parsedValue(field, draft);
+  return value === field.value ? null : { value };
+}
+
 function groupC411Fields(fields: OptionField[]): Array<{ fields: OptionField[]; slot: number }> {
   const grouped = new Map<number, OptionField[]>();
   for (const field of fields) {
@@ -108,6 +123,7 @@ export function AdminSettingsPage({
   const [revealedC411Passkeys, setRevealedC411Passkeys] = useState<Set<string>>(
     () => new Set(),
   );
+  const [erasedSecrets, setErasedSecrets] = useState<Set<string>>(() => new Set());
   const mounted = useRef(true);
 
   const load = useCallback(async () => {
@@ -118,6 +134,7 @@ export function AdminSettingsPage({
       if (!mounted.current) return;
       setOptions(result);
       setDraft(createDraft(result));
+      setErasedSecrets(new Set());
       setFieldErrors({});
     } catch (caught) {
       if (!mounted.current) return;
@@ -143,8 +160,25 @@ export function AdminSettingsPage({
     };
   }, [load]);
 
+  function toggleErasedSecret(key: string) {
+    setErasedSecrets((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   function updateDraft(key: string, value: DraftValue) {
     setDraft((current) => ({ ...current, [key]: value }));
+    if (value !== "") {
+      setErasedSecrets((current) => {
+        if (!current.has(key)) return current;
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
     setFieldErrors((current) => {
       if (current[key] === undefined) return current;
       const next = { ...current };
@@ -169,9 +203,10 @@ export function AdminSettingsPage({
     }
 
     const changes = Object.fromEntries(
-      fields
-        .filter((field) => parsedValue(field, draft[field.key]) !== field.value)
-        .map((field) => [field.key, parsedValue(field, draft[field.key])]),
+      fields.flatMap((field) => {
+        const change = pendingChange(field, draft[field.key], erasedSecrets);
+        return change === null ? [] : [[field.key, change.value] as const];
+      }),
     );
     if (Object.keys(changes).length === 0) {
       feedback.toast({ tone: "info", message: t("admin.noChanges") });
@@ -185,6 +220,7 @@ export function AdminSettingsPage({
       if (!mounted.current) return;
       setOptions(result);
       setDraft(createDraft(result));
+      setErasedSecrets(new Set());
       setFieldErrors({});
       feedback.toast({
         tone: result.restart_required ? "warning" : "success",
@@ -321,6 +357,14 @@ export function AdminSettingsPage({
     const c411Kind = /^WOS_C411_ACCOUNT_\d{2}_(USERNAME|NUMBER|PASSKEY)$/.exec(field.key)?.[1]?.toLowerCase();
     const c411Slot = /^WOS_C411_ACCOUNT_(\d{2})_PASSKEY$/.exec(field.key)?.[1];
     const c411PasskeyRevealed = revealedC411Passkeys.has(field.key);
+    const secretErased = erasedSecrets.has(field.key);
+    const secretPlaceholder = field.input_type !== "secret" || field.configured !== true
+      ? undefined
+      : t(secretErased ? "admin.secretWillBeErased" : "admin.secretConfigured");
+    const canEraseSecret = field.input_type === "secret"
+      && field.configured === true
+      && field.editable
+      && (secretErased || draft[field.key] === "");
     const describedBy = `${hintId}${error === undefined ? "" : ` ${errorId}`}`;
     return (
       <div
@@ -379,13 +423,14 @@ export function AdminSettingsPage({
               )}
             </div>
           ) : c411Kind === "passkey" ? (
-            <div className="c411-passkey-control">
+            <div className={`c411-passkey-control${canEraseSecret ? " c411-passkey-control-erasable" : ""}`}>
               <input
                 id={inputId}
                 className="c411-passkey-input"
                 type="text"
                 name={`c411-tracker-token-${c411Slot ?? "unknown"}`}
                 value={String(draft[field.key])}
+                placeholder={secretPlaceholder}
                 maxLength={256}
                 autoComplete="off"
                 autoCapitalize="none"
@@ -418,12 +463,28 @@ export function AdminSettingsPage({
                   ? <EyeOff aria-hidden="true" />
                   : <Eye aria-hidden="true" />}
               </Button>
+              {canEraseSecret && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="c411-passkey-toggle"
+                  aria-label={t(secretErased ? "admin.keepPasskey" : "admin.erasePasskey")}
+                  aria-pressed={secretErased}
+                  disabled={saving}
+                  onClick={() => toggleErasedSecret(field.key)}
+                >
+                  {secretErased
+                    ? <Undo2 aria-hidden="true" />
+                    : <Trash2 aria-hidden="true" />}
+                </Button>
+              )}
             </div>
           ) : (
             <input
               id={inputId}
               type={field.input_type === "secret" ? "password" : "text"}
               value={String(draft[field.key])}
+              placeholder={secretPlaceholder}
               maxLength={field.input_type === "secret" ? 256 : 64}
               inputMode={field.key.endsWith("_NUMBER") ? "numeric" : undefined}
               autoComplete="off"

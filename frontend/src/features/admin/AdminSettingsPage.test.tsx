@@ -232,7 +232,8 @@ describe("AdminSettingsPage", () => {
               label: "Compte C411 1 — passkey",
               description: "Passkey C411.",
               input_type: "secret",
-              value: "initial-passkey-123",
+              value: "",
+              configured: true,
               default: "",
               unit: null,
               minimum: null,
@@ -286,6 +287,8 @@ describe("AdminSettingsPage", () => {
     expect(passkey.getAttribute("data-revealed")).toBe("false");
     expect(passkey.getAttribute("data-1p-ignore")).toBe("true");
     expect(passkey.getAttribute("aria-describedby")).toBe(passkeyHint.id);
+    expect((passkey as HTMLInputElement).value).toBe("");
+    expect(passkey.getAttribute("placeholder")).toBe("Configurée — laisser vide pour la conserver");
     await user.click(screen.getByRole("button", { name: "Afficher la passkey" }));
     expect(passkey.getAttribute("data-revealed")).toBe("true");
     expect(screen.getByRole("button", { name: "Masquer la passkey" })).toBeTruthy();
@@ -299,6 +302,62 @@ describe("AdminSettingsPage", () => {
         body: JSON.stringify({
           changes: { WOS_C411_ACCOUNT_01_PASSKEY: "replacement-passkey-456" },
         }),
+        method: "PATCH",
+      }),
+    );
+  });
+
+  it("ne renvoie jamais la passkey stockée et ne l’efface que sur demande explicite", async () => {
+    const field = {
+      ...options.sections[0].fields[0],
+      key: "WOS_C411_ACCOUNT_01_PASSKEY",
+      label: "Compte C411 1 — passkey",
+      description: "Passkey C411.",
+      input_type: "secret",
+      value: "",
+      configured: true,
+      default: "",
+      unit: null,
+      minimum: null,
+      maximum: null,
+    } as const;
+    const secretOptions = {
+      ...options,
+      sections: [{ id: "c411_accounts", label: "Comptes C411", fields: [field] }],
+    } as const;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        if (String(input) === "/api/v2/admin/overview") return response(secretOptions);
+        if (String(input) === "/api/v2/admin/options" && init?.method === "PATCH") {
+          return response(secretOptions);
+        }
+        throw new Error(`Requête inattendue : ${init?.method ?? "GET"} ${String(input)}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(
+      <FeedbackProvider>
+        <AdminSettingsPage onBack={vi.fn()} onNavigate={vi.fn()} onSessionExpired={vi.fn()} />
+      </FeedbackProvider>,
+    );
+
+    await screen.findByRole("group", { name: "Compte C411 1" });
+    await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/v2/admin/options", expect.anything());
+
+    await user.click(screen.getByRole("button", { name: "Effacer la passkey" }));
+    expect(screen.getByLabelText("Passkey").getAttribute("placeholder")).toBe(
+      "Sera effacée à l’enregistrement",
+    );
+    await user.click(screen.getByRole("button", { name: "Conserver la passkey" }));
+    await user.click(screen.getByRole("button", { name: "Effacer la passkey" }));
+    await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v2/admin/options",
+      expect.objectContaining({
+        body: JSON.stringify({ changes: { WOS_C411_ACCOUNT_01_PASSKEY: "" } }),
         method: "PATCH",
       }),
     );

@@ -389,6 +389,20 @@ def _torrent_files(
         raise TorrentValidationError("La taille du torrent est invalide.")
 
 
+_PEER_DISCOVERY_FIELDS = (
+    b"url-list",
+    b"httpseeds",
+    b"nodes",
+    b"comment",
+    b"comment.utf-8",
+    b"created by",
+    b"publisher",
+    b"publisher.utf-8",
+    b"publisher-url",
+    b"publisher-url.utf-8",
+)
+
+
 def _rewrite_torrent(
     content: bytes,
     *,
@@ -444,6 +458,10 @@ def _rewrite_torrent(
         passkey=passkey,
         allowed_hosts=frozenset(host.lower() for host in allowed_tracker_hosts),
     )
+    # Anything outside `info` that lets a client find peers or sources beyond the allow-listed
+    # trackers (web seeds, HTTP seeds, DHT nodes) is dropped. The info-hash is untouched.
+    for key in _PEER_DISCOVERY_FIELDS:
+        metainfo.pop(key, None)
     encoded_parts: list[bytes] = []
     for key in sorted(metainfo):
         value: BValue | _RawValue = _RawValue(info_raw) if key == b"info" else metainfo[key]
