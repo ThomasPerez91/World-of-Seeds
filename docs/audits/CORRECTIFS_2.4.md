@@ -260,3 +260,12 @@ Le benchmark accepte --depth et --memory et refuse de générer un cas hors budg
 d’éléments du parser. Un nouveau test isolé impose un pic sous 64 MiB, avec une
 deadline de 20 secondes. Les 92 tests ciblés passent après correction ; Ruff et mypy
 restent verts. Le contrôle complet CI est relancé avant toute promotion master.
+
+
+### Relectures de relance
+
+La relecture du spool lors d’une relance rejoint le pool technique commun. Le verrou
+existant par storage_key et la protection contre l’annulation sont conservés ; des
+clés distinctes ou plusieurs instances de TorrentRetryReads ne peuvent pas contourner
+le budget de threads. Un test vérifie la saturation entre deux clés/instances, l’absence
+d’exécution excédentaire et la récupération de la clé après saturation.
