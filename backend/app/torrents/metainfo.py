@@ -11,7 +11,9 @@ MAX_BENCODE_DEPTH = 64
 MAX_BENCODE_ITEMS = 200_000
 MAX_TORRENT_FILES = 100_000
 MAX_PATH_COMPONENT_BYTES = 255
-MAX_TORRENT_PATH_BYTES = 4096
+# The unique index on (torrent, relative_path) cannot hold a B-tree key above ~2700 bytes:
+# a longer path would pass validation and then fail at insertion.
+MAX_TORRENT_PATH_BYTES = 2048
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:$")
 

@@ -82,7 +82,7 @@ La suppression d'un accès administré révoque les sessions, désactive le comp
 
 ## Trackers, qBittorrent et NewGreedy
 
-Les métainfo torrent sont parsés strictement et l'infohash est calculé depuis les octets bruts exacts du dictionnaire `info`. Les trackers sont allowlistés. Un à seize comptes C411 peuvent être configurés dans les options PostgreSQL réservées aux administrateurs. Chaque emplacement contient un numéro de compte et une passkey ; une paire vide est inactive. Les audits remplacent toujours la valeur d'une passkey par un marqueur expurgé et les passkeys ne sont jamais écrites dans les tables métier, logs ou métriques.
+Les métainfo torrent sont parsés strictement et l'infohash est calculé depuis les octets bruts exacts du dictionnaire `info`. Les trackers sont allowlistés. Un à seize comptes C411 peuvent être configurés dans les options PostgreSQL réservées aux administrateurs. Chaque emplacement contient un numéro de compte et une passkey ; une paire vide est inactive. Les audits remplacent toujours la valeur d'une passkey par un marqueur expurgé ; l'API d'administration ne renvoie jamais une passkey (valeur vide et indicateur `configured`) et elle n'est écrite ni dans les logs ni dans les métriques. Elle est stockée en clair dans les options PostgreSQL : le chiffrement au repos est un chantier ouvert.
 
 Un nouveau torrent choisit aléatoirement un emplacement C411 actif sous verrou SQL. Seule la référence opaque et stable de cet emplacement est persistée sur le torrent, afin que les retries conservent le même compte. La passkey courante est injectée en mémoire dans les URL `announce` juste avant l'ajout au qBittorrent unique. Les identifiants qBittorrent restent des secrets de déploiement.
 
