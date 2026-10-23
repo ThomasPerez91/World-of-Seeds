@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -27,6 +26,7 @@ from app.core.database import engine
 from app.core.database_errors import DatabaseUnavailableError
 from app.core.drain import RequestDrain, RequestDrainMiddleware
 from app.core.http_security import SecurityHeadersMiddleware
+from app.core.static_files import DeploymentAwareStaticFiles
 from app.integrations import ExternalServicesMonitor
 from app.integrations.admin_runtime import AdminRuntimeMonitor
 from app.integrations.network_collection import NetworkThroughputCollector
@@ -313,7 +313,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     if settings.static_root.is_dir():
         application.mount(
             "/",
-            StaticFiles(directory=settings.static_root, html=True),
+            DeploymentAwareStaticFiles(directory=settings.static_root, html=True),
             name="frontend",
         )
 

@@ -194,6 +194,7 @@ const messages = {
     "admin.cleanupConfirmPurge": "Confirmer la purge",
     "admin.cleanupPurging": "Planification…",
     "admin.cleanupPurgeScheduled": "Purge planifiée pour {count} contenu(s).",
+    "admin.cleanupPurgePartial": "Purge planifiée pour {count} contenu(s) ; {skipped} ignoré(s) (modifiés entre-temps).",
     "admin.cleanupPurgeFailed": "La purge n’a pas pu être planifiée.",
     "admin.cleanupSummary": "Résumé des résultats filtrés",
     "admin.cleanupFilteredContent": "Contenus filtrés",
@@ -548,6 +549,8 @@ const messages = {
     "downloads.trackingFailed": "Le suivi est indisponible.",
     "downloads.trackingUnavailable": "Suivi des téléchargements indisponible",
     "downloads.batchTooLarge": "Un lot peut contenir au maximum {count} fichiers .torrent.",
+    "downloads.batchStopped": "Lot interrompu : {count} fichier(s) non envoyé(s).",
+    "downloads.sessionExpired": "Ta session a expiré. Reconnecte-toi puis relance la récupération.",
     "downloads.batchTitle": "Ajout des torrents",
     "downloads.batchProgress": "{completed}/{total} traités · {active} en cours · {errors} erreurs",
     "downloads.batchComplete": "Lot terminé",
@@ -870,6 +873,7 @@ const messages = {
     "admin.cleanupConfirmPurge": "Confirm purge",
     "admin.cleanupPurging": "Scheduling…",
     "admin.cleanupPurgeScheduled": "Purge scheduled for {count} item(s).",
+    "admin.cleanupPurgePartial": "Purge scheduled for {count} item(s); {skipped} skipped (changed in the meantime).",
     "admin.cleanupPurgeFailed": "The purge could not be scheduled.",
     "admin.cleanupSummary": "Filtered results summary",
     "admin.cleanupFilteredContent": "Filtered content",
@@ -1222,6 +1226,8 @@ const messages = {
     "downloads.trackingFailed": "Download tracking is unavailable.",
     "downloads.trackingUnavailable": "Download tracking unavailable",
     "downloads.batchTooLarge": "A batch can contain at most {count} .torrent files.",
+    "downloads.batchStopped": "Batch stopped: {count} file(s) not sent.",
+    "downloads.sessionExpired": "Your session expired. Sign in again, then restart the download.",
     "downloads.batchTitle": "Adding torrents",
     "downloads.batchProgress": "{completed}/{total} processed · {active} active · {errors} errors",
     "downloads.batchComplete": "Batch complete",
@@ -1400,10 +1406,34 @@ interface I18nApi {
 const I18nContext = createContext<I18nApi | null>(null);
 const STORAGE_KEY = "wos.preferred-locale";
 
+// Storage can be blocked or throw (private modes, disabled cookies): never break rendering.
 function initialLocale(): Locale {
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (stored === "fr" || stored === "en") return stored;
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (stored === "fr" || stored === "en") return stored;
+  } catch {
+    // Fall back to the default language.
+  }
   return "fr";
+}
+
+function storeLocale(locale: Locale): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, locale);
+  } catch {
+    // The choice then only lasts for this session.
+  }
+}
+
+function formatDateValue(
+  languageTag: string,
+  value: string | Date,
+  options?: Intl.DateTimeFormatOptions,
+): string {
+  const date = typeof value === "string" ? new Date(value) : value;
+  // A malformed date from the API must not take the whole screen down.
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(languageTag, options).format(date);
 }
 
 function interpolate(template: string, params: Params = {}): string {
@@ -1443,10 +1473,7 @@ const fallbackI18n: I18nApi = {
   setLocale: () => undefined,
   t: (key, params) => interpolate(messages.fr[key], params),
   formatBytes: (value, nullLabel) => formatByteValue(value, nullLabel ?? "—", "fr-FR"),
-  formatDate: (value, options) =>
-    new Intl.DateTimeFormat("fr-FR", options).format(
-      typeof value === "string" ? new Date(value) : value,
-    ),
+  formatDate: (value, options) => formatDateValue("fr-FR", value, options),
   formatNumber: (value, options) => new Intl.NumberFormat("fr-FR", options).format(value),
   apiError: (_error, fallback) => interpolate(messages.fr[fallback]),
 };
@@ -1456,7 +1483,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const languageTag: I18nApi["languageTag"] = locale === "fr" ? "fr-FR" : "en-US";
 
   const setLocale = useCallback((nextLocale: Locale) => {
-    window.localStorage.setItem(STORAGE_KEY, nextLocale);
+    storeLocale(nextLocale);
     setLocaleState(nextLocale);
   }, []);
 
@@ -1475,9 +1502,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   );
   const formatDate = useCallback(
     (value: string | Date, options?: Intl.DateTimeFormatOptions) =>
-      new Intl.DateTimeFormat(languageTag, options).format(
-        typeof value === "string" ? new Date(value) : value,
-      ),
+      formatDateValue(languageTag, value, options),
     [languageTag],
   );
   const formatNumber = useCallback(
