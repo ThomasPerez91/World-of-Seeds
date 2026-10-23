@@ -31,7 +31,9 @@ const unitLabels: Record<string, MessageKey> = {
   bytes_per_second: "admin.unit.bytes_per_second",
   count: "admin.unit.count",
   count_per_minute: "admin.unit.count_per_minute",
+  credit: "admin.unit.credit",
   hours: "admin.unit.hours",
+  percent: "admin.unit.percent",
   seconds: "admin.unit.seconds",
 };
 

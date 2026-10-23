@@ -13,6 +13,7 @@ from app.auth.security import hash_password
 from app.coordination import TorrentEventType, TorrentRealtimeEvent
 from app.main import app
 from app.models import (
+    DatabaseOption,
     ManagedTorrent,
     ManagedTorrentState,
     TorrentJob,
@@ -1165,3 +1166,25 @@ async def test_add_job_attempt_budget_follows_the_retry_option(
     assert job is not None
     # WOS_TORRENT_MAX_RETRY_ATTEMPTS defaults to 5 retries, so six attempts in total.
     assert job.max_attempts == 6
+
+
+@pytest.mark.asyncio
+async def test_v2_upload_answers_503_when_the_stored_options_are_inconsistent(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+    warning = await db_session.get(DatabaseOption, "WOS_STORAGE_PRESSURE_WARNING_PERCENT")
+    assert warning is not None
+    warning.integer_value = 95  # above the critical threshold
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "torrent_options_unavailable"

@@ -21,6 +21,8 @@ const englishOptions: Record<string, OptionCopy> = {
   WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER: { label: "Concurrent ZIP archives per user", description: "Maximum ZIP streams per standard user. File streams use the HTTP traffic scheduler." },
   WOS_DOWNLOAD_LEASE_SECONDS: { label: "Download lease duration", description: "How long content remains protected while it is being downloaded." },
   WOS_FOLDER_ARCHIVE_MAX_BYTES: { label: "Maximum folder archive size", description: "Maximum source size accepted for a folder ZIP download." },
+  WOS_FOLDER_ARCHIVE_MAX_CONCURRENT_GLOBAL: { label: "Simultaneous ZIP streams", description: "Maximum ZIP archives produced at the same time by the API process; the others wait in line. It cannot exceed the global ZIP admissions." },
+  WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS: { label: "Automatic unsubscribe", description: "How long a user stays subscribed to a torrent once it is available. Applies to content that becomes ready afterwards." },
   WOS_DOWNLOAD_MAX_CONCURRENT_GLOBAL: { label: "Global ZIP archives", description: "Maximum open ZIP streams. Files use five fast lanes and reduced-rate waiting streams." },
   WOS_TORRENT_MAX_ACTIVE_PER_USER: { label: "Active torrents per user", description: "Maximum active requests for one account." },
   WOS_QB_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL: { label: "Maximum global qBittorrent rate", description: "Rate cap shared by admitted V2 torrents; 0 disables the limit." },
@@ -70,6 +72,8 @@ const frenchOptions: Record<string, OptionCopy> = {
   WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER: { label: "Archives ZIP simultanées par utilisateur", description: "Nombre maximal de flux ZIP pour un utilisateur standard. Les fichiers utilisent l’ordonnanceur HTTP." },
   WOS_DOWNLOAD_LEASE_SECONDS: { label: "Durée d’une lease", description: "Durée de protection d’un contenu pendant son téléchargement." },
   WOS_FOLDER_ARCHIVE_MAX_BYTES: { label: "Taille maximale d’une archive dossier", description: "Volume source maximal accepté pour un téléchargement ZIP de dossier." },
+  WOS_FOLDER_ARCHIVE_MAX_CONCURRENT_GLOBAL: { label: "Flux ZIP simultanés", description: "Nombre maximal d’archives ZIP produites en même temps par le processus API ; les autres attendent leur tour. Ne peut pas dépasser les admissions ZIP globales." },
+  WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS: { label: "Désabonnement automatique", description: "Durée pendant laquelle un utilisateur reste abonné à un torrent une fois disponible. S’applique aux contenus qui deviennent prêts ensuite." },
   WOS_DOWNLOAD_MAX_CONCURRENT_GLOBAL: { label: "Archives ZIP simultanées globales", description: "Nombre maximal de flux ZIP. Les fichiers utilisent cinq voies rapides et des flux d’attente ralentis." },
   WOS_TORRENT_MAX_ACTIVE_PER_USER: { label: "Torrents actifs par utilisateur", description: "Nombre maximal de demandes actives pour un même compte." },
   WOS_QB_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL: { label: "Débit qBittorrent maximal global", description: "Plafond réparti entre les torrents V2 admis ; 0 désactive la limite." },
@@ -131,7 +135,7 @@ export function optionFieldCopy(
           ? "Optional label used only to identify this account in administration."
           : kind === "PASSKEY"
             ? "Passkey inserted into tracker URLs for torrents assigned to this account."
-            : "C411 account number. Leave the number and passkey empty to disable this slot.",
+            : "C411 account number. To disable this slot, empty the number and erase the passkey.",
       };
     }
     return {
@@ -140,7 +144,7 @@ export function optionFieldCopy(
         ? "Libellé facultatif utilisé uniquement pour identifier ce compte dans l’administration."
         : kind === "PASSKEY"
           ? "Passkey injectée dans les URL tracker des torrents affectés à ce compte."
-          : "Numéro du compte C411. Laissez le numéro et la passkey vides pour désactiver cet emplacement.",
+          : "Numéro du compte C411. Pour désactiver cet emplacement, videz le numéro et effacez la passkey.",
     };
   }
   return (locale === "fr" ? frenchOptions[key] : englishOptions[key]) ?? frenchFallback;

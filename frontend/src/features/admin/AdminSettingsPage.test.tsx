@@ -83,7 +83,7 @@ function response(body: unknown, status = 200): Response {
 
 describe("AdminSettingsPage", () => {
   it("possède une traduction anglaise stable pour chaque option V2", () => {
-    expect(translatedOptionKeys.size).toBe(94);
+    expect(translatedOptionKeys.size).toBe(96);
     expect(translatedOptionKeys.has("WOS_ADMIN_REFRESH_INTERVAL_SECONDS")).toBe(true);
     expect(translatedNewGreedyFieldIds.size).toBe(44);
     expect(translatedNewGreedyFieldIds.has("advanced.inject_hours")).toBe(true);
@@ -273,7 +273,7 @@ describe("AdminSettingsPage", () => {
     const username = screen.getByLabelText("Nom d’utilisateur");
     expect(username.getAttribute("inputmode")).toBeNull();
     const usernameHint = screen.getByText("Libellé facultatif utilisé uniquement pour identifier ce compte dans l’administration.");
-    const numberHint = screen.getByText("Numéro du compte C411. Laissez le numéro et la passkey vides pour désactiver cet emplacement.");
+    const numberHint = screen.getByText("Numéro du compte C411. Pour désactiver cet emplacement, videz le numéro et effacez la passkey.");
     const passkeyHint = screen.getByText("Passkey injectée dans les URL tracker des torrents affectés à ce compte.");
     expect(usernameHint.classList.contains("sr-only")).toBe(true);
     expect(numberHint.classList.contains("sr-only")).toBe(true);

@@ -22,7 +22,7 @@ from app.models import (
     User,
     UserStorageUsage,
 )
-from app.options import PostgresOptionsRegistry
+from app.options import INACTIVE_OPTION_KEYS, PostgresOptionsRegistry
 
 
 async def _admin(db: AsyncSession) -> User:
@@ -100,6 +100,10 @@ async def test_admin_overview_exposes_options_scheduler_storage_and_bounded_audi
     assert body["storage"]["managed_bytes"] == 100
     assert body["storage"]["logical_bytes"] == 150
     assert 0 < len(body["audit"]) <= 50
+    shown = {field["key"] for section in body["sections"] for field in section["fields"]}
+    # Options that no consumer reads are not offered for editing.
+    assert not shown.intersection(INACTIVE_OPTION_KEYS)
+    assert "WOS_TORRENT_MAX_ACTIVE_PER_USER" in shown
     c411 = next(section for section in body["sections"] if section["id"] == "c411_accounts")
     assert len(c411["fields"]) == 48
     assert sum(field["input_type"] == "secret" for field in c411["fields"]) == 16
