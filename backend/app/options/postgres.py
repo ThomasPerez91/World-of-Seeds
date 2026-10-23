@@ -43,6 +43,15 @@ class PostgresOptionsRegistry:
 
     async def initialize(self, session: AsyncSession, *, now: datetime | None = None) -> None:
         changed_at = now or datetime.now(UTC)
+        # Fast path: when every row already exists nothing is written, so no exclusive lock
+        # on the whole table is needed (the scheduler calls this every cycle).
+        rows = await self._load_rows(session)
+        if all(spec.key in rows for spec in DATABASE_OPTION_SPECS):
+            self._reject_unknown_rows(rows)
+            for spec in DATABASE_OPTION_SPECS:
+                self._validate_row_metadata(rows[spec.key], spec)
+            self._validated_values(rows)
+            return
         rows = await self._load_rows(session, lock=True)
         self._reject_unknown_rows(rows)
 

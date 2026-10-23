@@ -1484,6 +1484,68 @@ async def test_periodic_enqueuer_coalesces_one_active_sync_job_per_torrent(
         assert await session.scalar(select(func.count()).select_from(TorrentJob)) == 1
 
 
+async def _add_torrent(
+    sessions: async_sessionmaker[AsyncSession],
+    *,
+    info_hash: str,
+    state: ManagedTorrentState,
+    updated_at: datetime,
+) -> uuid.UUID:
+    async with sessions() as session, session.begin():
+        torrent = ManagedTorrent(
+            info_hash=info_hash,
+            name=f"torrent-{info_hash[:6]}",
+            total_size=5,
+            state=state,
+            created_at=updated_at,
+            updated_at=updated_at,
+        )
+        session.add(torrent)
+        await session.flush()
+        return torrent.id
+
+
+@pytest.mark.asyncio
+async def test_ready_torrents_are_synchronized_slowly_and_downloads_first(
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fresh_ready = await _add_torrent(
+        sessions,
+        info_hash="1" * 40,
+        state=ManagedTorrentState.READY,
+        updated_at=NOW - timedelta(seconds=10),
+    )
+    stale_ready = await _add_torrent(
+        sessions,
+        info_hash="2" * 40,
+        state=ManagedTorrentState.READY,
+        updated_at=NOW - timedelta(minutes=10),
+    )
+    downloading = await _add_torrent(
+        sessions,
+        info_hash="3" * 40,
+        state=ManagedTorrentState.DOWNLOADING,
+        updated_at=NOW - timedelta(seconds=10),
+    )
+    enqueuer = TorrentSyncEnqueuer(sessions, RedisCoordinator.unconfigured(), clock=lambda: NOW)
+
+    # A bounded batch must serve the download before the much older READY torrent.
+    monkeypatch.setattr(torrent_effects, "MAX_SYNC_BATCH", 1)
+    assert await enqueuer.enqueue_once() == (5, 1)
+    async with sessions() as session:
+        first = (await session.scalars(select(TorrentJob.managed_torrent_id))).all()
+    assert list(first) == [downloading]
+
+    monkeypatch.setattr(torrent_effects, "MAX_SYNC_BATCH", 200)
+    assert await enqueuer.enqueue_once() == (5, 1)
+    async with sessions() as session:
+        queued = set((await session.scalars(select(TorrentJob.managed_torrent_id))).all())
+    # The READY torrent synchronized 10 seconds ago keeps waiting for its slow heartbeat.
+    assert queued == {downloading, stale_ready}
+    assert fresh_ready not in queued
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["read", "normalize"])
 async def test_add_handler_retries_validation_saturation_without_qb_add_or_payload_removal(
