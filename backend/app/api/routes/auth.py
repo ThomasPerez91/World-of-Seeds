@@ -53,7 +53,7 @@ async def reset_password(
     settings: AppSettings,
 ) -> None:
     ip = request.client.host if request.client is not None else "unknown"
-    retry = request.app.state.login_ip_rate_limiter.consume(f"password-reset:{ip}")
+    retry = request.app.state.password_reset_ip_rate_limiter.consume(ip, identity=payload.token)
     if retry is not None:
         raise HTTPException(
             429,
@@ -116,12 +116,14 @@ async def login(
 ) -> AuthResponse:
     # Uvicorn resolves forwarded addresses only from the configured trusted ingress.
     client_ip = request.client.host if request.client is not None else "unknown"
-    retry_after = request.app.state.login_ip_rate_limiter.consume(client_ip)
+    retry_after = request.app.state.login_ip_rate_limiter.consume(
+        client_ip, identity=payload.username.strip().lower()
+    )
     if retry_after is not None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=_detail("authentication_throttled", "Too many authentication attempts"),
-            headers={"Retry-After": str(retry_after)},
+            headers={"Retry-After": str(retry_after), "Cache-Control": "no-store"},
         )
     try:
         user, tokens = await authenticate(

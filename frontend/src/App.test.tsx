@@ -241,7 +241,7 @@ describe("App", () => {
     const view = render(<App />);
     await screen.findByRole("heading", { name: "Dashboard" });
     expect((await screen.findAllByText("1 KB available")).length).toBeGreaterThan(0);
-    expect(document.documentElement.lang).toBe("en");
+    await waitFor(() => expect(document.documentElement.lang).toBe("en"));
 
     const adminNavigation = screen.getByRole("button", { name: "Administration" });
     expect(adminNavigation.getAttribute("aria-current")).toBeNull();

@@ -4,9 +4,9 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version de production vérifiée : `2.4.3`. Cible en préparation : 2.4.4, S2 (limiteur externe borné).
+- Version de production vérifiée : `2.4.4`. Cible en préparation : 2.4.5, S3 (saturation login/reset).
 
-## Campagne audit 2.4.x — 2.4.3 déployée, préparation de 2.4.4
+## Campagne audit 2.4.x — 2.4.4 déployée, préparation de 2.4.5
 
 Journal complet : `docs/audits/CORRECTIFS_2.4.md`. Audit PDF lu intégralement.
 2.4.1 : #396, #398 et #399 intégrées ; #397 promue sur master
@@ -38,12 +38,22 @@ Benchmark local : 30000 fichiers 0,647664 s ; cas profond : pic Python tracé
 207940561 → 14452689 bytes, infohash conservé. Voir journal pour les limites de mesure.
 Aucun bootstrap root, migration ou mise à jour du bot nécessaires.
 
-2.4.4 en préparation : S2, limiteur externe ordonné/expirable, maximum 10000 identités,
+2.4.4 livrée : S2, limiteur externe ordonné/expirable, maximum 10000 identités,
 6000 admissions IP globales / 60 s avant auth, budgets IP/client 60 / 60 s inchangés.
 IPv6 /64, IPv4-mappée/alias unifiés, identités hachées ; aucune éviction de budget actif.
 Local : backend 1259 réussis / 72 ignorés ; frontend 209 réussis / 3 ignorés,
-TypeScript/build, Ruff et mypy verts. CI et déploiement à vérifier.
-S3 (login/reset) et S6 (limite métier authentifiée) restent à traiter.
+TypeScript/build, Ruff et mypy verts. #408/#410 intégrées, promotion #409 fusionnée.
+Master `e43bd5d572c93fe0d78c3960e4143d8b004b7242` ; CI 39920526108 verte
+(1329 tests backend réussis / 2 ignorés), déploiement 39920982983 réussi.
+Live/ready/page/bundle publics HTTP 200, version 2.4.4. Aucun changement de schéma
+ou du bot. Test de concurrence stockage isolé du pool de validation, revue corrigée.
+2.4.5 en préparation : S3, budgets login/reset séparés, IPv6 /64, plafond global
+par route avant SQL/crypto ; secours borné réseau + identité quand la table primaire
+est pleine, sans éviction ni réinitialisation des budgets actifs. Les collisions
+peuvent restreindre l’accès ; pas de garantie contre tout déni de service distribué.
+Local ciblé : 64 réussis ; frontend 209/3, build/TypeScript, Ruff/mypy 258 sources verts.
+Suite backend complète : 1280 réussis / 72 ignorés. CI/revue et déploiement à vérifier.
+S4 et S6 restent à traiter.
 Ne pas déclarer 2.4.4 déployée avant les preuves réelles.
 
 ## Release 2.3.29 — téléchargements et alertes privées Discord

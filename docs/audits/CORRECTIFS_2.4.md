@@ -7,15 +7,15 @@
 - Cycle : tests isolés → PR develop → CI → merge → PR master → CI → merge/déploiement → contrôles réels → mise à jour du journal → livraison suivante.
 - Tests : comportementaux, PostgreSQL/Redis/Docker en CI selon disponibilité ; aucun test destructif sur production. Limites métier users, protections techniques pour tous, exemptions admin vérifiées côté serveur.
 - Audit lu intégralement (15 pages) : les constats [V], [S] et les preuves runtime manquantes restent distingués.
-- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.3 déployée et vérifiée le 23 octobre ; S1 livré ; S2 en préparation pour 2.4.4.
+- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.4 déployée et vérifiée le 23 octobre ; S1 et S2 livrés ; S3 en préparation pour 2.4.5.
 
 ## Matrice de suivi
 
 | Référence | Problème | Priorité | Statut | Version | PR | Tests |
 |---|---|---|---|---|---|---|
 | S1 | Validation torrent quadratique | P0 | Corrigé, testé et déployé | 2.4.3 | #403 / #405 / #406 / #404 | 21 tests ajoutés ; collisions, mémoire, budget/cancel, async, relance, 30k |
-| S2 | Limiteur externe non borné | P0 | Corrigé ; validation locale en cours, CI/déploiement à suivre | 2.4.4 | À publier | 100k IPv6, expiration, non-éviction, budgets/concurrence/HTTP |
-| S3 | Saturation login/reset | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
+| S2 | Limiteur externe non borné | P0 | Corrigé, testé et déployé | 2.4.4 | #408 / #410 / #409 | 100k IPv6, expiration, non-éviction, budgets/concurrence/HTTP |
+| S3 | Saturation login/reset | P0 | Corrigé ; validation en cours | 2.4.5 | À publier | Connexion/reset avec table pleine, budgets IP/identité/global, IPv6, mémoire, expiration |
 | S4 | Métadonnées réseau et périmètre C411 | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S5 | Passkeys exposées en clair | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S6 | Limite authentifiée et cache santé | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -297,7 +297,7 @@ les budgets sans contournement par éviction. S2 n’est pas encore corrigé. C3
 (sauvegardes hors hôte/alertes reçues) restent non validés opérationnellement.
 
 
-## 2.4.4 — limiteur externe borné (préparation)
+## 2.4.4 — limiteur externe borné (livré)
 
 Cause confirmée : defaultdict(deque) créait une entrée par adresse avant validation
 API ; une adresse jamais revue ne bénéficiait d’aucune collecte d’expiration.
@@ -331,7 +331,7 @@ plafond de pic Python tracé à 32 MiB, récupération après expiration et rép
 Première validation ciblée : 33 réussis / 1 ignoré (PostgreSQL), Ruff et mypy strict
 257 sources verts. Suite backend complète : 1259 réussis / 72 ignorés (services
 indisponibles localement) ; frontend : 209 réussis / 3 ignorés, TypeScript et build
-réussis. CI et déploiement restent à vérifier avant de déclarer S2 livré.
+réussis. CI et déploiement validés ci-dessous.
 
 Version 2.4.4, aucune migration ou modification d’infrastructure protégée. Limiteur
 local au processus, API unique exigée par le déploiement ; les budgets sont réinitialisés
@@ -344,4 +344,87 @@ validation (capacité 4), avant le contrôle de stockage qui attend 507. Le test
 d’admission stockage dispose désormais d’un pool isolé admettant ses huit
 concurrents ; toutes les assertions de stockage et de non-duplication sont
 conservées. Les tests dédiés de saturation conservent les bornes de production.
-Aucun changement de capacité de production. Nouvelle CI complète requise.
+Aucun changement de capacité de production. La revue a corrigé la référence du
+pool remplacé : app.torrents.retry_reads.torrent_validation_pool. CI complète verte.
+
+### Preuves de livraison 2.4.4
+
+#408 (correctif S2) et #410 (isolation du test stockage) intégrées ; promotion #409
+fusionnée sur master `e43bd5d572c93fe0d78c3960e4143d8b004b7242`.
+[CI source finale](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39919511022),
+[CI promotion](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39920032237)
+et [CI master](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39920526108)
+vertes : 1329 tests backend réussis / 2 ignorés ; six contrôles verts.
+Le premier passage de promotion avait révélé le conflit du test stockage avec le
+pool borné ; il a été corrigé, sans relancer un échec pour le masquer.
+
+[Déploiement Rise2](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39920982983)
+réussi le 23 octobre 2026 à 07:56:55 UTC. Révision exacte ci-dessus et image :
+`ghcr.io/thomasperez91/world-of-seeds-v2@sha256:5c556872d28756999c96a6efc67f1e7f8220ad29dc73cb3615dfe0a7eff1a1ea`.
+Contrôles publics indépendants après livraison : live/ready HTTP 200, version 2.4.4 ;
+page et bundle `/assets/index-BL36gtjC.js` HTTP 200, version frontend 2.4.4.
+Aucune migration, nouvelle installation root ou mise à jour du bot.
+
+Prochaine priorité : S3, saturation login/reset. S6 et C3/C4 restent ouverts.
+
+## 2.4.5 — saturation des protections login/reset (préparation)
+
+Cause confirmée : une table IP de 10000 entrées était commune au login et au reset
+(publication des tokens exclue). À capacité, chaque nouvelle adresse recevait 429
+sans pouvoir vérifier ses identifiants, même valides. Les métadonnées IPv6 n’étaient
+pas agrégées par préfixe.
+
+Chaque route dispose désormais de son propre limiteur et de son propre plafond
+global de 6000 admissions par fenêtre (60 secondes par défaut). Une saturation du
+login ne consomme ni la table ni le plafond global de confirmation de reset, et
+réciproquement. Ces plafonds limitent le travail avant SQL/Argon2 ; le pool Argon2
+borné existant reste actif. Il ne s’agit pas d’une exemption pour les administrateurs.
+
+La table primaire reste bornée à 10000 réseaux, sans éviction active, avec 30 essais
+par fenêtre par défaut (réglages auth_ip_* existants). À capacité, le secours utilise
+deux tableaux de 4096 fenêtres chacun : réseau et identité. Les index dérivent d’un
+hachage avec secret aléatoire par processus et domaine distinct ; aucune adresse,
+aucun username ni token de récupération n’est conservé dans ces tableaux. Le réseau
+garde sa limite IP ; l’identité de secours est limitée à auth_max_attempts (5 par
+défaut), même si elle change de réseau. Login : username canonique insensible à la
+casse/espaces ; reset : token exact. Le verrouillage SQL existant par couple IP/nom
+reste inchangé et s’applique aussi au secours.
+
+Les fenêtres de secours restent actives lorsque des places primaires se libèrent,
+et une identité déjà limitée ne contourne pas le secours via un réseau primaire.
+Les IPv6 partagent leur /64 ; IPv4-mappée et IPv4 littérale sont unifiées. Des
+métadonnées de pair invalides partagent le budget inconnu. Les fenêtres expirent à
+la borne exacte, sans prolongation sur refus, Retry-After entier positif arrondi
+au plafond. Les refus préalables du login portent également Cache-Control: no-store.
+
+Limites explicites : plafonds globaux et collisions de secours peuvent produire un
+429, même pour des identifiants valides. Les collisions ne font que restreindre ;
+elles ne remettent pas les compteurs à zéro. Cela supprime le refus universel dû à
+la seule occupation de la table, pas tout déni de service distribué. Les compteurs
+restent locaux au processus et sont remis à zéro au redémarrage. Le déploiement
+impose toujours un seul processus API. Pas de migration ou infrastructure protégée.
+
+Tests : paramètres invalides, alias IPv6/IPv4/inconnu, table pleine sans éviction,
+rotation IP/identité, maintien du secours après expiration primaire, collision
+forcée, expiration exacte/Retry-After, plafond global et 100000 réseaux/identités
+avec mémoire tracée bornée à 32 MiB. Intégration HTTP : connexion valide user/admin
+sur nouvelle IP, refus avant crypto malgré rotation/casse, budgets login/reset
+indépendants, reset valide et token toujours à usage unique avec table pleine.
+Première validation ciblée : 64 réussis ; frontend 209 réussis / 3 ignorés,
+TypeScript/build verts. Ruff et mypy strict 258 sources verts.
+CI, revue et preuve de déploiement restent à terminer. Suite backend complète locale :
+1280 réussis / 72 ignorés (services absents localement). Le test de charge utilise
+une horloge figée pour exclure la vitesse du runner des assertions d’expiration.
+S4, S6 et C3/C4 restent ouverts.
+
+La première CI de promotion a révélé une attente synchrone instable dans le test
+de restauration de langue : le texte anglais peut être rendu avant l’effet React
+qui met à jour html.lang. Le test attend désormais explicitement cette valeur
+finale avec waitFor ; son assertion en et les contrôles du menu restent inchangés.
+Aucun changement de comportement frontend. Nouvelle CI complète avant promotion.
+
+La revue de promotion a relevé un Retry-After trop court lorsque le plafond global
+expire avant une limite IP/identité commencée plus tard. Le limiteur calcule désormais
+le maximum des délais de tous les blocages applicables, sans charger les budgets
+ni atteindre SQL/Argon2 lors d’un refus. Deux tests à horloge injectée couvrent les
+fenêtres décalées global/IP et global/identité (secours et réseau primaire).
