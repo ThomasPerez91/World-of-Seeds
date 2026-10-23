@@ -337,3 +337,11 @@ Version 2.4.4, aucune migration ou modification d’infrastructure protégée. L
 local au processus, API unique exigée par le déploiement ; les budgets sont réinitialisés
 au redémarrage. Le problème de saturation login/reset (S3) et le réglage métier
 WOS_REQUEST_RATE_LIMIT_PER_MINUTE (S6) restent séparés et non déclarés corrigés.
+
+La double CI de promotion a révélé une interaction non déterministe d’un test
+PostgreSQL existant : huit relances peuvent recevoir le 503 attendu du pool de
+validation (capacité 4), avant le contrôle de stockage qui attend 507. Le test
+d’admission stockage dispose désormais d’un pool isolé admettant ses huit
+concurrents ; toutes les assertions de stockage et de non-duplication sont
+conservées. Les tests dédiés de saturation conservent les bornes de production.
+Aucun changement de capacité de production. Nouvelle CI complète requise.
