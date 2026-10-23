@@ -4,9 +4,9 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version de production vérifiée : `2.4.4`. Cible en préparation : 2.4.5, S3 (saturation login/reset).
+- Version de production vérifiée : `2.4.5`. Prochaine priorité : S4 (métadonnées réseau et périmètre C411).
 
-## Campagne audit 2.4.x — 2.4.4 déployée, préparation de 2.4.5
+## Campagne audit 2.4.x — 2.4.5 déployée
 
 Journal complet : `docs/audits/CORRECTIFS_2.4.md`. Audit PDF lu intégralement.
 2.4.1 : #396, #398 et #399 intégrées ; #397 promue sur master
@@ -47,12 +47,18 @@ Master `e43bd5d572c93fe0d78c3960e4143d8b004b7242` ; CI 39920526108 verte
 (1329 tests backend réussis / 2 ignorés), déploiement 39920982983 réussi.
 Live/ready/page/bundle publics HTTP 200, version 2.4.4. Aucun changement de schéma
 ou du bot. Test de concurrence stockage isolé du pool de validation, revue corrigée.
-2.4.5 en préparation : S3, budgets login/reset séparés, IPv6 /64, plafond global
+2.4.5 livrée : S3, budgets login/reset séparés, IPv6 /64, plafond global
 par route avant SQL/crypto ; secours borné réseau + identité quand la table primaire
 est pleine, sans éviction ni réinitialisation des budgets actifs. Les collisions
 peuvent restreindre l’accès ; pas de garantie contre tout déni de service distribué.
 Local ciblé : 64 réussis ; frontend 209/3, build/TypeScript, Ruff/mypy 258 sources verts.
-Suite backend complète : 1280 réussis / 72 ignorés. CI/revue et déploiement à vérifier.
+Suite backend locale initiale : 1280 réussis / 72 ignorés ; ajustements de revue :
+55 tests ciblés backend réussis, App 12/2 et build verts. 23 cas backend ajoutés au total.
+#412/#414 intégrées, promotion #413 fusionnée ; master
+`11634b8f5183ae299d7a282e2d45be29455646e5`. CI master 39944059451 verte
+(1352 tests backend réussis / 2 ignorés), déploiement 39944454779 réussi.
+Live/ready/page/bundle publics HTTP 200, backend et frontend 2.4.5. Aucun changement
+Alembic ou du bot. Voir journal pour digest exact et limites de disponibilité.
 S4 et S6 restent à traiter.
 Ne pas déclarer 2.4.4 déployée avant les preuves réelles.
 
