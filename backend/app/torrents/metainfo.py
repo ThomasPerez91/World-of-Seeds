@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from urllib.parse import quote, urlsplit, urlunsplit
 
@@ -292,6 +292,26 @@ def _torrent_name(info: dict[bytes, BValue]) -> str:
     return name
 
 
+@dataclass(slots=True)
+class _PathNode:
+    children: dict[str, _PathNode] = field(default_factory=dict)
+    is_file: bool = False
+
+    def add_file(self, parts: tuple[str, ...]) -> None:
+        node = self
+        for part in parts:
+            if node.is_file:
+                raise TorrentValidationError("Un chemin du torrent est invalide.")
+            child = node.children.get(part)
+            if child is None:
+                child = _PathNode()
+                node.children[part] = child
+            node = child
+        if node.is_file or node.children:
+            raise TorrentValidationError("Un chemin du torrent est invalide.")
+        node.is_file = True
+
+
 def _torrent_files(
     info: dict[bytes, BValue],
     *,
@@ -306,7 +326,7 @@ def _torrent_files(
         if len(files) > MAX_TORRENT_FILES:
             raise TorrentValidationError("Le torrent contient trop de fichiers.")
         entries: list[TorrentContentFile] = []
-        collision_paths: set[tuple[str, ...]] = set()
+        paths = _PathNode()
         for file_index, raw_file in enumerate(files):
             file_entry = _required_dictionary(raw_file, "files")
             length = file_entry.get(b"length")
@@ -357,18 +377,12 @@ def _torrent_files(
             if (
                 relative_path.startswith("/")
                 or len(relative_path.encode("utf-8")) > MAX_TORRENT_PATH_BYTES
-                or collision_key in collision_paths
-                or any(
-                    existing == collision_key[: len(existing)]
-                    or collision_key == existing[: len(collision_key)]
-                    for existing in collision_paths
-                )
             ):
                 raise TorrentValidationError("Un chemin du torrent est invalide.")
             padding = "p" in attributes
             if padding and (components[0] != ".pad" or attributes != {"p"}):
                 raise TorrentValidationError("Un fichier de remplissage torrent est invalide.")
-            collision_paths.add(collision_key)
+            paths.add_file(collision_key)
             entries.append(TorrentContentFile(file_index, relative_path, length))
         return tuple(entries)
     else:

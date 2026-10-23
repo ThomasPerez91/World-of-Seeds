@@ -4,9 +4,9 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version applicative cible : `2.4.2` (préparation ; production 2.4.1 vérifiée).
+- Version de production vérifiée : `2.4.2`. Cible en préparation : 2.4.3, S1.
 
-## Campagne audit 2.4.x — 2.4.1 déployée, préparation de 2.4.2
+## Campagne audit 2.4.x — 2.4.2 déployée, préparation de 2.4.3
 
 Journal complet : `docs/audits/CORRECTIFS_2.4.md`. Audit PDF lu intégralement.
 2.4.1 : #396, #398 et #399 intégrées ; #397 promue sur master
@@ -19,10 +19,22 @@ automatique. Sauvegarde chiffrée et restauration isolée avant changement de he
 pas d’Alembic si head inchangé. Fenêtre SSH adaptée à la sauvegarde vérifiée.
 C3/C4 (hors hôte/alertes reçues) restent à traiter.
 
-2.4.2 en préparation : T1/M5 (reset et deux appareils conservant leurs cookies),
+2.4.2 déployée : T1/M5 (reset et deux appareils conservant leurs cookies),
 T2/M9 (toutes les mutations admin avec CSRF valide/invalide et rôles), T2/M11
 (seed d’un compte supprimé encore actif). Protections existantes vérifiées par
-les tests ; PR/CI/déploiement de cette nouvelle version pas encore réalisés.
+les tests. #400 et #401 fusionnées ; master `0be962b3f183a621631b1bba1addc229a2602086`.
+CI master 39852047968 : 1291 tests backend réussis / 2 ignorés, six contrôles verts.
+Déploiement 39852799747 réussi ; contrôles publics indépendants live/ready/page/bundle
+HTTP 200, version 2.4.2. Voir le journal pour le digest et les preuves complètes.
+
+2.4.3 en préparation, reprise le 23 octobre : scan quadratique remplacé par un
+arbre de chemins partageant les préfixes. Pool dédié (2 threads, 4 travaux admis par processus)
+pour validation/staging/lecture spool/normalisation C411, avec capacité conservée lors
+d’annulations jusqu’à la fin effective. API 503 temporaire FR/EN ; worker RETRY_WAIT
+et payload conservé. 92 tests ciblés après correction mémoire de revue ; première suite locale backend 1240 / 72 ignorés, frontend 209 / 3 ignorés,
+Ruff/mypy/TypeScript/build verts. CI et déploiement à suivre.
+L’environnement est de nouveau disponible ; pas de bootstrap root ou migration requis.
+La version ne sera déclarée déployée qu’après les contrôles réels sur Rise2.
 
 ## Release 2.3.29 — téléchargements et alertes privées Discord
 

@@ -7,13 +7,13 @@
 - Cycle : tests isolés → PR develop → CI → merge → PR master → CI → merge/déploiement → contrôles réels → mise à jour du journal → livraison suivante.
 - Tests : comportementaux, PostgreSQL/Redis/Docker en CI selon disponibilité ; aucun test destructif sur production. Limites métier users, protections techniques pour tous, exemptions admin vérifiées côté serveur.
 - Audit lu intégralement (15 pages) : les constats [V], [S] et les preuves runtime manquantes restent distingués.
-- État vérifié : 2.4.1 déployée sur Rise2 ; préparation de 2.4.2 après contrôles réels réussis.
+- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.2 déployée après contrôles réels réussis ; préparation de 2.4.3, S1 repris le 23 octobre.
 
 ## Matrice de suivi
 
 | Référence | Problème | Priorité | Statut | Version | PR | Tests |
 |---|---|---|---|---|---|---|
-| S1 | Validation torrent quadratique | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
+| S1 | Validation torrent quadratique | P0 | Corrigé et testé localement ; CI/déploiement à suivre | 2.4.3 | À publier | Collisions, mémoire chemins profonds, budget/cancel, async, 30k |
 | S2 | Limiteur externe non borné | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S3 | Saturation login/reset | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S4 | Métadonnées réseau et périmètre C411 | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -50,8 +50,8 @@
 | R8 | createWritable sur fichier partiel volumineux | P2 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | R9 | Chemins longs et index PostgreSQL | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | R10 | Ordre des verrous, retard quota et secrets au repos | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| T1 | Mutations M5 : révocation seconde session | P0 | Tests validés localement, CI/déploiement à suivre | 2.4.2 | À publier | Deux appareils et reset sans cookies |
-| T2 | Mutations M9/M11 : rôles et compte supprimé | P0 | Tests validés localement, CI/déploiement à suivre | 2.4.2 | À publier | 14 mutations admin × 7 états, seed supprimée active |
+| T1 | Mutations M5 : révocation seconde session | P0 | Corrigé, testé et déployé | 2.4.2 | #400 / #401 | Deux appareils et reset sans cookies |
+| T2 | Mutations M9/M11 : rôles et compte supprimé | P0 | Corrigé, testé et déployé | 2.4.2 | #400 / #401 | 14 mutations admin × 7 états, seed supprimée active |
 | T3 | Derniers désabonnements et claims PostgreSQL | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | T4 | Isolation manifestes/archives/fichiers/WebSocket | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | T5 | Lease renouvelée et limites temporelles exactes | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -128,7 +128,7 @@ Aucun changement de schéma dans cette livraison. Aucun test destructif de produ
 C3/C4 : aucune sauvegarde hors hôte ou réception d’alerte n’est présumée active.
 
 
-## 2.4.2 — régressions d’authentification (en préparation)
+## 2.4.2 — régressions d’authentification (déployée)
 
 T1/M5 : deux appareils authentifiés conservent leurs cookies ; un troisième client
 sans session consomme le reset. Les deux anciens cookies doivent ensuite recevoir 401,
@@ -148,7 +148,7 @@ tout en conservant is_active=True pour tester la suppression indépendamment de 
 
 Le code d’authentification existant applique ces protections ; cette livraison renforce
 les tests contre des régressions, sans modifier les limites métier ou les sessions.
-Tests et CI, PR et preuve de déploiement à renseigner au fil de l’exécution.
+PR #400 intégrée dans develop, promotion #401 fusionnée dans master ; preuves ci-dessous.
 
 Validation locale 2.4.2 : 149 tests ciblés réussis / 1 ignoré (dépendance PostgreSQL),
 Ruff et formatage 292 fichiers, mypy strict 254 sources, test de version frontend,
@@ -156,3 +156,116 @@ TypeScript et build réussis. Trois essais de mutation temporaires, restaurés a
 publication : M5 sans révocation, M9 sans contrôle is_admin, M11 sans contrôle deleted_at ;
 chaque test ciblé échoue avec AssertionError quand sa protection est retirée.
 La suite ciblée repasse après restauration ; aucun fichier d’authentification runtime modifié.
+
+
+### Preuve de livraison 2.4.2
+
+[PR #400](https://github.com/ThomasPerez91/World-of-Seeds/pull/400) et
+[promotion #401](https://github.com/ThomasPerez91/World-of-Seeds/pull/401) fusionnées après contrôles verts et aucune remarque ouverte.
+Commit master : `0be962b3f183a621631b1bba1addc229a2602086`.
+[CI source](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39850678285) et
+[CI master](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39852047968)
+réussies : 1291 tests backend réussis / 2 ignorés ; six contrôles verts.
+[Déploiement Rise2](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39852799747)
+réussi le 22 octobre 2026 à 20:56:02 UTC, révision exacte et image
+`ghcr.io/thomasperez91/world-of-seeds-v2@sha256:a82c0920f5392ad1f57c84725b191e020528dc370533e4df692fda5ae287ce6f`.
+Contrôles publics indépendants : live/ready HTTP 200 avec version 2.4.2,
+page et bundle `/assets/index-BVzATqB2.js` HTTP 200, version frontend 2.4.2.
+Aucune migration ; bot autonome inchangé. C3/C4 restent non validés opérationnellement.
+
+## S1 — point de reprise initial du 22 octobre (historique)
+
+Le scan de tous les chemins précédents dans `metainfo.py` est confirmé quadratique.
+La première validation API est déjà déportée par `run_in_threadpool`, de même que la
+lecture du spool worker par `asyncio.to_thread` ; la normalisation du gateway C411
+reste synchrone dans une méthode async. Le constat doit distinguer ces cas.
+
+Prototype local : ensembles de fichiers/répertoires normalisés à la place du scan,
+pool dédié borné pour validation/staging/lecture/normalisation, saturation temporaire,
+lifecycle API/worker et message FR/EN. Ce code n’est ni publié, ni testé complètement,
+ni déployé ; ne pas considérer S1 corrigé.
+
+Mesures locales sans réseau (infohash préservé) : ancien code 1000 fichiers 0,142246 s,
+5000 fichiers 2,325027 s ; prototype 1000 fichiers 0,019671 s, 5000 fichiers 0,132521 s,
+10000 fichiers 0,185090 s, 30000 fichiers 0,728226 s. Ce sont des mesures d’une machine,
+pas une garantie de latence en production.
+
+Blocage : environnement d’exécution devenu indisponible pendant le travail ; dernière
+commande refusée avec « exec-server transport disconnected ». Les tests des collisions,
+de la saturation, de l’annulation sans libération prématurée des slots, de la boucle
+async et de la propriété des payloads doivent encore être écrits/exécutés. Repartir de
+la branche distante validée, vérifier si les changements locaux sont récupérables,
+puis reprendre S1 pour la future 2.4.3. Aucun nouveau bootstrap root nécessaire.
+
+
+## 2.4.3 — validation torrent bornée et chemins sans scan quadratique (préparation)
+
+Cause : chaque entrée comparait son chemin à tous les fichiers déjà rencontrés.
+Un arbre de chemins normalisés partage les préfixes et remplace ce scan ; les
+collisions fichier/répertoire dans les deux sens, Unicode NFC et casse restent refusées.
+Le dictionnaire info brut et l’infohash ne changent pas. Les limites de profondeur,
+éléments, chemins et métadonnées restent en place.
+
+La validation initiale API et la lecture du spool worker étaient déjà déportées :
+le constat async de l’audit est donc partiellement infirmé. La normalisation C411
+était encore exécutée sur la boucle async et est désormais déportée. Validation,
+staging possédé, lecture/validation du spool et normalisation partagent un pool
+technique par processus : deux threads, quatre travaux admis au total (exécutés ou
+mis en file). Ce budget technique s’applique aux administrateurs comme aux users.
+L’annulation ne rend pas la capacité avant la fin réelle du thread ou le retrait de
+l’entrée annulée de la file ; une rafale d’annulations ne peut pas agrandir cette file.
+La protection existante du staging et de son nettoyage après annulation est conservée.
+
+Saturation : API 503 torrent_validation_busy, Retry-After: 1, Cache-Control: no-store,
+message FR/EN ; aucun torrent créé. Worker : erreur transitoire RETRY_WAIT, payload
+conservé, pas d’ADD qB. Le pool est fermé à l’arrêt de l’API/worker avant fermeture DB.
+Aucune migration ou modification d’infrastructure protégée ; version applicative 2.4.3.
+
+Tests ciblés après correction de revue : 92 réussis. Cas ajoutés : collisions inverses/NFC/casse, budget threads
+et file, boucle async réactive, annulation active/en attente, saturation user/admin,
+gateway sans appel qB, surcharge worker relançable, exceptions/fermeture/redémarrage.
+Les tests existants de propriété des payloads et nettoyage après annulation passent.
+Un sous-processus borné à 10 secondes valide 30000 fichiers pour détecter une régression
+quadratique sans bloquer la suite. Le script de benchmark reproductible se trouve dans
+scripts/benchmark_torrent_validation.py ; mesures locales du 23 octobre (secondes, aucune opération réseau) :
+
+| Fichiers | Avant | Après |
+|---|---:|---:|
+| 1000 | 0,098456 | 0,018167 |
+| 5000 | 2,245008 | 0,132538 |
+| 10000 | Non mesuré | 0,225523 |
+| 30000 | Non mesuré | 0,647664 |
+
+Chaque mesure vérifie nombre de fichiers, taille et infohash conservé. À 5000 fichiers,
+le gain observé est d’environ 17 fois ; aucune extrapolation de mesure 30000 avant.
+Le benchmark exclut la génération du torrent et ne garantit pas une latence production.
+
+Première validation locale avant correction mémoire : backend 1240 réussis / 72 ignorés (services externes absents),
+frontend 209 réussis / 3 ignorés ; Ruff/formatage (294 fichiers), mypy strict (256 sources),
+TypeScript et build verts. Script de benchmark linté et exécutable. Le code de validation
+retrouve exactement ses octets après la comparaison temporaire à l’ancien algorithme.
+Les contrôles CI et le déploiement restent à prouver avant de déclarer S1 livré.
+
+
+### Revue de promotion — mémoire des chemins profonds
+
+La revue de #404 a relevé que le premier correctif avec tuples de préfixes copiait
+encore O(profondeur²) références par chemin. Cas confirmé : 50 chemins distincts de
+1000 composants, valides sous les limites existantes, pic Python tracé de 207940561
+bytes. Le correctif final utilise un arbre de nœuds partageant les préfixes ; ce même
+cas mesure 14452689 bytes, infohash conservé. Il s’agit d’allocations Python tracées,
+pas d’une mesure de RSS totale du processus.
+
+Le benchmark accepte --depth et --memory et refuse de générer un cas hors budget
+d’éléments du parser. Un nouveau test isolé impose un pic sous 64 MiB, avec une
+deadline de 20 secondes. Les 92 tests ciblés passent après correction ; Ruff et mypy
+restent verts. Le contrôle complet CI est relancé avant toute promotion master.
+
+
+### Relectures de relance
+
+La relecture du spool lors d’une relance rejoint le pool technique commun. Le verrou
+existant par storage_key et la protection contre l’annulation sont conservés ; des
+clés distinctes ou plusieurs instances de TorrentRetryReads ne peuvent pas contourner
+le budget de threads. Un test vérifie la saturation entre deux clés/instances, l’absence
+d’exécution excédentaire et la récupération de la clé après saturation.

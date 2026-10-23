@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any, Literal, Protocol, cast
 
 from sqlalchemy import delete, func, select
@@ -74,6 +75,7 @@ from app.torrents import (
     record_tracker_activity,
     replace_torrent_manifest,
 )
+from app.torrents.validation_work import TorrentValidationBusyError, torrent_validation_pool
 
 ADD_TORRENT_JOB = "ADD_TORRENT"
 SYNC_TORRENT_JOB = "SYNC_TORRENT"
@@ -196,7 +198,13 @@ class TorrentEffectHandlers:
                 torrent_state=ManagedTorrentState.ERROR,
             ) from exc
         try:
-            parsed = await asyncio.to_thread(self._payloads.read, torrent.storage_key)
+            parsed = await torrent_validation_pool.run(
+                partial(self._payloads.read, torrent.storage_key)
+            )
+        except TorrentValidationBusyError as exc:
+            raise TransientTorrentJobError(
+                "torrent_validation_busy", torrent_state=ManagedTorrentState.RETRY_WAIT
+            ) from exc
         except TorrentPayloadStoreError as exc:
             raise PermanentTorrentJobError(
                 "torrent_payload_unavailable",
@@ -235,6 +243,10 @@ class TorrentEffectHandlers:
                 expected_info_hash=torrent.info_hash,
                 storage_key=torrent.storage_key,
             )
+        except TorrentValidationBusyError as exc:
+            raise TransientTorrentJobError(
+                "torrent_validation_busy", torrent_state=ManagedTorrentState.RETRY_WAIT
+            ) from exc
         except (NewGreedyV2UnavailableError, QBittorrentV2TransientError) as exc:
             raise TransientTorrentJobError(
                 "torrent_integration_unavailable",

@@ -111,6 +111,7 @@ from app.torrents.retry_reads import (
 )
 from app.torrents.traffic import DownloadTrafficScheduler, DownloadWaitingLimit
 from app.torrents.upload_staging import cleanup_upload_payload, stage_upload_payload
+from app.torrents.validation_work import torrent_validation_pool
 
 logger = logging.getLogger(__name__)
 
@@ -1195,11 +1196,13 @@ async def create_torrent_request(
 
     content = await _read_upload(torrent, max_upload)
     try:
-        parsed = await run_in_threadpool(
-            sanitize_torrent,
-            content,
-            allowed_tracker_hosts=settings.c411_tracker_hosts,
-            max_total_size=max_total,
+        parsed = await torrent_validation_pool.run(
+            partial(
+                sanitize_torrent,
+                content,
+                allowed_tracker_hosts=settings.c411_tracker_hosts,
+                max_total_size=max_total,
+            )
         )
     except TorrentValidationError as exc:
         _fail(status.HTTP_422_UNPROCESSABLE_CONTENT, exc.code, str(exc), "torrent")
