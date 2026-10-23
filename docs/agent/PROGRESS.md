@@ -1,12 +1,12 @@
 # World of Seeds — Progress
 
-## Etat courant — 22 octobre 2026
+## Etat courant — 23 octobre 2026
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version de production vérifiée : `2.4.3`. Prochaine cible : S2 (limiteur externe borné).
+- Version de production vérifiée : `2.4.3`. Cible en préparation : 2.4.4, S2 (limiteur externe borné).
 
-## Campagne audit 2.4.x — 2.4.3 déployée, S2 à traiter
+## Campagne audit 2.4.x — 2.4.3 déployée, préparation de 2.4.4
 
 Journal complet : `docs/audits/CORRECTIFS_2.4.md`. Audit PDF lu intégralement.
 2.4.1 : #396, #398 et #399 intégrées ; #397 promue sur master
@@ -38,8 +38,13 @@ Benchmark local : 30000 fichiers 0,647664 s ; cas profond : pic Python tracé
 207940561 → 14452689 bytes, infohash conservé. Voir journal pour les limites de mesure.
 Aucun bootstrap root, migration ou mise à jour du bot nécessaires.
 
-Prochaine priorité : S2, limiter mémoire/expiration de l’API externe et agréger IPv6.
-Ne pas le déclarer corrigé : le code de limitation actuel est encore à traiter.
+2.4.4 en préparation : S2, limiteur externe ordonné/expirable, maximum 10000 identités,
+6000 admissions IP globales / 60 s avant auth, budgets IP/client 60 / 60 s inchangés.
+IPv6 /64, IPv4-mappée/alias unifiés, identités hachées ; aucune éviction de budget actif.
+Local : backend 1259 réussis / 72 ignorés ; frontend 209 réussis / 3 ignorés,
+TypeScript/build, Ruff et mypy verts. CI et déploiement à vérifier.
+S3 (login/reset) et S6 (limite métier authentifiée) restent à traiter.
+Ne pas déclarer 2.4.4 déployée avant les preuves réelles.
 
 ## Release 2.3.29 — téléchargements et alertes privées Discord
 
