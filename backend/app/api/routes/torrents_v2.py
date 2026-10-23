@@ -58,7 +58,7 @@ from app.models import (
     TorrentRequest,
     TorrentRequestState,
 )
-from app.options import DatabaseOptionsDriftError, PostgresOptionsRegistry
+from app.options import DatabaseOptionsDriftError, OptionsValidationError, PostgresOptionsRegistry
 from app.scheduler.queue_visibility import (
     TorrentQueueVisibility,
     load_torrent_queue_visibility,
@@ -419,7 +419,7 @@ async def get_torrent_download_manifest(
     try:
         options = await PostgresOptionsRegistry().snapshot(db)
         archive_max_bytes = _integer_option(options, "WOS_FOLDER_ARCHIVE_MAX_BYTES")
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -569,7 +569,7 @@ async def get_torrent_download_directories(
     try:
         options = await PostgresOptionsRegistry().snapshot(db)
         archive_max_bytes = _integer_option(options, "WOS_FOLDER_ARCHIVE_MAX_BYTES")
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -729,7 +729,7 @@ async def download_torrent_folder_archive(
             "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
         )
         global_rate = _integer_option(options, "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL")
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -920,7 +920,7 @@ async def download_torrent_archive(
             "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
         )
         global_rate = _integer_option(options, "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL")
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1097,7 +1097,7 @@ async def download_torrent_file(
             "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
         )
         global_rate = _integer_option(options, "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL")
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1261,7 +1261,7 @@ async def create_torrent_request(
             "WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS",
         )
         policy = StorageAdmissionPolicy.from_options(values)
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1650,7 +1650,7 @@ async def cancel_torrent_request(
                 torrent_request_id=torrent_request_id,
                 retention_hours=retention_hours,
             )
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1699,7 +1699,7 @@ async def retry_torrent_request(
         policy = StorageAdmissionPolicy.from_options(values)
         retry_max_attempts = _integer_option(values, "WOS_TORRENT_MAX_RETRY_ATTEMPTS") + 1
         await db.rollback()
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -21,9 +21,7 @@ from app.options.store import (
     normalize_option_value,
     validate_cross_options,
 )
-
-QB_GLOBAL_LIMIT_OPTION = "WOS_QB_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL"
-MIN_QB_GLOBAL_LIMIT_BYTES = 1_048_576
+from app.options.write_guards import validate_written_options
 
 
 class DatabaseOptionsDriftError(RuntimeError):
@@ -100,7 +98,14 @@ class PostgresOptionsRegistry:
             )
 
         rows = await self._load_rows(session, lock=True)
-        values = self._validated_values(rows)
+        try:
+            values = self._validated_values(rows)
+        except OptionsValidationError:
+            # The stored state is already inconsistent (manual SQL edit, tightened bounds,
+            # a newer rule): the corrective change must still be accepted. The state it
+            # produces is validated below.
+            values = self._stored_values(rows)
+        previous = dict(values)
         normalized_changes: dict[str, OptionValue] = {}
         for key, candidate in changes.items():
             spec = DATABASE_OPTION_SPECS_BY_KEY.get(key)
@@ -120,23 +125,13 @@ class PostgresOptionsRegistry:
                     field=key,
                 )
             normalized = normalize_option_value(spec, candidate)
-            if (
-                key == QB_GLOBAL_LIMIT_OPTION
-                and type(normalized) is int
-                and 0 < normalized < MIN_QB_GLOBAL_LIMIT_BYTES
-                and values.get(key) != normalized
-            ):
-                # Written values below 1 MiB/s are almost certainly a unit mistake (5 meant
-                # as 5 MB/s would throttle every torrent to a few bytes per second).
-                raise OptionsValidationError(
-                    "Le débit global qBittorrent doit valoir 0 (illimité) ou au moins 1 Mio/s.",
-                    code="inconsistent_options",
-                    field=key,
-                )
             normalized_changes[key] = normalized
             values[key] = normalized
 
         validate_cross_options(values)
+        validate_written_options(
+            values, {key for key, value in normalized_changes.items() if previous.get(key) != value}
+        )
         changed_at = now or datetime.now(UTC)
         changed_keys: list[str] = []
         versions: dict[str, int] = {}
@@ -201,6 +196,20 @@ class PostgresOptionsRegistry:
             self._validate_row_metadata(row, spec)
             values[spec.key] = normalize_option_value(spec, row.value)
         validate_cross_options(values)
+        return values
+
+    def _stored_values(self, rows: Mapping[str, DatabaseOption]) -> dict[str, OptionValue]:
+        """Stored values as they are, without bounds or cross-option validation."""
+        self._reject_unknown_rows(rows)
+        values: dict[str, OptionValue] = {}
+        for spec in DATABASE_OPTION_SPECS:
+            row = rows.get(spec.key)
+            if row is None:
+                raise DatabaseOptionsDriftError(
+                    f"Database option registry is missing the entry {spec.key}"
+                )
+            self._validate_row_metadata(row, spec)
+            values[spec.key] = row.value
         return values
 
     @staticmethod

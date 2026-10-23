@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
@@ -8,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import DatabaseOption, DatabaseOptionAudit, User
 from app.options import (
     DATABASE_OPTION_SPECS,
+    INACTIVE_OPTION_KEYS,
     DatabaseOptionsDriftError,
     OptionsValidationError,
     PostgresOptionsRegistry,
 )
+from app.options.write_guards import validate_written_options
 
 NOW = datetime(2026, 8, 21, 14, tzinfo=UTC)
 
@@ -340,3 +343,123 @@ async def test_qb_global_limit_below_one_mibibyte_per_second_is_refused_on_write
             now=NOW,
         )
         assert update.values["WOS_QB_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL"] == accepted
+
+
+@pytest.mark.asyncio
+async def test_corrective_update_is_accepted_when_the_stored_state_is_inconsistent(
+    db_session: AsyncSession,
+) -> None:
+    registry = PostgresOptionsRegistry()
+    admin = await create_user(db_session, "repair-admin", is_admin=True)
+    await registry.initialize(db_session, now=NOW)
+    warning = await db_session.get(DatabaseOption, "WOS_STORAGE_PRESSURE_WARNING_PERCENT")
+    assert warning is not None
+    warning.integer_value = 95  # above the critical threshold: refused by the cross rules
+    await db_session.flush()
+    with pytest.raises(OptionsValidationError):
+        await registry.snapshot(db_session)
+
+    # The administrator must be able to repair the state from the administration screen.
+    update = await registry.update(
+        db_session,
+        {"WOS_STORAGE_PRESSURE_WARNING_PERCENT": 70},
+        actor_user_id=admin.id,
+        now=NOW,
+    )
+
+    assert update.values["WOS_STORAGE_PRESSURE_WARNING_PERCENT"] == 70
+    assert (await registry.snapshot(db_session))["WOS_STORAGE_PRESSURE_WARNING_PERCENT"] == 70
+
+
+@pytest.mark.asyncio
+async def test_a_repair_that_leaves_the_state_inconsistent_is_still_refused(
+    db_session: AsyncSession,
+) -> None:
+    registry = PostgresOptionsRegistry()
+    admin = await create_user(db_session, "partial-repair-admin", is_admin=True)
+    await registry.initialize(db_session, now=NOW)
+    warning = await db_session.get(DatabaseOption, "WOS_STORAGE_PRESSURE_WARNING_PERCENT")
+    assert warning is not None
+    warning.integer_value = 95
+    await db_session.flush()
+
+    with pytest.raises(OptionsValidationError):
+        await registry.update(
+            db_session,
+            {"WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS": 72},
+            actor_user_id=admin.id,
+            now=NOW,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("changes", "field"),
+    [
+        ({"WOS_STORAGE_MIN_FREE_PERCENT": 90}, "WOS_STORAGE_MIN_FREE_PERCENT"),
+        (
+            {"WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER": 100},
+            "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
+        ),
+        (
+            {"WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL": 1},
+            "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL",
+        ),
+        (
+            {"WOS_FOLDER_ARCHIVE_MAX_CONCURRENT_GLOBAL": 12},
+            "WOS_FOLDER_ARCHIVE_MAX_CONCURRENT_GLOBAL",
+        ),
+    ],
+)
+async def test_known_inconsistent_writes_are_refused_and_nothing_is_stored(
+    db_session: AsyncSession,
+    changes: dict[str, int],
+    field: str,
+) -> None:
+    registry = PostgresOptionsRegistry()
+    admin = await create_user(db_session, "guard-admin", is_admin=True)
+    await registry.initialize(db_session, now=NOW)
+    before = await registry.snapshot(db_session)
+
+    with pytest.raises(OptionsValidationError) as refused:
+        await registry.update(db_session, changes, actor_user_id=admin.id, now=NOW)
+
+    assert refused.value.field == field
+    assert refused.value.code == "inconsistent_options"
+    assert await registry.snapshot(db_session) == before
+
+
+def test_write_guards_never_judge_stored_state_alone() -> None:
+    violating = {
+        "WOS_STORAGE_MIN_FREE_PERCENT": 90,
+        "WOS_STORAGE_PRESSURE_WARNING_PERCENT": 80,
+        "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER": 10,
+    }
+
+    # Nothing involved is being changed: an already-stored value is left alone.
+    validate_written_options(violating, set())
+    validate_written_options(violating, {"WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS"})
+    with pytest.raises(OptionsValidationError):
+        validate_written_options(violating, {"WOS_STORAGE_PRESSURE_WARNING_PERCENT"})
+
+
+def test_every_visible_option_is_read_by_some_consumer() -> None:
+    """A registered option nobody reads is a control that misleads the administrator."""
+    app_root = Path(__file__).resolve().parents[1] / "app"
+    registry_files = {"registry.py", "store.py", "postgres.py", "write_guards.py"}
+    sources = [
+        path.read_text(encoding="utf-8")
+        for path in app_root.rglob("*.py")
+        if not (path.parent.name == "options" and path.name in registry_files)
+    ]
+    consumed_dynamically = ("WOS_C411_ACCOUNT_",)
+
+    unread = [
+        spec.key
+        for spec in DATABASE_OPTION_SPECS
+        if spec.key not in INACTIVE_OPTION_KEYS
+        and not spec.key.startswith(consumed_dynamically)
+        and not any(spec.key in source for source in sources)
+    ]
+
+    assert unread == []

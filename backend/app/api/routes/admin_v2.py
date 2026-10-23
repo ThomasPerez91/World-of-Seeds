@@ -53,6 +53,7 @@ from app.models import (
 from app.options import (
     CATEGORY_LABELS,
     DATABASE_OPTION_SPECS,
+    INACTIVE_OPTION_KEYS,
     DatabaseOptionsDriftError,
     OptionsValidationError,
     PostgresOptionsRegistry,
@@ -382,7 +383,7 @@ async def _overview(
                 configured=spec.input_type == "secret" and bool(rows[spec.key].value),
             )
             for spec in DATABASE_OPTION_SPECS
-            if spec.category == category
+            if spec.category == category and spec.key not in INACTIVE_OPTION_KEYS
         ]
         if fields:
             sections.append(AdminV2OptionSection(id=category, label=label, fields=fields))

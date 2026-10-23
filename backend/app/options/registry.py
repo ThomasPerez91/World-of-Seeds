@@ -641,6 +641,22 @@ C411_ACCOUNT_SPECS: tuple[OptionSpec, ...] = tuple(
         ),
     )
 )
+# Registered, validated and audited, but read by no consumer. They stay in the registry (removing
+# a row needs a migration) and are only hidden from the administration screen, so nobody tunes a
+# setting that does nothing. Wire one to a real consumer before removing it from this set.
+INACTIVE_OPTION_KEYS = frozenset(
+    {
+        "WOS_REQUEST_RATE_LIMIT_PER_MINUTE",
+        "WOS_CACHE_DEFAULT_TTL_SECONDS",
+        "WOS_CACHE_PROGRESS_TTL_SECONDS",
+        "WOS_CACHE_CONNECTION_POOL_SIZE",
+        "WOS_FILES_LIST_MAX_ENTRIES",
+        "WOS_ADMIN_REFRESH_INTERVAL_SECONDS",
+        "WOS_DIRECTORY_SIZE_MAX_ENTRIES",
+        "WOS_DIRECTORY_SIZE_CACHE_SECONDS",
+    }
+)
+
 DATABASE_OPTION_SPECS = (*OPTION_SPECS, *C411_ACCOUNT_SPECS)
 DATABASE_OPTION_SPECS_BY_KEY = {spec.key: spec for spec in DATABASE_OPTION_SPECS}
 
