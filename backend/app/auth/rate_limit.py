@@ -85,8 +85,11 @@ class LoginIpRateLimiter:
         # creation order; lookups and refusals never move or extend a window.
         now = self._clock()
         global_window = self._live(self._global, now)
-        if global_window is not None and global_window.count >= self.global_maximum:
-            return self._retry(global_window, now)
+        retry_after = (
+            self._retry(global_window, now)
+            if global_window is not None and global_window.count >= self.global_maximum
+            else 0
+        )
         while self._windows:
             _, oldest = next(iter(self._windows.items()))
             if self._live(oldest, now) is not None:
@@ -112,15 +115,17 @@ class LoginIpRateLimiter:
         if use_overflow:
             if identity_index is None:
                 oldest = overflow or next(iter(self._windows.values()))
-                return self._retry(oldest, now)
+                return max(retry_after, self._retry(oldest, now))
             window = overflow or _Window(now)
             account = account or _Window(now)
         else:
             window = window or _Window(now)
         if window.count >= self.maximum:
-            return self._retry(window, now)
+            retry_after = max(retry_after, self._retry(window, now))
         if account is not None and account.count >= self.fallback_maximum:
-            return self._retry(account, now)
+            retry_after = max(retry_after, self._retry(account, now))
+        if retry_after:
+            return retry_after
 
         window.count += 1
         if use_overflow:

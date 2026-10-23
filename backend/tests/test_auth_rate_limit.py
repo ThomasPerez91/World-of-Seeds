@@ -124,6 +124,40 @@ def test_global_budget_bounds_rotating_networks_and_identities_before_expiry() -
     assert limiter.consume("192.0.2.4", identity="new") is None
 
 
+def test_retry_after_covers_later_ip_window_when_global_budget_is_exhausted() -> None:
+    clock = Clock()
+    limiter = LoginIpRateLimiter(maximum=1, global_maximum=2, clock=clock)
+    assert limiter.consume("192.0.2.1", identity="first") is None
+    clock.now = 30
+    assert limiter.consume("192.0.2.2", identity="second") is None
+    clock.now = 40
+    assert limiter.consume("192.0.2.2", identity="second") == 50
+    assert limiter.consume("192.0.2.3", identity="third") == 20
+    clock.now = 60
+    assert limiter.consume("192.0.2.2", identity="second") == 30
+    clock.now = 90
+    assert limiter.consume("192.0.2.2", identity="second") is None
+
+
+def test_retry_after_covers_later_identity_window_in_overflow_and_primary() -> None:
+    clock = Clock()
+    limiter = LoginIpRateLimiter(
+        maximum=3, global_maximum=3, fallback_maximum=1, max_keys=1, clock=clock
+    )
+    assert limiter.consume("192.0.2.1", identity="first") is None
+    clock.now = 20
+    assert limiter.consume("192.0.2.2", identity="target") is None
+    clock.now = 30
+    assert limiter.consume("192.0.2.1", identity="other") is None
+    clock.now = 40
+    assert limiter.consume("192.0.2.2", identity="target") == 40
+    assert limiter.consume("192.0.2.1", identity="target") == 40
+    clock.now = 60
+    assert limiter.consume("192.0.2.2", identity="target") == 20
+    clock.now = 80
+    assert limiter.consume("192.0.2.2", identity="target") is None
+
+
 def test_many_distinct_networks_and_accounts_keep_overflow_memory_bounded() -> None:
     limiter = LoginIpRateLimiter(max_keys=8, global_maximum=200_000, clock=Clock())
     tracemalloc.start()

@@ -416,3 +416,15 @@ CI, revue et preuve de déploiement restent à terminer. Suite backend complète
 1280 réussis / 72 ignorés (services absents localement). Le test de charge utilise
 une horloge figée pour exclure la vitesse du runner des assertions d’expiration.
 S4, S6 et C3/C4 restent ouverts.
+
+La première CI de promotion a révélé une attente synchrone instable dans le test
+de restauration de langue : le texte anglais peut être rendu avant l’effet React
+qui met à jour html.lang. Le test attend désormais explicitement cette valeur
+finale avec waitFor ; son assertion en et les contrôles du menu restent inchangés.
+Aucun changement de comportement frontend. Nouvelle CI complète avant promotion.
+
+La revue de promotion a relevé un Retry-After trop court lorsque le plafond global
+expire avant une limite IP/identité commencée plus tard. Le limiteur calcule désormais
+le maximum des délais de tous les blocages applicables, sans charger les budgets
+ni atteindre SQL/Argon2 lors d’un refus. Deux tests à horloge injectée couvrent les
+fenêtres décalées global/IP et global/identité (secours et réseau primaire).
