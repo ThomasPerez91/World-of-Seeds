@@ -125,6 +125,9 @@ class SchedulerRuntime:
             base_policy = SchedulerPolicy.from_options(options)
             dynamic_config = DynamicConcurrencyConfig.from_options(options)
             purge_stops = await self._load_purge_stops(session)
+            error_stops = await self._load_error_stops(
+                session, limit=MAX_SCHEDULER_CONTROL_SET - len(purge_stops)
+            )
             torrents = await self._load_control_set(session, state)
             forced_torrents = tuple(
                 torrent
@@ -206,8 +209,11 @@ class SchedulerRuntime:
                     download_limit_bytes_per_second=0,
                     qbittorrent_account_ref=torrent.qbittorrent_account_ref,
                 )
-                for torrent in purge_stops
+                for torrent in (*purge_stops, *error_stops)
             )
+            error_stop_generations = {
+                torrent.id: torrent.lifecycle_generation for torrent in error_stops
+            }
             generation = state.desired_generation + 1
             previous_active = {
                 torrent.id: torrent.desired_active for torrent in schedulable_torrents
@@ -247,20 +253,34 @@ class SchedulerRuntime:
         if cooldown_released:
             await self._redis.publish_torrent_queue_changed(now)
 
-        purge_control_result = (
-            await self._gateway.apply_managed_controls(
-                purge_controls,
-                allow_missing_stopped=True,
-            )
-            if purge_controls
-            else QBittorrentV2ControlResult((), (), (), ())
-        )
+        # Stops owed to purges and failed torrents are applied first but can no longer
+        # hold the scheduled batch hostage: a failure is kept, the schedule still runs,
+        # and the failure is re-raised afterwards so the whole cycle is retried.
+        stop_error: Exception | None = None
+        purge_control_result = QBittorrentV2ControlResult((), (), (), ())
+        if purge_controls:
+            try:
+                purge_control_result = await self._gateway.apply_managed_controls(
+                    purge_controls,
+                    allow_missing_stopped=True,
+                )
+            except Exception as exc:
+                stop_error = exc
+                logger.warning(
+                    "scheduler_stop_controls_failed",
+                    extra={"cause_type": type(exc).__name__},
+                )
         scheduled_control_result = (
             await self._gateway.apply_managed_controls(controls)
             if controls
             else QBittorrentV2ControlResult((), (), (), ())
         )
         control_result = _merge_control_results(purge_control_result, scheduled_control_result)
+        if control_result.skipped:
+            logger.warning(
+                "scheduler_controls_skipped",
+                extra={"count": len(control_result.skipped)},
+            )
 
         applied_at = self._clock()
         async with self._session_factory() as session, session.begin():
@@ -270,6 +290,26 @@ class SchedulerRuntime:
                 generation=generation,
                 now=applied_at,
             )
+            if error_stop_generations and stop_error is None:
+                failed = tuple(
+                    (
+                        await session.scalars(
+                            select(ManagedTorrent)
+                            .where(
+                                ManagedTorrent.id.in_(error_stop_generations),
+                                ManagedTorrent.state == ManagedTorrentState.ERROR,
+                            )
+                            .with_for_update()
+                            .execution_options(populate_existing=True)
+                        )
+                    ).all()
+                )
+                for torrent in failed:
+                    if torrent.lifecycle_generation == error_stop_generations[torrent.id]:
+                        torrent.desired_active = False
+                        torrent.desired_priority = None
+                        torrent.admin_forced_active = False
+                        torrent.updated_at = applied_at
             if forced_stop_generations:
                 stopped_forced = tuple(
                     (
@@ -290,7 +330,7 @@ class SchedulerRuntime:
                         torrent.admin_forced_active = False
                         torrent.purge_stop_pending = False
                         torrent.updated_at = applied_at
-            if purge_stop_generations:
+            if purge_stop_generations and stop_error is None:
                 stopped = tuple(
                     (
                         await session.scalars(
@@ -315,6 +355,8 @@ class SchedulerRuntime:
             )
         if queue_changed_after_apply:
             await self._redis.publish_torrent_queue_changed(applied_at)
+        if stop_error is not None:
+            raise stop_error
         return SchedulerCycleResult(
             leader=True,
             generation=generation,
@@ -338,10 +380,11 @@ class SchedulerRuntime:
                 dynamic_interval = options.get("WOS_SCHEDULER_DYNAMIC_EVALUATION_SECONDS")
                 if dynamic_enabled is True and type(dynamic_interval) is int:
                     interval = min(interval, float(dynamic_interval))
-        except Exception:
+        except Exception as exc:
             # The durable desired generation remains unapplied and is retried by this process
-            # or by the next lease owner. Runtime logging is added with observability in V2-27.
-            logger.warning("scheduler_cycle_failed")
+            # or by the next lease owner. Only the exception class is logged: messages can
+            # carry integration details.
+            logger.warning("scheduler_cycle_failed", extra={"cause_type": type(exc).__name__})
             interval = min(5.0, self._lease_ttl.total_seconds())
         return interval
 
@@ -372,6 +415,33 @@ class SchedulerRuntime:
                     .order_by(ManagedTorrent.updated_at, ManagedTorrent.id)
                     .with_for_update(skip_locked=True)
                     .limit(MAX_SCHEDULER_CONTROL_SET)
+                )
+            ).all()
+        )
+
+    @staticmethod
+    async def _load_error_stops(session: AsyncSession, *, limit: int) -> tuple[ManagedTorrent, ...]:
+        """Torrents that failed while still running: qBittorrent must be told to stop them.
+
+        A torrent leaving DOWNLOADING/PAUSED for ERROR drops out of the control set, so
+        without this step it would keep downloading outside every slot and quota.
+        """
+        if limit <= 0:
+            return ()
+        return tuple(
+            (
+                await session.scalars(
+                    select(ManagedTorrent)
+                    .where(
+                        ManagedTorrent.state == ManagedTorrentState.ERROR,
+                        or_(
+                            ManagedTorrent.desired_active.is_(True),
+                            ManagedTorrent.admin_forced_active.is_(True),
+                        ),
+                    )
+                    .order_by(ManagedTorrent.updated_at, ManagedTorrent.id)
+                    .with_for_update(skip_locked=True)
+                    .limit(limit)
                 )
             ).all()
         )
@@ -606,6 +676,7 @@ def _merge_control_results(
         stopped=(*first.stopped, *second.stopped),
         limits_updated=(*first.limits_updated, *second.limits_updated),
         priorities_applied=(*first.priorities_applied, *second.priorities_applied),
+        skipped=(*first.skipped, *second.skipped),
     )
 
 

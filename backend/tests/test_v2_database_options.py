@@ -313,3 +313,30 @@ async def test_database_constraint_rejects_a_value_in_the_wrong_typed_column(
 
     with pytest.raises(IntegrityError):
         await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_qb_global_limit_below_one_mibibyte_per_second_is_refused_on_write(
+    db_session: AsyncSession,
+) -> None:
+    registry = PostgresOptionsRegistry()
+    admin = await create_user(db_session, "limit-admin", is_admin=True)
+    await registry.initialize(db_session, now=NOW)
+
+    with pytest.raises(OptionsValidationError) as refused:
+        await registry.update(
+            db_session,
+            {"WOS_QB_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL": 5},
+            actor_user_id=admin.id,
+            now=NOW,
+        )
+    assert refused.value.field == "WOS_QB_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL"
+
+    for accepted in (0, 1_048_576, 125_000_000):
+        update = await registry.update(
+            db_session,
+            {"WOS_QB_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL": accepted},
+            actor_user_id=admin.id,
+            now=NOW,
+        )
+        assert update.values["WOS_QB_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL"] == accepted

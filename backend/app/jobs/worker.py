@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -25,6 +25,7 @@ from app.jobs.torrent_jobs import (
     retry_torrent_job,
 )
 from app.models import (
+    DatabaseOption,
     ManagedTorrent,
     ManagedTorrentState,
     TorrentJob,
@@ -36,23 +37,37 @@ from app.scheduler.queue_visibility import is_ranked_queue_member
 
 logger = logging.getLogger(__name__)
 
+# Mirrors torrent_effects.ADD_TORRENT_JOB (importing it here would be circular).
+ADD_JOB_TYPE = "ADD_TORRENT"
+RETRY_BASE_OPTION = "WOS_TORRENT_RETRY_BASE_SECONDS"
+# A job that only waits for a resource (qBittorrent or NewGreedy down, a running download
+# holding the content) does not consume its attempt budget for this long.
+WAITING_RETRY_BUDGET = timedelta(days=7)
+WAITING_RETRY_CAP = timedelta(minutes=10)
+
 type TorrentJobHandler = Callable[[TorrentJobSnapshot], Coroutine[Any, Any, None]]
 type Clock = Callable[[], datetime]
 type Jitter = Callable[[float, float], float]
 
 
 class TransientTorrentJobError(RuntimeError):
-    """A retryable worker failure represented by a bounded, secret-safe code."""
+    """A retryable worker failure represented by a bounded, secret-safe code.
+
+    ``waiting`` marks an expected wait for an external resource: the attempt is not
+    consumed, so an outage cannot exhaust the budget meant for genuine failures.
+    """
 
     def __init__(
         self,
         error_code: str,
         *,
         torrent_state: ManagedTorrentState | None = None,
+        waiting: bool = False,
     ) -> None:
         super().__init__(error_code)
         self.error_code = error_code
         self.torrent_state = torrent_state
+        self.waiting = waiting
 
 
 class PermanentTorrentJobError(RuntimeError):
@@ -193,8 +208,85 @@ class TorrentWorker:
             self._last_recovery = now
             if recovered:
                 logger.info("torrent_worker_recovered_jobs", extra={"count": len(recovered)})
+            abandoned = [
+                job.managed_torrent_id
+                for job in recovered
+                if job.state is TorrentJobState.FAILED and job.job_type == ADD_JOB_TYPE
+            ]
+            if abandoned:
+                await self._fail_abandoned_add_torrents(abandoned, now=now)
         except (SQLAlchemyError, OSError):
             logger.warning("torrent_worker_database_unavailable")
+
+    async def _fail_abandoned_add_torrents(
+        self, torrent_ids: list[uuid.UUID], *, now: datetime
+    ) -> None:
+        """Move torrents whose ADD job was abandoned by claim recovery out of ADDING.
+
+        Recovery exhausts a job without knowing the torrent. Without this step the torrent
+        stays ADDING forever, cannot be retried and keeps its quota and capacity reserved.
+        The torrent is locked before its jobs, like every other lifecycle mutation.
+        """
+        realtime_events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
+        queue_changed = False
+        for torrent_id in dict.fromkeys(torrent_ids):
+            async with self._session_factory() as session, session.begin():
+                managed = await session.get(
+                    ManagedTorrent,
+                    torrent_id,
+                    with_for_update=True,
+                    populate_existing=True,
+                )
+                if managed is None or managed.state not in {
+                    ManagedTorrentState.PENDING,
+                    ManagedTorrentState.ADDING,
+                    ManagedTorrentState.RETRY_WAIT,
+                }:
+                    continue
+                active_add = await session.scalar(
+                    select(func.count())
+                    .select_from(TorrentJob)
+                    .where(
+                        TorrentJob.managed_torrent_id == torrent_id,
+                        TorrentJob.job_type == ADD_JOB_TYPE,
+                        TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
+                    )
+                )
+                if active_add:
+                    continue
+                was_ranked = await is_ranked_queue_member(session, managed, now=now)
+                managed.state = ManagedTorrentState.ERROR
+                managed.retry_at = None
+                managed.updated_at = now
+                requests = (
+                    await session.scalars(
+                        select(TorrentRequest).where(
+                            TorrentRequest.managed_torrent_id == torrent_id,
+                            TorrentRequest.state.in_(
+                                (
+                                    TorrentRequestState.REQUESTED,
+                                    TorrentRequestState.ACTIVE,
+                                    TorrentRequestState.READY,
+                                )
+                            ),
+                        )
+                    )
+                ).all()
+                realtime_events.extend(
+                    (
+                        request.user_id,
+                        TorrentRealtimeEvent(TorrentEventType.FAILED, request.id, now),
+                    )
+                    for request in requests
+                )
+                await session.flush()
+                queue_changed = queue_changed or was_ranked != await is_ranked_queue_member(
+                    session, managed, now=now
+                )
+        for user_id, event in realtime_events:
+            await self._redis.publish_torrent_event(user_id, event)
+        if queue_changed:
+            await self._redis.publish_torrent_queue_changed(now)
 
     async def _claim_one(self) -> TorrentJob | None:
         if not self._handlers:
@@ -261,6 +353,7 @@ class TorrentWorker:
                     exc.error_code,
                     permanent=False,
                     torrent_state=exc.torrent_state,
+                    waiting=exc.waiting,
                 )
             except PermanentTorrentJobError as exc:
                 await self._finish_failure(
@@ -332,14 +425,16 @@ class TorrentWorker:
         *,
         permanent: bool,
         torrent_state: ManagedTorrentState | None = None,
+        waiting: bool = False,
     ) -> None:
         realtime_events: list[tuple[uuid.UUID, TorrentRealtimeEvent]] = []
         queue_changed = False
         async with self._session_factory() as session, session.begin():
             # Lifecycle mutations lock the torrent before its jobs. Do not hold
             # a job (or block its heartbeat) while waiting for the parent lock.
+            # An ADD job always locks it: its definitive failure must also leave ADDING.
             managed = None
-            if torrent_state is not None:
+            if torrent_state is not None or snapshot.job_type == ADD_JOB_TYPE:
                 managed = await session.get(
                     ManagedTorrent,
                     snapshot.managed_torrent_id,
@@ -359,10 +454,18 @@ class TorrentWorker:
                     error_code=error_code,
                 )
             else:
-                base = self._config.retry_base.total_seconds()
-                maximum = self._config.retry_max.total_seconds()
-                upper = min(maximum, base * (2 ** max(0, snapshot.attempt_count - 1)))
-                delay = self._jitter(base, upper)
+                base = await self._retry_base_seconds(session)
+                maximum = max(base, self._config.retry_max.total_seconds())
+                age = (now - _aware(job.created_at)).total_seconds()
+                if waiting and age < WAITING_RETRY_BUDGET.total_seconds():
+                    # Expected wait for an external resource: keep the attempt for real
+                    # failures and back off from the age of the outage, capped at ten minutes.
+                    upper = max(base, min(WAITING_RETRY_CAP.total_seconds(), age / 4))
+                    delay = self._jitter(base, upper)
+                    job.attempt_count = max(0, job.attempt_count - 1)
+                else:
+                    upper = min(maximum, base * (2 ** max(0, snapshot.attempt_count - 1)))
+                    delay = self._jitter(base, upper)
                 await retry_torrent_job(
                     session,
                     job,
@@ -375,14 +478,24 @@ class TorrentWorker:
             # any purge or revival that requested cancellation while we waited.
             if (
                 managed is not None
-                and torrent_state is not None
                 and job.state is not TorrentJobState.CANCELLED
+                and (torrent_state is not None or job.state is TorrentJobState.FAILED)
+                and (
+                    torrent_state is not None
+                    or managed.state
+                    in {
+                        ManagedTorrentState.PENDING,
+                        ManagedTorrentState.ADDING,
+                        ManagedTorrentState.RETRY_WAIT,
+                    }
+                )
             ):
                 was_ranked = await is_ranked_queue_member(session, managed, now=now)
                 if job.state is TorrentJobState.FAILED:
                     managed.state = ManagedTorrentState.ERROR
                     managed.retry_at = None
                 else:
+                    assert torrent_state is not None
                     managed.state = torrent_state
                     managed.retry_at = job.available_at
                 managed.updated_at = now
@@ -420,6 +533,15 @@ class TorrentWorker:
             await self._redis.publish_torrent_event(user_id, event)
         if queue_changed:
             await self._redis.publish_torrent_queue_changed(now)
+
+    async def _retry_base_seconds(self, session: AsyncSession) -> float:
+        """Honor the administrable backoff base; fall back to the worker configuration."""
+        value = await session.scalar(
+            select(DatabaseOption.integer_value).where(DatabaseOption.key == RETRY_BASE_OPTION)
+        )
+        if type(value) is int and 1 <= value <= 3600:
+            return float(value)
+        return self._config.retry_base.total_seconds()
 
     async def _owned_job(self, session: AsyncSession, snapshot: TorrentJobSnapshot) -> TorrentJob:
         job = await session.scalar(
@@ -473,3 +595,7 @@ class TorrentWorker:
             task.cancel()
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
+
+
+def _aware(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)

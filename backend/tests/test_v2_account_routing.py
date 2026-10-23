@@ -574,3 +574,94 @@ async def test_postgresql_concurrent_assignment_converges_on_one_stable_route() 
                 delete(ManagedTorrent).where(ManagedTorrent.info_hash == info_hash)
             )
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_inspector_is_resolved_without_a_tracker_route_after_a_slot_is_emptied(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    registry = PostgresOptionsRegistry()
+    async with sessions() as session, session.begin():
+        await registry.initialize(session)
+        torrent = ManagedTorrent(
+            info_hash="7" * 40,
+            name="slot-emptied",
+            total_size=1,
+            tracker_account_ref=c411_tracker_account_ref(2),
+            qbittorrent_account_ref=QB_A,
+        )
+        session.add(torrent)
+        await session.flush()
+        torrent_id = torrent.id
+
+    qbittorrent = FakeQBittorrent()
+    router = DeploymentAccountRouter(
+        sessions,
+        shared_integration=SharedIntegrationRoute(
+            qbittorrent_account_ref=QB_A,
+            qbittorrent=qbittorrent,
+            newgreedy=FakeNewGreedy(),
+            allowed_tracker_hosts=("c411.org",),
+            max_total_size=1024,
+        ),
+    )
+
+    with pytest.raises(AccountRoutingError, match="managed_torrent_route_unavailable"):
+        await router.resolve(torrent_id, "7" * 40)
+    inspector = await router.resolve_inspector(torrent_id, "7" * 40)
+
+    assert inspector is qbittorrent
+
+
+@pytest.mark.asyncio
+async def test_inspector_resolution_rejects_unknown_torrent_and_hash_mismatch(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    async with sessions() as session, session.begin():
+        torrent = ManagedTorrent(info_hash="8" * 40, name="known", total_size=1)
+        session.add(torrent)
+        await session.flush()
+        torrent_id = torrent.id
+    router = DeploymentAccountRouter(sessions, (_route(TRACKER_A, QB_A),))
+
+    with pytest.raises(AccountRoutingError, match="managed_torrent_route_invalid"):
+        await router.resolve_inspector(uuid.uuid4(), "8" * 40)
+    with pytest.raises(AccountRoutingError, match="managed_torrent_route_invalid"):
+        await router.resolve_inspector(torrent_id, "9" * 40)
+    with pytest.raises(AccountRoutingError, match="managed_torrent_route_invalid"):
+        await router.resolve_inspector(torrent_id, "not-a-hash")
+
+
+@pytest.mark.asyncio
+async def test_controls_without_a_known_qbittorrent_route_are_skipped_not_fatal(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    qbittorrent = FakeQBittorrent()
+    router = DeploymentAccountRouter(sessions, (_route(TRACKER_A, QB_A, qbittorrent),))
+    known = QBittorrentV2DesiredControl(
+        info_hash="a" * 40,
+        storage_key=uuid.UUID(int=1),
+        run_state=QBittorrentV2RunState.RUNNING,
+        download_limit_bytes_per_second=0,
+        qbittorrent_account_ref=QB_A,
+    )
+    stale = QBittorrentV2DesiredControl(
+        info_hash="b" * 40,
+        storage_key=uuid.UUID(int=2),
+        run_state=QBittorrentV2RunState.RUNNING,
+        download_limit_bytes_per_second=0,
+        qbittorrent_account_ref=QB_B,
+    )
+    unassigned = QBittorrentV2DesiredControl(
+        info_hash="c" * 40,
+        storage_key=uuid.UUID(int=3),
+        run_state=QBittorrentV2RunState.STOPPED,
+        download_limit_bytes_per_second=0,
+        qbittorrent_account_ref=None,
+    )
+
+    result = await router.apply_managed_controls((known, stale, unassigned))
+
+    assert result.started == ("a" * 40,)
+    assert result.skipped == ("b" * 40, "c" * 40)
+    assert [control.info_hash for control in qbittorrent.control_calls[0]] == ["a" * 40]
