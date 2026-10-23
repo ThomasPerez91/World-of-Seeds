@@ -510,3 +510,9 @@ Première validation des sept suites : 69 réussis / 4 ignorés avant les dernie
 Les deux cas supplémentaires d’annulation passent ; Ruff/format et mypy strict
 259 sources verts. Suite backend complète, frontend et CI en cours. Aucune migration
 ou infrastructure protégée modifiée. Version 2.4.6 ; livraison à vérifier avant ZIP1 livré.
+
+Revue de promotion : préservation de la traduction Starlette ASGI 2.4, OSError
+de send devient ClientDisconnect, sans l’enfermer seul dans un ExceptionGroup.
+Les erreurs simultanées restent groupées et les erreurs de lecture ne sont pas
+traduites en déconnexion. Quatre tests couvrent en-têtes/corps et ASGI 2.0/2.4,
+avec vérification de la libération SQL/FIFO. Aucune modification des fichiers simples.
