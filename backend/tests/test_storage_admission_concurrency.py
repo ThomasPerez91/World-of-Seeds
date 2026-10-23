@@ -13,6 +13,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from test_v2_torrent_api import RecordingRedis, torrent_content
 
+from app.api.routes import torrents_v2
 from app.auth.security import hash_password
 from app.core.config import Settings, get_settings
 from app.core.database import get_db_session
@@ -32,6 +33,7 @@ from app.models import (
 from app.options import PostgresOptionsRegistry
 from app.storage import SharedContentStore, StorageAdmissionPolicy, StorageDiskSnapshot, accounting
 from app.torrents import create_or_get_torrent_request
+from app.torrents.validation_work import TorrentValidationPool
 
 
 @pytest_asyncio.fixture
@@ -171,9 +173,24 @@ async def test_reconciliation_aggregates_after_a_concurrent_accounting_commit(
             await asyncio.gather(reconcile_task, return_exceptions=True)
 
 
+@pytest_asyncio.fixture
+async def retry_validation_capacity(
+    count: int, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[None]:
+    # This test exercises serialized storage admission, after payload validation.
+    # Admit all contenders here; production pool saturation has dedicated tests.
+    pool = TorrentValidationPool(workers=2, max_pending=count)
+    monkeypatch.setattr(torrents_v2, "torrent_validation_pool", pool)
+    try:
+        yield
+    finally:
+        await pool.aclose()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("count", [2, 8])
 async def test_concurrent_retries_share_one_capacity_admission(
+    retry_validation_capacity: None,
     postgres_storage: tuple[async_sessionmaker[AsyncSession], str],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
