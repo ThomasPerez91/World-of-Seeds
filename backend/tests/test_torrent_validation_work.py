@@ -197,3 +197,18 @@ def test_large_manifest_validation_finishes_within_a_bounded_time() -> None:
     measurements = json.loads(result.stdout)
     assert measurements[0]["files"] == 30_000
     assert measurements[0]["infohash_preserved"]
+
+
+def test_deep_manifest_prefix_storage_stays_within_a_bounded_memory_budget() -> None:
+    script = Path(__file__).resolve().parents[2] / "scripts/benchmark_torrent_validation.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "--files", "50", "--depth", "1000", "--memory"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    measurement = json.loads(result.stdout)[0]
+    assert measurement["files"] == 50 and measurement["infohash_preserved"]
+    # Copied prefix tuples exceed 200 MB on this valid input; shared nodes stay well below this.
+    assert measurement["peak_bytes"] < 64 * 1024**2
