@@ -7,7 +7,8 @@ from functools import partial
 from typing import Any, cast
 
 from fastapi import Request
-from starlette.concurrency import run_in_threadpool
+
+from app.torrents.validation_work import torrent_validation_pool
 
 
 class TorrentRetryBusyError(RuntimeError):
@@ -21,7 +22,7 @@ class TorrentRetryReads:
     async def run[T](self, key: uuid.UUID, operation: Callable[[], T]) -> T:
         if key in self._tasks:
             raise TorrentRetryBusyError("torrent_retry_in_progress")
-        task = asyncio.create_task(run_in_threadpool(operation))
+        task = asyncio.create_task(torrent_validation_pool.run(operation))
         self._tasks[key] = task
         task.add_done_callback(partial(self._completed, key))
         # Keep admission until the real disk operation ends, even if its caller leaves.
