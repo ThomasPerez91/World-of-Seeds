@@ -193,7 +193,7 @@ async def test_scope_schema_and_public_budget(
         CONFIRM, json={"token": "SECRET_INVALID_TOKEN", "new_password": "SECRET_SHORT"}
     )
     assert malformed.status_code == 422 and "SECRET" not in malformed.text
-    app.state.login_ip_rate_limiter = LoginIpRateLimiter(maximum=1)
+    app.state.password_reset_ip_rate_limiter = LoginIpRateLimiter(maximum=1)
     assert (
         await client.post(CONFIRM, json={"token": "Z" * 43, "new_password": "replacement-password"})
     ).status_code == 400

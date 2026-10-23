@@ -125,7 +125,14 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     )
     application.state.external_api_rate_limiter = ExternalApiRateLimiter()
     application.state.login_ip_rate_limiter = LoginIpRateLimiter(
-        maximum=settings.auth_ip_max_attempts, window_seconds=settings.auth_ip_window_seconds
+        maximum=settings.auth_ip_max_attempts,
+        window_seconds=settings.auth_ip_window_seconds,
+        fallback_maximum=settings.auth_max_attempts,
+    )
+    application.state.password_reset_ip_rate_limiter = LoginIpRateLimiter(
+        maximum=settings.auth_ip_max_attempts,
+        window_seconds=settings.auth_ip_window_seconds,
+        fallback_maximum=settings.auth_max_attempts,
     )
     application.state.metrics_registry = MetricsRegistry()
     application.state.operational_metrics_cache = OperationalMetricsCache()

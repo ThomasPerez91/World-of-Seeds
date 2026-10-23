@@ -66,6 +66,7 @@ async def client(db_session: AsyncSession, data_root: Path) -> AsyncIterator[Asy
 
     test_settings = Settings(data_root=data_root)
     app.state.login_ip_rate_limiter = LoginIpRateLimiter()
+    app.state.password_reset_ip_rate_limiter = LoginIpRateLimiter()
 
     def override_settings() -> Settings:
         return test_settings
