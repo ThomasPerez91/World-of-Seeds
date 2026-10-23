@@ -135,15 +135,15 @@ async def test_async_password_helpers_preserve_hash_compatibility() -> None:
 def test_ip_budget_expires_and_bounds_key_storage_without_eviction() -> None:
     now = 100.0
     limiter = LoginIpRateLimiter(maximum=2, window_seconds=60, max_keys=2, clock=lambda: now)
-    assert limiter.consume("first") is None
-    assert limiter.consume("first") is None
-    assert limiter.consume("first") == 60
-    assert limiter.consume("second") is None
-    assert limiter.consume("third") == 60
-    assert limiter.consume("first") == 60
+    assert limiter.consume("192.0.2.1") is None
+    assert limiter.consume("192.0.2.1") is None
+    assert limiter.consume("192.0.2.1") == 60
+    assert limiter.consume("192.0.2.2") is None
+    assert limiter.consume("192.0.2.3") == 60
+    assert limiter.consume("192.0.2.1") == 60
     now += 60
-    assert limiter.consume("third") is None
-    assert limiter.consume("first") is None
+    assert limiter.consume("192.0.2.3") is None
+    assert limiter.consume("192.0.2.1") is None
 
 
 @pytest.mark.asyncio
@@ -168,7 +168,7 @@ async def test_rotating_usernames_and_forwarded_headers_cannot_bypass_ip_budget(
     assert int(response.headers["Retry-After"]) > 0
     assert verify.await_count == 2
     # The ASGI client address changes only through trusted server proxy handling.
-    assert app.state.login_ip_rate_limiter.consume("different-client") is None
+    assert app.state.login_ip_rate_limiter.consume("192.0.2.2") is None
 
 
 @pytest.mark.asyncio
