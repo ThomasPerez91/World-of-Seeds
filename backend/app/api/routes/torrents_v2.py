@@ -10,13 +10,11 @@ from typing import Annotated, Any, Literal, Never, cast
 from fastapi import (
     APIRouter,
     Depends,
-    File,
     Header,
     HTTPException,
     Query,
     Request,
     Response,
-    UploadFile,
     WebSocket,
     WebSocketDisconnect,
     status,
@@ -25,6 +23,7 @@ from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile
 
 from app.auth.dependencies import (
     AuthContext,
@@ -118,6 +117,28 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 UPLOAD_READ_CHUNK = 64 * 1024
+# Multipart framing (boundaries, part headers) allowed around the file itself.
+UPLOAD_ENVELOPE_BYTES = 64 * 1024
+_TORRENT_UPLOAD_OPENAPI: dict[str, Any] = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "multipart/form-data": {
+                "schema": {
+                    "type": "object",
+                    "required": ["torrent"],
+                    "properties": {
+                        "torrent": {
+                            "type": "string",
+                            "format": "binary",
+                            "description": "Fichier BitTorrent C411",
+                        }
+                    },
+                }
+            }
+        },
+    }
+}
 MAX_PAGE_SIZE = 100
 MAX_MANIFEST_PAGE_SIZE = 500
 MAX_MANAGED_ARCHIVE_ENTRIES = 50_000
@@ -203,13 +224,58 @@ async def _read_upload(upload: UploadFile, max_bytes: int) -> bytes:
             break
         content.extend(chunk)
         if len(content) > max_bytes:
+            _too_large()
+    return bytes(content)
+
+
+def _too_large() -> Never:
+    _fail(
+        status.HTTP_413_CONTENT_TOO_LARGE,
+        "torrent_too_large",
+        "Le fichier .torrent dépasse la taille autorisée.",
+        "torrent",
+    )
+
+
+async def _read_torrent_upload(request: Request, max_bytes: int) -> tuple[str | None, bytes]:
+    """Read the multipart body only once the caller is authenticated and the size is bounded.
+
+    FastAPI parses a declared ``File`` parameter before resolving the authentication
+    dependencies, so an anonymous request would be spooled to disk first. The route reads
+    the form itself instead, and rejects an oversized or undeclared body before any parsing.
+    """
+
+    declared = request.headers.get("content-length")
+    if declared is None:
+        _fail(
+            status.HTTP_411_LENGTH_REQUIRED,
+            "torrent_length_required",
+            "La taille de l’envoi doit être précisée.",
+            "torrent",
+        )
+    try:
+        length = int(declared)
+    except ValueError:
+        length = -1
+    if length < 0:
+        _fail(
+            status.HTTP_400_BAD_REQUEST,
+            "torrent_length_invalid",
+            "La taille de l’envoi est invalide.",
+            "torrent",
+        )
+    if length > max_bytes + UPLOAD_ENVELOPE_BYTES:
+        _too_large()
+    async with request.form(max_files=1, max_fields=1, max_part_size=UPLOAD_ENVELOPE_BYTES) as form:
+        upload = form.get("torrent")
+        if not isinstance(upload, UploadFile):
             _fail(
-                status.HTTP_413_CONTENT_TOO_LARGE,
-                "torrent_too_large",
-                "Le fichier .torrent dépasse la taille autorisée.",
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "torrent_missing",
+                "Sélectionne un fichier portant l’extension .torrent.",
                 "torrent",
             )
-    return bytes(content)
+        return upload.filename, await _read_upload(upload, max_bytes)
 
 
 def _integer_option(values: dict[str, bool | int | str], key: str) -> int:
@@ -1158,22 +1224,20 @@ async def download_torrent_file(
     )
 
 
-@router.post("", response_model=TorrentRequestV2CreateResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=TorrentRequestV2CreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    openapi_extra=_TORRENT_UPLOAD_OPENAPI,
+)
 async def create_torrent_request(
+    request: Request,
     db: DbSession,
     redis: RedisCoordinatorDependency,
     settings: Annotated[Settings, Depends(get_settings)],
     context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
-    torrent: Annotated[UploadFile, File(description="Fichier BitTorrent C411")],
 ) -> TorrentRequestV2CreateResponse:
     user_id = context.user.id
-    if torrent.filename is None or not torrent.filename.lower().endswith(".torrent"):
-        _fail(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "torrent_filename_invalid",
-            "Sélectionne un fichier portant l’extension .torrent.",
-            "torrent",
-        )
 
     registry = PostgresOptionsRegistry()
     try:
@@ -1196,7 +1260,14 @@ async def create_torrent_request(
         )
     await db.rollback()
 
-    content = await _read_upload(torrent, max_upload)
+    filename, content = await _read_torrent_upload(request, max_upload)
+    if filename is None or not filename.lower().endswith(".torrent"):
+        _fail(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "torrent_filename_invalid",
+            "Sélectionne un fichier portant l’extension .torrent.",
+            "torrent",
+        )
     try:
         parsed = await torrent_validation_pool.run(
             partial(

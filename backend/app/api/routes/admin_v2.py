@@ -370,7 +370,7 @@ async def _overview(
                 label=spec.label,
                 description=spec.description,
                 input_type=spec.input_type,
-                value=rows[spec.key].value,
+                value="" if spec.input_type == "secret" else rows[spec.key].value,
                 default=spec.default,
                 unit=spec.unit,
                 minimum=spec.minimum,
@@ -379,6 +379,7 @@ async def _overview(
                 editable=spec.editable,
                 restart_required=spec.restart_required,
                 version=rows[spec.key].version,
+                configured=spec.input_type == "secret" and bool(rows[spec.key].value),
             )
             for spec in DATABASE_OPTION_SPECS
             if spec.category == category

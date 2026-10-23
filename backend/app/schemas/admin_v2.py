@@ -22,6 +22,8 @@ class AdminV2OptionField(BaseModel):
     editable: bool
     restart_required: bool
     version: int
+    # Secrets are write-only: the value is always empty and this flag tells whether one is set.
+    configured: bool = False
 
 
 class AdminV2OptionSection(BaseModel):

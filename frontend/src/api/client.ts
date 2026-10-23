@@ -428,6 +428,8 @@ export interface OptionField {
   choices: string[];
   editable: boolean;
   restart_required: boolean;
+  /** Secrets are write-only: `value` is empty and this tells whether one is stored. */
+  configured?: boolean;
 }
 
 export interface OptionSection {

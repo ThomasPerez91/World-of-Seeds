@@ -160,8 +160,39 @@ async def test_admin_can_configure_c411_pair_without_exposing_passkey_in_audit(
     fields = {field["key"]: field for field in c411["fields"]}
     assert fields["WOS_C411_ACCOUNT_01_USERNAME"]["value"] == "Thomas"
     assert fields["WOS_C411_ACCOUNT_01_NUMBER"]["value"] == "1001"
-    assert fields["WOS_C411_ACCOUNT_01_PASSKEY"]["value"] == "admin-passkey-123"
+    # Secrets are write-only: the response never carries the value, only whether one is set.
+    assert fields["WOS_C411_ACCOUNT_01_PASSKEY"]["value"] == ""
+    assert fields["WOS_C411_ACCOUNT_01_PASSKEY"]["configured"] is True
+    assert fields["WOS_C411_ACCOUNT_02_PASSKEY"]["configured"] is False
+    assert "admin-passkey-123" not in response.text
     assert all("admin-passkey-123" not in repr(event) for event in body["audit"])
+
+    overview = await client.get("/api/v2/admin/overview", headers=headers)
+    assert overview.status_code == 200
+    assert "admin-passkey-123" not in overview.text
+    refreshed = next(
+        section for section in overview.json()["sections"] if section["id"] == "c411_accounts"
+    )
+    stored = {field["key"]: field for field in refreshed["fields"]}
+    assert stored["WOS_C411_ACCOUNT_01_PASSKEY"]["configured"] is True
+
+    cleared = await client.patch(
+        "/api/v2/admin/options",
+        json={
+            "changes": {
+                "WOS_C411_ACCOUNT_01_NUMBER": "",
+                "WOS_C411_ACCOUNT_01_PASSKEY": "",
+            }
+        },
+        headers=headers,
+    )
+    assert cleared.status_code == 200
+    after = next(
+        section for section in cleared.json()["sections"] if section["id"] == "c411_accounts"
+    )
+    assert {field["key"]: field for field in after["fields"]}["WOS_C411_ACCOUNT_01_PASSKEY"][
+        "configured"
+    ] is False
 
 
 class _RuntimeMonitor:

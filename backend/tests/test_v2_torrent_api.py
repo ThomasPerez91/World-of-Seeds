@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Never
@@ -470,6 +471,80 @@ async def test_v2_api_requires_authentication_csrf_and_valid_torrent(
     assert invalid.json()["detail"]["code"] == "torrent_invalid"
     assert wrong_name.status_code == 422
     assert wrong_name.json()["detail"]["code"] == "torrent_filename_invalid"
+
+
+@pytest.mark.asyncio
+async def test_v2_upload_body_is_not_parsed_before_authentication(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await prepare_user(db_session)
+
+    async def forbidden(self: object) -> Never:
+        raise AssertionError("an anonymous multipart body must not be parsed")
+
+    monkeypatch.setattr("starlette.formparsers.MultiPartParser.parse", forbidden)
+
+    anonymous = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+    )
+
+    assert anonymous.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_v2_upload_rejects_oversized_or_undeclared_bodies_before_parsing(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+
+    async def forbidden(self: object) -> Never:
+        raise AssertionError("an unbounded multipart body must not be parsed")
+
+    monkeypatch.setattr("starlette.formparsers.MultiPartParser.parse", forbidden)
+
+    oversized = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("big.torrent", b"0" * (5 * 1024 * 1024), "application/x-bittorrent")},
+        headers=headers,
+    )
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"--x\r\n"
+
+    undeclared = await client.post(
+        "/api/v2/torrents",
+        content=chunks(),
+        headers={**headers, "Content-Type": "multipart/form-data; boundary=x"},
+    )
+
+    assert oversized.status_code == 413
+    assert oversized.json()["detail"]["code"] == "torrent_too_large"
+    assert undeclared.status_code == 411
+    assert undeclared.json()["detail"]["code"] == "torrent_length_required"
+
+
+@pytest.mark.asyncio
+async def test_v2_upload_without_a_torrent_part_is_a_validation_error(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+
+    response = await client.post(
+        "/api/v2/torrents",
+        files={"other": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "torrent_missing"
 
 
 @pytest.mark.asyncio
