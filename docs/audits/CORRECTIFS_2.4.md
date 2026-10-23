@@ -7,7 +7,7 @@
 - Cycle : tests isolés → PR develop → CI → merge → PR master → CI → merge/déploiement → contrôles réels → mise à jour du journal → livraison suivante.
 - Tests : comportementaux, PostgreSQL/Redis/Docker en CI selon disponibilité ; aucun test destructif sur production. Limites métier users, protections techniques pour tous, exemptions admin vérifiées côté serveur.
 - Audit lu intégralement (15 pages) : les constats [V], [S] et les preuves runtime manquantes restent distingués.
-- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.4 déployée et vérifiée le 23 octobre ; S1 et S2 livrés ; S3 en préparation pour 2.4.5.
+- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.5 déployée et vérifiée le 23 octobre ; S1, S2 et S3 livrés.
 
 ## Matrice de suivi
 
@@ -15,7 +15,7 @@
 |---|---|---|---|---|---|---|
 | S1 | Validation torrent quadratique | P0 | Corrigé, testé et déployé | 2.4.3 | #403 / #405 / #406 / #404 | 21 tests ajoutés ; collisions, mémoire, budget/cancel, async, relance, 30k |
 | S2 | Limiteur externe non borné | P0 | Corrigé, testé et déployé | 2.4.4 | #408 / #410 / #409 | 100k IPv6, expiration, non-éviction, budgets/concurrence/HTTP |
-| S3 | Saturation login/reset | P0 | Corrigé ; validation en cours | 2.4.5 | À publier | Connexion/reset avec table pleine, budgets IP/identité/global, IPv6, mémoire, expiration |
+| S3 | Saturation login/reset | P0 | Corrigé, testé et déployé | 2.4.5 | #412 / #414 / #413 | Connexion/reset avec table pleine, budgets IP/identité/global, IPv6, mémoire, expiration |
 | S4 | Métadonnées réseau et périmètre C411 | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S5 | Passkeys exposées en clair | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S6 | Limite authentifiée et cache santé | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -367,7 +367,7 @@ Aucune migration, nouvelle installation root ou mise à jour du bot.
 
 Prochaine priorité : S3, saturation login/reset. S6 et C3/C4 restent ouverts.
 
-## 2.4.5 — saturation des protections login/reset (préparation)
+## 2.4.5 — saturation des protections login/reset (livré)
 
 Cause confirmée : une table IP de 10000 entrées était commune au login et au reset
 (publication des tokens exclue). À capacité, chaque nouvelle adresse recevait 429
@@ -412,7 +412,7 @@ sur nouvelle IP, refus avant crypto malgré rotation/casse, budgets login/reset
 indépendants, reset valide et token toujours à usage unique avec table pleine.
 Première validation ciblée : 64 réussis ; frontend 209 réussis / 3 ignorés,
 TypeScript/build verts. Ruff et mypy strict 258 sources verts.
-CI, revue et preuve de déploiement restent à terminer. Suite backend complète locale :
+CI, revue et preuve de déploiement validées ci-dessous. Suite backend complète locale :
 1280 réussis / 72 ignorés (services absents localement). Le test de charge utilise
 une horloge figée pour exclure la vitesse du runner des assertions d’expiration.
 S4, S6 et C3/C4 restent ouverts.
@@ -421,10 +421,35 @@ La première CI de promotion a révélé une attente synchrone instable dans le 
 de restauration de langue : le texte anglais peut être rendu avant l’effet React
 qui met à jour html.lang. Le test attend désormais explicitement cette valeur
 finale avec waitFor ; son assertion en et les contrôles du menu restent inchangés.
-Aucun changement de comportement frontend. Nouvelle CI complète avant promotion.
+Aucun changement de comportement frontend. Nouvelle CI complète verte avant promotion.
 
 La revue de promotion a relevé un Retry-After trop court lorsque le plafond global
 expire avant une limite IP/identité commencée plus tard. Le limiteur calcule désormais
 le maximum des délais de tous les blocages applicables, sans charger les budgets
 ni atteindre SQL/Argon2 lors d’un refus. Deux tests à horloge injectée couvrent les
 fenêtres décalées global/IP et global/identité (secours et réseau primaire).
+
+### Preuves de livraison 2.4.5
+
+#412 (S3) et #414 (revue Retry-After et synchronisation du test de langue) intégrées ;
+23 cas backend ajoutés au total. Promotion #413 fusionnée sur master
+`11634b8f5183ae299d7a282e2d45be29455646e5`.
+[CI source finale](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39942930302),
+[CI promotion](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39943515835)
+et [CI master](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39944059451)
+vertes : 1352 tests backend réussis / 2 ignorés ; six contrôles verts, revue corrigée.
+Après ajustements : 55 tests ciblés backend locaux réussis ; App 12 réussis / 2 ignorés,
+TypeScript/build, Ruff et mypy strict verts. La suite backend locale initiale 1280/72
+précède les deux tests Retry-After ; la CI complète finale couvre la version livrée.
+
+[Déploiement Rise2](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39944454779)
+réussi le 23 octobre 2026 à 11:13:59 UTC (13:13:59 à Paris), révision exacte ci-dessus :
+`ghcr.io/thomasperez91/world-of-seeds-v2@sha256:16373810182da285a00a05b61da9a402bde56667bd2fd96408c32951e92b8019`.
+Contrôles publics indépendants après déploiement : live/ready HTTP 200, version 2.4.5 ;
+page et bundle `/assets/index-CJACzAQE.js` HTTP 200, version frontend 2.4.5.
+Aucun changement de head Alembic, nouvelle installation root ou mise à jour du bot.
+Les limites de disponibilité et de stockage des compteurs sont décrites ci-dessus.
+
+Prochaine priorité S4 : métadonnées réseau des torrents et périmètre C411 ; vérifier
+les fixtures réelles et la configuration qB avant toute modification sensible.
+S6 et C3/C4 restent ouverts, sans présumer de validation opérationnelle.
