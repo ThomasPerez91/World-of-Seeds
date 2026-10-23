@@ -7,14 +7,14 @@
 - Cycle : tests isolés → PR develop → CI → merge → PR master → CI → merge/déploiement → contrôles réels → mise à jour du journal → livraison suivante.
 - Tests : comportementaux, PostgreSQL/Redis/Docker en CI selon disponibilité ; aucun test destructif sur production. Limites métier users, protections techniques pour tous, exemptions admin vérifiées côté serveur.
 - Audit lu intégralement (15 pages) : les constats [V], [S] et les preuves runtime manquantes restent distingués.
-- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.3 déployée et vérifiée le 23 octobre ; S1 livré ; S2 en préparation pour 2.4.4.
+- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.4 déployée et vérifiée le 23 octobre ; S1 et S2 livrés.
 
 ## Matrice de suivi
 
 | Référence | Problème | Priorité | Statut | Version | PR | Tests |
 |---|---|---|---|---|---|---|
 | S1 | Validation torrent quadratique | P0 | Corrigé, testé et déployé | 2.4.3 | #403 / #405 / #406 / #404 | 21 tests ajoutés ; collisions, mémoire, budget/cancel, async, relance, 30k |
-| S2 | Limiteur externe non borné | P0 | Corrigé ; validation locale en cours, CI/déploiement à suivre | 2.4.4 | À publier | 100k IPv6, expiration, non-éviction, budgets/concurrence/HTTP |
+| S2 | Limiteur externe non borné | P0 | Corrigé, testé et déployé | 2.4.4 | #408 / #410 / #409 | 100k IPv6, expiration, non-éviction, budgets/concurrence/HTTP |
 | S3 | Saturation login/reset | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S4 | Métadonnées réseau et périmètre C411 | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S5 | Passkeys exposées en clair | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -297,7 +297,7 @@ les budgets sans contournement par éviction. S2 n’est pas encore corrigé. C3
 (sauvegardes hors hôte/alertes reçues) restent non validés opérationnellement.
 
 
-## 2.4.4 — limiteur externe borné (préparation)
+## 2.4.4 — limiteur externe borné (livré)
 
 Cause confirmée : defaultdict(deque) créait une entrée par adresse avant validation
 API ; une adresse jamais revue ne bénéficiait d’aucune collecte d’expiration.
@@ -331,7 +331,7 @@ plafond de pic Python tracé à 32 MiB, récupération après expiration et rép
 Première validation ciblée : 33 réussis / 1 ignoré (PostgreSQL), Ruff et mypy strict
 257 sources verts. Suite backend complète : 1259 réussis / 72 ignorés (services
 indisponibles localement) ; frontend : 209 réussis / 3 ignorés, TypeScript et build
-réussis. CI et déploiement restent à vérifier avant de déclarer S2 livré.
+réussis. CI et déploiement validés ci-dessous.
 
 Version 2.4.4, aucune migration ou modification d’infrastructure protégée. Limiteur
 local au processus, API unique exigée par le déploiement ; les budgets sont réinitialisés
@@ -344,4 +344,25 @@ validation (capacité 4), avant le contrôle de stockage qui attend 507. Le test
 d’admission stockage dispose désormais d’un pool isolé admettant ses huit
 concurrents ; toutes les assertions de stockage et de non-duplication sont
 conservées. Les tests dédiés de saturation conservent les bornes de production.
-Aucun changement de capacité de production. Nouvelle CI complète requise.
+Aucun changement de capacité de production. La revue a corrigé la référence du
+pool remplacé : app.torrents.retry_reads.torrent_validation_pool. CI complète verte.
+
+### Preuves de livraison 2.4.4
+
+#408 (correctif S2) et #410 (isolation du test stockage) intégrées ; promotion #409
+fusionnée sur master `e43bd5d572c93fe0d78c3960e4143d8b004b7242`.
+[CI source finale](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39919511022),
+[CI promotion](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39920032237)
+et [CI master](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39920526108)
+vertes : 1329 tests backend réussis / 2 ignorés ; six contrôles verts.
+Le premier passage de promotion avait révélé le conflit du test stockage avec le
+pool borné ; il a été corrigé, sans relancer un échec pour le masquer.
+
+[Déploiement Rise2](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39920982983)
+réussi le 23 octobre 2026 à 07:56:55 UTC. Révision exacte ci-dessus et image :
+`ghcr.io/thomasperez91/world-of-seeds-v2@sha256:5c556872d28756999c96a6efc67f1e7f8220ad29dc73cb3615dfe0a7eff1a1ea`.
+Contrôles publics indépendants après livraison : live/ready HTTP 200, version 2.4.4 ;
+page et bundle `/assets/index-BL36gtjC.js` HTTP 200, version frontend 2.4.4.
+Aucune migration, nouvelle installation root ou mise à jour du bot.
+
+Prochaine priorité : S3, saturation login/reset. S6 et C3/C4 restent ouverts.
