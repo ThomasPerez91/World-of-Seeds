@@ -117,3 +117,19 @@ def test_peer_discovery_fields_outside_info_are_dropped_without_changing_the_inf
     assert b"qbittorrent:8080" not in cleaned.content
     assert cleaned.info_hash == reference.info_hash
     assert cleaned.content == reference.content
+
+
+def test_a_path_too_long_for_the_database_index_is_refused_at_validation() -> None:
+    def multi_file(depth: int) -> bytes:
+        info = {
+            b"name": b"root",
+            b"piece length": 16_384,
+            b"pieces": b"p" * 20,
+            b"files": [{b"length": 1, b"path": [b"d" * 250] * depth + [b"f.bin"]}],
+        }
+        return bencode({b"announce": b"https://c411.org/anything/old-user-passkey", b"info": info})
+
+    kwargs = {"passkey": "test-passkey-123", "allowed_tracker_hosts": ["c411.org"]}
+    assert normalize_torrent(multi_file(7), **kwargs, max_total_size=1_000)  # type: ignore[arg-type]
+    with pytest.raises(TorrentValidationError):
+        normalize_torrent(multi_file(9), **kwargs, max_total_size=1_000)  # type: ignore[arg-type]

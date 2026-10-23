@@ -4,7 +4,10 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version de production vérifiée : `2.4.6`. ZIP1 corrigé et déployé ; ZIP privé authentifié en production à confirmer. Prochain correctif : S4.
+- Version de production vérifiée : `2.4.6`. ZIP1 corrigé et déployé ; ZIP privé authentifié en production à confirmer.
+- `2.4.7` (en cours de livraison) : correctifs par lots issus de l’audit complet, voir
+  `docs/audits/CORRECTIFS_2.4.md` et `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`. `3.0.0` sera la
+  version de clôture de l’audit.
 
 ## Campagne audit 2.4.x — 2.4.6 déployée, ZIP1 corrigé
 

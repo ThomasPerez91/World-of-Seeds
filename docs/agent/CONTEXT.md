@@ -60,8 +60,11 @@ Principes de récupération locale :
 
 - la File System Access API est le chemin direct privilégié lorsqu'elle est disponible ; le ZIP
   reste une solution de repli indépendante et ne doit jamais masquer ce chemin ;
-- les flux HTTP sont bornés par utilisateur et globalement ; un administrateur n'est pas soumis au
-  plafond individuel mais reste soumis au plafond global de protection du serveur ;
+- les flux fichiers sont régulés par l'ordonnanceur de voies (cinq voies rapides initiales, attentes
+  à 1 Kio/s, deux attentes par compte) ; les plafonds de leases par utilisateur et global
+  (`WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER` / `_GLOBAL`) ne s'appliquent qu'aux ZIP, et seul le
+  plafond de leases ZIP par compte exempte les administrateurs ;
+- un client qui ne lit plus pendant 120 s perd sa voie, sa lease et son slot ZIP ;
 - les ZIP complets et de dossiers partagent la même file FIFO globale ;
 - le scheduler conserve une cadence de synchronisation rapide, mais ses décisions de rotation qB
   utilisent un quantum séparé afin de préserver l'équité sans provoquer de churn excessif.
@@ -256,7 +259,7 @@ La connexion consomme un budget agrégé par IP avant tout calcul : trente tenta
 - Les téléchargements READY privilégient la File System Access API pour reconstruire localement les dossiers ; le ZIP reste un fallback de compatibilité et ne doit pas être présenté en parallèle lorsque `showDirectoryPicker()` est disponible.
 - La file locale alterne les travaux concurrents. Dans un dossier, elle favorise les petits fichiers par salves bornées puis force le plus ancien afin d'améliorer le temps de complétion sans affamer les gros fichiers.
 - Les téléchargements READY conservent Range, leases et validation du manifeste. L’ordonnanceur asynchrone de l’unique processus API démarre à cinq flux rapides puis ajuste la cible (5 à 64) toutes les 15 secondes selon le débit sortant total du serveur mesuré par Prometheus et la capacité montante configurée (125 Mo/s sur Rise2). Il ouvre davantage de flux sous 80 % de charge si des fichiers attendent ; au-delà de 95 %, il réduit les admissions futures sans rétrograder un transfert déjà rapide, qui conserve sa voie jusqu’à sa fin ou sa déconnexion. Les autres flux avancent à 1 Kio/s ; chaque compte peut ouvrir au plus deux attentes. La priorité à chaque place libérée combine ancienneté et bonus de taille restante plafonné à cinq minutes, ce qui évite de repousser indéfiniment les gros fichiers ; une nouvelle requête ne dépasse pas les attentes existantes. Les ZIP ont leurs limites distinctes. Sans télémétrie fraîche, la dernière décision est conservée. Le plafond global HTTP configuré, s’il existe, est appliqué aux octets réellement transmis sans réserver une fraction fixe aux clients lents.
-- Le plafond de flux simultanés par utilisateur s'applique aux comptes standards. Les administrateurs en sont exemptés, mais conservent une lease par flux et restent soumis aux rate limits et protections globales.
+- Le plafond de leases ZIP simultanées par utilisateur s'applique aux comptes standards ; les administrateurs en sont exemptés. Les flux fichiers ne sont pas plafonnés par compte côté serveur (le navigateur n'en ouvre que deux) : voir `docs/audits/CORRECTIFS_2.4.md`, décisions en attente.
 - Les noms longs et chemins imbriqués ne doivent pas provoquer de débordement horizontal mobile.
 
 ## Torrent et sécurité tracker
@@ -266,7 +269,9 @@ La connexion consomme un budget agrégé par IP avant tout calcul : trente tenta
 - La sécurité de l'ingestion repose sur les chemins et leurs collisions (y compris Unicode et casse), les attributs des fichiers (symlink, exécutable et attributs inconnus interdits), les métadonnées torrent, les trackers et les limites applicatives (taille, fichiers, profondeur et upload).
 - Le hash est calculé depuis les octets bruts exacts du dictionnaire `info`; ne jamais le réencoder avant calcul.
 - Les trackers sont allowlistés côté serveur.
-- Les passkeys et credentials restent des secrets de déploiement ; ne jamais les persister dans les tables métier, logs, diagnostics ou réponses frontend.
+- Les credentials d'intégration restent des secrets de déploiement. Les passkeys C411 administrables sont stockées dans les options PostgreSQL (chiffrement au repos non réalisé) mais ne sont jamais renvoyées par l'API (valeur vide et indicateur `configured`), ni écrites dans l'audit, les logs, les diagnostics ou les métriques.
+- La normalisation d'un torrent retire les champs de découverte de pairs hors `info` (`url-list`, `httpseeds`, `nodes`, commentaires) ; l'infohash reste calculé sur les octets bruts de `info`.
+- `POST /api/v2/torrents` lit le multipart après l'authentification, avec `Content-Length` obligatoire et borné.
 - Les références multi-comptes sont opaques côté domaine.
 
 ## qBittorrent / NewGreedy
@@ -337,7 +342,7 @@ expiré n'est accordé.
 L'interface torrent charge un état PostgreSQL autoritaire puis reçoit des événements WebSocket non autoritaires.
 
 - pas de polling complet toutes les dix secondes ;
-- après reconnexion, faire une resynchronisation GET autoritaire ;
+- après reconnexion, faire une resynchronisation GET autoritaire ; la reconnexion utilise un backoff exponentiel plafonné à 30 s avec jitter ;
 - un WebSocket idle ne doit pas maintenir de session SQL.
 
 Les téléchargements récursifs utilisent un manifeste paginé/progressif et une concurrence bornée. Ne pas attendre un manifeste énorme complet avant de démarrer les premiers fichiers.
