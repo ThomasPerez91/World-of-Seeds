@@ -1143,18 +1143,28 @@ async def download_torrent_file(
             manifest_version=manifest_version,
             file_index=file_index,
         )
-    except (ManagedDownloadError, SharedContentStoreError):
+    except BaseException as error:
+        # Whatever stops the open (including a cancelled request), the lease must not linger.
         if lease_id is not None:
             await finish_download(partial(leases.release, lease_id))
-        _fail(
-            status.HTTP_409_CONFLICT,
-            "torrent_file_changed",
-            "Le fichier ne correspond plus au manifeste.",
-        )
+        if isinstance(error, ManagedDownloadError | SharedContentStoreError):
+            _fail(
+                status.HTTP_409_CONFLICT,
+                "torrent_file_changed",
+                "Le fichier ne correspond plus au manifeste.",
+            )
+        if isinstance(error, OSError):
+            logger.warning("download_open_failed", extra={"error_type": type(error).__name__})
+            _fail(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "download_storage_unavailable",
+                "Le stockage est momentanément indisponible.",
+            )
+        raise
 
     headers = {
         "Accept-Ranges": "bytes",
-        "Cache-Control": "private, no-cache",
+        "Cache-Control": "private, no-cache, no-transform",
         "Content-Disposition": download.content_disposition,
         "Content-Type": download.media_type,
         "ETag": download.etag,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import hashlib
+import logging
 import mimetypes
 import os
 import stat
@@ -20,6 +21,7 @@ from urllib.parse import quote
 
 import anyio
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect
@@ -39,6 +41,16 @@ from app.models import (
 )
 from app.storage import SharedContentStore
 from app.torrents.traffic import DownloadTrafficScheduler
+
+logger = logging.getLogger(__name__)
+
+# A client that stops reading keeps its TCP window closed, so `send` never returns and the
+# lane, the lease and the archive slot would stay taken forever. One accepted chunk must
+# never take longer than this.
+SEND_STALL_TIMEOUT_SECONDS = 120.0
+
+_ZIP_EARLIEST = (1980, 1, 1, 0, 0, 0)
+_ZIP_LATEST = (2107, 12, 31, 23, 59, 58)
 
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_NONBLOCK", 0)
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0)
@@ -82,6 +94,24 @@ _managed_archive_concurrency = _ManagedArchiveConcurrency()
 
 class ManagedDownloadError(RuntimeError):
     """A managed file no longer matches its authoritative manifest entry."""
+
+
+class DownloadStalledError(RuntimeError):
+    """The client stopped consuming the response for longer than the stall budget."""
+
+
+async def _bounded_send(send: Send, message: Message) -> None:
+    try:
+        async with asyncio.timeout(SEND_STALL_TIMEOUT_SECONDS):
+            await send(message)
+    except TimeoutError as error:
+        raise DownloadStalledError("client stopped reading the download") from error
+
+
+def _zip_timestamp(moment: datetime) -> tuple[int, int, int, int, int, int]:
+    """Clamp to the range the ZIP format can store (a bad mtime must not cut the archive)."""
+    year, month, day, hour, minute, second = moment.timetuple()[:6]
+    return min(max((year, month, day, hour, minute, second), _ZIP_EARLIEST), _ZIP_LATEST)
 
 
 class DownloadConcurrencyError(RuntimeError):
@@ -171,7 +201,13 @@ class ManagedFileDownloader:
             metadata = os.fstat(file_fd)
             if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != expected_size:
                 raise ManagedDownloadError("managed file does not match its manifest")
-            modified_at = datetime.fromtimestamp(metadata.st_mtime, tz=UTC).replace(microsecond=0)
+            try:
+                modified_at = datetime.fromtimestamp(metadata.st_mtime, tz=UTC).replace(
+                    microsecond=0
+                )
+            except (OverflowError, OSError, ValueError):
+                # An absurd mtime must not make the file permanently undownloadable.
+                modified_at = datetime.fromtimestamp(0, tz=UTC)
             etag_source = f"{manifest_checksum}:{manifest_version}:{file_index}:{expected_size}"
             etag = f'"{hashlib.sha256(etag_source.encode()).hexdigest()}"'
             name = components[-1]
@@ -301,7 +337,7 @@ class ManagedFolderArchiver:
                 try:
                     info = zipfile.ZipInfo(
                         entry.archive_path or entry.relative_path,
-                        opened.modified_at.timetuple()[:6],
+                        _zip_timestamp(opened.modified_at),
                     )
                     info.compress_type = zipfile.ZIP_STORED
                     info.external_attr = 0o100640 << 16
@@ -558,10 +594,32 @@ class DownloadLeaseManager:
             lease.expires_at = now + timedelta(seconds=self._lease_seconds)
 
     async def keep_alive(self, lease_id: uuid.UUID) -> None:
-        """Renew on independent short SQL sessions even while ASGI send is blocked."""
+        """Renew on independent short SQL sessions even while ASGI send is blocked.
+
+        A transient database failure is retried quickly while the lease is still valid: only a
+        lost lease, or an expiry about to happen, may interrupt a transfer that can last hours.
+        """
+        last_renewal = self._clock()
+        margin = max(5.0, self._lease_seconds / 10)
+        retry_seconds = min(self.heartbeat_seconds, max(1.0, self._lease_seconds / 12))
+        wait = self.heartbeat_seconds
         while True:
-            await self._heartbeat_wait(self.heartbeat_seconds)
-            await self.renew_independent(lease_id)
+            await self._heartbeat_wait(wait)
+            try:
+                await self.renew_independent(lease_id)
+            except (SQLAlchemyError, OSError) as error:
+                # OSError includes TimeoutError (pool or command timeout).
+                elapsed = (self._clock() - last_renewal).total_seconds()
+                if elapsed >= self._lease_seconds - margin:
+                    raise
+                logger.warning(
+                    "download_lease_renewal_retry",
+                    extra={"error_type": type(error).__name__},
+                )
+                wait = retry_seconds
+                continue
+            last_renewal = self._clock()
+            wait = self.heartbeat_seconds
 
     async def renew_independent(self, lease_id: uuid.UUID) -> None:
         async with AsyncSession(bind=self._session.bind, expire_on_commit=False) as session:
@@ -792,7 +850,7 @@ class ManagedDownloadStreamingResponse(StreamingResponse):
 
         async def measured_send(message: Message) -> None:
             nonlocal sent
-            await send(message)
+            await _bounded_send(send, message)
             if message["type"] == "http.response.body":
                 size = len(message.get("body", b""))
                 sent += size
@@ -809,6 +867,13 @@ class ManagedDownloadStreamingResponse(StreamingResponse):
                 outcome = "completed"
         except asyncio.CancelledError:
             raise
+        except BaseExceptionGroup as group:
+            stalled, other = group.split(DownloadStalledError)
+            if stalled is None or other is not None:
+                outcome = "error"
+                raise
+            # Dropping the connection is the only way to free a dead client's lane.
+            logger.warning("download_stalled", extra={"transferred_bytes": sent})
         except BaseException:
             outcome = "error"
             raise
@@ -850,7 +915,7 @@ class ManagedArchiveStreamingResponse(StreamingResponse):
         super().__init__(
             self._body,
             headers={
-                "Cache-Control": "private, no-store",
+                "Cache-Control": "private, no-store, no-transform",
                 "Content-Disposition": archiver.content_disposition,
             },
             media_type="application/zip",
@@ -861,7 +926,9 @@ class ManagedArchiveStreamingResponse(StreamingResponse):
 
         async def checked_send(message: Message) -> None:
             try:
-                await send(message)
+                await _bounded_send(send, message)
+            except DownloadStalledError:
+                raise
             except OSError as error:
                 if version >= (2, 4):
                     raise ClientDisconnect from error
@@ -894,10 +961,14 @@ class ManagedArchiveStreamingResponse(StreamingResponse):
             cause: BaseException = error
             while isinstance(cause, BaseExceptionGroup) and len(cause.exceptions) == 1:
                 cause = cause.exceptions[0]
-            if cause is not error:
-                context = None if cause.__suppress_context__ else cause.__context__
-                raise cause from cause.__cause__ or context
-            raise
+            if isinstance(cause, DownloadStalledError):
+                # Dropping the connection is the only way to free a dead client's slot.
+                logger.warning("download_archive_stalled")
+            else:
+                if cause is not error:
+                    context = None if cause.__suppress_context__ else cause.__context__
+                    raise cause from cause.__cause__ or context
+                raise
         finally:
             operations: list[Callable[[], Awaitable[None]]] = [
                 self._body.aclose,
