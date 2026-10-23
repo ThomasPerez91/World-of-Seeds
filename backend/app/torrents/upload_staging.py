@@ -12,6 +12,7 @@ from app.jobs.torrent_payloads import (
     TorrentPayloadStore,
     TorrentPayloadStoreError,
 )
+from app.torrents.validation_work import torrent_validation_pool
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ async def stage_upload_payload(
     max_total_size: int,
 ) -> OwnedTorrentPayload:
     task = asyncio.create_task(
-        run_in_threadpool(
+        torrent_validation_pool.run(
             partial(
                 store.stage_owned,
                 content,

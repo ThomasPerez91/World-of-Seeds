@@ -39,6 +39,7 @@ from app.options import OptionsStore
 from app.torrents.downloads import DownloadRateLimiter
 from app.torrents.retry_reads import TorrentRetryReads
 from app.torrents.traffic import DownloadTrafficScheduler
+from app.torrents.validation_work import TorrentValidationBusyError, torrent_validation_pool
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ async def monitor_http_upload(application: FastAPI) -> None:
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     password_work_pool.start()
+    torrent_validation_pool.start()
     monitor = asyncio.create_task(monitor_http_upload(application))
     try:
         yield
@@ -84,6 +86,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             await monitor
         await application.state.network_throughput_collector.aclose()
         await password_work_pool.aclose()
+        await torrent_validation_pool.aclose()
         await application.state.redis_coordinator.aclose()
         await engine.dispose()
 
@@ -199,6 +202,21 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
             headers={"Retry-After": "5", "Cache-Control": "no-store"},
         )
 
+    async def torrent_validation_busy_handler(
+        request: Request, exc: TorrentValidationBusyError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": {
+                    "code": "torrent_validation_busy",
+                    "message": "Torrent validation is busy",
+                    "field": None,
+                }
+            },
+            headers={"Retry-After": "1", "Cache-Control": "no-store"},
+        )
+
     async def password_work_error_handler(
         request: Request, exc: PasswordWorkUnavailableError
     ) -> JSONResponse:
@@ -275,6 +293,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     application.add_exception_handler(ReconciliationBusyError, reconciliation_busy_handler)  # type: ignore[arg-type]
     application.add_exception_handler(DatabaseUnavailableError, database_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(PoolTimeoutError, database_error_handler)  # type: ignore[arg-type]
+    application.add_exception_handler(TorrentValidationBusyError, torrent_validation_busy_handler)  # type: ignore[arg-type]
     application.add_exception_handler(PasswordWorkUnavailableError, password_work_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(ExternalApiError, external_error_handler)  # type: ignore[arg-type]
     application.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]

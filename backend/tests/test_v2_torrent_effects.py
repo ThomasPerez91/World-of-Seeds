@@ -26,6 +26,7 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2RejectionCause,
     QBittorrentV2TorrentSnapshot,
 )
+from app.jobs import torrent_effects
 from app.jobs.torrent_effects import (
     TorrentEffectHandlers,
     TorrentRetentionReaper,
@@ -49,6 +50,7 @@ from app.models import (
 )
 from app.scheduler.queue_visibility import load_torrent_queue_visibility
 from app.storage import SharedContentStore
+from app.torrents.validation_work import TorrentValidationBusyError, TorrentValidationPool
 
 NOW = datetime(2026, 8, 21, 20, tzinfo=UTC)
 STORAGE_KEY = uuid.UUID("12345678-1234-5678-1234-567812345678")
@@ -1363,3 +1365,41 @@ async def test_periodic_enqueuer_coalesces_one_active_sync_job_per_torrent(
     assert await enqueuer.enqueue_once() == (5, 0)
     async with sessions() as session:
         assert await session.scalar(select(func.count()).select_from(TorrentJob)) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["read", "normalize"])
+async def test_add_handler_retries_validation_saturation_without_qb_add_or_payload_removal(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    torrent_id, request_id = await _create_domain(sessions)
+    payloads = _payloads(tmp_path)
+    payloads.stage(_torrent(), storage_key=STORAGE_KEY)
+
+    class BusyAdder(FakeAdder):
+        async def add_torrent(
+            self, content: bytes, *, expected_info_hash: str, storage_key: uuid.UUID
+        ) -> object:
+            raise TorrentValidationBusyError
+
+    adder = FakeAdder() if phase == "read" else BusyAdder()
+    if phase == "read":
+        pool = TorrentValidationPool(workers=1, max_pending=1)
+        await pool.aclose()
+        monkeypatch.setattr(torrent_effects, "torrent_validation_pool", pool)
+    effects = TorrentEffectHandlers(
+        sessions,
+        _router(sessions, adder, QBittorrentV2TorrentSnapshot(INFO_HASH, "downloading", 0.2)),
+        payloads,
+        _content(tmp_path),
+        clock=lambda: NOW,
+    )
+    with pytest.raises(TransientTorrentJobError) as failure:
+        await effects.add_torrent(_snapshot(torrent_id, request_id, "ADD_TORRENT"))
+    assert failure.value.error_code == "torrent_validation_busy"
+    assert failure.value.torrent_state is ManagedTorrentState.RETRY_WAIT
+    assert not adder.contents
+    assert payloads.read(STORAGE_KEY).info_hash == INFO_HASH
