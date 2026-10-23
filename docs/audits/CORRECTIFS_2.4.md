@@ -7,13 +7,13 @@
 - Cycle : tests isolés → PR develop → CI → merge → PR master → CI → merge/déploiement → contrôles réels → mise à jour du journal → livraison suivante.
 - Tests : comportementaux, PostgreSQL/Redis/Docker en CI selon disponibilité ; aucun test destructif sur production. Limites métier users, protections techniques pour tous, exemptions admin vérifiées côté serveur.
 - Audit lu intégralement (15 pages) : les constats [V], [S] et les preuves runtime manquantes restent distingués.
-- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.2 déployée après contrôles réels réussis ; préparation de 2.4.3, S1 repris le 23 octobre.
+- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.3 déployée et vérifiée le 23 octobre ; S1 livré, S2 reste à traiter.
 
 ## Matrice de suivi
 
 | Référence | Problème | Priorité | Statut | Version | PR | Tests |
 |---|---|---|---|---|---|---|
-| S1 | Validation torrent quadratique | P0 | Corrigé et testé localement ; CI/déploiement à suivre | 2.4.3 | À publier | Collisions, mémoire chemins profonds, budget/cancel, async, 30k |
+| S1 | Validation torrent quadratique | P0 | Corrigé, testé et déployé | 2.4.3 | #403 / #405 / #406 / #404 | 21 tests ajoutés ; collisions, mémoire, budget/cancel, async, relance, 30k |
 | S2 | Limiteur externe non borné | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S3 | Saturation login/reset | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S4 | Métadonnées réseau et périmètre C411 | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -198,7 +198,7 @@ la branche distante validée, vérifier si les changements locaux sont récupér
 puis reprendre S1 pour la future 2.4.3. Aucun nouveau bootstrap root nécessaire.
 
 
-## 2.4.3 — validation torrent bornée et chemins sans scan quadratique (préparation)
+## 2.4.3 — validation torrent bornée et chemins sans scan quadratique (déployée)
 
 Cause : chaque entrée comparait son chemin à tous les fichiers déjà rencontrés.
 Un arbre de chemins normalisés partage les préfixes et remplace ce scan ; les
@@ -269,3 +269,29 @@ existant par storage_key et la protection contre l’annulation sont conservés 
 clés distinctes ou plusieurs instances de TorrentRetryReads ne peuvent pas contourner
 le budget de threads. Un test vérifie la saturation entre deux clés/instances, l’absence
 d’exécution excédentaire et la récupération de la clé après saturation.
+
+
+### Preuve de livraison 2.4.3
+
+[PR #403](https://github.com/ThomasPerez91/World-of-Seeds/pull/403),
+[correction mémoire #405](https://github.com/ThomasPerez91/World-of-Seeds/pull/405) et
+[relances #406](https://github.com/ThomasPerez91/World-of-Seeds/pull/406) intégrées dans develop.
+[Promotion #404](https://github.com/ThomasPerez91/World-of-Seeds/pull/404) fusionnée sur master
+après contrôles verts et remarque P1 effectivement corrigée/résolue.
+
+Commit master : `69b10c028cfc370c93381f39c2c3724385516663`.
+[CI source finale](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39909563942)
+et [CI master](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39910474087)
+réussies : 1312 tests backend réussis / 2 ignorés, six contrôles verts.
+[Déploiement Rise2](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39910869671)
+réussi le 23 octobre 2026 à 06:21:54 UTC, image et révision exactes :
+`ghcr.io/thomasperez91/world-of-seeds-v2@sha256:c4f89a61f25879c5ed64b61d89fd62bbd4af099b45028780231149868c4845aa`.
+Le helper vérifie API/workers/scheduler et les services persistants sans les recréer.
+Contrôles publics indépendants après déploiement : live/ready HTTP 200, version 2.4.3 ;
+page et bundle `/assets/index-BCSVaby9.js` HTTP 200, version frontend 2.4.3.
+Aucun changement de head Alembic, nouvelle installation root ou changement du bot.
+
+Le blocage d’environnement du 22 octobre est résolu. Prochaine priorité S2 : borner
+la mémoire et l’expiration du limiteur externe, agréger les préfixes IPv6 et préserver
+les budgets sans contournement par éviction. S2 n’est pas encore corrigé. C3/C4
+(sauvegardes hors hôte/alertes reçues) restent non validés opérationnellement.
