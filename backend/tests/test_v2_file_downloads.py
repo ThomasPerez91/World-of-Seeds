@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import io
 import os
 import uuid
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Never
 
 import pytest
 from httpx import AsyncClient
@@ -31,6 +33,7 @@ from app.torrents.downloads import (
     DownloadLeaseManager,
     DownloadRateLimiter,
     ManagedDownloadError,
+    ManagedFileDownloader,
 )
 from app.torrents.traffic import DownloadTrafficScheduler
 
@@ -177,6 +180,27 @@ async def test_changed_file_and_invalid_range_fail_closed_and_release_lease(
     changed = await client.get(url)
     assert changed.status_code == 409
     assert changed.json()["detail"]["code"] == "torrent_file_changed"
+    assert await db_session.scalar(select(func.count()).select_from(DownloadLease)) == 0
+
+
+@pytest.mark.asyncio
+async def test_unexpected_open_failure_is_a_503_and_releases_the_lease(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, request, torrent_file, _ = await _ready_file(db_session, data_root)
+    await _login(client)
+
+    def exhausted(*_: object, **__: object) -> Never:
+        raise OSError(errno.EMFILE, "Too many open files")
+
+    monkeypatch.setattr(ManagedFileDownloader, "open", exhausted)
+    response = await client.get(_url(request, torrent_file))
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "download_storage_unavailable"
     assert await db_session.scalar(select(func.count()).select_from(DownloadLease)) == 0
 
 

@@ -844,3 +844,25 @@ async def test_unwrapped_archive_error_preserves_original_exception_context(
             assert str(error.value.__cause__) == "original transport failure"
         assert await domain.count() == 0
         assert response._heartbeat is not None and response._heartbeat.done()
+
+
+@pytest.mark.asyncio
+async def test_stalled_client_releases_the_archive_slot_and_the_lease(
+    domain: Domain, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(downloads, "SEND_STALL_TIMEOUT_SECONDS", 0.05)
+    async with domain.sessions() as session:
+        manager = domain.manager(session)
+        lease = await domain.lease(manager)
+        connection = Connection(block=True)
+        response = domain.response(manager, lease)
+        task = connection.run(response)
+        try:
+            # The client never reads again: the response ends by itself.
+            await asyncio.wait_for(task, 2)
+            assert response._heartbeat is not None and response._heartbeat.done()
+            assert await domain.count() == 0
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

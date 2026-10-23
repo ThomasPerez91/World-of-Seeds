@@ -63,6 +63,10 @@ async def monitor_http_upload(application: FastAPI) -> None:
                 )
         except PrometheusNetworkError:
             logger.warning("HTTP upload scheduler could not read network telemetry")
+        except Exception:
+            # An unexpected failure must not silently end the monitor: lane capacity would
+            # stay frozen until the next restart.
+            logger.exception("http_upload_monitor_iteration_failed")
         await asyncio.sleep(15)
 
 
