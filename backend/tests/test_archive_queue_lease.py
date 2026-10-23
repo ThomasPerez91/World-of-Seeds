@@ -810,3 +810,37 @@ async def test_send_disconnect_preserves_asgi_semantics_and_cleans_every_resourc
                 await response(scope, connection.receive, send)
         assert await domain.count() == 0
         assert response._heartbeat is not None and response._heartbeat.done()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chain", ["implicit", "explicit", "suppressed"])
+async def test_unwrapped_archive_error_preserves_original_exception_context(
+    domain: Domain, chain: str
+) -> None:
+    async with domain.sessions() as session:
+        manager = domain.manager(session)
+        lease = await domain.lease(manager)
+        response = domain.response(manager, lease)
+        connection = Connection()
+
+        async def send(_message: Message) -> None:
+            try:
+                raise OSError("original transport failure")
+            except OSError as original:
+                if chain == "explicit":
+                    raise RuntimeError("send wrapper failure") from original
+                if chain == "suppressed":
+                    raise RuntimeError("send wrapper failure") from None
+                raise RuntimeError("send wrapper failure")  # noqa: B904 - intentional implicit chain
+
+        scope = cast(Scope, {"type": "http", "asgi": {"spec_version": "2.0"}})
+        with pytest.raises(RuntimeError, match="send wrapper failure") as error:
+            await response(scope, connection.receive, send)
+        if chain == "suppressed":
+            assert error.value.__cause__ is None
+            assert error.value.__suppress_context__
+        else:
+            assert isinstance(error.value.__cause__, OSError)
+            assert str(error.value.__cause__) == "original transport failure"
+        assert await domain.count() == 0
+        assert response._heartbeat is not None and response._heartbeat.done()

@@ -895,7 +895,8 @@ class ManagedArchiveStreamingResponse(StreamingResponse):
             while isinstance(cause, BaseExceptionGroup) and len(cause.exceptions) == 1:
                 cause = cause.exceptions[0]
             if cause is not error:
-                raise cause from cause.__cause__
+                context = None if cause.__suppress_context__ else cause.__context__
+                raise cause from cause.__cause__ or context
             raise
         finally:
             operations: list[Callable[[], Awaitable[None]]] = [

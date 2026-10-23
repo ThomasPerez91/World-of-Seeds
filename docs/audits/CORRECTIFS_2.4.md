@@ -516,3 +516,8 @@ de send devient ClientDisconnect, sans l’enfermer seul dans un ExceptionGroup.
 Les erreurs simultanées restent groupées et les erreurs de lecture ne sont pas
 traduites en déconnexion. Quatre tests couvrent en-têtes/corps et ASGI 2.0/2.4,
 avec vérification de la libération SQL/FIFO. Aucune modification des fichiers simples.
+
+Revue complémentaire : le dégroupement conserve la cause explicite ou, à défaut,
+le contexte implicite non supprimé, conformément au helper Starlette installé.
+Trois cas vérifient la chaîne implicite, explicite et from None volontaire, tout en
+vérifiant la libération de la lease et du slot.
