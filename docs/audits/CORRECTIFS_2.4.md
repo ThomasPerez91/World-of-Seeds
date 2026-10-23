@@ -7,7 +7,7 @@
 - Cycle : tests isolés → PR develop → CI → merge → PR master → CI → merge/déploiement → contrôles réels → mise à jour du journal → livraison suivante.
 - Tests : comportementaux, PostgreSQL/Redis/Docker en CI selon disponibilité ; aucun test destructif sur production. Limites métier users, protections techniques pour tous, exemptions admin vérifiées côté serveur.
 - Audit lu intégralement (15 pages) : les constats [V], [S] et les preuves runtime manquantes restent distingués.
-- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.5 déployée et vérifiée le 23 octobre ; S1, S2 et S3 livrés.
+- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.5 déployée et vérifiée le 23 octobre ; S1, S2 et S3 livrés ; ZIP1 prioritaire en préparation pour 2.4.6.
 
 ## Matrice de suivi
 
@@ -16,6 +16,7 @@
 | S1 | Validation torrent quadratique | P0 | Corrigé, testé et déployé | 2.4.3 | #403 / #405 / #406 / #404 | 21 tests ajoutés ; collisions, mémoire, budget/cancel, async, relance, 30k |
 | S2 | Limiteur externe non borné | P0 | Corrigé, testé et déployé | 2.4.4 | #408 / #410 / #409 | 100k IPv6, expiration, non-éviction, budgets/concurrence/HTTP |
 | S3 | Saturation login/reset | P0 | Corrigé, testé et déployé | 2.4.5 | #412 / #414 / #413 | Connexion/reset avec table pleine, budgets IP/identité/global, IPv6, mémoire, expiration |
+| ZIP1 | Lease ZIP expirée en FIFO et nettoyage MissingGreenlet | P0 | Corrigé ; validation en cours | 2.4.6 | À publier | Attente > TTL, send bloqué, purge, UUID expiré, annulation, 8/9 leases et PostgreSQL |
 | S4 | Métadonnées réseau et périmètre C411 | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S5 | Passkeys exposées en clair | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S6 | Limite authentifiée et cache santé | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -453,3 +454,59 @@ Les limites de disponibilité et de stockage des compteurs sont décrites ci-des
 Prochaine priorité S4 : métadonnées réseau des torrents et périmètre C411 ; vérifier
 les fixtures réelles et la configuration qB avant toute modification sensible.
 S6 et C3/C4 restent ouverts, sans présumer de validation opérationnelle.
+
+## 2.4.6 — leases ZIP pendant l’attente FIFO (préparation prioritaire)
+
+Nouveau P0 ZIP1, demandé avant S4. Workspace propre et branches actualisées ;
+base develop 2.4.5 après #415, master 2.4.5 après #413. Aucun test local de Claude
+nommé test_archive_queue_lease.py retrouvé ; scénarios recréés dans ce fichier.
+
+Causes confirmées : les routes download-folder-archive et download-archive
+acquéraient une lease SQL avant la FIFO, sans heartbeat pendant cette attente.
+Le générateur ZIP renouvelait seulement en progressant ; un send bloqué arrêtait
+ces renouvellements. Le nettoyage relisait lease.id sur un objet ORM que le rollback
+pouvait expirer, introduisant MissingGreenlet à la place de la cause initiale.
+
+La réponse ZIP possède désormais tout son cycle : admission SQL et capture UUID,
+puis démarrage immédiat du heartbeat indépendant en sessions SQL courtes, AVANT
+l’acquisition du slot FIFO. La lease compte donc toujours dans les plafonds globaux
+et par compte pendant l’attente. Ni lease ni tâche de fond sur une réponse non
+exécutée. L’attente du slot, le streaming et la déconnexion sont surveillés dans un
+TaskGroup ; l’échec du heartbeat annule l’attente/stream. Une validation SQL indépendante
+supplémentaire après la FIFO précède les en-têtes de succès. Les renouvellements
+redondants du générateur ZIP ont été supprimés.
+
+Les fichiers simples capturent aussi un UUID, employé par le générateur, la télémétrie
+et le nettoyage. Aucune modification de l’ordonnanceur ou des 429 sans Retry-After.
+L’acquisition SQL capture son UUID avant le commit : en cas d’annulation du commit,
+une suppression explicite est tentée sans dépendre d’un attribut ORM expiré.
+
+Le nettoyage tente toutes ses opérations, sous protection AnyIO et asyncio contre
+l’annulation, et conserve l’exception initiale avec une note sur l’erreur secondaire.
+Un lecteur ZIP déjà exécuté dans un thread est terminé avant la fermeture du générateur
+ou la libération du slot. Fin normale, erreur, annulation répétée et déconnexion
+libèrent le générateur, le slot et la lease. Les contrôles de purge existants restent
+actifs : un test appelle réellement le handler de purge après dépassement du TTL
+initial et vérifie torrent_download_active ainsi que la présence du fichier.
+Si SQL est durablement indisponible, la suppression ne peut être garantie : heartbeat
+arrêté, lease bornée par son expiration, erreur de nettoyage attachée à la cause.
+
+Attente bornée étudiée : la file est déjà limitée par les admissions SQL (défauts
+8 archives globales, 2 par user ; slots FIFO configurés séparément). Pas de timeout
+de durée ajouté : le TTL sert à détecter une lease abandonnée, pas à interrompre un
+client encore connecté et renouvelé. Déconnexion, annulation ou échec de renouvellement
+interrompent l’attente. Aucun contournement par acquisition après la FIFO.
+
+Tests recréés : horloge UTC et réveil du vrai heartbeat injectés séparément, chaque
+pas attend le commit du renouvellement avant d’avancer. Attentes de 10/40/160 s pour
+une lease de 30 s ; HTTP des deux routes avec 80 s d’attente ; send bloqué 80 s ;
+ZIP final valide ; erreur de renouvellement avant en-têtes ; arrêt/déconnexion en
+FIFO/streaming ; UUID ORM expiré après rollback pour ZIP/fichier ; erreur secondaire
+de cleanup ; annulation répétée ; réponse annulée avant démarrage ; lecture disque
+en cours ; annulation juste après commit ; huit leases et neuvième refusée, plusieurs
+comptes ; admissions concurrentes réelles PostgreSQL prévues en CI.
+
+Première validation des sept suites : 69 réussis / 4 ignorés avant les derniers cas.
+Les deux cas supplémentaires d’annulation passent ; Ruff/format et mypy strict
+259 sources verts. Suite backend complète, frontend et CI en cours. Aucune migration
+ou infrastructure protégée modifiée. Version 2.4.6 ; livraison à vérifier avant ZIP1 livré.

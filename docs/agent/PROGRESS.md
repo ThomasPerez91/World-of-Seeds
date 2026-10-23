@@ -4,9 +4,9 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version de production vérifiée : `2.4.5`. Prochaine priorité : S4 (métadonnées réseau et périmètre C411).
+- Version de production vérifiée : `2.4.5`. Cible en préparation : 2.4.6, P0 ZIP1 (leases ZIP en FIFO et nettoyage après rollback).
 
-## Campagne audit 2.4.x — 2.4.5 déployée
+## Campagne audit 2.4.x — 2.4.5 déployée, préparation prioritaire de 2.4.6
 
 Journal complet : `docs/audits/CORRECTIFS_2.4.md`. Audit PDF lu intégralement.
 2.4.1 : #396, #398 et #399 intégrées ; #397 promue sur master
@@ -689,3 +689,11 @@ Cette consolidation ne modifie ni le schéma PostgreSQL, ni `UserTorrent` histor
 La séquence **UX-00 → UX-06 est terminée**. Aucun chantier UX supplémentaire n'est présumé automatiquement.
 
 Le prochain développement doit repartir d'un besoin produit, maintenance, sécurité ou exploitation explicitement défini, depuis le `develop` courant après intégration de la PR #158. La promotion en production reste une PR séparée `develop → master`.
+
+2.4.6 en préparation prioritaire : ZIP1, demande explicite utilisateur. Le test local
+Claude n’était pas disponible ; recréé avec SQL, horloge et heartbeat contrôlés.
+Réponse propriétaire de l’admission AVANT FIFO, UUID indépendants ORM, heartbeat
+indépendant pendant FIFO/stream/send, revalidation avant en-têtes, nettoyage protégé
+et cause initiale conservée. Aucun changement de l’ordonnanceur fichiers ou des 429.
+Sept suites initiales 69/4 ; cas supplémentaires en cours ; Ruff/mypy verts.
+Validation complète, CI, promotion et preuve de livraison à terminer. S4 reste ensuite prioritaire.

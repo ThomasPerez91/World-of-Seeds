@@ -6,16 +6,19 @@ import hashlib
 import mimetypes
 import os
 import stat
+import sys
 import time
 import uuid
 import zipfile
-from collections.abc import AsyncGenerator, Callable, Generator, Iterator
+from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import PurePosixPath
 from typing import IO, Literal, cast
 from urllib.parse import quote
 
+import anyio
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
@@ -318,6 +321,42 @@ class ManagedFolderArchiver:
         yield from writer.drain()
 
 
+async def finish_download(*operations: Callable[[], Awaitable[None]]) -> None:
+    """Finish every resource cleanup, shield cancellation and preserve the cause."""
+    primary = sys.exception()
+
+    async def cleanup() -> None:
+        first: BaseException | None = None
+        for operation in operations:
+            try:
+                await operation()
+            except BaseException as error:
+                if first is None:
+                    first = error
+        if first is not None:
+            raise first
+
+    # Starlette can cancel through an AnyIO scope, callers through Task.cancel().
+    with anyio.CancelScope(shield=True):
+        task = asyncio.create_task(cleanup())
+        cancellation: asyncio.CancelledError | None = None
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as error:
+                cancellation = error
+            except BaseException:
+                break
+        try:
+            task.result()
+        except BaseException as error:
+            if primary is None:
+                raise
+            primary.add_note(f"Download cleanup also failed: {type(error).__name__}")
+        if cancellation is not None and primary is None:
+            raise cancellation
+
+
 class DownloadLeaseManager:
     def __init__(
         self,
@@ -325,11 +364,13 @@ class DownloadLeaseManager:
         *,
         lease_seconds: int,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        heartbeat_wait: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         if not 30 <= lease_seconds <= 3600:
             raise ValueError("download lease duration is invalid")
         self._session = session
         self._lease_seconds = lease_seconds
+        self._heartbeat_wait = heartbeat_wait
         self._clock = clock
 
     @property
@@ -351,97 +392,106 @@ class DownloadLeaseManager:
             raise ValueError("download concurrency limit is invalid")
         if max_concurrent_global is not None and not 1 <= max_concurrent_global <= 20:
             raise ValueError("global download concurrency limit is invalid")
-        async with self._session.begin():
-            global_lock = await self._session.scalar(
-                select(DatabaseOption)
-                .where(DatabaseOption.key == "WOS_DOWNLOAD_MAX_CONCURRENT_GLOBAL")
-                .with_for_update()
-            )
-            if global_lock is None:
-                raise ManagedDownloadError("global download concurrency option is missing")
-            owner = await self._session.scalar(
-                select(User)
-                .where(User.id == user_id)
-                # Serialize account changes while allowing FK KEY SHARE checks
-                # from expiration, which already holds the torrent parent.
-                .with_for_update(key_share=True)
-                .execution_options(populate_existing=True)
-            )
-            if owner is None or not owner.is_active or owner.deleted_at is not None:
-                raise ManagedDownloadError("download owner is missing or inactive")
-            # Same parent-before-right order as expiration and cancellation.
-            managed = await self._session.get(
-                ManagedTorrent,
-                managed_torrent_id,
-                with_for_update=True,
-                populate_existing=True,
-            )
-            request = await self._session.scalar(
-                select(TorrentRequest)
-                .where(
-                    TorrentRequest.id == torrent_request_id,
-                    TorrentRequest.user_id == user_id,
-                    TorrentRequest.managed_torrent_id == managed_torrent_id,
+        lease_id: uuid.UUID | None = None
+        try:
+            async with self._session.begin():
+                global_lock = await self._session.scalar(
+                    select(DatabaseOption)
+                    .where(DatabaseOption.key == "WOS_DOWNLOAD_MAX_CONCURRENT_GLOBAL")
+                    .with_for_update()
                 )
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-            file_id = await self._session.scalar(
-                select(TorrentFile.id)
-                .where(
-                    TorrentFile.id == torrent_file_id,
-                    TorrentFile.managed_torrent_id == managed_torrent_id,
+                if global_lock is None:
+                    raise ManagedDownloadError("global download concurrency option is missing")
+                owner = await self._session.scalar(
+                    select(User)
+                    .where(User.id == user_id)
+                    # Serialize account changes while allowing FK KEY SHARE checks
+                    # from expiration, which already holds the torrent parent.
+                    .with_for_update(key_share=True)
+                    .execution_options(populate_existing=True)
                 )
-                .with_for_update()
-            )
-            now = self._clock()
-            if (
-                managed is None
-                or managed.state is not ManagedTorrentState.READY
-                or request is None
-                or request.state is not TorrentRequestState.READY
-                or request.unsubscribe_at is None
-                or _as_utc(request.unsubscribe_at) <= _as_utc(now)
-                or file_id is None
-            ):
-                raise ManagedDownloadError("download right is no longer ready")
-            await self._session.execute(
-                delete(DownloadLease).where(
-                    DownloadLease.expires_at <= now,
+                if owner is None or not owner.is_active or owner.deleted_at is not None:
+                    raise ManagedDownloadError("download owner is missing or inactive")
+                # Same parent-before-right order as expiration and cancellation.
+                managed = await self._session.get(
+                    ManagedTorrent,
+                    managed_torrent_id,
+                    with_for_update=True,
+                    populate_existing=True,
                 )
-            )
-            if max_concurrent_global is not None:
-                active_global = await self._session.scalar(
-                    select(func.count())
-                    .select_from(DownloadLease)
-                    .where(DownloadLease.expires_at > now, DownloadLease.kind == kind)
-                )
-                if active_global is None or active_global >= max_concurrent_global:
-                    raise DownloadConcurrencyError("global download concurrency limit reached")
-            if max_concurrent is not None:
-                active = await self._session.scalar(
-                    select(func.count())
-                    .select_from(DownloadLease)
+                request = await self._session.scalar(
+                    select(TorrentRequest)
                     .where(
-                        DownloadLease.user_id == user_id,
-                        DownloadLease.expires_at > now,
-                        DownloadLease.kind == kind,
+                        TorrentRequest.id == torrent_request_id,
+                        TorrentRequest.user_id == user_id,
+                        TorrentRequest.managed_torrent_id == managed_torrent_id,
+                    )
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+                file_id = await self._session.scalar(
+                    select(TorrentFile.id)
+                    .where(
+                        TorrentFile.id == torrent_file_id,
+                        TorrentFile.managed_torrent_id == managed_torrent_id,
+                    )
+                    .with_for_update()
+                )
+                now = self._clock()
+                if (
+                    managed is None
+                    or managed.state is not ManagedTorrentState.READY
+                    or request is None
+                    or request.state is not TorrentRequestState.READY
+                    or request.unsubscribe_at is None
+                    or _as_utc(request.unsubscribe_at) <= _as_utc(now)
+                    or file_id is None
+                ):
+                    raise ManagedDownloadError("download right is no longer ready")
+                await self._session.execute(
+                    delete(DownloadLease).where(
+                        DownloadLease.expires_at <= now,
                     )
                 )
-                if active is None or active >= max_concurrent:
-                    raise DownloadConcurrencyError("download concurrency limit reached")
-            lease = DownloadLease(
-                user_id=user_id,
-                managed_torrent_id=managed_torrent_id,
-                torrent_request_id=torrent_request_id,
-                torrent_file_id=torrent_file_id,
-                kind=kind,
-                expires_at=now + timedelta(seconds=self._lease_seconds),
-                created_at=now,
-                renewed_at=now,
-            )
-            self._session.add(lease)
-            await self._session.flush()
+                if max_concurrent_global is not None:
+                    active_global = await self._session.scalar(
+                        select(func.count())
+                        .select_from(DownloadLease)
+                        .where(DownloadLease.expires_at > now, DownloadLease.kind == kind)
+                    )
+                    if active_global is None or active_global >= max_concurrent_global:
+                        raise DownloadConcurrencyError("global download concurrency limit reached")
+                if max_concurrent is not None:
+                    active = await self._session.scalar(
+                        select(func.count())
+                        .select_from(DownloadLease)
+                        .where(
+                            DownloadLease.user_id == user_id,
+                            DownloadLease.expires_at > now,
+                            DownloadLease.kind == kind,
+                        )
+                    )
+                    if active is None or active >= max_concurrent:
+                        raise DownloadConcurrencyError("download concurrency limit reached")
+                lease = DownloadLease(
+                    user_id=user_id,
+                    managed_torrent_id=managed_torrent_id,
+                    torrent_request_id=torrent_request_id,
+                    torrent_file_id=torrent_file_id,
+                    kind=kind,
+                    expires_at=now + timedelta(seconds=self._lease_seconds),
+                    created_at=now,
+                    renewed_at=now,
+                )
+                self._session.add(lease)
+                await self._session.flush()
+                lease_id = lease.id
+        except BaseException:
+            # A cancelled commit may have reached SQL; use the pre-commit scalar
+            # to explicitly clean up without touching rollback-expired ORM state.
+            if lease_id is not None:
+                await finish_download(partial(self.release, lease_id))
+            raise
         return lease
 
     async def renew(self, lease_id: uuid.UUID) -> None:
@@ -509,11 +559,14 @@ class DownloadLeaseManager:
     async def keep_alive(self, lease_id: uuid.UUID) -> None:
         """Renew on independent short SQL sessions even while ASGI send is blocked."""
         while True:
-            await asyncio.sleep(self.heartbeat_seconds)
-            async with AsyncSession(bind=self._session.bind, expire_on_commit=False) as session:
-                await DownloadLeaseManager(
-                    session, lease_seconds=self._lease_seconds, clock=self._clock
-                ).renew(lease_id)
+            await self._heartbeat_wait(self.heartbeat_seconds)
+            await self.renew_independent(lease_id)
+
+    async def renew_independent(self, lease_id: uuid.UUID) -> None:
+        async with AsyncSession(bind=self._session.bind, expire_on_commit=False) as session:
+            await DownloadLeaseManager(
+                session, lease_seconds=self._lease_seconds, clock=self._clock
+            ).renew(lease_id)
 
     async def release(self, lease_id: uuid.UUID) -> None:
         await self._session.rollback()
@@ -591,7 +644,7 @@ async def stream_managed_download(
     length: int,
     chunk_size: int,
     user_id: uuid.UUID,
-    lease: DownloadLease,
+    lease_id: uuid.UUID,
     leases: DownloadLeaseManager,
     limiter: DownloadRateLimiter,
     traffic: DownloadTrafficScheduler,
@@ -611,7 +664,7 @@ async def stream_managed_download(
     try:
         while remaining > 0:
             requested, share = await traffic.next_chunk(
-                lease.id,
+                lease_id,
                 min(remaining, chunk_size),
             )
             delay = await limiter.reserve(
@@ -619,7 +672,7 @@ async def stream_managed_download(
                 requested,
                 per_user_bytes_per_second=per_user_bytes_per_second,
                 global_bytes_per_second=global_bytes_per_second,
-                stream_id=lease.id,
+                stream_id=lease_id,
                 stream_bytes_per_second=share,
             )
             while delay > 0:
@@ -645,27 +698,37 @@ def _next_archive_chunk(iterator: Iterator[bytes]) -> bytes | None:
     return next(iterator, None)
 
 
+async def _read_archive_chunk(chunks: Iterator[bytes]) -> bytes | None:
+    # A cancelled coroutine cannot stop an already running filesystem thread.
+    # Drain it before closing its generator or releasing the archive slot.
+    task = asyncio.create_task(run_in_threadpool(_next_archive_chunk, chunks))
+    try:
+        return await asyncio.shield(task)
+    finally:
+        if not task.done():
+
+            async def drain() -> None:
+                await task
+
+            await finish_download(drain)
+
+
 async def stream_managed_archive(
     archiver: ManagedFolderArchiver,
     *,
     chunk_size: int,
     user_id: uuid.UUID,
-    lease: DownloadLease,
     leases: DownloadLeaseManager,
     limiter: DownloadRateLimiter,
     per_user_bytes_per_second: int,
     global_bytes_per_second: int,
 ) -> AsyncGenerator[bytes, None]:
     chunks = archiver.iter_chunks(chunk_size=chunk_size)
-    next_renewal = time.monotonic() + leases.heartbeat_seconds
     try:
         while True:
-            chunk = await run_in_threadpool(_next_archive_chunk, chunks)
+            chunk = await _read_archive_chunk(chunks)
             if chunk is None:
                 return
-            if time.monotonic() >= next_renewal:
-                await leases.renew(lease.id)
-                next_renewal = time.monotonic() + leases.heartbeat_seconds
             delay = await limiter.reserve(
                 user_id,
                 len(chunk),
@@ -676,11 +739,9 @@ async def stream_managed_archive(
                 interval = min(delay, leases.heartbeat_seconds)
                 await asyncio.sleep(interval)
                 delay -= interval
-                await leases.renew(lease.id)
-                next_renewal = time.monotonic() + leases.heartbeat_seconds
             yield chunk
     finally:
-        await run_in_threadpool(chunks.close)
+        await finish_download(partial(run_in_threadpool, chunks.close))
 
 
 class ManagedDownloadStreamingResponse(StreamingResponse):
@@ -702,7 +763,7 @@ class ManagedDownloadStreamingResponse(StreamingResponse):
         global_bytes_per_second: int,
     ) -> None:
         self._download = download
-        self._lease = lease
+        self._lease_id = lease.id
         self._leases = leases
         self._traffic = traffic
         self._expected_length = length
@@ -713,7 +774,7 @@ class ManagedDownloadStreamingResponse(StreamingResponse):
                 length=length,
                 chunk_size=chunk_size,
                 user_id=user_id,
-                lease=lease,
+                lease_id=self._lease_id,
                 leases=leases,
                 limiter=limiter,
                 traffic=traffic,
@@ -734,11 +795,11 @@ class ManagedDownloadStreamingResponse(StreamingResponse):
             if message["type"] == "http.response.body":
                 size = len(message.get("body", b""))
                 sent += size
-                await self._traffic.report(self._lease.id, size)
+                await self._traffic.report(self._lease_id, size)
 
         try:
             async with asyncio.TaskGroup() as group:
-                heartbeat = group.create_task(self._leases.keep_alive(self._lease.id))
+                heartbeat = group.create_task(self._leases.keep_alive(self._lease_id))
                 try:
                     await super().__call__(scope, receive, measured_send)
                 finally:
@@ -752,10 +813,10 @@ class ManagedDownloadStreamingResponse(StreamingResponse):
             raise
         finally:
             self._download.close()
-            try:
-                await self._traffic.unregister(self._lease.id, outcome=outcome)
-            finally:
-                await self._leases.release(self._lease.id)
+            await finish_download(
+                partial(self._traffic.unregister, self._lease_id, outcome=outcome),
+                partial(self._leases.release, self._lease_id),
+            )
 
 
 class ManagedArchiveStreamingResponse(StreamingResponse):
@@ -765,26 +826,28 @@ class ManagedArchiveStreamingResponse(StreamingResponse):
         *,
         chunk_size: int,
         user_id: uuid.UUID,
-        lease: DownloadLease,
+        admit: Callable[[], Awaitable[uuid.UUID]],
         leases: DownloadLeaseManager,
         limiter: DownloadRateLimiter,
         per_user_bytes_per_second: int,
         global_bytes_per_second: int,
     ) -> None:
         self._archiver = archiver
-        self._lease = lease
+        self._admit = admit
+        self._lease_id: uuid.UUID | None = None
+        self._heartbeat: asyncio.Task[None] | None = None
         self._leases = leases
+        self._body = stream_managed_archive(
+            archiver,
+            chunk_size=chunk_size,
+            user_id=user_id,
+            leases=leases,
+            limiter=limiter,
+            per_user_bytes_per_second=per_user_bytes_per_second,
+            global_bytes_per_second=global_bytes_per_second,
+        )
         super().__init__(
-            stream_managed_archive(
-                archiver,
-                chunk_size=chunk_size,
-                user_id=user_id,
-                lease=lease,
-                leases=leases,
-                limiter=limiter,
-                per_user_bytes_per_second=per_user_bytes_per_second,
-                global_bytes_per_second=global_bytes_per_second,
-            ),
+            self._body,
             headers={
                 "Cache-Control": "private, no-store",
                 "Content-Disposition": archiver.content_disposition,
@@ -793,8 +856,32 @@ class ManagedArchiveStreamingResponse(StreamingResponse):
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        async def stream() -> None:
+            await self._archiver.acquire()
+            # Recheck after the queue, before sending even the success headers.
+            assert self._lease_id is not None
+            await self._leases.renew_independent(self._lease_id)
+            await self.stream_response(send)
+
         try:
-            await super().__call__(scope, receive, send)
+            # SQL admission stays BEFORE the FIFO, under this response's lifetime.
+            # No background task exists on an uncalled/discarded response.
+            self._lease_id = await self._admit()
+            async with asyncio.TaskGroup() as group:
+                heartbeat = group.create_task(self._leases.keep_alive(self._lease_id))
+                self._heartbeat = heartbeat
+                transfer = group.create_task(stream())
+                disconnected = group.create_task(self.listen_for_disconnect(receive))
+                await asyncio.wait((transfer, disconnected), return_when=asyncio.FIRST_COMPLETED)
+                if not transfer.done():
+                    transfer.cancel()
+                disconnected.cancel()
+                heartbeat.cancel()
         finally:
-            await self._archiver.release()
-            await self._leases.release(self._lease.id)
+            operations: list[Callable[[], Awaitable[None]]] = [
+                self._body.aclose,
+                self._archiver.release,
+            ]
+            if self._lease_id is not None:
+                operations.append(partial(self._leases.release, self._lease_id))
+            await finish_download(*operations)

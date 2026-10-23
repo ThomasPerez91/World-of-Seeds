@@ -20,7 +20,7 @@ World of Seeds est une application privée de gestion de seedbox avec :
 
 La ligne de production active est **V2**.
 
-- version stable : `2.4.5` ; déploiement Rise2 et contrôles publics vérifiés ; prochaine priorité S4 (métadonnées réseau et périmètre C411), voir PROGRESS.md ;
+- version stable : `2.4.5` ; déploiement Rise2 et contrôles publics vérifiés ; 2.4.6 en préparation prioritaire pour ZIP1 (leases ZIP), puis S4 ; voir PROGRESS.md ;
 - production : Rise2 ;
 - domaine public : `world-of-seeds.fr` ;
 - V1 `1.3.3` : legacy/rollback seulement.

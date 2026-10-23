@@ -103,6 +103,7 @@ from app.torrents.downloads import (
     ManagedFileDownloader,
     ManagedFolderArchiver,
     download_snapshot_id,
+    finish_download,
 )
 from app.torrents.retry_reads import (
     TorrentRetryBusyError,
@@ -734,28 +735,32 @@ async def download_torrent_folder_archive(
     await db.rollback()
 
     leases = DownloadLeaseManager(db, lease_seconds=lease_seconds)
-    try:
-        lease = await leases.acquire(
-            user_id=owner_id,
-            managed_torrent_id=managed_torrent_id,
-            torrent_request_id=torrent_request_id,
-            torrent_file_id=first_file_id,
-            kind="archive",
-            max_concurrent=None if is_admin else max_concurrent,
-            max_concurrent_global=max_concurrent_global,
-        )
-    except DownloadConcurrencyError:
-        _fail(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "download_concurrency_reached",
-            "Trop de téléchargements sont déjà actifs.",
-        )
-    except ManagedDownloadError:
-        _fail(
-            status.HTTP_404_NOT_FOUND,
-            "folder_archive_not_found",
-            "Ce dossier est indisponible.",
-        )
+
+    async def admit_archive() -> uuid.UUID:
+        try:
+            lease = await leases.acquire(
+                user_id=owner_id,
+                managed_torrent_id=managed_torrent_id,
+                torrent_request_id=torrent_request_id,
+                torrent_file_id=first_file_id,
+                kind="archive",
+                max_concurrent=None if is_admin else max_concurrent,
+                max_concurrent_global=max_concurrent_global,
+            )
+            return lease.id
+        except DownloadConcurrencyError:
+            _fail(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                "download_concurrency_reached",
+                "Trop de téléchargements sont déjà actifs.",
+            )
+        except ManagedDownloadError:
+            _fail(
+                status.HTTP_404_NOT_FOUND,
+                "folder_archive_not_found",
+                "Ce dossier est indisponible.",
+            )
+
     archiver = ManagedFolderArchiver(
         ManagedFileDownloader(SharedContentStore(settings.data_root)),
         storage_key=storage_key,
@@ -765,16 +770,11 @@ async def download_torrent_folder_archive(
         download_name=f"{root_name}.zip",
         max_concurrent_global=archive_concurrency,
     )
-    try:
-        await archiver.acquire()
-    except BaseException:
-        await leases.release(lease.id)
-        raise
     return ManagedArchiveStreamingResponse(
         archiver,
         chunk_size=chunk_size,
         user_id=owner_id,
-        lease=lease,
+        admit=admit_archive,
         leases=leases,
         limiter=_download_rate_limiter(request),
         per_user_bytes_per_second=per_user_rate,
@@ -898,28 +898,32 @@ async def download_torrent_archive(
     await db.rollback()
 
     leases = DownloadLeaseManager(db, lease_seconds=lease_seconds)
-    try:
-        lease = await leases.acquire(
-            user_id=owner_id,
-            managed_torrent_id=managed_torrent_id,
-            torrent_request_id=torrent_request_id,
-            torrent_file_id=first_file_id,
-            kind="archive",
-            max_concurrent=None if is_admin else max_concurrent,
-            max_concurrent_global=max_concurrent_global,
-        )
-    except DownloadConcurrencyError:
-        _fail(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "download_concurrency_reached",
-            "Trop de téléchargements sont déjà actifs.",
-        )
-    except ManagedDownloadError:
-        _fail(
-            status.HTTP_404_NOT_FOUND,
-            "torrent_manifest_not_found",
-            "Ce contenu est indisponible.",
-        )
+
+    async def admit_archive() -> uuid.UUID:
+        try:
+            lease = await leases.acquire(
+                user_id=owner_id,
+                managed_torrent_id=managed_torrent_id,
+                torrent_request_id=torrent_request_id,
+                torrent_file_id=first_file_id,
+                kind="archive",
+                max_concurrent=None if is_admin else max_concurrent,
+                max_concurrent_global=max_concurrent_global,
+            )
+            return lease.id
+        except DownloadConcurrencyError:
+            _fail(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                "download_concurrency_reached",
+                "Trop de téléchargements sont déjà actifs.",
+            )
+        except ManagedDownloadError:
+            _fail(
+                status.HTTP_404_NOT_FOUND,
+                "torrent_manifest_not_found",
+                "Ce contenu est indisponible.",
+            )
+
     archiver = ManagedFolderArchiver(
         ManagedFileDownloader(SharedContentStore(settings.data_root)),
         storage_key=storage_key,
@@ -929,16 +933,11 @@ async def download_torrent_archive(
         download_name=download_name,
         max_concurrent_global=archive_concurrency,
     )
-    try:
-        await archiver.acquire()
-    except BaseException:
-        await leases.release(lease.id)
-        raise
     return ManagedArchiveStreamingResponse(
         archiver,
         chunk_size=chunk_size,
         user_id=owner_id,
-        lease=lease,
+        admit=admit_archive,
         leases=leases,
         limiter=_download_rate_limiter(request),
         per_user_bytes_per_second=per_user_rate,
@@ -1043,6 +1042,7 @@ async def download_torrent_file(
 
     leases = DownloadLeaseManager(db, lease_seconds=lease_seconds)
     lease = None
+    lease_id = None
     if request.method != "HEAD":
         try:
             lease = await leases.acquire(
@@ -1053,6 +1053,7 @@ async def download_torrent_file(
                 max_concurrent=None,
                 max_concurrent_global=None,
             )
+            lease_id = lease.id
         except DownloadConcurrencyError:
             _fail(
                 status.HTTP_429_TOO_MANY_REQUESTS,
@@ -1077,8 +1078,8 @@ async def download_torrent_file(
             file_index=file_index,
         )
     except (ManagedDownloadError, SharedContentStoreError):
-        if lease is not None:
-            await leases.release(lease.id)
+        if lease_id is not None:
+            await finish_download(partial(leases.release, lease_id))
         _fail(
             status.HTTP_409_CONFLICT,
             "torrent_file_changed",
@@ -1101,8 +1102,8 @@ async def download_torrent_file(
             selected_range = parse_range_header(range_header, download.size)
         except RangeNotSatisfiableError:
             download.close()
-            if lease is not None:
-                await leases.release(lease.id)
+            if lease_id is not None:
+                await finish_download(partial(leases.release, lease_id))
             headers.update({"Content-Length": "0", "Content-Range": f"bytes */{download.size}"})
             return Response(
                 status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
@@ -1124,13 +1125,13 @@ async def download_torrent_file(
     if request.method == "HEAD":
         download.close()
         return Response(status_code=response_status, headers=headers)
-    assert lease is not None
+    assert lease is not None and lease_id is not None
     traffic = _download_traffic_scheduler(request)
     try:
-        await traffic.register(lease.id, owner_id, length)
+        await traffic.register(lease_id, owner_id, length)
     except DownloadWaitingLimit:
         download.close()
-        await leases.release(lease.id)
+        await finish_download(partial(leases.release, lease_id))
         _fail(
             status.HTTP_429_TOO_MANY_REQUESTS,
             "download_waiting_limit_reached",
@@ -1138,7 +1139,7 @@ async def download_torrent_file(
         )
     except BaseException:
         download.close()
-        await leases.release(lease.id)
+        await finish_download(partial(leases.release, lease_id))
         raise
     return ManagedDownloadStreamingResponse(
         download,
