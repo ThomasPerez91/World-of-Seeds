@@ -7,7 +7,7 @@
 - Cycle : tests isolés → PR develop → CI → merge → PR master → CI → merge/déploiement → contrôles réels → mise à jour du journal → livraison suivante.
 - Tests : comportementaux, PostgreSQL/Redis/Docker en CI selon disponibilité ; aucun test destructif sur production. Limites métier users, protections techniques pour tous, exemptions admin vérifiées côté serveur.
 - Audit lu intégralement (15 pages) : les constats [V], [S] et les preuves runtime manquantes restent distingués.
-- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.4 déployée et vérifiée le 23 octobre ; S1 et S2 livrés ; S3 en préparation pour 2.4.5.
+- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.5 déployée et vérifiée le 23 octobre ; S1, S2 et S3 livrés ; ZIP1 prioritaire en préparation pour 2.4.6.
 
 ## Matrice de suivi
 
@@ -15,7 +15,8 @@
 |---|---|---|---|---|---|---|
 | S1 | Validation torrent quadratique | P0 | Corrigé, testé et déployé | 2.4.3 | #403 / #405 / #406 / #404 | 21 tests ajoutés ; collisions, mémoire, budget/cancel, async, relance, 30k |
 | S2 | Limiteur externe non borné | P0 | Corrigé, testé et déployé | 2.4.4 | #408 / #410 / #409 | 100k IPv6, expiration, non-éviction, budgets/concurrence/HTTP |
-| S3 | Saturation login/reset | P0 | Corrigé ; validation en cours | 2.4.5 | À publier | Connexion/reset avec table pleine, budgets IP/identité/global, IPv6, mémoire, expiration |
+| S3 | Saturation login/reset | P0 | Corrigé, testé et déployé | 2.4.5 | #412 / #414 / #413 | Connexion/reset avec table pleine, budgets IP/identité/global, IPv6, mémoire, expiration |
+| ZIP1 | Lease ZIP expirée en FIFO et nettoyage MissingGreenlet | P0 | Corrigé ; validation en cours | 2.4.6 | À publier | Attente > TTL, send bloqué, purge, UUID expiré, annulation, 8/9 leases et PostgreSQL |
 | S4 | Métadonnées réseau et périmètre C411 | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S5 | Passkeys exposées en clair | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
 | S6 | Limite authentifiée et cache santé | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
@@ -367,7 +368,7 @@ Aucune migration, nouvelle installation root ou mise à jour du bot.
 
 Prochaine priorité : S3, saturation login/reset. S6 et C3/C4 restent ouverts.
 
-## 2.4.5 — saturation des protections login/reset (préparation)
+## 2.4.5 — saturation des protections login/reset (livré)
 
 Cause confirmée : une table IP de 10000 entrées était commune au login et au reset
 (publication des tokens exclue). À capacité, chaque nouvelle adresse recevait 429
@@ -412,7 +413,7 @@ sur nouvelle IP, refus avant crypto malgré rotation/casse, budgets login/reset
 indépendants, reset valide et token toujours à usage unique avec table pleine.
 Première validation ciblée : 64 réussis ; frontend 209 réussis / 3 ignorés,
 TypeScript/build verts. Ruff et mypy strict 258 sources verts.
-CI, revue et preuve de déploiement restent à terminer. Suite backend complète locale :
+CI, revue et preuve de déploiement validées ci-dessous. Suite backend complète locale :
 1280 réussis / 72 ignorés (services absents localement). Le test de charge utilise
 une horloge figée pour exclure la vitesse du runner des assertions d’expiration.
 S4, S6 et C3/C4 restent ouverts.
@@ -421,10 +422,102 @@ La première CI de promotion a révélé une attente synchrone instable dans le 
 de restauration de langue : le texte anglais peut être rendu avant l’effet React
 qui met à jour html.lang. Le test attend désormais explicitement cette valeur
 finale avec waitFor ; son assertion en et les contrôles du menu restent inchangés.
-Aucun changement de comportement frontend. Nouvelle CI complète avant promotion.
+Aucun changement de comportement frontend. Nouvelle CI complète verte avant promotion.
 
 La revue de promotion a relevé un Retry-After trop court lorsque le plafond global
 expire avant une limite IP/identité commencée plus tard. Le limiteur calcule désormais
 le maximum des délais de tous les blocages applicables, sans charger les budgets
 ni atteindre SQL/Argon2 lors d’un refus. Deux tests à horloge injectée couvrent les
 fenêtres décalées global/IP et global/identité (secours et réseau primaire).
+
+### Preuves de livraison 2.4.5
+
+#412 (S3) et #414 (revue Retry-After et synchronisation du test de langue) intégrées ;
+23 cas backend ajoutés au total. Promotion #413 fusionnée sur master
+`11634b8f5183ae299d7a282e2d45be29455646e5`.
+[CI source finale](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39942930302),
+[CI promotion](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39943515835)
+et [CI master](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39944059451)
+vertes : 1352 tests backend réussis / 2 ignorés ; six contrôles verts, revue corrigée.
+Après ajustements : 55 tests ciblés backend locaux réussis ; App 12 réussis / 2 ignorés,
+TypeScript/build, Ruff et mypy strict verts. La suite backend locale initiale 1280/72
+précède les deux tests Retry-After ; la CI complète finale couvre la version livrée.
+
+[Déploiement Rise2](https://github.com/ThomasPerez91/World-of-Seeds/actions/runs/39944454779)
+réussi le 23 octobre 2026 à 11:13:59 UTC (13:13:59 à Paris), révision exacte ci-dessus :
+`ghcr.io/thomasperez91/world-of-seeds-v2@sha256:16373810182da285a00a05b61da9a402bde56667bd2fd96408c32951e92b8019`.
+Contrôles publics indépendants après déploiement : live/ready HTTP 200, version 2.4.5 ;
+page et bundle `/assets/index-CJACzAQE.js` HTTP 200, version frontend 2.4.5.
+Aucun changement de head Alembic, nouvelle installation root ou mise à jour du bot.
+Les limites de disponibilité et de stockage des compteurs sont décrites ci-dessus.
+
+Prochaine priorité S4 : métadonnées réseau des torrents et périmètre C411 ; vérifier
+les fixtures réelles et la configuration qB avant toute modification sensible.
+S6 et C3/C4 restent ouverts, sans présumer de validation opérationnelle.
+
+## 2.4.6 — leases ZIP pendant l’attente FIFO (préparation prioritaire)
+
+Nouveau P0 ZIP1, demandé avant S4. Workspace propre et branches actualisées ;
+base develop 2.4.5 après #415, master 2.4.5 après #413. Aucun test local de Claude
+nommé test_archive_queue_lease.py retrouvé ; scénarios recréés dans ce fichier.
+
+Causes confirmées : les routes download-folder-archive et download-archive
+acquéraient une lease SQL avant la FIFO, sans heartbeat pendant cette attente.
+Le générateur ZIP renouvelait seulement en progressant ; un send bloqué arrêtait
+ces renouvellements. Le nettoyage relisait lease.id sur un objet ORM que le rollback
+pouvait expirer, introduisant MissingGreenlet à la place de la cause initiale.
+
+La réponse ZIP possède désormais tout son cycle : admission SQL et capture UUID,
+puis démarrage immédiat du heartbeat indépendant en sessions SQL courtes, AVANT
+l’acquisition du slot FIFO. La lease compte donc toujours dans les plafonds globaux
+et par compte pendant l’attente. Ni lease ni tâche de fond sur une réponse non
+exécutée. L’attente du slot, le streaming et la déconnexion sont surveillés dans un
+TaskGroup ; l’échec du heartbeat annule l’attente/stream. Une validation SQL indépendante
+supplémentaire après la FIFO précède les en-têtes de succès. Les renouvellements
+redondants du générateur ZIP ont été supprimés.
+
+Les fichiers simples capturent aussi un UUID, employé par le générateur, la télémétrie
+et le nettoyage. Aucune modification de l’ordonnanceur ou des 429 sans Retry-After.
+L’acquisition SQL capture son UUID avant le commit : en cas d’annulation du commit,
+une suppression explicite est tentée sans dépendre d’un attribut ORM expiré.
+
+Le nettoyage tente toutes ses opérations, sous protection AnyIO et asyncio contre
+l’annulation, et conserve l’exception initiale avec une note sur l’erreur secondaire.
+Un lecteur ZIP déjà exécuté dans un thread est terminé avant la fermeture du générateur
+ou la libération du slot. Fin normale, erreur, annulation répétée et déconnexion
+libèrent le générateur, le slot et la lease. Les contrôles de purge existants restent
+actifs : un test appelle réellement le handler de purge après dépassement du TTL
+initial et vérifie torrent_download_active ainsi que la présence du fichier.
+Si SQL est durablement indisponible, la suppression ne peut être garantie : heartbeat
+arrêté, lease bornée par son expiration, erreur de nettoyage attachée à la cause.
+
+Attente bornée étudiée : la file est déjà limitée par les admissions SQL (défauts
+8 archives globales, 2 par user ; slots FIFO configurés séparément). Pas de timeout
+de durée ajouté : le TTL sert à détecter une lease abandonnée, pas à interrompre un
+client encore connecté et renouvelé. Déconnexion, annulation ou échec de renouvellement
+interrompent l’attente. Aucun contournement par acquisition après la FIFO.
+
+Tests recréés : horloge UTC et réveil du vrai heartbeat injectés séparément, chaque
+pas attend le commit du renouvellement avant d’avancer. Attentes de 10/40/160 s pour
+une lease de 30 s ; HTTP des deux routes avec 80 s d’attente ; send bloqué 80 s ;
+ZIP final valide ; erreur de renouvellement avant en-têtes ; arrêt/déconnexion en
+FIFO/streaming ; UUID ORM expiré après rollback pour ZIP/fichier ; erreur secondaire
+de cleanup ; annulation répétée ; réponse annulée avant démarrage ; lecture disque
+en cours ; annulation juste après commit ; huit leases et neuvième refusée, plusieurs
+comptes ; admissions concurrentes réelles PostgreSQL prévues en CI.
+
+Première validation des sept suites : 69 réussis / 4 ignorés avant les derniers cas.
+Les deux cas supplémentaires d’annulation passent ; Ruff/format et mypy strict
+259 sources verts. Suite backend complète, frontend et CI en cours. Aucune migration
+ou infrastructure protégée modifiée. Version 2.4.6 ; livraison à vérifier avant ZIP1 livré.
+
+Revue de promotion : préservation de la traduction Starlette ASGI 2.4, OSError
+de send devient ClientDisconnect, sans l’enfermer seul dans un ExceptionGroup.
+Les erreurs simultanées restent groupées et les erreurs de lecture ne sont pas
+traduites en déconnexion. Quatre tests couvrent en-têtes/corps et ASGI 2.0/2.4,
+avec vérification de la libération SQL/FIFO. Aucune modification des fichiers simples.
+
+Revue complémentaire : le dégroupement conserve la cause explicite ou, à défaut,
+le contexte implicite non supprimé, conformément au helper Starlette installé.
+Trois cas vérifient la chaîne implicite, explicite et from None volontaire, tout en
+vérifiant la libération de la lease et du slot.
