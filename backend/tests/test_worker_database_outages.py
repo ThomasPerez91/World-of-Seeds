@@ -365,8 +365,13 @@ async def test_retention_success_keeps_hourly_cadence_and_stops_promptly(
     task = asyncio.create_task(reaper.run())
     try:
         await asyncio.wait_for(finished.wait(), 1)
+        # The retention pass is followed by the bounded maintenance pass (one short session
+        # per table): let it finish, then check that no second cycle starts.
+        await asyncio.sleep(0.04)
+        settled = len(outage_sessions.calls)
+        assert 1 <= settled <= 4
         await asyncio.sleep(0.08)
-        assert len(outage_sessions.calls) == 1
+        assert len(outage_sessions.calls) == settled
         reaper.request_stop()
         await asyncio.wait_for(task, 1)
     finally:
