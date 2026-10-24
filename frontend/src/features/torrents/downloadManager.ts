@@ -344,6 +344,8 @@ export class BrowserDownloadManager {
       directory: options.directory,
       loadManifestPage: options.loadManifestPage,
       concurrency: DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY,
+      // The Save dialog of a single file already asked before replacing it; a folder did not.
+      replaceExistingFiles: options.kind === "file",
       fetcher: (input, init) => this.fetchWithPermit(id, input, init),
       onProgress: (progress) => this.onProgress(id, progress),
     });
