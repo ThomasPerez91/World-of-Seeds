@@ -44,7 +44,11 @@ from app.scheduler.qbittorrent_control import (
     ManagedTorrentControlIdentity,
     build_qbittorrent_control_plan,
 )
-from app.scheduler.weighted_fair import SchedulerCandidate, SchedulerPolicy, select_torrents
+from app.scheduler.weighted_fair import (
+    SchedulerCandidate,
+    SchedulerPolicy,
+    select_with_continuity,
+)
 
 MAX_SCHEDULER_CONTROL_SET = 200
 logger = logging.getLogger(__name__)
@@ -94,6 +98,8 @@ class SchedulerRuntime:
         self._stop = asyncio.Event()
         self._options = PostgresOptionsRegistry()
         self._consecutive_failures = 0
+        # The singleton scheduler keeps this in memory: a restart simply rotates once.
+        self._last_rotation_at: datetime | None = None
 
     def request_stop(self) -> None:
         self._stop.set()
@@ -174,12 +180,32 @@ class SchedulerRuntime:
                 if dynamic.preserve_active_set
                 else candidates
             )
-            selection = select_torrents(
+            # The control interval is the rotation quantum: the cycle itself may run faster (the
+            # dynamic evaluation), but running torrents only change hands once per quantum,
+            # except that a freed slot is always refilled.
+            quantum = options["WOS_SCHEDULER_CONTROL_INTERVAL_SECONDS"]
+            rotation_due = self._rotation_due(now, quantum if type(quantum) is int else 0)
+            retained = (
+                ()
+                if rotation_due or dynamic.preserve_active_set
+                else tuple(
+                    torrent.id
+                    for torrent in sorted(
+                        schedulable_torrents,
+                        key=lambda item: (
+                            item.desired_priority if item.desired_priority is not None else 1 << 30,
+                            str(item.id),
+                        ),
+                    )
+                    if torrent.desired_active
+                )
+            )
+            selection = select_with_continuity(
                 selection_candidates,
+                retained=retained,
                 policy=policy,
                 now=now,
                 active_global=len(forced_torrents),
-                active_by_user={},
                 ledger=ledger,
                 fairness_user_order=fairness_user_order,
                 fairness_user_order_complete=fairness_user_order_complete,
@@ -256,6 +282,8 @@ class SchedulerRuntime:
             state.desired_generation = generation
             await persist_scheduler_ledger(session, state, selection.ledger, now=now)
 
+        if rotation_due:
+            self._last_rotation_at = now
         if cooldown_released:
             await self._redis.publish_torrent_queue_changed(now)
 
@@ -402,6 +430,14 @@ class SchedulerRuntime:
             self._consecutive_failures += 1
             interval = min(60.0, 5.0 * 2 ** (self._consecutive_failures - 1))
         return interval
+
+    def _rotation_due(self, now: datetime, quantum_seconds: int) -> bool:
+        last = self._last_rotation_at
+        return (
+            last is None
+            or _utc(now) < _utc(last)
+            or (_utc(now) - _utc(last)).total_seconds() >= quantum_seconds
+        )
 
     async def _release_lease(self) -> None:
         try:

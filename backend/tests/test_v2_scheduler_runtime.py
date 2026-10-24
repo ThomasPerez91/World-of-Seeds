@@ -1356,3 +1356,79 @@ async def test_the_lease_is_handed_back_when_the_scheduler_stops(tmp_path: Path)
         )
     assert successor is not None
     await engine.dispose()
+
+
+async def _stable_rotation_setup(
+    tmp_path: Path,
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession], list[ManagedTorrent]]:
+    engine, sessions = await _database(tmp_path)
+    torrents = [
+        await _torrent(
+            sessions,
+            username=f"rotating-{index}",
+            info_hash=f"{300 + index:040x}",
+            size=20 * 1024**3,
+            created_at=NOW + timedelta(seconds=index),
+        )
+        for index in range(5)
+    ]
+    async with sessions() as session, session.begin():
+        limit = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+        dynamic = await session.get(DatabaseOption, "WOS_SCHEDULER_DYNAMIC_CONCURRENCY_ENABLED")
+        assert limit is not None and dynamic is not None
+        limit.integer_value = 2
+        dynamic.boolean_value = False
+    return engine, sessions, torrents
+
+
+@pytest.mark.asyncio
+async def test_running_set_is_stable_within_a_quantum_and_rotates_after_it(
+    tmp_path: Path,
+) -> None:
+    engine, sessions, _ = await _stable_rotation_setup(tmp_path)
+    clock = [NOW]
+    runtime = SchedulerRuntime(
+        sessions, FakeGateway(), scheduler_id="scheduler-rotation", clock=lambda: clock[0]
+    )
+
+    first = await runtime.run_once()
+    selections = []
+    for seconds in (30, 60, 90):  # faster than the 120 s quantum
+        clock[0] = NOW + timedelta(seconds=seconds)
+        selections.append((await runtime.run_once()).selected_torrent_ids)
+    clock[0] = NOW + timedelta(seconds=130)
+    rotated = await runtime.run_once()
+
+    assert len(first.selected_torrent_ids) == 2
+    assert selections == [first.selected_torrent_ids] * 3
+    assert set(rotated.selected_torrent_ids) != set(first.selected_torrent_ids)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_completed_torrent_frees_its_slot_without_waiting_for_the_quantum(
+    tmp_path: Path,
+) -> None:
+    engine, sessions, torrents = await _stable_rotation_setup(tmp_path)
+    clock = [NOW]
+    runtime = SchedulerRuntime(
+        sessions, FakeGateway(), scheduler_id="scheduler-refill", clock=lambda: clock[0]
+    )
+    first = await runtime.run_once()
+    finished, survivor = first.selected_torrent_ids
+    async with sessions() as session, session.begin():
+        row = await session.get(ManagedTorrent, finished)
+        assert row is not None
+        row.state = ManagedTorrentState.READY
+        row.progress = 1
+        row.desired_active = False
+        row.desired_priority = None
+
+    clock[0] = NOW + timedelta(seconds=30)
+    second = await runtime.run_once()
+
+    assert survivor in second.selected_torrent_ids
+    assert finished not in second.selected_torrent_ids
+    assert len(second.selected_torrent_ids) == 2
+    assert {torrent.id for torrent in torrents} >= set(second.selected_torrent_ids)
+    await engine.dispose()
