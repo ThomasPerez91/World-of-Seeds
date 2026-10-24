@@ -181,8 +181,11 @@ export async function localFileName(
   component: string,
   options: { disambiguate?: boolean } = {},
 ): Promise<string> {
+  // The server refuses the characters that reorder a displayed name (embeddings, overrides,
+  // isolates, line and paragraph separators); a torrent stored before that check can still
+  // carry one, and a file manager would show `photo<RLO>gpj.exe` as `photoexe.jpg`.
   // eslint-disable-next-line no-control-regex
-  let name = component.replace(/[<>:"|?*\u0000-\u001f]/g, "_");
+  let name = component.replace(/[<>:"|?*\u0000-\u001f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, "_");
   name = name.replace(/[. ]+$/, (trailing) => "_".repeat(trailing.length));
   if (WINDOWS_RESERVED_NAME.test(name)) name = `_${name}`;
   // Reserve the suffix namespace too: a literal mapped-looking name must not alias

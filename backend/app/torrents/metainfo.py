@@ -266,6 +266,16 @@ def _validate_attributes(entry: dict[bytes, BValue], *, field: str) -> frozenset
     return attributes
 
 
+# Embeddings, overrides and isolates reorder what is displayed: `photo<RLO>gpj.exe` reads
+# `photoexe.jpg` in a file manager, the interface and a Discord embed, and extensions are
+# deliberately not filtered. The direction marks and the zero-width joiners stay valid: emoji
+# sequences and several scripts (Arabic, Hebrew, Persian, Indic) cannot be spelled without them.
+_BIDI_REORDERING_CONTROLS = frozenset(
+    chr(code) for code in (*range(0x202A, 0x202F), *range(0x2066, 0x206A))
+)
+_UNSAFE_CHARACTER_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})
+
+
 def _validate_component(component: str, *, first: bool = False) -> None:
     encoded = component.encode("utf-8")
     if (
@@ -276,7 +286,11 @@ def _validate_component(component: str, *, first: bool = False) -> None:
         or "\x00" in component
         or len(encoded) > MAX_PATH_COMPONENT_BYTES
         or component.endswith((" ", "."))
-        or any(unicodedata.category(character) == "Cc" for character in component)
+        or any(
+            unicodedata.category(character) in _UNSAFE_CHARACTER_CATEGORIES
+            or character in _BIDI_REORDERING_CONTROLS
+            for character in component
+        )
         or (first and _WINDOWS_DRIVE_RE.fullmatch(component) is not None)
     ):
         raise TorrentValidationError("Un chemin du torrent est invalide.")
