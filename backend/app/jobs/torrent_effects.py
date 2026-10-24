@@ -924,10 +924,13 @@ class TorrentRetentionReaper:
             except (SQLAlchemyError, OSError):
                 logger.warning("torrent_retention_reaper_database_unavailable")
                 interval = DATABASE_RETRY_SECONDS
-            try:
-                await self.prune_once()
-            except (SQLAlchemyError, OSError):
-                logger.warning("torrent_maintenance_database_unavailable")
+            else:
+                # Maintenance only runs while the database answers and nobody asked to stop.
+                if not self._stop.is_set():
+                    try:
+                        await self.prune_once()
+                    except (SQLAlchemyError, OSError):
+                        logger.warning("torrent_maintenance_database_unavailable")
             with suppress(TimeoutError):
                 await asyncio.wait_for(
                     self._stop.wait(),
