@@ -51,4 +51,21 @@ describe("AdminServicesPage", () => {
     expect(await screen.findByText("1.7.5")).toBeTruthy();
     expect(screen.getByText("5.2.3")).toBeTruthy();
   });
+
+  it("n'affiche pas de version attendue pour un service qui ne répond pas", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({
+      status: "degraded",
+      checked_at: "2026-09-12T10:00:00Z",
+      newgreedy: { status: "unavailable", latency_ms: null, version: null, error_code: "timeout" },
+      qbittorrent: { status: "healthy", latency_ms: 9, version: null, error_code: null },
+      service_controls_available: false,
+    })));
+
+    render(
+      <AdminServicesPage onBack={vi.fn()} onNavigate={vi.fn()} onSessionExpired={vi.fn()} />,
+    );
+
+    expect(await screen.findByText("5.2.3")).toBeTruthy();
+    expect(screen.queryByText("1.7.5")).toBeNull();
+  });
 });

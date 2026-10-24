@@ -244,8 +244,12 @@ def reconcile_inventory(
 
     for torrent in torrents:
         resource_id = str(torrent.id)
+        # An add that is still in progress (or waiting for its next attempt) is not an anomaly:
+        # the torrent legitimately is not in qBittorrent or in storage yet.
         expects_physical = torrent.state not in {
             ManagedTorrentState.PENDING,
+            ManagedTorrentState.ADDING,
+            ManagedTorrentState.RETRY_WAIT,
             ManagedTorrentState.PURGED,
         }
         qb_missing = (

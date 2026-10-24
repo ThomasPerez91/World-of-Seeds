@@ -350,3 +350,79 @@ def select_torrents(
         stalled_torrent_ids=tuple(sorted(stalled_ids, key=str)),
         capacity_remaining=slots,
     )
+
+
+def select_with_continuity(
+    candidates: Sequence[SchedulerCandidate],
+    *,
+    retained: Sequence[uuid.UUID],
+    policy: SchedulerPolicy,
+    now: datetime,
+    active_global: int,
+    ledger: SchedulerLedger | None = None,
+    fairness_user_order: Sequence[uuid.UUID] | None = None,
+    fairness_user_order_complete: bool = False,
+) -> SchedulerResult:
+    """Keep the running torrents between two rotations and only fill the free slots fairly.
+
+    A fresh selection each cycle replaces most of the running set whenever there are more users
+    than slots: every replacement is a stop and a start in qBittorrent (lost peers, tracker
+    re-announce) and pollutes the throughput measurement. Between rotations the torrents listed
+    in ``retained`` (in priority order) keep their slot as long as they are still candidates and
+    the global and per-user limits allow it; slots freed by a completion, a stall or a higher limit
+    are filled by the usual fair selection. Retained torrents paid for their slot when they were
+    admitted: they are not charged again, so the fairness ledger only moves with new admissions.
+    An empty ``retained`` is exactly ``select_torrents``.
+    """
+
+    by_id = {candidate.torrent_id: candidate for candidate in candidates}
+    slots = max(0, policy.max_active_global - active_global)
+    per_user: dict[uuid.UUID, int] = {}
+    kept: list[SchedulerCandidate] = []
+    for torrent_id in retained:
+        candidate = by_id.get(torrent_id)
+        if candidate is None or candidate.stalled or slots <= 0:
+            continue
+        if per_user.get(candidate.user_id, 0) >= policy.max_active_per_user:
+            continue
+        kept.append(candidate)
+        per_user[candidate.user_id] = per_user.get(candidate.user_id, 0) + 1
+        slots -= 1
+
+    kept_ids = {candidate.torrent_id for candidate in kept}
+    result = select_torrents(
+        [candidate for candidate in candidates if candidate.torrent_id not in kept_ids],
+        policy=policy,
+        now=now,
+        active_global=active_global + len(kept),
+        active_by_user=per_user,
+        ledger=ledger,
+        fairness_user_order=fairness_user_order,
+        fairness_user_order_complete=fairness_user_order_complete,
+    )
+    if not kept:
+        return result
+
+    previous = (ledger or SchedulerLedger()).deficits
+    users = {user for candidate in candidates for user in candidate.beneficiaries}
+    deficits = {
+        user: value
+        for user in sorted(users, key=str)
+        if (value := result.ledger.deficits.get(user, previous.get(user, 0))) > 0
+    }
+    return SchedulerResult(
+        selected=(
+            *(
+                _decision(policy, candidate, now, beneficiary_user_id=candidate.user_id)
+                for candidate in kept
+            ),
+            *result.selected,
+        ),
+        ledger=SchedulerLedger(
+            deficits=deficits,
+            rounds=result.ledger.rounds,
+            cursor_user_id=result.ledger.cursor_user_id,
+        ),
+        stalled_torrent_ids=result.stalled_torrent_ids,
+        capacity_remaining=result.capacity_remaining,
+    )

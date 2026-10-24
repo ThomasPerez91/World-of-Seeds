@@ -25,6 +25,7 @@ from app.integrations.qbittorrent_v2 import (
     QBittorrentV2RejectedError,
     QBittorrentV2RejectionCause,
     QBittorrentV2TorrentSnapshot,
+    QBittorrentV2TransientError,
 )
 from app.jobs import torrent_effects
 from app.jobs.torrent_effects import (
@@ -1119,22 +1120,31 @@ async def test_ready_torrent_keeps_syncing_and_seeding_during_purge_grace(
     assert torrent.purge_stop_pending is False
 
 
-@pytest.mark.asyncio
-async def test_sync_handler_marks_missing_qb_torrent_as_permanent_error(
+def _sync_snapshot(
+    torrent_id: uuid.UUID, request_id: uuid.UUID, attempt: int
+) -> TorrentJobSnapshot:
+    return TorrentJobSnapshot(
+        id=uuid.uuid4(),
+        managed_torrent_id=torrent_id,
+        torrent_request_id=request_id,
+        job_type="SYNC_TORRENT",
+        idempotency_key=f"test:{uuid.uuid4().hex}",
+        attempt_count=attempt,
+    )
+
+
+async def _sync_effects(
     sessions: async_sessionmaker[AsyncSession],
     tmp_path: Path,
-) -> None:
-    torrent_id, request_id = await _create_domain(
-        sessions,
-        state=ManagedTorrentState.DOWNLOADING,
-    )
+    inspector: FakeInspector,
+) -> TorrentEffectHandlers:
     route = TorrentEffectRoute(
         TRACKER_ACCOUNT_REF,
         QBITTORRENT_ACCOUNT_REF,
         FakeAdder(),
-        MissingInspector(QBittorrentV2TorrentSnapshot(INFO_HASH, "missing", 0)),
+        inspector,
     )
-    effects = TorrentEffectHandlers(
+    return TorrentEffectHandlers(
         sessions,
         DeploymentAccountRouter(sessions, (route,)),
         _payloads(tmp_path),
@@ -1142,11 +1152,118 @@ async def test_sync_handler_marks_missing_qb_torrent_as_permanent_error(
         clock=lambda: NOW,
     )
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attempt", [1, 2, 3, 4])
+async def test_sync_handler_tolerates_a_missing_qb_torrent_before_the_last_attempt(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+    attempt: int,
+) -> None:
+    torrent_id, request_id = await _create_domain(
+        sessions,
+        state=ManagedTorrentState.DOWNLOADING,
+    )
+    effects = await _sync_effects(
+        sessions,
+        tmp_path,
+        MissingInspector(QBittorrentV2TorrentSnapshot(INFO_HASH, "missing", 0)),
+    )
+
+    with pytest.raises(TransientTorrentJobError) as failure:
+        await effects.sync_torrent(_sync_snapshot(torrent_id, request_id, attempt))
+
+    assert failure.value.error_code == "qbittorrent_managed_torrent_missing"
+    assert failure.value.torrent_state is None
+    assert failure.value.waiting is False
+
+
+@pytest.mark.asyncio
+async def test_sync_handler_marks_missing_qb_torrent_as_error_only_on_the_last_attempt(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    torrent_id, request_id = await _create_domain(
+        sessions,
+        state=ManagedTorrentState.DOWNLOADING,
+    )
+    effects = await _sync_effects(
+        sessions,
+        tmp_path,
+        MissingInspector(QBittorrentV2TorrentSnapshot(INFO_HASH, "missing", 0)),
+    )
+
     with pytest.raises(PermanentTorrentJobError) as failure:
-        await effects.sync_torrent(_snapshot(torrent_id, request_id, "SYNC_TORRENT"))
+        await effects.sync_torrent(
+            _sync_snapshot(torrent_id, request_id, torrent_effects.SYNC_JOB_MAX_ATTEMPTS)
+        )
 
     assert failure.value.error_code == "qbittorrent_managed_torrent_missing"
     assert failure.value.torrent_state is ManagedTorrentState.ERROR
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("qb_state", ["missingFiles", "error", "unknownState"])
+async def test_sync_handler_observes_an_error_state_again_before_condemning_the_torrent(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+    qb_state: str,
+) -> None:
+    torrent_id, request_id = await _create_domain(
+        sessions,
+        state=ManagedTorrentState.READY,
+    )
+    effects = await _sync_effects(
+        sessions,
+        tmp_path,
+        FakeInspector(QBittorrentV2TorrentSnapshot(INFO_HASH, qb_state, 0.4)),
+    )
+
+    with pytest.raises(TransientTorrentJobError) as failure:
+        await effects.sync_torrent(_sync_snapshot(torrent_id, request_id, 1))
+
+    assert failure.value.error_code == "qbittorrent_state_error_observed"
+    async with sessions() as session:
+        torrent = await session.get(ManagedTorrent, torrent_id)
+        assert torrent is not None
+        assert torrent.state is ManagedTorrentState.READY
+
+    await effects.sync_torrent(
+        _sync_snapshot(torrent_id, request_id, torrent_effects.SYNC_JOB_MAX_ATTEMPTS)
+    )
+    async with sessions() as session:
+        torrent = await session.get(ManagedTorrent, torrent_id)
+        assert torrent is not None
+        assert torrent.state is ManagedTorrentState.ERROR
+
+
+@pytest.mark.asyncio
+async def test_sync_handler_waits_without_consuming_attempts_when_qb_is_unreachable(
+    sessions: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    class UnreachableInspector(FakeInspector):
+        async def inspect_managed_torrents(
+            self,
+            _identities: Sequence[QBittorrentV2ManagedIdentity],
+        ) -> tuple[QBittorrentV2TorrentSnapshot, ...]:
+            raise QBittorrentV2TransientError("qBittorrent unreachable")
+
+    torrent_id, request_id = await _create_domain(
+        sessions,
+        state=ManagedTorrentState.DOWNLOADING,
+    )
+    effects = await _sync_effects(
+        sessions,
+        tmp_path,
+        UnreachableInspector(QBittorrentV2TorrentSnapshot(INFO_HASH, "downloading", 0.1)),
+    )
+
+    with pytest.raises(TransientTorrentJobError) as failure:
+        await effects.sync_torrent(_sync_snapshot(torrent_id, request_id, 3))
+
+    assert failure.value.error_code == "qbittorrent_sync_unavailable"
+    assert failure.value.waiting is True
 
 
 @pytest.mark.asyncio
@@ -1365,6 +1482,68 @@ async def test_periodic_enqueuer_coalesces_one_active_sync_job_per_torrent(
     assert await enqueuer.enqueue_once() == (5, 0)
     async with sessions() as session:
         assert await session.scalar(select(func.count()).select_from(TorrentJob)) == 1
+
+
+async def _add_torrent(
+    sessions: async_sessionmaker[AsyncSession],
+    *,
+    info_hash: str,
+    state: ManagedTorrentState,
+    updated_at: datetime,
+) -> uuid.UUID:
+    async with sessions() as session, session.begin():
+        torrent = ManagedTorrent(
+            info_hash=info_hash,
+            name=f"torrent-{info_hash[:6]}",
+            total_size=5,
+            state=state,
+            created_at=updated_at,
+            updated_at=updated_at,
+        )
+        session.add(torrent)
+        await session.flush()
+        return torrent.id
+
+
+@pytest.mark.asyncio
+async def test_ready_torrents_are_synchronized_slowly_and_downloads_first(
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fresh_ready = await _add_torrent(
+        sessions,
+        info_hash="1" * 40,
+        state=ManagedTorrentState.READY,
+        updated_at=NOW - timedelta(seconds=10),
+    )
+    stale_ready = await _add_torrent(
+        sessions,
+        info_hash="2" * 40,
+        state=ManagedTorrentState.READY,
+        updated_at=NOW - timedelta(minutes=10),
+    )
+    downloading = await _add_torrent(
+        sessions,
+        info_hash="3" * 40,
+        state=ManagedTorrentState.DOWNLOADING,
+        updated_at=NOW - timedelta(seconds=10),
+    )
+    enqueuer = TorrentSyncEnqueuer(sessions, RedisCoordinator.unconfigured(), clock=lambda: NOW)
+
+    # A bounded batch must serve the download before the much older READY torrent.
+    monkeypatch.setattr(torrent_effects, "MAX_SYNC_BATCH", 1)
+    assert await enqueuer.enqueue_once() == (5, 1)
+    async with sessions() as session:
+        first = (await session.scalars(select(TorrentJob.managed_torrent_id))).all()
+    assert list(first) == [downloading]
+
+    monkeypatch.setattr(torrent_effects, "MAX_SYNC_BATCH", 200)
+    assert await enqueuer.enqueue_once() == (5, 1)
+    async with sessions() as session:
+        queued = set((await session.scalars(select(TorrentJob.managed_torrent_id))).all())
+    # The READY torrent synchronized 10 seconds ago keeps waiting for its slow heartbeat.
+    assert queued == {downloading, stale_ready}
+    assert fresh_ready not in queued
 
 
 @pytest.mark.asyncio

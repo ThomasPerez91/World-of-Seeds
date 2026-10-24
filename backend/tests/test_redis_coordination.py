@@ -349,3 +349,23 @@ async def test_real_redis_supports_signal_cache_and_reconstruction() -> None:
         await subscription.aclose()
     finally:
         await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_blocking_wait_uses_its_own_connection_and_both_are_closed() -> None:
+    regular, blocking = FakeRedis(), FakeRedis()
+    redis = RedisCoordinator(
+        regular,
+        blocking_client=blocking,
+        namespace="wos:test",
+        cache_ttl_seconds=60,
+        cache_stale_seconds=300,
+        signal_queue_max_length=2,
+    )
+    blocking.lists["wos:test:signals:torrent-jobs"] = ["1"]
+
+    assert await redis.wait_for_job_signal(timeout_seconds=1) is True
+    assert regular.lists == {}
+
+    await redis.aclose()
+    assert regular.closed and blocking.closed

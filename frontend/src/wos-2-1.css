@@ -1136,6 +1136,7 @@ body {
   .user-navigation .ui-button { flex: 1; }
   .header-actions { grid-column: 2 !important; }
   .dashboard-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .dashboard-summary-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
 
 @media (max-width: 680px) {

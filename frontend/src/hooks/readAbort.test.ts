@@ -14,5 +14,10 @@ it.each([
   vi.stubGlobal("fetch", fetchMock);
   const controller = new AbortController();
   await read(controller.signal);
-  expect(fetchMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ signal: controller.signal, credentials: "same-origin" }));
+  expect(fetchMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ signal: expect.any(AbortSignal), credentials: "same-origin" }));
+  // The signal handed to fetch follows the caller's: aborting the read aborts the request.
+  const sent = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].signal as AbortSignal;
+  expect(sent.aborted).toBe(false);
+  controller.abort();
+  expect(sent.aborted).toBe(true);
 });

@@ -86,6 +86,9 @@ def _download_limit_shares(global_limit: int, active_count: int) -> tuple[int, .
     if global_limit == 0:
         return (0,) * active_count
     if global_limit < active_count:
-        raise ValueError("Global qB download limit is too small for active torrents")
+        # A budget smaller than the number of torrents cannot be split in whole bytes.
+        # Zero would mean "unlimited" in qBittorrent, so each torrent receives the smallest
+        # real limit instead of failing every scheduler cycle.
+        return (1,) * active_count
     base, remainder = divmod(global_limit, active_count)
     return tuple(base + (1 if index < remainder else 0) for index in range(active_count))

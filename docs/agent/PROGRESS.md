@@ -4,9 +4,12 @@
 
 World of Seeds V2 est désormais la ligne de production active.
 
-- Version de production vérifiée : `2.4.5`. Cible en préparation : 2.4.6, P0 ZIP1 (leases ZIP en FIFO et nettoyage après rollback).
+- Version de production vérifiée : `2.4.6`. ZIP1 corrigé et déployé ; ZIP privé authentifié en production à confirmer.
+- `2.4.7` (en cours de livraison) : correctifs par lots issus de l’audit complet, voir
+  `docs/audits/CORRECTIFS_2.4.md` et `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`. `3.0.0` sera la
+  version de clôture de l’audit.
 
-## Campagne audit 2.4.x — 2.4.5 déployée, préparation prioritaire de 2.4.6
+## Campagne audit 2.4.x — 2.4.6 déployée, ZIP1 corrigé
 
 Journal complet : `docs/audits/CORRECTIFS_2.4.md`. Audit PDF lu intégralement.
 2.4.1 : #396, #398 et #399 intégrées ; #397 promue sur master
@@ -60,7 +63,7 @@ Suite backend locale initiale : 1280 réussis / 72 ignorés ; ajustements de rev
 Live/ready/page/bundle publics HTTP 200, backend et frontend 2.4.5. Aucun changement
 Alembic ou du bot. Voir journal pour digest exact et limites de disponibilité.
 S4 et S6 restent à traiter.
-Ne pas déclarer 2.4.4 déployée avant les preuves réelles.
+
 
 ## Release 2.3.29 — téléchargements et alertes privées Discord
 
@@ -690,10 +693,17 @@ La séquence **UX-00 → UX-06 est terminée**. Aucun chantier UX supplémentair
 
 Le prochain développement doit repartir d'un besoin produit, maintenance, sécurité ou exploitation explicitement défini, depuis le `develop` courant après intégration de la PR #158. La promotion en production reste une PR séparée `develop → master`.
 
-2.4.6 en préparation prioritaire : ZIP1, demande explicite utilisateur. Le test local
-Claude n’était pas disponible ; recréé avec SQL, horloge et heartbeat contrôlés.
-Réponse propriétaire de l’admission AVANT FIFO, UUID indépendants ORM, heartbeat
-indépendant pendant FIFO/stream/send, revalidation avant en-têtes, nettoyage protégé
-et cause initiale conservée. Aucun changement de l’ordonnanceur fichiers ou des 429.
-Sept suites initiales 69/4 ; cas supplémentaires en cours ; Ruff/mypy verts.
-Validation complète, CI, promotion et preuve de livraison à terminer. S4 reste ensuite prioritaire.
+2.4.6 livrée : ZIP1, admission SQL avant FIFO, UUID indépendants ORM, heartbeat
+indépendant pendant FIFO/stream/send, validation avant en-têtes et nettoyage protégé
+préservant la cause et les exceptions ASGI. 29 cas ajoutés ; sept suites locales
+79/5, dernier fichier archive 28/1. Suite globale locale incomplète et timeouts
+frontend locaux sous contention ; CI complète verte fait foi. Ruff/mypy/build verts.
+#416/#418 intégrées, promotion #417 fusionnée ; master
+68d66a0a4d2429fec27a6805ff53cee7f717a99d. CI master 39953318062 :
+1381 tests backend réussis / 2 ignorés. Déploiement 39953976497 réussi
+le 23 octobre à 12:33:10 UTC ; digest et preuves dans le journal d’audit.
+Live/ready/page/bundle publics HTTP 200, version 2.4.6 ; les deux routes ZIP
+non authentifiées refusent HTTP 401. Aucun transfert privé authentifié réellement
+exécuté sur Rise2 faute de session : contrôle utilisateur restant, distinct des tests
+isolés et CI. Aucun changement de l’ordonnanceur fichiers, des 429 sans Retry-After,
+du schéma, du bot ou de l’infrastructure. S4 reste ensuite prioritaire.

@@ -428,6 +428,10 @@ export interface OptionField {
   choices: string[];
   editable: boolean;
   restart_required: boolean;
+  /** Secrets are write-only: `value` is empty and this tells whether one is stored. */
+  configured?: boolean;
+  /** Version of the stored value, sent back so a concurrent change is detected. */
+  version?: number;
 }
 
 export interface OptionSection {
@@ -515,9 +519,23 @@ export class ApiError extends Error {
     message: string,
     public readonly code: string | null = null,
     public readonly field: string | null = null,
+    public readonly retryAfterMs: number | null = null,
   ) {
     super(message);
   }
+}
+
+const MAX_RETRY_AFTER_MS = 60_000;
+
+/** Retry-After is either a number of seconds or an HTTP date. */
+export function parseRetryAfter(value: string | null, now: number = Date.now()): number | null {
+  if (value === null || value.trim() === "") return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) {
+    return seconds < 0 ? null : Math.min(MAX_RETRY_AFTER_MS, Math.round(seconds * 1_000));
+  }
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? null : Math.min(MAX_RETRY_AFTER_MS, Math.max(0, date - now));
 }
 
 function readCookie(name: string): string | null {
@@ -526,7 +544,33 @@ function readCookie(name: string): string | null {
     .split(";")
     .map((part) => part.trim())
     .find((part) => part.startsWith(prefix));
-  return value === undefined ? null : decodeURIComponent(value.slice(prefix.length));
+  if (value === undefined) return null;
+  try {
+    return decodeURIComponent(value.slice(prefix.length));
+  } catch {
+    // A malformed cookie (set by a sibling sub-domain, for instance) must not break mutations.
+    return null;
+  }
+}
+
+export const READ_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Reads never wait forever: a half-dead connection (laptop waking up, network change) would
+ * otherwise freeze every refresh that queues behind the pending request. Mutations keep their
+ * own pace, an upload can legitimately be slow.
+ */
+export function withReadTimeout(
+  method: string,
+  signal: AbortSignal | null | undefined,
+  timeoutMs: number = READ_REQUEST_TIMEOUT_MS,
+): AbortSignal | undefined {
+  if (!["GET", "HEAD"].includes(method) || typeof AbortSignal.timeout !== "function") {
+    return signal ?? undefined;
+  }
+  const timeout = AbortSignal.timeout(timeoutMs);
+  if (signal === null || signal === undefined) return timeout;
+  return typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeout]) : signal;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -555,6 +599,7 @@ async function requestAt<T>(prefix: string, path: string, init: RequestInit = {}
     ...init,
     headers,
     credentials: "same-origin",
+    signal: withReadTimeout(method, init.signal),
   });
   if (!response.ok) {
     let message = "Une erreur est survenue.";
@@ -572,7 +617,13 @@ async function requestAt<T>(prefix: string, path: string, init: RequestInit = {}
     } catch {
       // Keep the generic message for non-JSON failures.
     }
-    throw new ApiError(response.status, message, code, field);
+    throw new ApiError(
+      response.status,
+      message,
+      code,
+      field,
+      parseRetryAfter(response.headers.get("Retry-After")),
+    );
   }
   if (response.status === 204) {
     return undefined as T;
@@ -804,19 +855,31 @@ export const api = {
     return requestV2<AdminCleanupListing>("/admin/cleanup");
   },
 
-  purgeAdminCleanup(torrentIds: string[]): Promise<AdminCleanupPurgeResult> {
+  purgeAdminCleanup(
+    torrentIds: string[],
+    expectedSubscribers: Record<string, number> = {},
+  ): Promise<AdminCleanupPurgeResult> {
     return requestV2<AdminCleanupPurgeResult>("/admin/cleanup/purge", {
       method: "POST",
-      body: JSON.stringify({ torrent_ids: torrentIds }),
+      body: JSON.stringify(
+        Object.keys(expectedSubscribers).length === 0
+          ? { torrent_ids: torrentIds }
+          : { torrent_ids: torrentIds, expected_subscribers: expectedSubscribers },
+      ),
     });
   },
 
   updateCentralAdminOptions(
     changes: Record<string, OptionValue>,
+    expectedVersions: Record<string, number> = {},
   ): Promise<CentralAdminOverview> {
     return requestV2<CentralAdminOverview>("/admin/options", {
       method: "PATCH",
-      body: JSON.stringify({ changes }),
+      body: JSON.stringify(
+        Object.keys(expectedVersions).length === 0
+          ? { changes }
+          : { changes, expected_versions: expectedVersions },
+      ),
     });
   },
 

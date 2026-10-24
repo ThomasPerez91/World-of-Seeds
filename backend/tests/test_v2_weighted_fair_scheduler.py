@@ -12,6 +12,7 @@ from app.scheduler import (
     SchedulerResult,
     TorrentSizeClass,
     select_torrents,
+    select_with_continuity,
 )
 
 NOW = datetime(2026, 8, 21, 20, tzinfo=UTC)
@@ -434,3 +435,108 @@ def test_duplicate_physical_torrent_and_inconsistent_user_weight_are_rejected() 
 def test_candidate_rejects_timezone_naive_queue_time(queued_at: datetime) -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         candidate(uuid.UUID(int=91), GIB, torrent_number=1101, queued_at=queued_at)
+
+
+def _five_single_torrent_users() -> list[SchedulerCandidate]:
+    users = [uuid.UUID(int=1_000 + index) for index in range(5)]
+    return [candidate(user, 20 * GIB, torrent_number=index + 1) for index, user in enumerate(users)]
+
+
+def test_running_torrents_keep_their_slot_between_rotations() -> None:
+    limits = policy(max_active_global=2, max_active_per_user=2)
+    candidates = _five_single_torrent_users()
+    first = select_torrents(candidates, policy=limits, now=NOW, active_global=0, active_by_user={})
+    running = selected_ids(first)
+
+    second = select_with_continuity(
+        candidates,
+        retained=running,
+        policy=limits,
+        now=NOW,
+        active_global=0,
+        ledger=first.ledger,
+    )
+
+    assert selected_ids(second) == running
+    # Nobody was admitted: the fairness ledger does not move.
+    assert second.ledger.rounds == first.ledger.rounds
+    assert second.ledger.cursor_user_id == first.ledger.cursor_user_id
+    assert dict(second.ledger.deficits) == dict(first.ledger.deficits)
+
+
+def test_a_freed_slot_is_refilled_fairly_while_the_other_keeps_running() -> None:
+    limits = policy(max_active_global=2, max_active_per_user=2)
+    candidates = _five_single_torrent_users()
+    first = select_torrents(candidates, policy=limits, now=NOW, active_global=0, active_by_user={})
+    running = selected_ids(first)
+    finished, survivor = running
+    remaining = [item for item in candidates if item.torrent_id != finished]
+
+    second = select_with_continuity(
+        remaining,
+        retained=running,
+        policy=limits,
+        now=NOW,
+        active_global=0,
+        ledger=first.ledger,
+    )
+
+    chosen = selected_ids(second)
+    assert chosen[0] == survivor
+    assert len(chosen) == 2
+    assert finished not in chosen
+    assert second.ledger.rounds > first.ledger.rounds  # the refill is a real admission
+
+
+def test_empty_retention_is_exactly_the_regular_selection() -> None:
+    limits = policy(max_active_global=3, max_active_per_user=1)
+    candidates = _five_single_torrent_users()
+
+    regular = select_torrents(
+        candidates, policy=limits, now=NOW, active_global=0, active_by_user={}
+    )
+    continued = select_with_continuity(
+        candidates, retained=(), policy=limits, now=NOW, active_global=0
+    )
+
+    assert selected_ids(continued) == selected_ids(regular)
+    assert continued.ledger == regular.ledger
+
+
+def test_retention_never_exceeds_the_current_limits() -> None:
+    candidates = _five_single_torrent_users()
+    everyone = [item.torrent_id for item in candidates]
+
+    lowered = select_with_continuity(
+        candidates,
+        retained=everyone,
+        policy=policy(max_active_global=2, max_active_per_user=2),
+        now=NOW,
+        active_global=0,
+    )
+    assert selected_ids(lowered) == everyone[:2]
+
+    # One user running three torrents with a per-user cap of one keeps only the first.
+    user = uuid.UUID(int=7)
+    own = [candidate(user, 20 * GIB, torrent_number=10 + index) for index in range(3)]
+    capped = select_with_continuity(
+        own,
+        retained=[item.torrent_id for item in own],
+        policy=policy(max_active_global=8, max_active_per_user=1),
+        now=NOW,
+        active_global=0,
+    )
+    assert selected_ids(capped) == [own[0].torrent_id]
+
+    # A retained torrent that stalled or was removed gives its slot back.
+    stalled = [candidate(user, 20 * GIB, torrent_number=20, stalled=True)]
+    assert (
+        select_with_continuity(
+            stalled,
+            retained=[stalled[0].torrent_id, uuid.UUID(int=99)],
+            policy=policy(),
+            now=NOW,
+            active_global=0,
+        ).selected
+        == ()
+    )

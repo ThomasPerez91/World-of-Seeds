@@ -22,6 +22,8 @@ class AdminV2OptionField(BaseModel):
     editable: bool
     restart_required: bool
     version: int
+    # Secrets are write-only: the value is always empty and this flag tells whether one is set.
+    configured: bool = False
 
 
 class AdminV2OptionSection(BaseModel):
@@ -83,6 +85,11 @@ class AdminV2OptionsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     changes: Annotated[dict[str, AdminOptionRequestValue], Field(min_length=1, max_length=128)]
+    # Version of each changed option as the administrator saw it. When given, a change made by
+    # someone else in the meantime is refused instead of being silently overwritten.
+    expected_versions: Annotated[dict[str, int], Field(max_length=128)] = Field(
+        default_factory=dict
+    )
 
 
 class AdminV2ReconciliationAnomaly(BaseModel):
@@ -178,6 +185,12 @@ class AdminV2CleanupPurgeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     torrent_ids: Annotated[list[UUID], Field(min_length=1, max_length=5000)]
+    # Subscriber count of each content as the administrator saw it. A content whose number
+    # changed since is skipped, so a stale list or a replayed request cannot cancel rights that
+    # were never shown.
+    expected_subscribers: Annotated[dict[UUID, int], Field(max_length=5000)] = Field(
+        default_factory=dict
+    )
 
 
 class AdminV2CleanupPurgeResult(BaseModel):

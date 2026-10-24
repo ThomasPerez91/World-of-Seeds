@@ -19,8 +19,10 @@ import {
   type TorrentRequestV2,
   type TorrentRequestV2State,
 } from "../../api/client";
+import { ConfirmButton } from "../../components/ConfirmButton";
 import { useFeedback } from "../../components/Feedback";
 import {
+  ConfirmIcon,
   DeleteIcon,
   DownloadIcon,
   InfoIcon,
@@ -50,9 +52,19 @@ import {
 import { CompatibilityDirectoryBrowser } from "./CompatibilityDirectoryBrowser";
 import { SubscriptionExpiryIndicator } from "./SubscriptionExpiryIndicator";
 import { RetentionWarning } from "./RetentionWarning";
+import {
+  RECONNECT_STABLE_MS,
+  UPLOAD_MAX_RETRIES,
+  isRetryableUploadStatus,
+  isTerminalUploadCode,
+  reconnectDelay,
+  sleep,
+  uploadRetryDelay,
+} from "./resilience";
 
 export const PAGE_SIZE = 25;
 const AUTO_REFRESH_MS = 4_000;
+const SEARCH_DEBOUNCE_MS = 300;
 const FALLBACK_PAGE_SIZE = 50;
 export const MAX_TORRENT_BATCH_FILES = 50;
 export const TORRENT_UPLOAD_CONCURRENCY = 3;
@@ -169,6 +181,7 @@ const transferErrorKeys: Record<RecursiveTransferErrorCode, MessageKey> = {
   download_unavailable: "downloads.unavailable",
   download_interrupted: "downloads.interrupted",
   local_transfer_failed: "downloads.failed",
+  session_expired: "downloads.sessionExpired",
 };
 
 function LocalQueueLabel({ item }: { item: LocalTransferQueueItem }) {
@@ -580,15 +593,17 @@ function TorrentItem({
                     </Button>
                   ) : null}
                   {!(["cancelled", "expired"] as TorrentRequestV2State[]).includes(torrent.state) && (
-                    <Button
+                    <ConfirmButton
                       type="button"
                       variant="danger"
                       disabled={cancelBusy}
-                      onClick={onCancel}
+                      onConfirm={onCancel}
+                      armedChildren={<ConfirmIcon />}
+                      hint={t("downloads.confirmDeleteHint", { name: torrent.name })}
                       aria-label={t(torrent.state === "ready" ? "downloads.deleteNamed" : "downloads.cancelNamed", { name: torrent.name })}
                     >
                       <DeleteIcon />
-                    </Button>
+                    </ConfirmButton>
                   )}
                 </div>
               </div>
@@ -621,6 +636,7 @@ export function UserDownloadsPage({
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [pageError, setPageError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<TorrentStatusFilter>("all");
   const [retentionFilter, setRetentionFilter] = useState<RetentionBucket | null>(null);
   const [sort, setSort] = useState<{ by: TorrentSort; order: SortOrder } | null>(null);
@@ -632,6 +648,7 @@ export function UserDownloadsPage({
   const [serverTraffic, setServerTraffic] = useState<ServerDownloadTraffic | null>(null);
   const [trackNativeDownloads, setTrackNativeDownloads] = useState(false);
   const loadGenerationRef = useRef(0);
+  const mountedRef = useRef(true);
   const managerRef = useRef<BrowserDownloadManager | null>(null);
   const completedDownloadNotificationsRef = useRef(new Set<string>());
   if (managerRef.current === null) {
@@ -653,6 +670,33 @@ export function UserDownloadsPage({
   }
 
   useEffect(() => () => managerRef.current?.dispose(), []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // One request per pause in typing, not one per keystroke (each one rebuilds the socket).
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchQuery), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Closing or reloading the tab silently drops local transfers and uploads in progress.
+  const hasActiveWork = uploading || managerSnapshot.jobs.some(
+    (job) => job.status === "queued" || job.status === "running" || job.status === "paused",
+  );
+  useEffect(() => {
+    if (!hasActiveWork) return undefined;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasActiveWork]);
 
   useEffect(() => {
     if (!trackNativeDownloads && managerSnapshot.jobs.length === 0) return;
@@ -702,7 +746,7 @@ export function UserDownloadsPage({
     setRefreshing(true);
     try {
       const result = await api.listTorrentRequestsV2(requestedOffset, PAGE_SIZE, signal, {
-        search: searchQuery.trim() || undefined,
+        search: debouncedSearch.trim() || undefined,
         status: statusFilter === "all" ? undefined : statusFilter === "active" ? "downloading" : statusFilter,
         sort_by: sort?.by,
         sort_order: sort?.order,
@@ -734,7 +778,7 @@ export function UserDownloadsPage({
         setRefreshing(false);
       }
     }
-  }, [apiError, onActivityChanged, onSessionExpired, retentionFilter, searchQuery, sort, statusFilter]);
+  }, [apiError, debouncedSearch, onActivityChanged, onSessionExpired, retentionFilter, sort, statusFilter]);
 
   const loadReadyManifest = useCallback((
     torrentId: string,
@@ -807,6 +851,8 @@ export function UserDownloadsPage({
     let reconnectTimer: number | null = null;
     let pollingTimer: number | null = null;
     let hasConnected = false;
+    let reconnectAttempt = 0;
+    let openedAt: number | null = null;
     let refreshPending = false;
     let refreshQueued = false;
     const manifestRefreshPending = new Set<string>();
@@ -852,6 +898,7 @@ export function UserDownloadsPage({
       if (!active || typeof WebSocket === "undefined") return;
       socket = api.openTorrentEventsV2();
       socket.onopen = () => {
+        openedAt = Date.now();
         if (hasConnected) refreshFromEvent();
         hasConnected = true;
       };
@@ -864,7 +911,11 @@ export function UserDownloadsPage({
       socket.onerror = () => socket?.close();
       socket.onclose = () => {
         if (!active) return;
-        reconnectTimer = window.setTimeout(connect, 1_000);
+        // Back off while the server is unavailable; start over once a connection held.
+        if (openedAt !== null && Date.now() - openedAt >= RECONNECT_STABLE_MS) reconnectAttempt = 0;
+        openedAt = null;
+        reconnectTimer = window.setTimeout(connect, reconnectDelay(reconnectAttempt));
+        reconnectAttempt += 1;
       };
     };
 
@@ -910,6 +961,7 @@ export function UserDownloadsPage({
     const queuedIndexes = results.flatMap((result, index) => result.status === "queued" ? [index] : []);
     let nextIndex = 0;
     let sessionExpired = false;
+    let batchStopped = false;
 
     setUploading(true);
     if (inputRef.current !== null) inputRef.current.value = "";
@@ -943,8 +995,25 @@ export function UserDownloadsPage({
       if (status !== "uploading") notifyResult(results[index]);
     };
 
+    const createWithRetry = async (file: File) => {
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          return await api.createTorrentRequestV2(file);
+        } catch (caught) {
+          const retryable = caught instanceof ApiError
+            && isRetryableUploadStatus(caught.status)
+            && attempt <= UPLOAD_MAX_RETRIES
+            && !sessionExpired
+            && !batchStopped
+            && mountedRef.current;
+          if (!retryable) throw caught;
+          await sleep(uploadRetryDelay(caught.retryAfterMs, attempt));
+        }
+      }
+    };
+
     const worker = async () => {
-      while (!sessionExpired) {
+      while (!sessionExpired && !batchStopped) {
         const queuePosition = nextIndex;
         nextIndex += 1;
         if (queuePosition >= queuedIndexes.length) return;
@@ -952,7 +1021,7 @@ export function UserDownloadsPage({
         const file = results[resultIndex].file;
         updateResult(resultIndex, "uploading");
         try {
-          const created = await api.createTorrentRequestV2(file);
+          const created = await createWithRetry(file);
           updateResult(resultIndex, created.created ? "added" : "duplicate");
           if (created.storage_pressure !== "normal") {
             feedback.toast({
@@ -968,6 +1037,7 @@ export function UserDownloadsPage({
             onSessionExpired();
             return;
           }
+          if (caught instanceof ApiError && isTerminalUploadCode(caught.code)) batchStopped = true;
           updateResult(
             resultIndex,
             caught instanceof ApiError && (caught.status === 413 || caught.status === 422) ? "invalid" : "failed",
@@ -982,6 +1052,12 @@ export function UserDownloadsPage({
       () => worker(),
     ));
     setUploading(false);
+    if (batchStopped) {
+      feedback.toast({
+        tone: "warning",
+        message: t("downloads.batchStopped", { count: Math.max(0, queuedIndexes.length - nextIndex) }),
+      });
+    }
     if (!sessionExpired) {
       setOffset(0);
       await load(0);

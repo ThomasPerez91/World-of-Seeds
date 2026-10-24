@@ -4,6 +4,7 @@ import { ApiError, type TorrentDownloadSnapshotV2 } from "../../api/client";
 import {
   type LocalDirectoryHandle,
   type LocalFileHandle,
+  localFileName,
   pickDownloadDirectory,
   recursiveDirectoryDownloadCapability,
   RecursiveDownloadController,
@@ -666,6 +667,23 @@ describe("RecursiveDownloadController", () => {
     expect(updates.at(-1)).toMatchObject({ status: "completed", downloadedBytes: 3 });
   });
 
+  it("signale une session expirée au lieu d’un contenu modifié sur un 401", async () => {
+    const updates: RecursiveTransferProgress[] = [];
+    const controller = new RecursiveDownloadController({
+      torrentRequestId: "request",
+      firstPage: { ...snapshot(), file_count: 1, total_size: 3, items: [snapshot().items[0]] },
+      directory: new MemoryDirectory(),
+      loadManifestPage: vi.fn(),
+      concurrency: 1,
+      fetcher: vi.fn(async () => new Response("{}", { status: 401 })),
+      onProgress: (progress) => updates.push(progress),
+    });
+
+    await controller.start();
+
+    expect(updates.at(-1)).toMatchObject({ status: "error", error: "session_expired" });
+  });
+
   it("échoue fermé si le snapshot d’une page suivante change", async () => {
     const firstPage = { ...snapshot(), file_count: 3, total_size: 9, limit: 2 };
     const updates: RecursiveTransferProgress[] = [];
@@ -797,5 +815,58 @@ describe("RecursiveDownloadController", () => {
       error: null,
     });
     expect(updates.at(-1)?.queue.every((item) => item.status === "cancelled")).toBe(true);
+  });
+});
+
+describe("localFileName", () => {
+  it("leaves ordinary names untouched", async () => {
+    expect(await localFileName("Épisode 1.mkv")).toBe("Épisode 1.mkv");
+    expect(await localFileName("film.2026.1080p.mkv")).toBe("film.2026.1080p.mkv");
+  });
+
+  it("rewrites refused names deterministically within filesystem limits", async () => {
+    for (const original of ['Titre : Épisode 1.mkv', 'a<b>c"d|e?f*g', 'CON.txt', 'nul', 'rapport.', 'nom ']) {
+      const mapped = await localFileName(original);
+      expect(mapped).not.toBe(original);
+      expect(mapped).not.toMatch(/[<>:"|?*]|[. ]$/);
+      expect(mapped).toContain("~wos-");
+      expect(await localFileName(original)).toBe(mapped);
+    }
+    const result = await localFileName(`${"é".repeat(200)}.mkv`);
+    expect(new TextEncoder().encode(result).length).toBeLessThanOrEqual(255);
+    expect(result.endsWith(".mkv")).toBe(true);
+  });
+
+  it.each([
+    ["a:b.txt", "a?b.txt"],
+    ["CON.txt", "_CON.txt"],
+    [`${"a".repeat(260)}1.txt`, `${"a".repeat(260)}2.txt`],
+  ])("keeps distinct rewritten files and directories separate: %s", async (first, second) => {
+    const mapped = await Promise.all([localFileName(first), localFileName(second)]);
+    expect(mapped[0]).not.toBe(mapped[1]);
+    // An original name equal to the generated destination is escaped as well.
+    expect(await localFileName(mapped[0])).not.toBe(mapped[0]);
+    for (const folders of [false, true]) {
+      const directory = new MemoryDirectory();
+      const updates: RecursiveTransferProgress[] = [];
+      const paths = [first, second].map((name) => folders ? `${name}/file.bin` : name);
+      const controller = new RecursiveDownloadController({
+        torrentRequestId: "request", firstPage: {
+          ...snapshot(), total_size: 2,
+          items: paths.map((relative_path, index) => ({ id: String(index), file_index: index, relative_path, size: 1 })),
+        },
+        directory, loadManifestPage: vi.fn(), concurrency: 2,
+        fetcher: vi.fn(async (input: RequestInfo | URL) => fileResponse(new Uint8Array([String(input).includes("/0/") ? 1 : 2]))),
+        onProgress: (progress) => updates.push(progress),
+      });
+      await controller.start();
+      expect(updates.at(-1)?.status).toBe("completed");
+      for (let index = 0; index < 2; index += 1) {
+        const file = folders
+          ? directory.directories.get(mapped[index])?.files.get("file.bin")
+          : directory.files.get(mapped[index]);
+        expect([...file!.content]).toEqual([index + 1]);
+      }
+    }
   });
 });

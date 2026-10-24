@@ -31,6 +31,7 @@ from app.auth.dependencies import (
     require_current_admin,
 )
 from app.coordination.dependencies import RedisCoordinatorDependency
+from app.core.audit_log import log_admin_action
 from app.integrations.dependencies import AdminRuntimeMonitorDependency
 from app.integrations.http import IntegrationRequestError
 from app.integrations.qbittorrent_v2 import QBittorrentV2OwnershipError
@@ -53,6 +54,7 @@ from app.models import (
 from app.options import (
     CATEGORY_LABELS,
     DATABASE_OPTION_SPECS,
+    INACTIVE_OPTION_KEYS,
     DatabaseOptionsDriftError,
     OptionsValidationError,
     PostgresOptionsRegistry,
@@ -119,14 +121,25 @@ async def purge_admin_cleanup(
     payload: AdminV2CleanupPurgeRequest,
     db: DbSession,
     redis: RedisCoordinatorDependency,
-    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> AdminV2CleanupPurgeResult:
     try:
-        result = await schedule_admin_purge(db, tuple(payload.torrent_ids))
+        result = await schedule_admin_purge(
+            db,
+            tuple(payload.torrent_ids),
+            expected_subscribers=payload.expected_subscribers,
+        )
         await db.commit()
     except Exception:
         await db.rollback()
         raise
+    log_admin_action(
+        "cleanup_purge",
+        context.user.id,
+        requested=result.requested,
+        scheduled=len(result.scheduled_ids),
+        skipped=len(result.skipped_ids),
+    )
     if result.scheduled_ids:
         await redis.signal_job_available()
     return AdminV2CleanupPurgeResult(
@@ -206,8 +219,11 @@ async def act_on_admin_qbittorrent_torrent(
     db: DbSession,
     redis: RedisCoordinatorDependency,
     monitor: AdminRuntimeMonitorDependency,
-    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> AdminV2QBittorrentActionResult:
+    log_admin_action(
+        "qbittorrent_action", context.user.id, torrent=str(torrent_id), operation=payload.action
+    )
     if payload.action == "delete":
         try:
             result = await schedule_admin_purge(
@@ -340,7 +356,11 @@ def _business_detail(code: str, message: str, field: str | None = None) -> dict[
 def _raise_options_error(exc: Exception) -> Never:
     if isinstance(exc, OptionsValidationError):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=(
+                status.HTTP_409_CONFLICT
+                if exc.code == "option_version_conflict"
+                else status.HTTP_422_UNPROCESSABLE_CONTENT
+            ),
             detail=_business_detail(exc.code, str(exc), exc.field),
         ) from exc
     raise HTTPException(
@@ -370,7 +390,7 @@ async def _overview(
                 label=spec.label,
                 description=spec.description,
                 input_type=spec.input_type,
-                value=rows[spec.key].value,
+                value="" if spec.input_type == "secret" else rows[spec.key].value,
                 default=spec.default,
                 unit=spec.unit,
                 minimum=spec.minimum,
@@ -379,9 +399,10 @@ async def _overview(
                 editable=spec.editable,
                 restart_required=spec.restart_required,
                 version=rows[spec.key].version,
+                configured=spec.input_type == "secret" and bool(rows[spec.key].value),
             )
             for spec in DATABASE_OPTION_SPECS
-            if spec.category == category
+            if spec.category == category and spec.key not in INACTIVE_OPTION_KEYS
         ]
         if fields:
             sections.append(AdminV2OptionSection(id=category, label=label, fields=fields))
@@ -502,6 +523,7 @@ async def update_admin_options(
             db,
             payload.changes,
             actor_user_id=context.user.id,
+            expected_versions=payload.expected_versions,
         )
         await db.commit()
         return await _overview(
@@ -676,6 +698,8 @@ async def get_admin_reconciliation(
         for torrent in page:
             expects_physical = torrent.state not in {
                 ManagedTorrentState.PENDING,
+                ManagedTorrentState.ADDING,
+                ManagedTorrentState.RETRY_WAIT,
                 ManagedTorrentState.PURGED,
             }
             try:
@@ -897,8 +921,14 @@ async def recover_admin_managed_torrent(
     managed_torrent_id: uuid.UUID,
     payload: AdminV2RecoveryRequest,
     db: DbSession,
-    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> AdminV2RecoveryResult:
+    log_admin_action(
+        "reconciliation_recover",
+        context.user.id,
+        torrent=str(managed_torrent_id),
+        operation=payload.action,
+    )
     try:
         expected = await recovery_snapshot(db, managed_torrent_id)
     except ReconciliationRecoveryError as exc:

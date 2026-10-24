@@ -455,3 +455,40 @@ async def test_archive_concurrency_guard_honors_dynamic_global_limit(data_root: 
     await asyncio.wait_for(waiting, timeout=1)
     await archivers[1].release()
     await archivers[2].release()
+
+
+@pytest.mark.asyncio
+async def test_folder_archive_refuses_a_concurrent_zip_over_the_per_user_cap_with_json_429(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    data_root: Path,
+) -> None:
+    request, _ = await _folder_torrent(db_session, data_root)
+    await _login(client)
+    listing = (await client.get(f"/api/v2/torrents/{request.id}/download-directories")).json()
+    owner_id = await db_session.scalar(select(User.id).where(User.username == "folder-owner"))
+    file_id = await db_session.scalar(select(TorrentFile.id).limit(1))
+    assert owner_id is not None and file_id is not None
+    now = datetime.now(UTC)
+    for _ in range(2):  # the default per-user cap is two simultaneous ZIP streams
+        db_session.add(
+            DownloadLease(
+                user_id=owner_id,
+                managed_torrent_id=request.managed_torrent_id,
+                torrent_request_id=request.id,
+                torrent_file_id=file_id,
+                kind="archive",
+                expires_at=now + timedelta(minutes=10),
+            )
+        )
+    await db_session.commit()
+
+    response = await client.get(
+        f"/api/v2/torrents/{request.id}/download-folder-archive",
+        params={"path": "Saison 1", "snapshot": listing["snapshot_id"]},
+    )
+
+    assert response.status_code == 429
+    assert response.json()["detail"]["code"] == "download_concurrency_reached"
+    assert "application/zip" not in response.headers.get("content-type", "")
+    assert await db_session.scalar(select(func.count()).select_from(DownloadLease)) == 2

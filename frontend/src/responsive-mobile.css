@@ -51,6 +51,10 @@
   align-items: center;
 }
 
+.c411-passkey-control-erasable {
+  grid-template-columns: minmax(0, 1fr) 2.75rem 2.75rem;
+}
+
 .c411-passkey-input {
   min-width: 0;
   -webkit-text-security: disc;
@@ -196,6 +200,13 @@
 
   .dashboard-summary-card h2 {
     font-size: 1rem !important;
+  }
+
+  a.summary-link {
+    top: 0.4rem;
+    right: 0.5rem;
+    min-height: 2.5rem;
+    padding-inline: 0.5rem;
   }
 
   .network-throughput-direction > strong,

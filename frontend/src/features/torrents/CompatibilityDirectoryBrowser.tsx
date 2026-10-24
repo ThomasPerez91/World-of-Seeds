@@ -2,6 +2,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import {
@@ -188,7 +189,17 @@ export function CompatibilityDirectoryBrowser({
     return () => controller.abort();
   }, [apiError, snapshot.snapshot_id, torrentId]);
 
-  useEffect(() => loadDirectories(null), [loadDirectories]);
+  // Listings belong to one manifest snapshot: file identifiers of the previous one must not
+  // be mixed with the new snapshot in download links.
+  const snapshotIdRef = useRef(snapshot.snapshot_id);
+  useEffect(() => {
+    if (snapshotIdRef.current !== snapshot.snapshot_id) {
+      snapshotIdRef.current = snapshot.snapshot_id;
+      setListings({});
+      setOpenPaths(new Set());
+    }
+    return loadDirectories(null);
+  }, [loadDirectories, snapshot.snapshot_id]);
 
   function toggleDirectory(directory: TorrentDownloadDirectoryV2) {
     const path = directory.relative_path;
