@@ -1863,6 +1863,35 @@ async def retry_torrent_request(
                     "torrent_retry_not_allowed",
                     "Cette erreur ne peut pas être relancée automatiquement.",
                 )
+            # Upload admissions, purge accounting and retries share this lock.
+            # Aggregate only after admission has been serialized.
+            await lock_storage_ledger(db, now=datetime.now(UTC))
+            committed_states = (
+                ManagedTorrentState.PENDING,
+                ManagedTorrentState.ADDING,
+                ManagedTorrentState.DOWNLOADING,
+                ManagedTorrentState.PAUSED,
+                ManagedTorrentState.RETRY_WAIT,
+                ManagedTorrentState.READY,
+            )
+            committed_bytes = int(
+                await db.scalar(
+                    select(func.coalesce(func.sum(ManagedTorrent.total_size), 0)).where(
+                        ManagedTorrent.state.in_(committed_states)
+                    )
+                )
+                or 0
+            )
+            if committed_bytes + managed.total_size > managed_reservation_capacity(
+                disk,
+                policy=policy,
+            ):
+                _fail(
+                    status.HTTP_507_INSUFFICIENT_STORAGE,
+                    "managed_capacity_exceeded",
+                    "La capacité réservée ne permet pas encore de relancer ce torrent.",
+                )
+
             response: TorrentRequestV2Response | None = None
             if resync_only:
                 now = datetime.now(UTC)
@@ -1896,35 +1925,6 @@ async def retry_torrent_request(
                         status.HTTP_409_CONFLICT,
                         "torrent_retry_in_progress",
                         "Une relance est déjà en cours.",
-                    )
-
-                # Upload admissions, purge accounting and retries share this lock.
-                # Aggregate only after admission has been serialized.
-                await lock_storage_ledger(db, now=datetime.now(UTC))
-                committed_states = (
-                    ManagedTorrentState.PENDING,
-                    ManagedTorrentState.ADDING,
-                    ManagedTorrentState.DOWNLOADING,
-                    ManagedTorrentState.PAUSED,
-                    ManagedTorrentState.RETRY_WAIT,
-                    ManagedTorrentState.READY,
-                )
-                committed_bytes = int(
-                    await db.scalar(
-                        select(func.coalesce(func.sum(ManagedTorrent.total_size), 0)).where(
-                            ManagedTorrent.state.in_(committed_states)
-                        )
-                    )
-                    or 0
-                )
-                if committed_bytes + managed.total_size > managed_reservation_capacity(
-                    disk,
-                    policy=policy,
-                ):
-                    _fail(
-                        status.HTTP_507_INSUFFICIENT_STORAGE,
-                        "managed_capacity_exceeded",
-                        "La capacité réservée ne permet pas encore de relancer ce torrent.",
                     )
 
                 if (

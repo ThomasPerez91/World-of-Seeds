@@ -22,7 +22,7 @@ from app.models import (
     TorrentRequestState,
     User,
 )
-from app.options import PostgresOptionsRegistry
+from app.options import OptionValue, PostgresOptionsRegistry
 
 
 class RecordingRedis:
@@ -1259,3 +1259,52 @@ async def test_a_live_ready_request_still_counts_against_the_active_limit(
 
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "torrent_limit_reached"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("add_state", [TorrentJobState.FAILED, TorrentJobState.COMPLETED])
+async def test_retry_cannot_bypass_a_tightened_storage_reservation(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    add_state: TorrentJobState,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+    redis = RecordingRedis()
+    app.state.redis_coordinator = redis
+    uploaded = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+    assert uploaded.status_code == 201
+    managed = await db_session.scalar(select(ManagedTorrent))
+    job = await db_session.scalar(select(TorrentJob))
+    assert managed is not None and job is not None
+    managed.state = ManagedTorrentState.ERROR
+    job.state = add_state
+    job.finished_at = datetime.now(UTC)
+    generation = managed.lifecycle_generation
+    await db_session.commit()
+    values = dict(await PostgresOptionsRegistry().snapshot(db_session))
+    values["WOS_STORAGE_MANAGED_MAX_BYTES"] = managed.total_size - 1
+    await db_session.rollback()
+
+    async def snapshot(
+        _registry: PostgresOptionsRegistry, _session: AsyncSession
+    ) -> dict[str, OptionValue]:
+        return values.copy()
+
+    monkeypatch.setattr(PostgresOptionsRegistry, "snapshot", snapshot)
+    redis.signals = 0
+    redis.events.clear()
+    response = await client.post(f"/api/v2/torrents/{uploaded.json()['id']}/retry", headers=headers)
+    assert response.status_code == 507, response.text
+    assert response.json()["detail"]["code"] == "managed_capacity_exceeded"
+    await db_session.refresh(managed)
+    assert managed.state is ManagedTorrentState.ERROR
+    assert managed.lifecycle_generation == generation
+    assert redis.signals == 0
+    assert redis.events == []
+    assert await db_session.scalar(select(func.count()).select_from(TorrentJob)) == 1
