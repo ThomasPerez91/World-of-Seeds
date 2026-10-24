@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "country-flag-icons": "1.6.20",
-    "lucide-react": "1.31.0",
+    "lucide-react": "1.61.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
