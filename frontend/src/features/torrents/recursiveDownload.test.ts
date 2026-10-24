@@ -5,6 +5,7 @@ import {
   type LocalDirectoryHandle,
   type LocalFileHandle,
   localFileName,
+  localNameKey,
   pickDownloadDirectory,
   recursiveDirectoryDownloadCapability,
   RecursiveDownloadController,
@@ -837,6 +838,22 @@ describe("localFileName", () => {
     expect(result.endsWith(".mkv")).toBe(true);
   });
 
+  it("never keeps a character that reorders the displayed name on disk", async () => {
+    for (const character of ["\u202e", "\u202a", "\u2066", "\u2069", "\u2028", "\u2029"]) {
+      const original = `photo${character}gpj.exe`;
+      const mapped = await localFileName(original);
+      expect(mapped).not.toBe(original);
+      expect(mapped).not.toMatch(/[\u2028\u2029\u202a-\u202e\u2066-\u2069]/);
+      expect(mapped).toContain("~wos-");
+      expect(mapped.endsWith(".exe")).toBe(true);
+    }
+    // Joiners and direction marks that real names need are left alone.
+    expect(await localFileName("\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.mkv"))
+      .toBe("\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.mkv");
+    expect(await localFileName("\u200f\u05e9\u05dc\u05d5\u05dd.mkv"))
+      .toBe("\u200f\u05e9\u05dc\u05d5\u05dd.mkv");
+  });
+
   it.each([
     ["a:b.txt", "a?b.txt"],
     ["CON.txt", "_CON.txt"],
@@ -868,5 +885,147 @@ describe("localFileName", () => {
         expect([...file!.content]).toEqual([index + 1]);
       }
     }
+  });
+
+  it("forces the suffix on request and reserves its namespace in any case or Unicode form", async () => {
+    const forced = await localFileName("README.md", { disambiguate: true });
+    expect(forced).toMatch(/^README~wos-[0-9a-f]{32}\.md$/);
+    expect(await localFileName("README.md", { disambiguate: true })).toBe(forced);
+    for (const literal of ["~WOS-x.txt", "~woſ-x.txt"]) {
+      expect(await localFileName(literal)).not.toBe(literal);
+    }
+  });
+
+  it("folds case and Unicode normalization into one key", () => {
+    expect(localNameKey("README.md")).toBe(localNameKey("readme.MD"));
+    expect(localNameKey("é")).toBe(localNameKey("é"));
+    expect(localNameKey("σ")).toBe(localNameKey("ς"));
+    expect(localNameKey("a.txt")).not.toBe(localNameKey("b.txt"));
+  });
+});
+
+// NTFS and the default APFS volume: one entry per name once case and normalization are folded.
+class FoldedDirectory extends MemoryDirectory {
+  override async getDirectoryHandle(name: string): Promise<MemoryDirectory> {
+    const key = localNameKey(name);
+    const directory = this.directories.get(key) ?? new FoldedDirectory();
+    this.directories.set(key, directory);
+    return directory;
+  }
+
+  override async getFileHandle(name: string): Promise<MemoryFile> {
+    const key = localNameKey(name);
+    const file = this.files.get(key) ?? new MemoryFile();
+    this.files.set(key, file);
+    return file;
+  }
+}
+
+async function transfer(
+  directory: LocalDirectoryHandle,
+  paths: string[],
+  options: { concurrency?: number; replaceExistingFiles?: boolean } = {},
+) {
+  const updates: RecursiveTransferProgress[] = [];
+  const controller = new RecursiveDownloadController({
+    torrentRequestId: "request",
+    firstPage: {
+      ...snapshot(), file_count: paths.length, total_size: paths.length,
+      items: paths.map((relative_path, index) => ({ id: String(index), file_index: index, relative_path, size: 1 })),
+    },
+    directory, loadManifestPage: vi.fn(), concurrency: options.concurrency ?? 1,
+    replaceExistingFiles: options.replaceExistingFiles ?? false,
+    fetcher: vi.fn(async (input: RequestInfo | URL) => fileResponse(new Uint8Array([String(input).includes("/0/") ? 1 : 2]))),
+    onProgress: (progress) => updates.push(progress),
+  });
+  await controller.start();
+  return { controller, updates };
+}
+
+describe("local destination collisions", () => {
+  it.each([
+    ["case", "README.md", "readme.md"],
+    ["Unicode normalization", "é.txt", "é.txt"],
+  ])("keeps siblings that differ only by %s in distinct local files", async (_label, first, second) => {
+    for (const concurrency of [1, 2]) {
+      const root = new FoldedDirectory();
+      const { updates } = await transfer(root, [`Show/${first}`, `Show/${second}`], { concurrency });
+      expect(updates.at(-1)?.status).toBe("completed");
+      const show = root.directories.get(localNameKey("Show"))!;
+      expect([...show.files.values()].map((file) => [...file.content]).sort()).toEqual([[1], [2]]);
+      expect([...show.files.keys()].filter((key) => key.includes("~wos-"))).toHaveLength(1);
+    }
+  });
+
+  it("keeps sibling folders that differ only by case apart", async () => {
+    const root = new FoldedDirectory();
+    const { updates } = await transfer(root, ["Dir/a.bin", "dir/a.bin"], { concurrency: 2 });
+    expect(updates.at(-1)?.status).toBe("completed");
+    expect(root.directories.size).toBe(2);
+    const contents = [...root.directories.values()]
+      .flatMap((directory) => [...directory.files.values()].map((file) => [...file.content]));
+    expect(contents.sort()).toEqual([[1], [2]]);
+  });
+
+  it("does not suffix names that are already distinct", async () => {
+    const root = new FoldedDirectory();
+    await transfer(root, ["Show/a.bin", "Show/b.bin"], { concurrency: 2 });
+    const show = root.directories.get(localNameKey("Show"))!;
+    expect([...show.files.keys()].sort()).toEqual(["a.bin", "b.bin"]);
+  });
+
+  it("stops instead of truncating a non-empty file already in the folder, then resumes once it is gone", async () => {
+    const root = new MemoryDirectory();
+    const show = await root.getDirectoryHandle("Show");
+    const existing = await show.getFileHandle("a.bin");
+    existing.content = new Uint8Array([9, 9]);
+    const { controller, updates } = await transfer(root, ["Show/a.bin", "Show/b.bin"]);
+    expect(updates.at(-1)).toMatchObject({ status: "error", error: "local_file_exists" });
+    expect([...existing.content]).toEqual([9, 9]);
+    expect(show.files.has("b.bin")).toBe(false);
+
+    existing.content = new Uint8Array();
+    await controller.resume();
+    expect(updates.at(-1)).toMatchObject({ status: "completed", error: null });
+    expect([...existing.content]).toEqual([1]);
+    expect([...show.files.get("b.bin")!.content]).toEqual([2]);
+  });
+
+  it("detects a file already in the folder through a different case on a case-insensitive disk", async () => {
+    const root = new FoldedDirectory();
+    const show = await root.getDirectoryHandle("Show");
+    const existing = await show.getFileHandle("README.MD");
+    existing.content = new Uint8Array([9]);
+    const { updates } = await transfer(root, ["Show/readme.md"]);
+    expect(updates.at(-1)).toMatchObject({ status: "error", error: "local_file_exists" });
+    expect([...existing.content]).toEqual([9]);
+  });
+
+  it("accepts an empty file left by an earlier attempt", async () => {
+    const root = new MemoryDirectory();
+    await root.getFileHandle("a.bin");
+    const { updates } = await transfer(root, ["a.bin"]);
+    expect(updates.at(-1)?.status).toBe("completed");
+  });
+
+  it.each([
+    [false, "error", [9, 9]],
+    [true, "completed", [1]],
+  ])("overwrites only a destination the user confirmed (replace=%s)", async (replace, status, content) => {
+    const root = new MemoryDirectory();
+    const existing = await root.getFileHandle("a.bin");
+    existing.content = new Uint8Array([9, 9]);
+    const { updates } = await transfer(root, ["a.bin"], { replaceExistingFiles: replace });
+    expect(updates.at(-1)?.status).toBe(status);
+    expect([...existing.content]).toEqual(content);
+  });
+
+  it("reports a folder in the way of a file, or the reverse, as an existing entry", async () => {
+    const root: LocalDirectoryHandle = {
+      getDirectoryHandle: async () => { throw new DOMException("not a directory", "TypeMismatchError"); },
+      getFileHandle: async () => { throw new Error("unexpected"); },
+    };
+    const { updates } = await transfer(root, ["Show/a.bin"]);
+    expect(updates.at(-1)).toMatchObject({ status: "error", error: "local_file_exists" });
   });
 });

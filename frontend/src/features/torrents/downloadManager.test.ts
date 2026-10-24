@@ -352,4 +352,43 @@ describe("BrowserDownloadManager", () => {
     expect(current.jobs[0]?.error).toBe("local_write_denied");
     expect(current.activeStreams).toBe(0);
   });
+
+  it("replaces the file chosen in the Save dialog but never a file already in a chosen folder", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => validResponse()));
+    let current: BrowserDownloadManagerSnapshot = {
+      activeStreams: 0,
+      maxConcurrentStreams: 2,
+      waitingJobs: 0,
+      jobs: [],
+    };
+    const manager = new BrowserDownloadManager(2, (next) => {
+      current = next;
+    });
+    const occupied = (): LocalFileHandle => ({ ...target(), getFile: async () => ({ size: 7 }) });
+    const single = snapshot("single");
+    const folder = snapshot("folder");
+    const folderTarget = occupied();
+
+    manager.enqueueFile({
+      torrentId: "torrent-single",
+      name: "single.bin",
+      snapshot: single,
+      file: single.items[0],
+      target: occupied(),
+    });
+    manager.enqueueFolder({
+      torrentId: "torrent-folder",
+      name: "folder",
+      snapshot: folder,
+      directory: {
+        getDirectoryHandle: vi.fn(async () => { throw new Error("unexpected"); }),
+        getFileHandle: vi.fn(async () => folderTarget),
+      },
+      loadManifestPage: vi.fn(),
+    });
+
+    await vi.waitFor(() => expect(current.jobs.map((job) => job.status)).toEqual(["completed", "error"]));
+    expect(current.jobs[1]?.error).toBe("local_file_exists");
+    expect(folderTarget.createWritable).not.toHaveBeenCalled();
+  });
 });

@@ -654,7 +654,7 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
   d’Alembic accepte un mot de passe contenant `%` (IN-09).
 - Documentation alignée sur le comportement réel (secrets, plafonds de flux, options).
 
-### Lots 9 à 17 et 19 — compléments
+### Lots 9 à 17, 19 et 21 — compléments
 
 - Lot 9 : le reaper de rétention n’exécute sa passe de maintenance que si la rétention a
   réussi et qu’aucun arrêt n’est demandé.
@@ -722,6 +722,28 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
   sur la liste utilisateur ; les barres d’onglets et de filtres défilent à l’intérieur de leur
   conteneur, ce qui est voulu. Le chantier de fond sur la cascade CSS (FE-05) reste à faire.
 
+- Lot 21 (SE-21 et OP-09) :
+  - SE-21 : l’analyse d’un torrent refuse, dans le nom et dans chaque composant de chemin, les
+    contrôles qui réordonnent l’affichage (embeddings, overrides et isolats, U+202A à U+202E et
+    U+2066 à U+2069) et les séparateurs de ligne et de paragraphe (U+2028, U+2029) :
+    `photo<RLO>gpj.exe` s’affichait `photoexe.jpg` et les extensions ne sont volontairement pas
+    filtrées. Les marques de direction (U+200E, U+200F) et les jointures de largeur nulle
+    (U+200C, U+200D) restent valides, car les emoji composés, le persan, l’hébreu et l’arabe
+    en ont besoin : le reste de la catégorie `Cf` proposé par l’audit n’est donc pas refusé. Les
+    noms avec `:` ou réservés Windows ne le sont pas non plus côté serveur : ils sont déjà
+    réécrits côté client (FE-15). Un torrent déjà stocké avec un de ces caractères échouerait à
+    l’ajout ou à la relance, car le fichier conservé est revalidé à la lecture. Le nom local
+    d’un fichier téléchargé remplace aussi ces caractères (suffixe `~wos-`), pour ce cas.
+  - OP-09 : le scheduler n’attend plus la fin de son intervalle de contrôle (30 s à 30 min)
+    pour voir une option modifiée. Pendant l’attente, il relit les options à chaque tiers de
+    bail (10 s par défaut) et lance un cycle dès que l’ensemble diffère de celui du dernier
+    cycle ; cela ne dépend pas de Redis. Le cycle anticipé ne fait pas tourner les torrents en
+    cours (le quantum de rotation n’est pas écoulé) : il applique les nouvelles limites, remplit
+    les slots libérés et retire l’excédent d’une limite abaissée. Un changement vu est consommé
+    une seule fois : un cycle qui échoue ensuite garde son délai d’attente progressif. Les
+    flux de téléchargement déjà ouverts gardent le débit de leur ouverture, et les échéances de
+    rétention déjà calculées ne bougent pas (OP-09, points 2 et 3, inchangés).
+
 ### Non traité dans cette livraison (décision, migration ou exploitation requises)
 
 Politique à trancher : plafond de voies rapides par compte et exemption administrateur sur
@@ -735,9 +757,8 @@ Exploitation (voir le runbook) : sauvegardes hors hôte (IN-01), Alertmanager (I
 mémoire (IN-04), healthchecks (IN-06), rôles PostgreSQL (IN-07), limites Caddy et DHT/PeX/LSD
 côté qBittorrent (SE-02, OP-18), liste autorisée du helper de déploiement (SE-12, IN-16).
 Développement ultérieur : limiteur d’API authentifiée (SE-06), verrous de
-lecture manifeste/archives (LS-17, LS-18), consolidation CSS (FE-05), caractères
-bidirectionnels dans les noms (SE-21), table d’audit de sécurité (SE-09), authentification
-renforcée (SE-13), réveil du scheduler sur modification d’option (OP-09).
+lecture manifeste/archives (LS-17, LS-18), consolidation CSS (FE-05), table d’audit de
+sécurité (SE-09), authentification renforcée (SE-13).
 
 ### Revue avant promotion 2.4.7
 
@@ -761,3 +782,37 @@ réussis ; Ruff, mypy strict (268 sources), typage TypeScript et build frontend 
 CI complète et promotion à vérifier sur les commits exacts. Aucun changement de migration
 ou du helper dans ces ajustements. Le helper modifié par #420 reste à réinstaller
 sur l’hôte pour que son durcissement soit effectif, comme indiqué dans le runbook.
+
+### Lot 20 — téléchargement de dossier : casse, normalisation et fichiers existants
+
+Deux risques restaient après la revue précédente, tous deux dans `recursiveDownload.ts` :
+
+- Deux fichiers ou dossiers frères qui ne diffèrent que par la casse (`README.md` et
+  `readme.md`) ou par la forme Unicode (`é` composé ou décomposé) désignent la même entrée
+  sous NTFS et APFS par défaut : le second écrasait le premier. Le premier nom rencontré dans
+  un dossier garde son nom ; tout frère dont la clé repliée (NFC, majuscules puis minuscules)
+  est déjà prise reçoit le suffixe `~wos-<SHA-256 tronqué>`. Le choix est fait une fois par
+  transfert et mémorisé, donc une reprise rouvre le même fichier ; il se fait sans attente
+  entre le test et la prise de la clé, car deux fichiers du même dossier sont écrits en
+  parallèle. Seules les clés repliées sont gardées par dossier (au plus 100 000 fichiers par
+  torrent) ; l’état par fichier est libéré à la fin de chaque fichier. Le préfixe `~wos-`
+  réservé est maintenant reconnu à travers la casse et l’Unicode (`~woſ-` compris).
+- `createWritable` tronque : un fichier non vide déjà présent dans le dossier choisi était
+  écrasé sans demande. Le transfert s’arrête maintenant sur l’erreur `local_file_exists`
+  (message traduit) tant que le fichier n’est pas retiré, puis `Reprendre` repart. Un fichier
+  vide, ou créé par ce transfert, reste réutilisable ; un fichier à la place d’un dossier (ou
+  l’inverse) donne la même erreur. Le téléchargement d’un fichier seul, dont le dialogue
+  « Enregistrer sous » du navigateur a déjà demandé confirmation, garde le remplacement
+  (`replaceExistingFiles`).
+
+Conséquence à connaître : annuler un dossier puis le relancer dans le même dossier local
+s’arrête sur le premier fichier partiel, qu’il faut supprimer ou changer de dossier ; avant, il
+était écrasé en silence. Nettoyer les fichiers partiels à l’annulation demanderait
+`removeEntry`, absent de l’interface locale, et n’est pas fait ici.
+
+Validation locale : 13 tests ajoutés (collisions de casse et d’Unicode avec un disque simulé
+insensible à la casse, dossiers frères, fichier existant puis reprise, détection à travers la
+casse, remplacement confirmé, dossier sur fichier, manager fichier contre dossier) ; chacune
+des deux protections désactivée à tour de rôle fait échouer trois tests, et le drapeau du
+manager forcé dans un sens ou l’autre fait échouer le sien. tsc, suite Vitest complète (253
+réussis) et build verts. Aucun changement backend, migration ni helper.
