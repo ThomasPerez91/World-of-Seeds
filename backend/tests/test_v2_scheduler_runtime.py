@@ -4,7 +4,7 @@ import asyncio
 import math
 import os
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -1355,6 +1355,117 @@ async def test_the_lease_is_handed_back_when_the_scheduler_stops(tmp_path: Path)
             session, owner="scheduler-b", now=NOW, ttl=timedelta(seconds=30)
         )
     assert successor is not None
+    await engine.dispose()
+
+
+async def _until(condition: Callable[[], bool]) -> None:
+    async with asyncio.timeout(10):
+        while not condition():  # noqa: ASYNC110 -- the gateway exposes calls, not an event.
+            await asyncio.sleep(0.02)
+
+
+async def _queued_scheduler_with_limit_one(
+    tmp_path: Path,
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+    engine, sessions = await _database(tmp_path)
+    for index in range(10):
+        await _torrent(
+            sessions,
+            username=f"queued-{index}",
+            info_hash=f"{index:040x}",
+            size=10 + index,
+        )
+    async with sessions() as session, session.begin():
+        limit = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+        dynamic = await session.get(DatabaseOption, "WOS_SCHEDULER_DYNAMIC_CONCURRENCY_ENABLED")
+        assert limit is not None and dynamic is not None
+        limit.integer_value = 1
+        dynamic.boolean_value = False
+    return engine, sessions
+
+
+@pytest.mark.asyncio
+async def test_an_option_change_starts_a_cycle_without_waiting_for_the_control_interval(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _queued_scheduler_with_limit_one(tmp_path)
+    gateway = FakeGateway()
+    # The control interval is at least 30 s; checks happen every third of the lease (0.1 s).
+    runtime = SchedulerRuntime(
+        sessions,
+        gateway,
+        scheduler_id="scheduler-wake",
+        lease_ttl=timedelta(seconds=0.3),
+        clock=lambda: NOW,
+    )
+    task = asyncio.create_task(runtime.run())
+    try:
+        await _until(lambda: len(gateway.calls) == 1)
+        async with sessions() as session, session.begin():
+            limit = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+            assert limit is not None
+            limit.integer_value = 2
+        await _until(lambda: len(gateway.calls) == 2)
+    finally:
+        runtime.request_stop()
+        await task
+
+    assert sum(control.run_state == "running" for control in gateway.calls[0]) == 1
+    assert sum(control.run_state == "running" for control in gateway.calls[1]) == 2
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_unchanged_options_do_not_start_extra_cycles(tmp_path: Path) -> None:
+    engine, sessions = await _queued_scheduler_with_limit_one(tmp_path)
+    gateway = FakeGateway()
+    runtime = SchedulerRuntime(
+        sessions,
+        gateway,
+        scheduler_id="scheduler-quiet",
+        lease_ttl=timedelta(seconds=0.3),
+        clock=lambda: NOW,
+    )
+    task = asyncio.create_task(runtime.run())
+    try:
+        await _until(lambda: len(gateway.calls) == 1)
+        await asyncio.sleep(0.6)  # about six checks
+    finally:
+        runtime.request_stop()
+        await task
+
+    assert len(gateway.calls) == 1
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_change_is_consumed_once_and_an_unreadable_registry_is_not_a_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    runtime = SchedulerRuntime(
+        sessions, FakeGateway(), scheduler_id="scheduler-check", clock=lambda: NOW
+    )
+    # A scheduler that has never been the leader has nothing to compare with.
+    assert await runtime._options_changed() is False
+
+    await runtime.run_once()
+    assert await runtime._options_changed() is False
+
+    async with sessions() as session, session.begin():
+        limit = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+        assert limit is not None
+        limit.integer_value = 2 if limit.integer_value == 1 else 1
+    assert await runtime._options_changed() is True
+    # A cycle that fails after this must not turn the backoff into a retry at every check.
+    assert await runtime._options_changed() is False
+
+    async def unreadable(_session: AsyncSession) -> dict[str, object]:
+        raise RuntimeError("database_unavailable")
+
+    monkeypatch.setattr(runtime._options, "snapshot", unreadable)
+    assert await runtime._options_changed() is False
     await engine.dispose()
 
 

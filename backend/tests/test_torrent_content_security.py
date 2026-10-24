@@ -25,6 +25,7 @@ def _torrent(
     paths: list[list[bytes]],
     *,
     attributes: list[bytes | None] | None = None,
+    name: bytes = b"Media",
 ) -> bytes:
     attributes = attributes or [None] * len(paths)
     files = []
@@ -40,7 +41,7 @@ def _torrent(
             b"announce": b"https://c411.org/announce/redacted",
             b"info": {
                 b"files": files,
-                b"name": b"Media",
+                b"name": name,
                 b"piece length": 16_384,
                 b"pieces": b"p" * 20,
             },
@@ -125,6 +126,55 @@ def test_ordinary_single_file_torrents_accept_any_extension(filename: bytes) -> 
 def test_torrent_rejects_traversal_absolute_and_ambiguous_paths(path: list[bytes]) -> None:
     with pytest.raises(TorrentValidationError):
         _sanitize(_torrent([path]))
+
+
+DISPLAY_REORDERING_CHARACTERS = [
+    chr(code) for code in (*range(0x202A, 0x202F), *range(0x2066, 0x206A), 0x2028, 0x2029)
+]
+
+
+@pytest.mark.parametrize(
+    "character", DISPLAY_REORDERING_CHARACTERS, ids=lambda value: f"U+{ord(value):04X}"
+)
+def test_torrent_rejects_characters_that_reorder_or_break_the_displayed_name(
+    character: str,
+) -> None:
+    spoofed = f"photo{character}gpj.exe".encode()
+    single_file = _bencode(
+        {
+            b"announce": b"https://c411.org/announce/redacted",
+            b"info": {
+                b"length": 5,
+                b"name": spoofed,
+                b"piece length": 16_384,
+                b"pieces": b"p" * 20,
+            },
+        }
+    )
+    for content in (
+        _torrent([[spoofed]]),
+        _torrent([[b"folder", spoofed]]),
+        _torrent([[spoofed, b"inner.bin"]]),
+        _torrent([[b"Film.mkv"]], name=spoofed),
+        single_file,
+    ):
+        with pytest.raises(TorrentValidationError):
+            _sanitize(content)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "👨\u200d👩\u200d👧 Famille.mkv",  # emoji sequences are joined by U+200D
+        "می\u200cخواهم.mkv",  # Persian needs U+200C
+        "\u200fשלום.mkv",  # direction marks stay valid in right-to-left names
+        "Film\u200e (2020).mkv",
+    ],
+)
+def test_names_that_need_joiners_and_direction_marks_remain_valid(name: str) -> None:
+    parsed = _sanitize(_torrent([[name.encode()]]))
+
+    assert [item.relative_path for item in parsed.files] == [f"Media/{name}"]
 
 
 def test_torrent_rejects_symlink_and_executable_attributes() -> None:

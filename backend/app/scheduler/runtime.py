@@ -27,6 +27,7 @@ from app.models import (
     User,
 )
 from app.options import PostgresOptionsRegistry
+from app.options.registry import OptionValue
 from app.scheduler.dynamic_concurrency import (
     DynamicConcurrencyConfig,
     align_measurement_after_selection,
@@ -100,6 +101,8 @@ class SchedulerRuntime:
         self._consecutive_failures = 0
         # The singleton scheduler keeps this in memory: a restart simply rotates once.
         self._last_rotation_at: datetime | None = None
+        # The options the last cycle read: a different set seen while waiting starts a cycle now.
+        self._applied_options: dict[str, OptionValue] | None = None
 
     def request_stop(self) -> None:
         self._stop.set()
@@ -116,6 +119,10 @@ class SchedulerRuntime:
                     except TimeoutError:
                         remaining -= wait_seconds
                         if remaining > 0 and not await self._renew_lease():
+                            break
+                        # An administrator change must not wait for the end of a long control
+                        # interval: it is seen within one third of the lease, whatever Redis does.
+                        if remaining > 0 and await self._options_changed():
                             break
         finally:
             await self._release_lease()
@@ -134,6 +141,7 @@ class SchedulerRuntime:
 
             await self._options.initialize(session, now=now)
             options = await self._options.snapshot(session)
+            self._applied_options = options
             base_policy = SchedulerPolicy.from_options(options)
             dynamic_config = DynamicConcurrencyConfig.from_options(options)
             purge_stops = await self._load_purge_stops(session)
@@ -445,6 +453,29 @@ class SchedulerRuntime:
                 await release_scheduler_lease(session, owner=self._scheduler_id, now=self._clock())
         except Exception:
             logger.warning("scheduler_lease_release_failed")
+
+    async def _options_changed(self) -> bool:
+        """Whether the stored options differ from the ones the last cycle used.
+
+        A change is consumed as soon as it is seen, so a cycle that then fails does not turn
+        the failure backoff into a retry at every check.
+        """
+
+        applied = self._applied_options
+        if applied is None:
+            # No cycle has read the options yet (this instance has not been the leader).
+            return False
+        try:
+            async with self._session_factory() as session:
+                current = await self._options.snapshot(session)
+        except Exception:
+            # An unreadable registry is reported by the next cycle, which reads it too.
+            logger.warning("scheduler_options_check_failed")
+            return False
+        if current == applied:
+            return False
+        self._applied_options = current
+        return True
 
     async def _renew_lease(self) -> bool:
         try:

@@ -838,6 +838,22 @@ describe("localFileName", () => {
     expect(result.endsWith(".mkv")).toBe(true);
   });
 
+  it("never keeps a character that reorders the displayed name on disk", async () => {
+    for (const character of ["\u202e", "\u202a", "\u2066", "\u2069", "\u2028", "\u2029"]) {
+      const original = `photo${character}gpj.exe`;
+      const mapped = await localFileName(original);
+      expect(mapped).not.toBe(original);
+      expect(mapped).not.toMatch(/[\u2028\u2029\u202a-\u202e\u2066-\u2069]/);
+      expect(mapped).toContain("~wos-");
+      expect(mapped.endsWith(".exe")).toBe(true);
+    }
+    // Joiners and direction marks that real names need are left alone.
+    expect(await localFileName("\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.mkv"))
+      .toBe("\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.mkv");
+    expect(await localFileName("\u200f\u05e9\u05dc\u05d5\u05dd.mkv"))
+      .toBe("\u200f\u05e9\u05dc\u05d5\u05dd.mkv");
+  });
+
   it.each([
     ["a:b.txt", "a?b.txt"],
     ["CON.txt", "_CON.txt"],
