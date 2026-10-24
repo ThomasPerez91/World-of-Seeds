@@ -215,10 +215,16 @@ export function AdminSettingsPage({
       return;
     }
 
+    const expectedVersions = Object.fromEntries(
+      fields.flatMap((field) =>
+        field.key in changes && field.version !== undefined ? [[field.key, field.version]] : [],
+      ),
+    );
+
     setSaving(true);
     setNotice(null);
     try {
-      const result = await api.updateCentralAdminOptions(changes);
+      const result = await api.updateCentralAdminOptions(changes, expectedVersions);
       if (!mounted.current) return;
       setOptions(result);
       setDraft(createDraft(result));
@@ -235,6 +241,13 @@ export function AdminSettingsPage({
       if (!mounted.current) return;
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
+        return;
+      }
+      if (caught instanceof ApiError && caught.code === "option_version_conflict") {
+        // Someone else changed an option meanwhile: show the current state instead of
+        // overwriting it, and let the administrator re-enter the change.
+        feedback.toast({ tone: "warning", message: t("admin.optionVersionConflict") });
+        await load();
         return;
       }
       if (caught instanceof ApiError && caught.field !== null) {

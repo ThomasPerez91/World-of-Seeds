@@ -430,6 +430,8 @@ export interface OptionField {
   restart_required: boolean;
   /** Secrets are write-only: `value` is empty and this tells whether one is stored. */
   configured?: boolean;
+  /** Version of the stored value, sent back so a concurrent change is detected. */
+  version?: number;
 }
 
 export interface OptionSection {
@@ -835,10 +837,15 @@ export const api = {
 
   updateCentralAdminOptions(
     changes: Record<string, OptionValue>,
+    expectedVersions: Record<string, number> = {},
   ): Promise<CentralAdminOverview> {
     return requestV2<CentralAdminOverview>("/admin/options", {
       method: "PATCH",
-      body: JSON.stringify({ changes }),
+      body: JSON.stringify(
+        Object.keys(expectedVersions).length === 0
+          ? { changes }
+          : { changes, expected_versions: expectedVersions },
+      ),
     });
   },
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import uuid
 import zipfile
 from collections.abc import AsyncIterator, Iterator
@@ -317,8 +318,12 @@ async def test_queue_abort_never_sends_success_or_leaves_a_ticket(
                     assert owner is not None
                     owner.is_active = False
                 domain.ticks.ticks.put_nowait(None)
-                with pytest.raises(ManagedDownloadError, match="lease was lost"):
-                    await asyncio.wait_for(task, 2)
+                # A lease lost in the queue ends with a plain 404, never with ZIP headers.
+                await asyncio.wait_for(task, 2)
+                starts = [m for m in connection.messages if m["type"] == "http.response.start"]
+                assert [m["status"] for m in starts] == [404]
+                assert not any(m.get("body", b"").startswith(b"PK") for m in connection.messages)
+                connection.messages.clear()
             assert not connection.messages
             assert await domain.count() == 0
             assert not downloads._managed_archive_concurrency._waiters
@@ -517,9 +522,10 @@ async def test_lease_rechecked_before_success_headers(domain: Domain) -> None:
             assert owner is not None
             owner.is_active = False
         connection = Connection()
-        with pytest.raises(ManagedDownloadError):
-            await asyncio.wait_for(connection.run(response), 2)
-        assert not connection.messages
+        await asyncio.wait_for(connection.run(response), 2)
+        assert connection.messages[0]["type"] == "http.response.start"
+        assert connection.messages[0]["status"] == 404
+        assert not any(m.get("body", b"").startswith(b"PK") for m in connection.messages)
         assert await domain.count() == 0
         assert response._heartbeat is not None and response._heartbeat.done()
 
@@ -866,3 +872,28 @@ async def test_stalled_client_releases_the_archive_slot_and_the_lease(
             if not task.done():
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_a_right_lost_in_the_queue_answers_404_before_any_zip_header(
+    domain: Domain,
+) -> None:
+    async with domain.sessions() as session:
+        manager = domain.manager(session)
+        lease = await domain.lease(manager)
+
+        async def lost(lease_id: uuid.UUID) -> None:
+            raise ManagedDownloadError("download lease was lost")
+
+        manager.renew_independent = lost  # type: ignore[method-assign]
+        connection = Connection()
+        response = domain.response(manager, lease)
+
+        await asyncio.wait_for(connection.run(response), 2)
+
+        assert connection.messages[0]["type"] == "http.response.start"
+        assert connection.messages[0]["status"] == 404
+        body = b"".join(m.get("body", b"") for m in connection.messages[1:])
+        assert json.loads(body)["detail"]["code"] == "torrent_archive_not_found"
+        assert b"PK" not in body
+        assert await domain.count() == 0

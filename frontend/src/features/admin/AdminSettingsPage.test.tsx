@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -361,6 +361,61 @@ describe("AdminSettingsPage", () => {
         method: "PATCH",
       }),
     );
+  });
+
+  it("envoie la version vue de chaque option et recharge après un conflit", async () => {
+    const versioned = {
+      ...options,
+      sections: [
+        {
+          ...options.sections[0],
+          fields: [{ ...options.sections[0].fields[0], version: 3 }],
+        },
+      ],
+    } as const;
+    let overviewCalls = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        if (String(input) === "/api/v2/admin/overview") {
+          overviewCalls += 1;
+          return response(versioned);
+        }
+        if (String(input) === "/api/v2/admin/options" && init?.method === "PATCH") {
+          return response(
+            { detail: { code: "option_version_conflict", message: "modifiée", field: null } },
+            409,
+          );
+        }
+        throw new Error(`Requête inattendue : ${init?.method ?? "GET"} ${String(input)}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(
+      <FeedbackProvider>
+        <AdminSettingsPage onBack={vi.fn()} onNavigate={vi.fn()} onSessionExpired={vi.fn()} />
+      </FeedbackProvider>,
+    );
+
+    const input = await screen.findByLabelText("Torrents actifs par utilisateur");
+    await user.clear(input);
+    await user.type(input, "7");
+    await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v2/admin/options",
+      expect.objectContaining({
+        body: JSON.stringify({
+          changes: { WOS_TORRENT_MAX_ACTIVE_PER_USER: 7 },
+          expected_versions: { WOS_TORRENT_MAX_ACTIVE_PER_USER: 3 },
+        }),
+        method: "PATCH",
+      }),
+    );
+    await waitFor(() => expect(overviewCalls).toBe(2));
+    expect(
+      await screen.findByText(/Une autre modification a été enregistrée entre-temps/),
+    ).toBeTruthy();
   });
 
   it("confirme le redémarrage puis attend le retour du service", async () => {

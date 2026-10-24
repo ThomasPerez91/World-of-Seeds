@@ -85,6 +85,11 @@ class AdminV2OptionsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     changes: Annotated[dict[str, AdminOptionRequestValue], Field(min_length=1, max_length=128)]
+    # Version of each changed option as the administrator saw it. When given, a change made by
+    # someone else in the meantime is refused instead of being silently overwritten.
+    expected_versions: Annotated[dict[str, int], Field(max_length=128)] = Field(
+        default_factory=dict
+    )
 
 
 class AdminV2ReconciliationAnomaly(BaseModel):
