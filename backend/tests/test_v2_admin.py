@@ -487,3 +487,32 @@ async def test_admin_cleanup_lists_downloads_and_purges_only_explicit_filtered_i
     assert reloaded_subscription is not None
     assert reloaded_subscription.state is TorrentRequestState.CANCELLED
     assert usage.logical_bytes == 900
+
+
+@pytest.mark.asyncio
+async def test_admin_options_patch_answers_409_on_a_stale_version(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await _admin(db_session)
+    headers = await _login(client)
+    key = "WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS"
+    overview = (await client.get("/api/v2/admin/overview")).json()
+    field = next(
+        item for section in overview["sections"] for item in section["fields"] if item["key"] == key
+    )
+
+    first = await client.patch(
+        "/api/v2/admin/options",
+        json={"changes": {key: 60}, "expected_versions": {key: field["version"]}},
+        headers=headers,
+    )
+    stale = await client.patch(
+        "/api/v2/admin/options",
+        json={"changes": {key: 80}, "expected_versions": {key: field["version"]}},
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "option_version_conflict"

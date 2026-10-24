@@ -352,7 +352,11 @@ def _business_detail(code: str, message: str, field: str | None = None) -> dict[
 def _raise_options_error(exc: Exception) -> Never:
     if isinstance(exc, OptionsValidationError):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=(
+                status.HTTP_409_CONFLICT
+                if exc.code == "option_version_conflict"
+                else status.HTTP_422_UNPROCESSABLE_CONTENT
+            ),
             detail=_business_detail(exc.code, str(exc), exc.field),
         ) from exc
     raise HTTPException(
@@ -515,6 +519,7 @@ async def update_admin_options(
             db,
             payload.changes,
             actor_user_id=context.user.id,
+            expected_versions=payload.expected_versions,
         )
         await db.commit()
         return await _overview(

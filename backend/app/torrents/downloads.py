@@ -25,7 +25,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from starlette.types import Message, Receive, Scope, Send
 
 from app.http_downloads import OpenedDownload
@@ -923,8 +923,11 @@ class ManagedArchiveStreamingResponse(StreamingResponse):
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         version = tuple(map(int, scope.get("asgi", {}).get("spec_version", "2.0").split(".")))
+        started = False
 
         async def checked_send(message: Message) -> None:
+            nonlocal started
+            started = True
             try:
                 await _bounded_send(send, message)
             except DownloadStalledError:
@@ -964,6 +967,19 @@ class ManagedArchiveStreamingResponse(StreamingResponse):
             if isinstance(cause, DownloadStalledError):
                 # Dropping the connection is the only way to free a dead client's slot.
                 logger.warning("download_archive_stalled")
+            elif isinstance(cause, ManagedDownloadError) and not started:
+                # The right was lost while the request waited in the queue, before any ZIP
+                # header: answer like the route would have, not with a bare server error.
+                await JSONResponse(
+                    status_code=404,
+                    content={
+                        "detail": {
+                            "code": "torrent_archive_not_found",
+                            "message": "Ce contenu est indisponible.",
+                            "field": None,
+                        }
+                    },
+                )(scope, receive, send)
             else:
                 if cause is not error:
                     context = None if cause.__suppress_context__ else cause.__context__

@@ -463,3 +463,36 @@ def test_every_visible_option_is_read_by_some_consumer() -> None:
     ]
 
     assert unread == []
+
+
+@pytest.mark.asyncio
+async def test_a_stale_version_is_refused_instead_of_overwriting_another_change(
+    db_session: AsyncSession,
+) -> None:
+    registry = PostgresOptionsRegistry()
+    admin = await create_user(db_session, "versions-admin", is_admin=True)
+    await registry.initialize(db_session, now=NOW)
+    key = "WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS"
+    first = await registry.update(
+        db_session, {key: 72}, actor_user_id=admin.id, now=NOW, expected_versions={key: 1}
+    )
+    assert first.versions[key] == 2
+
+    with pytest.raises(OptionsValidationError) as stale:
+        await registry.update(
+            db_session, {key: 96}, actor_user_id=admin.id, now=NOW, expected_versions={key: 1}
+        )
+    assert stale.value.code == "option_version_conflict"
+    assert stale.value.field == key
+    assert (await registry.snapshot(db_session))[key] == 72
+
+    # Without versions (older clients) and with an unrelated version nothing changes.
+    await registry.update(db_session, {key: 96}, actor_user_id=admin.id, now=NOW)
+    await registry.update(
+        db_session,
+        {key: 100},
+        actor_user_id=admin.id,
+        now=NOW,
+        expected_versions={"WOS_STORAGE_MIN_FREE_PERCENT": 99},
+    )
+    assert (await registry.snapshot(db_session))[key] == 100

@@ -654,6 +654,29 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
   d’Alembic accepte un mot de passe contenant `%` (IN-09).
 - Documentation alignée sur le comportement réel (secrets, plafonds de flux, options).
 
+### Lots 9 à 13 — compléments
+
+- Lot 9 : le reaper de rétention n’exécute sa passe de maintenance que si la rétention a
+  réussi et qu’aucun arrêt n’est demandé.
+- Lot 10 (scheduler) : bail renouvelé avant l’application qB et rendu à l’arrêt, génération
+  appliquée même si l’application dépasse le TTL (SC-15) ; backoff 5 → 60 s des cycles en échec
+  (SC-09, partie cadence) ; attentes Redis sur une connexion dédiée sans timeout de socket de
+  1 s (SC-13) ; relance manuelle sans cooldown ni slot forcé hérités (SC-23) ; la réconciliation
+  ne signale plus un ajout en cours (SC-21).
+- Lot 11 (sécurité) : socket d’événements refusée depuis une origine autre que l’hôte de la page,
+  5 sockets par utilisateur et plafond global, session revérifiée à chaque heartbeat (SE-07) ;
+  tracker `http://` réécrit en `https://` quand la passkey est injectée (SE-11) ; journal
+  `admin_action` pour purge, actions qB, récupération, comptes et clés API (SE-09, partie
+  journal ; pas de table d’audit).
+- Lot 12 (frontend) : confirmation avant révocation d’une clé API et erreurs d’action qui ne
+  masquent plus la liste (FE-18) ; compteurs du Dashboard issus d’une seule requête (FE-19) ;
+  listings d’un ancien snapshot oubliés (FE-20, point 4) ; noms locaux compatibles avec les
+  systèmes de fichiers (FE-15).
+- Lot 13 : PATCH d’options versionné et rétrocompatible, 409 `option_version_conflict` et
+  rechargement côté interface (OP-08) ; un ZIP dont le droit est perdu pendant la file répond
+  404 avant tout en-tête (LS-11) ; tests HTTP du 429 de plafond ZIP (LS-25) ; texte du toast de
+  sauvegarde qui n’annonce plus une application immédiate (OP-09, partie message).
+
 ### Non traité dans cette livraison (décision, migration ou exploitation requises)
 
 Politique à trancher : plafond de voies rapides par compte et exemption administrateur sur
@@ -666,6 +689,8 @@ chiffrement des passkeys au repos (SE-01/IN-21), contrainte `CHECK` des valeurs 
 Exploitation (voir le runbook) : sauvegardes hors hôte (IN-01), Alertmanager (IN-03), limites
 mémoire (IN-04), healthchecks (IN-06), rôles PostgreSQL (IN-07), limites Caddy et DHT/PeX/LSD
 côté qBittorrent (SE-02, OP-18), liste autorisée du helper de déploiement (SE-12, IN-16).
-Développement ultérieur : rotation et lease du scheduler (SC-05), limiteur d’API authentifiée
-(SE-06), verrous de lecture manifeste/archives (LS-17, LS-18), consolidation CSS (FE-05),
-tracker `http://` (SE-11), caractères bidirectionnels et noms Windows (SE-21, FE-15).
+Développement ultérieur : rotation d’ensemble actif du scheduler (SC-05, l’algorithme
+d’équité demande une conception dédiée), limiteur d’API authentifiée (SE-06), verrous de
+lecture manifeste/archives (LS-17, LS-18), consolidation CSS (FE-05), caractères
+bidirectionnels dans les noms (SE-21), table d’audit de sécurité (SE-09), authentification
+renforcée (SE-13), réveil du scheduler sur modification d’option (OP-09).

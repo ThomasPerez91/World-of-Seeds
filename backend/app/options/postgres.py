@@ -87,6 +87,7 @@ class PostgresOptionsRegistry:
         *,
         actor_user_id: uuid.UUID,
         now: datetime | None = None,
+        expected_versions: Mapping[str, int] | None = None,
     ) -> DatabaseOptionsUpdate:
         if not changes:
             raise OptionsValidationError("Au moins une option doit être modifiée.")
@@ -106,6 +107,14 @@ class PostgresOptionsRegistry:
             # produces is validated below.
             values = self._stored_values(rows)
         previous = dict(values)
+        for key, expected in (expected_versions or {}).items():
+            row = rows.get(key)
+            if key in changes and row is not None and row.version != expected:
+                raise OptionsValidationError(
+                    "Cette option a été modifiée par un autre administrateur : recharge la page.",
+                    code="option_version_conflict",
+                    field=key,
+                )
         normalized_changes: dict[str, OptionValue] = {}
         for key, candidate in changes.items():
             spec = DATABASE_OPTION_SPECS_BY_KEY.get(key)
