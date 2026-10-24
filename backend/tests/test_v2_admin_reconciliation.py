@@ -558,3 +558,22 @@ async def test_concurrent_reconciliation_is_rejected_without_a_second_disk_read(
         release.set()
         await first
     assert (await client.get("/api/v2/admin/reconciliation", params=params)).status_code == 200
+
+
+@pytest.mark.parametrize("state", [ManagedTorrentState.ADDING, ManagedTorrentState.RETRY_WAIT])
+def test_reconciliation_does_not_flag_an_add_that_is_still_in_progress(
+    state: ManagedTorrentState,
+) -> None:
+    torrent = _torrent(info_hash="c" * 40, storage_key=uuid.uuid4())
+    torrent.state = state
+
+    report = reconcile_inventory(
+        (torrent,),
+        database_truncated=False,
+        qbittorrent=QBittorrentV2Inventory((), False),
+        storage=SharedContentInventory((), 0, False),
+    )
+
+    assert {item.code for item in report.anomalies}.isdisjoint(
+        {"missing_qb_torrent", "missing_storage"}
+    )

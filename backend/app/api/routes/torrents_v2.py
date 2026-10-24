@@ -1930,6 +1930,11 @@ async def retry_torrent_request(
                 managed.progress = 0
                 managed.retry_at = None
                 managed.scheduler_retry_at = None
+                # A retry must not inherit the previous attempt stall cooldowns or forced slot.
+                managed.stall_count = 0
+                managed.last_progress_at = None
+                managed.last_downloaded_bytes = None
+                managed.admin_forced_active = False
                 managed.desired_active = False
                 managed.desired_priority = None
                 managed.desired_download_limit = 0

@@ -1284,3 +1284,75 @@ async def test_cycle_failure_is_logged_with_the_exception_class_only(
     assert record.__dict__["cause_type"] == "RuntimeError"
     assert "qb_unavailable" not in caplog.text
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_failing_cycles_back_off_and_a_success_resets_the_delay(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    await _torrent(sessions, username="first", info_hash="a" * 40, size=10)
+    gateway = FakeGateway(fail=True)
+    runtime = SchedulerRuntime(sessions, gateway, scheduler_id="scheduler-a", clock=lambda: NOW)
+
+    delays = [await runtime._run_guarded_cycle() for _ in range(6)]
+
+    assert delays == [5.0, 10.0, 20.0, 40.0, 60.0, 60.0]
+    gateway.fail = False
+    await runtime._run_guarded_cycle()
+    gateway.fail = True
+    assert await runtime._run_guarded_cycle() == 5.0
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_slow_application_renews_the_lease_and_is_still_recorded(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    await _torrent(sessions, username="first", info_hash="a" * 40, size=10)
+    clock = [NOW]
+
+    class SlowGateway(FakeGateway):
+        async def apply_managed_controls(
+            self,
+            controls: Sequence[QBittorrentV2DesiredControl],
+            *,
+            allow_missing_stopped: bool = False,
+        ) -> QBittorrentV2ControlResult:
+            clock[0] += timedelta(seconds=120)  # far beyond the 30 s lease
+            return await super().apply_managed_controls(
+                controls, allow_missing_stopped=allow_missing_stopped
+            )
+
+    runtime = SchedulerRuntime(
+        sessions, SlowGateway(), scheduler_id="scheduler-a", clock=lambda: clock[0]
+    )
+
+    result = await runtime.run_once()
+
+    assert result.leader is True
+    async with sessions() as session:
+        state = await session.get(SchedulerState, 1)
+    assert state is not None and state.applied_generation == state.desired_generation == 1
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_lease_is_handed_back_when_the_scheduler_stops(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    runtime = SchedulerRuntime(
+        sessions, FakeGateway(), scheduler_id="scheduler-a", clock=lambda: NOW
+    )
+    await runtime.run_once()
+    async with sessions() as session:
+        held = await session.get(SchedulerState, 1)
+    assert held is not None and held.lease_owner == "scheduler-a"
+
+    runtime.request_stop()
+    await runtime.run()
+
+    async with sessions() as session, session.begin():
+        released = await session.get(SchedulerState, 1)
+        assert released is not None and released.lease_owner is None
+        successor = await acquire_scheduler_lease(
+            session, owner="scheduler-b", now=NOW, ttl=timedelta(seconds=30)
+        )
+    assert successor is not None
+    await engine.dispose()

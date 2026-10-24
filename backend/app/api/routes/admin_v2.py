@@ -678,6 +678,8 @@ async def get_admin_reconciliation(
         for torrent in page:
             expects_physical = torrent.state not in {
                 ManagedTorrentState.PENDING,
+                ManagedTorrentState.ADDING,
+                ManagedTorrentState.RETRY_WAIT,
                 ManagedTorrentState.PURGED,
             }
             try:
