@@ -136,8 +136,11 @@ class RedisCoordinator:
         cache_stale_seconds: int,
         signal_queue_max_length: int,
         clock: Callable[[], float] = time.time,
+        blocking_client: RedisCommands | None = None,
     ) -> None:
         self._client = client
+        # BLPOP waits longer than the regular socket timeout: it needs its own connection pool.
+        self._blocking_client = blocking_client if blocking_client is not None else client
         self._namespace = namespace
         self._cache_ttl_seconds = cache_ttl_seconds
         self._cache_stale_seconds = cache_stale_seconds
@@ -147,6 +150,7 @@ class RedisCoordinator:
     @classmethod
     def from_settings(cls, settings: Settings) -> RedisCoordinator:
         client: RedisCommands | None = None
+        blocking_client: RedisCommands | None = None
         if settings.redis_url is not None:
             client = cast(
                 RedisCommands,
@@ -158,8 +162,21 @@ class RedisCoordinator:
                     health_check_interval=30,
                 ),
             )
+            # A blocking pop is only answered when a signal arrives or its own timeout ends:
+            # the regular 1 s socket timeout would cut every wait after one second.
+            blocking_client = cast(
+                RedisCommands,
+                Redis.from_url(
+                    settings.redis_url.get_secret_value(),
+                    decode_responses=True,
+                    socket_connect_timeout=settings.redis_connect_timeout_seconds,
+                    socket_timeout=None,
+                    health_check_interval=30,
+                ),
+            )
         return cls(
             client,
+            blocking_client=blocking_client,
             namespace=settings.redis_namespace,
             cache_ttl_seconds=settings.redis_cache_ttl_seconds,
             cache_stale_seconds=settings.redis_cache_stale_seconds,
@@ -229,10 +246,10 @@ class RedisCoordinator:
     async def wait_for_job_signal(self, *, timeout_seconds: float) -> bool:
         if not 0 < timeout_seconds <= 300:
             raise ValueError("timeout_seconds must be between 0 and 300")
-        if self._client is None:
+        if self._blocking_client is None:
             return False
         try:
-            signal = await self._client.blpop(
+            signal = await self._blocking_client.blpop(
                 self._signal_key,
                 max(1, math.ceil(timeout_seconds)),
             )
@@ -373,8 +390,9 @@ class RedisCoordinator:
         return True
 
     async def aclose(self) -> None:
-        if self._client is not None:
+        clients = {id(c): c for c in (self._client, self._blocking_client) if c is not None}
+        for client in clients.values():
             try:
-                await self._client.aclose()
+                await client.aclose()
             except (RedisError, OSError, TimeoutError):
-                return
+                continue

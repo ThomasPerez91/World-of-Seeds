@@ -93,17 +93,25 @@ async def mark_scheduler_generation_applied(
     state = await session.scalar(
         select(SchedulerState).where(SchedulerState.id == 1).with_for_update()
     )
-    if (
-        state is None
-        or state.lease_owner != owner
-        or state.lease_expires_at is None
-        or _utc(state.lease_expires_at) <= _utc(now)
-        or state.desired_generation != generation
-    ):
+    # A slow application may outlive the lease TTL: what matters is that no other scheduler took
+    # over (the owner is unchanged) and that no newer generation was decided meanwhile.
+    if state is None or state.lease_owner != owner or state.desired_generation != generation:
         raise SchedulerLeaseLostError("scheduler lease or desired generation changed")
     state.applied_generation = generation
     state.updated_at = now
     await session.flush()
+
+
+async def release_scheduler_lease(session: AsyncSession, *, owner: str, now: datetime) -> None:
+    """Hand the singleton lease back so a restarted scheduler does not wait for its expiry."""
+    state = await session.scalar(
+        select(SchedulerState).where(SchedulerState.id == 1).with_for_update()
+    )
+    if state is not None and state.lease_owner == owner:
+        state.lease_owner = None
+        state.lease_expires_at = None
+        state.updated_at = now
+        await session.flush()
 
 
 async def _ensure_scheduler_state(session: AsyncSession, *, now: datetime) -> None:

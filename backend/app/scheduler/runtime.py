@@ -33,10 +33,12 @@ from app.scheduler.dynamic_concurrency import (
     apply_dynamic_concurrency,
 )
 from app.scheduler.persistence import (
+    SchedulerLeaseLostError,
     acquire_scheduler_lease,
     load_scheduler_ledger,
     mark_scheduler_generation_applied,
     persist_scheduler_ledger,
+    release_scheduler_lease,
 )
 from app.scheduler.qbittorrent_control import (
     ManagedTorrentControlIdentity,
@@ -91,22 +93,26 @@ class SchedulerRuntime:
         self._clock = clock
         self._stop = asyncio.Event()
         self._options = PostgresOptionsRegistry()
+        self._consecutive_failures = 0
 
     def request_stop(self) -> None:
         self._stop.set()
 
     async def run(self) -> None:
-        while not self._stop.is_set():
-            interval = await self._run_guarded_cycle()
-            remaining = interval
-            while remaining > 0 and not self._stop.is_set():
-                wait_seconds = min(remaining, self._lease_ttl.total_seconds() / 3)
-                try:
-                    await asyncio.wait_for(self._stop.wait(), timeout=wait_seconds)
-                except TimeoutError:
-                    remaining -= wait_seconds
-                    if remaining > 0 and not await self._renew_lease():
-                        break
+        try:
+            while not self._stop.is_set():
+                interval = await self._run_guarded_cycle()
+                remaining = interval
+                while remaining > 0 and not self._stop.is_set():
+                    wait_seconds = min(remaining, self._lease_ttl.total_seconds() / 3)
+                    try:
+                        await asyncio.wait_for(self._stop.wait(), timeout=wait_seconds)
+                    except TimeoutError:
+                        remaining -= wait_seconds
+                        if remaining > 0 and not await self._renew_lease():
+                            break
+        finally:
+            await self._release_lease()
 
     async def run_once(self) -> SchedulerCycleResult:
         now = self._clock()
@@ -258,6 +264,10 @@ class SchedulerRuntime:
         # and the failure is re-raised afterwards so the whole cycle is retried.
         stop_error: Exception | None = None
         purge_control_result = QBittorrentV2ControlResult((), (), (), ())
+        # Applying controls is a series of HTTP calls that can outlast the lease TTL when
+        # qBittorrent is slow: renew before, and between, the two application phases.
+        if not await self._renew_lease():
+            raise SchedulerLeaseLostError("scheduler lease lost before applying controls")
         if purge_controls:
             try:
                 purge_control_result = await self._gateway.apply_managed_controls(
@@ -270,6 +280,8 @@ class SchedulerRuntime:
                     "scheduler_stop_controls_failed",
                     extra={"cause_type": type(exc).__name__},
                 )
+        if controls and purge_controls and not await self._renew_lease():
+            raise SchedulerLeaseLostError("scheduler lease lost between control phases")
         scheduled_control_result = (
             await self._gateway.apply_managed_controls(controls)
             if controls
@@ -370,6 +382,7 @@ class SchedulerRuntime:
         interval = 5.0
         try:
             result = await self.run_once()
+            self._consecutive_failures = 0
             if result.leader:
                 async with self._session_factory() as session:
                     options = await self._options.snapshot(session)
@@ -385,8 +398,17 @@ class SchedulerRuntime:
             # or by the next lease owner. Only the exception class is logged: messages can
             # carry integration details.
             logger.warning("scheduler_cycle_failed", extra={"cause_type": type(exc).__name__})
-            interval = min(5.0, self._lease_ttl.total_seconds())
+            # Back off while a dependency stays down instead of recomputing every 5 seconds.
+            self._consecutive_failures += 1
+            interval = min(60.0, 5.0 * 2 ** (self._consecutive_failures - 1))
         return interval
+
+    async def _release_lease(self) -> None:
+        try:
+            async with self._session_factory() as session, session.begin():
+                await release_scheduler_lease(session, owner=self._scheduler_id, now=self._clock())
+        except Exception:
+            logger.warning("scheduler_lease_release_failed")
 
     async def _renew_lease(self) -> bool:
         try:
