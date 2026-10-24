@@ -654,7 +654,7 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
   d’Alembic accepte un mot de passe contenant `%` (IN-09).
 - Documentation alignée sur le comportement réel (secrets, plafonds de flux, options).
 
-### Lots 9 à 15 — compléments
+### Lots 9 à 16 — compléments
 
 - Lot 9 : le reaper de rétention n’exécute sa passe de maintenance que si la rétention a
   réussi et qu’aucun arrêt n’est demandé.
@@ -698,6 +698,11 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
     (IN-18, hors épinglage par SHA) ;
   - helper de déploiement : tous les scripts et unités exécutés en root rendent le
     déploiement manuel obligatoire (SE-12) ; effectif après réinstallation du helper racine.
+
+- Lot 16 (FE-17) : la confirmation « en deux clics » de suppression/annulation n’est plus un
+  écouteur DOM posé par une icône. Le composant `ConfirmButton` garde l’état dans React : le
+  nom accessible ne change pas, un message d’état annonce « clique de nouveau pour confirmer »,
+  le bouton se désarme après 4 s et à la perte de focus, sans `aria-pressed` détourné.
 
 ### Non traité dans cette livraison (décision, migration ou exploitation requises)
 

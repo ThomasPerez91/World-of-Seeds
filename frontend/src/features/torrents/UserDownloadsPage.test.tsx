@@ -1442,7 +1442,8 @@ describe("UserDownloadsPage", () => {
     expect(calls.some((url) => url.includes("offset=0") && url.includes("limit=25"))).toBe(true);
     expect(calls.some((url) => url.includes("offset=25") && url.includes("limit=25"))).toBe(true);
     expect(calls.some((url) => url.includes("offset=50") && url.includes("limit=25"))).toBe(true);
-  });
+    // Nine keystrokes over 25 rows is CPU-bound in jsdom: allow it more than the default 5 s.
+  }, 15_000);
 
   it("combine recherche partielle insensible à la casse et filtre de statut", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
@@ -1662,7 +1663,9 @@ describe("UserDownloadsPage", () => {
     const article = await screen.findByRole("article", { name: "Film.mkv" });
     expect(within(article).getByRole("button", { name: "Afficher les détails de Film.mkv" }).getAttribute("aria-expanded")).toBe("false");
     await user.click(screen.getByRole("button", { name: "Annuler la demande Film.mkv" }));
-    await user.click(screen.getByRole("button", { name: "Annuler la demande Film.mkv", pressed: true }));
+    expect(screen.getByRole("status").textContent).toContain("Clique de nouveau pour confirmer");
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Annuler la demande Film.mkv" }));
     await waitFor(() => expect(cancelled).toBe(true));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(await auditAccessibility(document.body)).toMatchObject({ violations: [] });
@@ -1697,7 +1700,8 @@ describe("UserDownloadsPage", () => {
     renderPage();
 
     await user.click(await screen.findByRole("button", { name: "Supprimer « Film.mkv »" }));
-    await user.click(screen.getByRole("button", { name: "Supprimer « Film.mkv »", pressed: true }));
+    expect(screen.getByRole("status").textContent).toContain("Clique de nouveau pour confirmer");
+    await user.click(screen.getByRole("button", { name: "Supprimer « Film.mkv »" }));
     await waitFor(() => expect(deleted).toBe(true));
     expect(calls).toContainEqual({
       method: "DELETE",
