@@ -84,7 +84,7 @@ function ServiceCard({
         </div>
         <div>
           <dt>{t("admin.version")}</dt>
-          <dd>{health.version ?? fallbackVersion}</dd>
+          <dd>{health.version ?? (health.status === "healthy" ? fallbackVersion : "—")}</dd>
         </div>
       </dl>
     </Card>

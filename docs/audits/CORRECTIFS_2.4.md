@@ -654,7 +654,7 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
   d’Alembic accepte un mot de passe contenant `%` (IN-09).
 - Documentation alignée sur le comportement réel (secrets, plafonds de flux, options).
 
-### Lots 9 à 17 — compléments
+### Lots 9 à 17 et 19 — compléments
 
 - Lot 9 : le reaper de rétention n’exécute sa passe de maintenance que si la rétention a
   réussi et qu’aucun arrêt n’est demandé.
@@ -709,6 +709,18 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
   depuis, sans annuler aucun droit. L’interface l’envoie systématiquement ; un client qui ne
   l’envoie pas garde l’ancien comportement. Le second facteur et le plafond par appel restent
   à décider.
+
+- Lot 19 (revue du design et du responsive, aperçu réel de l’application sur SQLite à 320, 375,
+  768, 1024 et 1440 px) : la carte « Contenu » d’un téléchargement prêt écrasait son texte à
+  largeur nulle à côté du bouton pleine largeur et passe à la ligne ; la troisième carte du
+  tableau de bord occupe toute la ligne quand deux colonnes sont affichées (tablette) ; les
+  infobulles masquées ne sont plus rendues (`display: none` jusqu’au survol ou au focus), ce
+  qui supprime le défilement horizontal de la page « Nettoyage » sur téléphone (391 px pour
+  375) ; le lien « Voir tous » du tableau de bord passe de 16 à 40 px de haut sans bouger
+  visuellement ; un service injoignable affiche « — » au lieu de la version attendue comme si
+  elle avait été observée. Aucun autre débordement de page sur les onglets d’administration ni
+  sur la liste utilisateur ; les barres d’onglets et de filtres défilent à l’intérieur de leur
+  conteneur, ce qui est voulu. Le chantier de fond sur la cascade CSS (FE-05) reste à faire.
 
 ### Non traité dans cette livraison (décision, migration ou exploitation requises)
 

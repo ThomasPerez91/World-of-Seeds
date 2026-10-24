@@ -202,6 +202,13 @@
     font-size: 1rem !important;
   }
 
+  a.summary-link {
+    top: 0.4rem;
+    right: 0.5rem;
+    min-height: 2.5rem;
+    padding-inline: 0.5rem;
+  }
+
   .network-throughput-direction > strong,
   .dashboard-summary-value {
     max-width: 100%;
