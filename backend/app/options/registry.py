@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -407,7 +408,8 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     _integer(
         "WOS_TORRENT_MAX_RETRY_ATTEMPTS",
         "Tentatives maximales",
-        "Nombre de reprises automatiques avant passage en erreur durable.",
+        "Reprises automatiques d’un ajout en échec avant erreur durable. Une indisponibilité de "
+        "qBittorrent ou de NewGreedy n’en consomme pas.",
         5,
         "torrents",
         minimum=0,
@@ -417,7 +419,7 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     _integer(
         "WOS_TORRENT_RETRY_BASE_SECONDS",
         "Base du délai de reprise",
-        "Délai initial du backoff exponentiel du worker.",
+        "Délai initial du backoff exponentiel des reprises, relu à chaque échec.",
         30,
         "torrents",
         minimum=1,
@@ -427,7 +429,7 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     _integer(
         "WOS_WORKER_CONCURRENCY",
         "Concurrence du worker",
-        "Nombre d’opérations torrent traitées en parallèle par le futur worker.",
+        "Nombre d’opérations torrent traitées en parallèle par chaque worker (au redémarrage).",
         2,
         "performance",
         minimum=1,
@@ -640,8 +642,35 @@ C411_ACCOUNT_SPECS: tuple[OptionSpec, ...] = tuple(
         ),
     )
 )
+# Registered, validated and audited, but read by no consumer. They stay in the registry (removing
+# a row needs a migration) and are only hidden from the administration screen, so nobody tunes a
+# setting that does nothing. Wire one to a real consumer before removing it from this set.
+INACTIVE_OPTION_KEYS = frozenset(
+    {
+        "WOS_REQUEST_RATE_LIMIT_PER_MINUTE",
+        "WOS_CACHE_DEFAULT_TTL_SECONDS",
+        "WOS_CACHE_PROGRESS_TTL_SECONDS",
+        "WOS_CACHE_CONNECTION_POOL_SIZE",
+        "WOS_FILES_LIST_MAX_ENTRIES",
+        "WOS_ADMIN_REFRESH_INTERVAL_SECONDS",
+        "WOS_DIRECTORY_SIZE_MAX_ENTRIES",
+        "WOS_DIRECTORY_SIZE_CACHE_SECONDS",
+    }
+)
+
 DATABASE_OPTION_SPECS = (*OPTION_SPECS, *C411_ACCOUNT_SPECS)
 DATABASE_OPTION_SPECS_BY_KEY = {spec.key: spec for spec in DATABASE_OPTION_SPECS}
+
+
+def ignored_option_variables(environ: Mapping[str, str]) -> tuple[str, ...]:
+    """Environment variables named like an administration option.
+
+    Functional options live in PostgreSQL and are changed from the administration screen:
+    setting one in the environment has no effect, which an operator should be told rather than
+    left to discover.
+    """
+    return tuple(sorted(name for name in environ if name.upper() in DATABASE_OPTION_SPECS_BY_KEY))
+
 
 if len(OPTION_SPECS_BY_KEY) != len(OPTION_SPECS):
     raise RuntimeError("Option registry contains duplicate keys")

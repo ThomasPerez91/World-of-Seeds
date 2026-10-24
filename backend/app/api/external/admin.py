@@ -13,6 +13,7 @@ from app.api.external.schemas import (
 )
 from app.auth.dependencies import AuthContext, DbSession, require_admin_csrf, require_current_admin
 from app.auth.security import generate_token, hash_token
+from app.core.audit_log import log_admin_action
 from app.models import ExternalApiClient
 
 router = APIRouter()
@@ -50,7 +51,7 @@ async def create_client(
     payload: ExternalApiClientCreateRequest,
     response: Response,
     db: DbSession,
-    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> ExternalApiClientCreatedResponse:
     raw_key = f"wos_live_{generate_token()}"
     scopes = sorted(set(payload.scopes))
@@ -63,6 +64,9 @@ async def create_client(
     db.add(client)
     await db.commit()
     await db.refresh(client)
+    log_admin_action(
+        "api_client_create", context.user.id, target=str(client.id), scopes=",".join(scopes)
+    )
     response.headers["Cache-Control"] = "no-store"
     return ExternalApiClientCreatedResponse(**_response(client).model_dump(), api_key=raw_key)
 
@@ -71,10 +75,11 @@ async def create_client(
 async def revoke_client(
     client_id: UUID,
     db: DbSession,
-    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> None:
     client = await db.get(ExternalApiClient, client_id)
     if client is not None and client.revoked_at is None:
         client.is_active = False
         client.revoked_at = datetime.now(UTC)
         await db.commit()
+        log_admin_action("api_client_revoke", context.user.id, target=str(client_id))

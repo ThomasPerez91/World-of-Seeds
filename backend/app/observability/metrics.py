@@ -4,6 +4,7 @@ import math
 import threading
 import time
 from collections import defaultdict
+from dataclasses import dataclass, field
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -15,13 +16,29 @@ def _label(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
+@dataclass(slots=True)
+class _Histogram:
+    """Cumulative counters: monotonic for the life of the process, as Prometheus requires."""
+
+    buckets: list[int] = field(default_factory=lambda: [0] * len(_DURATION_BUCKETS))
+    total: float = 0.0
+    count: int = 0
+
+    def observe(self, value: float) -> None:
+        for index, bound in enumerate(_DURATION_BUCKETS):
+            if value <= bound:
+                self.buckets[index] += 1
+        self.total += value
+        self.count += 1
+
+
 class MetricsRegistry:
     """Small in-process API collector with fixed labels and Prometheus text output."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._requests: dict[tuple[str, str, str], int] = defaultdict(int)
-        self._durations: dict[tuple[str, str], list[float]] = defaultdict(list)
+        self._durations: dict[tuple[str, str], _Histogram] = defaultdict(_Histogram)
 
     def observe_request(self, method: str, route: str, status_code: int, duration: float) -> None:
         normalized_method = method if method in _METHODS else "OTHER"
@@ -30,10 +47,7 @@ class MetricsRegistry:
         safe_duration = duration if math.isfinite(duration) and duration >= 0 else 0.0
         with self._lock:
             self._requests[(normalized_method, normalized_route, status_class)] += 1
-            samples = self._durations[(normalized_method, normalized_route)]
-            samples.append(safe_duration)
-            if len(samples) > 10_000:
-                del samples[: len(samples) - 10_000]
+            self._durations[(normalized_method, normalized_route)].observe(safe_duration)
 
     def render_api(self) -> list[str]:
         lines = [
@@ -42,7 +56,10 @@ class MetricsRegistry:
         ]
         with self._lock:
             requests = dict(self._requests)
-            durations = {key: tuple(values) for key, values in self._durations.items()}
+            durations = {
+                key: (tuple(value.buckets), value.total, value.count)
+                for key, value in self._durations.items()
+            }
         for (method, route, status_class), value in sorted(requests.items()):
             lines.append(
                 f'wos_api_requests_total{{method="{_label(method)}",route="{_label(route)}",'
@@ -54,18 +71,16 @@ class MetricsRegistry:
                 "# TYPE wos_api_request_duration_seconds histogram",
             ]
         )
-        for (method, route), values in sorted(durations.items()):
+        for (method, route), (buckets, total, count) in sorted(durations.items()):
             labels = f'method="{_label(method)}",route="{_label(route)}"'
-            for bucket in _DURATION_BUCKETS:
-                count = sum(value <= bucket for value in values)
+            for bound, bucket_count in zip(_DURATION_BUCKETS, buckets, strict=True):
                 lines.append(
-                    f'wos_api_request_duration_seconds_bucket{{{labels},le="{bucket}"}} {count}'
+                    f'wos_api_request_duration_seconds_bucket{{{labels},le="{bound}"}} '
+                    f"{bucket_count}"
                 )
-            lines.append(
-                f'wos_api_request_duration_seconds_bucket{{{labels},le="+Inf"}} {len(values)}'
-            )
-            lines.append(f"wos_api_request_duration_seconds_sum{{{labels}}} {sum(values):.9f}")
-            lines.append(f"wos_api_request_duration_seconds_count{{{labels}}} {len(values)}")
+            lines.append(f'wos_api_request_duration_seconds_bucket{{{labels},le="+Inf"}} {count}')
+            lines.append(f"wos_api_request_duration_seconds_sum{{{labels}}} {total:.9f}")
+            lines.append(f"wos_api_request_duration_seconds_count{{{labels}}} {count}")
         return lines
 
 

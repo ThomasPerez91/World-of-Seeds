@@ -50,6 +50,15 @@ export async function loadTorrentActivity(signal: AbortSignal): Promise<TorrentA
     if (page.offset !== offset || page.items.length > ACTIVITY_PAGE_SIZE) {
       throw new Error("torrent_activity_page_invalid");
     }
+    // The list already carries the server-side counts: one request is enough, the full
+    // pagination below only serves a server that does not provide them.
+    if (offset === 0 && page.status_counts !== undefined) {
+      return {
+        active: page.status_counts.downloading,
+        ready: page.status_counts.ready,
+        waiting: page.status_counts.waiting,
+      };
+    }
     if (expectedTotal === null) expectedTotal = page.total;
     if (page.items.length === 0) {
       if (offset < expectedTotal) throw new Error("torrent_activity_page_incomplete");

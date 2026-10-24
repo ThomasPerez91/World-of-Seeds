@@ -8,6 +8,7 @@ const MAX_MANIFEST_PAGE_SIZE = 500;
 const MAX_BUFFERED_MANIFEST_PAGES = 2;
 const MAX_VISIBLE_QUEUE_ITEMS = 8;
 const MAX_DOWNLOAD_BUSY_RETRIES = 6;
+const PROGRESS_EMIT_INTERVAL_MS = 250;
 const MAX_RECOVERY_RETRIES = 8;
 const SIZE_PRIORITY_BURST = 3;
 export const DEFAULT_RECURSIVE_DOWNLOAD_CONCURRENCY = 2;
@@ -79,6 +80,7 @@ export type RecursiveTransferErrorCode =
   | "local_write_denied"
   | "local_destination_missing"
   | "download_busy"
+  | "session_expired"
   | "download_unavailable"
   | "download_interrupted"
   | "local_transfer_failed";
@@ -134,6 +136,44 @@ class InterruptedTransfer extends TransferFailure {
   }
 }
 
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+const MAX_LOCAL_NAME_BYTES = 255;
+
+function utf8Length(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  let result = "";
+  let bytes = 0;
+  for (const character of value) {
+    const size = utf8Length(character);
+    if (bytes + size > maxBytes) break;
+    result += character;
+    bytes += size;
+  }
+  return result;
+}
+
+/**
+ * A torrent name valid on Linux can be refused by a local file system (`:` in a title, a
+ * reserved Windows name, a trailing dot, a very long name). Only such names are rewritten, and
+ * always the same way, so a resumed transfer reopens the same local file.
+ */
+export function localFileName(component: string): string {
+  // eslint-disable-next-line no-control-regex
+  let name = component.replace(/[<>:"|?*\u0000-\u001f]/g, "_");
+  name = name.replace(/[. ]+$/, (trailing) => "_".repeat(trailing.length));
+  if (WINDOWS_RESERVED_NAME.test(name)) name = `_${name}`;
+  if (utf8Length(name) > MAX_LOCAL_NAME_BYTES) {
+    const dot = name.lastIndexOf(".");
+    const extension = dot > 0 && name.length - dot <= 16 ? name.slice(dot) : "";
+    const base = name.slice(0, name.length - extension.length);
+    name = truncateUtf8(base, MAX_LOCAL_NAME_BYTES - utf8Length(extension)) + extension;
+  }
+  return name;
+}
+
 function isNetworkFailure(error: unknown): boolean {
   return error instanceof TypeError
     || (error instanceof DOMException && error.name === "NetworkError");
@@ -181,6 +221,8 @@ export class RecursiveDownloadController {
   private status: RecursiveTransferStatus = "paused";
   private error: RecursiveTransferErrorCode | null = null;
   private downloadedBytes = 0;
+  private lastProgressEmit = 0;
+  private progressTimer: ReturnType<typeof setTimeout> | null = null;
   private completedFiles = 0;
   private nextManifestOffset: number;
   private manifestComplete: boolean;
@@ -440,6 +482,12 @@ export class RecursiveDownloadController {
         }
         await waitForDownloadSlot(attempt, controller.signal);
       }
+      if (response.status === 401) {
+        // The session is absolute (it does not follow the lease heartbeat): say so instead
+        // of reporting a changed manifest.
+        await response.body?.cancel().catch(() => undefined);
+        throw new TransferFailure("session_expired");
+      }
       if (response.status === 404 || response.status === 410) {
         await response.body?.cancel().catch(() => undefined);
         throw new TransferFailure("download_unavailable");
@@ -489,7 +537,7 @@ export class RecursiveDownloadController {
           await writer.write(result.value);
           written += result.value.byteLength;
           this.setOffset(file.id, written);
-          this.emit();
+          this.emitProgress();
         }
       } catch (error) {
         if (reader === null) {
@@ -578,9 +626,9 @@ export class RecursiveDownloadController {
     }
     let directory = this.directory;
     for (const component of components.slice(0, -1)) {
-      directory = await directory.getDirectoryHandle(component, { create: true });
+      directory = await directory.getDirectoryHandle(localFileName(component), { create: true });
     }
-    return directory.getFileHandle(components.at(-1) as string, { create: true });
+    return directory.getFileHandle(localFileName(components.at(-1) as string), { create: true });
   }
 
   private abortActive(): void {
@@ -608,7 +656,28 @@ export class RecursiveDownloadController {
     return "local_transfer_failed";
   }
 
+  // A network chunk is 16-64 KiB: at tens of MB/s that would re-render the page thousands of
+  // times per second. Byte progress is sampled (leading edge, then one trailing emit); every
+  // state change still emits at once and carries the exact count.
+  private emitProgress(): void {
+    const wait = PROGRESS_EMIT_INTERVAL_MS - (Date.now() - this.lastProgressEmit);
+    if (wait <= 0) {
+      this.emit();
+      return;
+    }
+    if (this.progressTimer !== null) return;
+    this.progressTimer = setTimeout(() => {
+      this.progressTimer = null;
+      this.emit();
+    }, wait);
+  }
+
   private emit(error: RecursiveTransferErrorCode | null = this.error): void {
+    if (this.progressTimer !== null) {
+      clearTimeout(this.progressTimer);
+      this.progressTimer = null;
+    }
+    this.lastProgressEmit = Date.now();
     this.onProgress({
       status: this.status,
       downloadedBytes: this.downloadedBytes,

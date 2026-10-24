@@ -11,7 +11,9 @@ MAX_BENCODE_DEPTH = 64
 MAX_BENCODE_ITEMS = 200_000
 MAX_TORRENT_FILES = 100_000
 MAX_PATH_COMPONENT_BYTES = 255
-MAX_TORRENT_PATH_BYTES = 4096
+# The unique index on (torrent, relative_path) cannot hold a B-tree key above ~2700 bytes:
+# a longer path would pass validation and then fail at insertion.
+MAX_TORRENT_PATH_BYTES = 2048
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:$")
 
@@ -160,9 +162,15 @@ def _tracker_url(raw: bytes, *, passkey: str | None, allowed_hosts: frozenset[st
         or port not in {None, 80, 443}
     ):
         raise TorrentValidationError("Ce torrent n’utilise pas un tracker C411 autorisé.")
+    scheme = parsed.scheme
+    if passkey is not None and scheme == "http":
+        # The shared account passkey is part of the URL: never send it in clear text.
+        scheme = "https"
+        if port == 80:
+            port = None
     netloc = hostname if port is None else f"{hostname}:{port}"
     path = "/announce" if passkey is None else f"/announce/{quote(passkey, safe='')}"
-    return urlunsplit((parsed.scheme, netloc, path, "", "")).encode("ascii")
+    return urlunsplit((scheme, netloc, path, "", "")).encode("ascii")
 
 
 def _normalize_trackers(
@@ -389,6 +397,20 @@ def _torrent_files(
         raise TorrentValidationError("La taille du torrent est invalide.")
 
 
+_PEER_DISCOVERY_FIELDS = (
+    b"url-list",
+    b"httpseeds",
+    b"nodes",
+    b"comment",
+    b"comment.utf-8",
+    b"created by",
+    b"publisher",
+    b"publisher.utf-8",
+    b"publisher-url",
+    b"publisher-url.utf-8",
+)
+
+
 def _rewrite_torrent(
     content: bytes,
     *,
@@ -444,6 +466,10 @@ def _rewrite_torrent(
         passkey=passkey,
         allowed_hosts=frozenset(host.lower() for host in allowed_tracker_hosts),
     )
+    # Anything outside `info` that lets a client find peers or sources beyond the allow-listed
+    # trackers (web seeds, HTTP seeds, DHT nodes) is dropped. The info-hash is untouched.
+    for key in _PEER_DISCOVERY_FIELDS:
+        metainfo.pop(key, None)
     encoded_parts: list[bytes] = []
     for key in sorted(metainfo):
         value: BValue | _RawValue = _RawValue(info_raw) if key == b"info" else metainfo[key]

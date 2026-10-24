@@ -92,6 +92,16 @@ def test_plan_uses_qb_unlimited_value_when_global_limit_is_disabled() -> None:
     assert [control.download_limit_bytes_per_second for control in plan] == [0, 0, 0]
 
 
+def test_plan_degrades_instead_of_failing_when_limit_is_below_torrent_count() -> None:
+    plan = build_qbittorrent_control_plan(
+        _result(),
+        _identities(),
+        options={"WOS_QB_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL": 1},
+    )
+
+    assert [control.download_limit_bytes_per_second for control in plan] == [1, 1, 0]
+
+
 @pytest.mark.parametrize("limit", [-1, 10_000_000_001, True, "100"])
 def test_plan_rejects_invalid_global_limit(limit: object) -> None:
     with pytest.raises(ValueError):

@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import ipaddress
 import re
 import secrets
 import string
@@ -52,6 +53,21 @@ def verify_password(value: str, encoded_hash: str) -> bool:
     return password_hash.verify(value, encoded_hash)
 
 
+def password_needs_rehash(encoded_hash: str) -> bool:
+    """Whether the stored hash predates the current hashing parameters (no crypto involved)."""
+    for hasher in password_hash.hashers:
+        if hasher.identify(encoded_hash):
+            return hasher != password_hash.current_hasher or bool(
+                hasher.check_needs_rehash(encoded_hash)
+            )
+    return False
+
+
+def rehash_verified_password(value: str) -> str:
+    """Hash a password that was just verified, even if it predates today's length policy."""
+    return password_hash.hash(value)
+
+
 def generate_token() -> str:
     return secrets.token_urlsafe(32)
 
@@ -64,8 +80,23 @@ def tokens_match(left: str, right: str) -> bool:
     return hmac.compare_digest(left, right)
 
 
+def network_identity(peer: str) -> str:
+    """The network an address belongs to: an IPv6 /64 (one subscriber), otherwise the address."""
+    try:
+        address = ipaddress.ip_address(peer.split("%", 1)[0])
+    except ValueError:
+        return "unknown"
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    if isinstance(address, ipaddress.IPv6Address):
+        return str(ipaddress.IPv6Network((address, 64), strict=False))
+    return str(address)
+
+
 def throttle_key(client_ip: str, username: str) -> str:
-    return hash_token(f"{client_ip}\0{username.lower()}")
+    # An IPv6 attacker owns a whole /64: keying on the exact address would give a fresh budget
+    # to every attempt.
+    return hash_token(f"{network_identity(client_ip)}\0{username.lower()}")
 
 
 def generate_initial_username() -> str:

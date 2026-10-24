@@ -82,10 +82,20 @@ async def test_metrics_expose_fixed_operational_dimensions_without_business_iden
                 job_type="ADD_TORRENT",
                 idempotency_key="metrics-job",
                 state=TorrentJobState.QUEUED,
-                attempt_count=1,
+                attempt_count=2,
                 max_attempts=3,
-                available_at=now,
+                available_at=now - timedelta(seconds=5),
                 created_at=now - timedelta(seconds=5),
+            ),
+            TorrentJob(
+                managed_torrent_id=torrent.id,
+                job_type="PURGE_TORRENT",
+                idempotency_key="metrics-deferred-purge",
+                state=TorrentJobState.QUEUED,
+                attempt_count=0,
+                max_attempts=20,
+                available_at=now + timedelta(hours=48),
+                created_at=now - timedelta(days=3),
             ),
             SchedulerState(id=1, desired_generation=3, applied_generation=2, rounds=4),
             StorageLedger(
@@ -118,6 +128,41 @@ async def test_metrics_expose_fixed_operational_dimensions_without_business_iden
         "wos_storage_pressure",
     ):
         assert metric in output
+    oldest = next(
+        float(line.split()[-1])
+        for line in output.splitlines()
+        if line.startswith("wos_job_queue_oldest_age_seconds ")
+    )
+    # The deferred purge created three days ago is not a stuck job: only the claimable one counts.
+    assert 0 <= oldest < 120
     assert "private-release-name" not in output
     assert "a" * 40 not in output
     assert "passkey" not in output.lower()
+
+
+def test_duration_histogram_stays_monotonic_beyond_the_old_sample_window() -> None:
+    registry = MetricsRegistry()
+    for index in range(12_000):
+        registry.observe_request("GET", "/api/v2/torrents", 200, 0.02 if index % 2 else 0.2)
+
+    lines = registry.render_api()
+    prefix = 'wos_api_request_duration_seconds_bucket{method="GET",route="/api/v2/torrents",'
+    buckets = {
+        line.split('le="')[1].split('"')[0]: int(line.rsplit(" ", 1)[1])
+        for line in lines
+        if line.startswith(prefix)
+    }
+    count = next(
+        int(line.rsplit(" ", 1)[1])
+        for line in lines
+        if line.startswith("wos_api_request_duration_seconds_count")
+    )
+
+    # Nothing is dropped after 10 000 requests: counters only ever grow.
+    assert count == 12_000
+    assert buckets["+Inf"] == 12_000
+    assert buckets["0.01"] == 0
+    assert buckets["0.05"] == 6_000
+    assert buckets["0.25"] == 12_000
+    ordered = [buckets[key] for key in ("0.01", "0.05", "0.1", "0.25", "0.5", "+Inf")]
+    assert ordered == sorted(ordered)

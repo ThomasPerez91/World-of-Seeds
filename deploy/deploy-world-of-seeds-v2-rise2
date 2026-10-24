@@ -275,6 +275,14 @@ repo_git merge-base --is-ancestor "${PREVIOUS_REVISION}" "${TARGET_REVISION}" \
 
 readonly BLOCKED_CHANGES="$(repo_git diff --name-only "${PREVIOUS_REVISION}..${TARGET_REVISION}" -- \
   scripts/rise2_v2_preflight.sh \
+  scripts/validate_compose_v2_rise2.py \
+  scripts/rise2_v2_storage_smoke.sh \
+  scripts/rise2_v2_database_backup.py \
+  deploy/deploy-world-of-seeds-v2-rise2 \
+  deploy/world-of-seeds-v2-database-backup.service \
+  deploy/world-of-seeds-v2-database-backup.timer \
+  deploy/world-of-seeds-v2-smart-metrics.service \
+  deploy/world-of-seeds-v2-smart-metrics.timer \
   deploy/compose.rise2.v2.yaml \
   deploy/qbittorrent.rise2.conf \
   deploy/world-of-seeds-v2-rise2.service \

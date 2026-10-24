@@ -4,6 +4,7 @@ import { ApiError, type TorrentDownloadSnapshotV2 } from "../../api/client";
 import {
   type LocalDirectoryHandle,
   type LocalFileHandle,
+  localFileName,
   pickDownloadDirectory,
   recursiveDirectoryDownloadCapability,
   RecursiveDownloadController,
@@ -666,6 +667,23 @@ describe("RecursiveDownloadController", () => {
     expect(updates.at(-1)).toMatchObject({ status: "completed", downloadedBytes: 3 });
   });
 
+  it("signale une session expirée au lieu d’un contenu modifié sur un 401", async () => {
+    const updates: RecursiveTransferProgress[] = [];
+    const controller = new RecursiveDownloadController({
+      torrentRequestId: "request",
+      firstPage: { ...snapshot(), file_count: 1, total_size: 3, items: [snapshot().items[0]] },
+      directory: new MemoryDirectory(),
+      loadManifestPage: vi.fn(),
+      concurrency: 1,
+      fetcher: vi.fn(async () => new Response("{}", { status: 401 })),
+      onProgress: (progress) => updates.push(progress),
+    });
+
+    await controller.start();
+
+    expect(updates.at(-1)).toMatchObject({ status: "error", error: "session_expired" });
+  });
+
   it("échoue fermé si le snapshot d’une page suivante change", async () => {
     const firstPage = { ...snapshot(), file_count: 3, total_size: 9, limit: 2 };
     const updates: RecursiveTransferProgress[] = [];
@@ -797,5 +815,30 @@ describe("RecursiveDownloadController", () => {
       error: null,
     });
     expect(updates.at(-1)?.queue.every((item) => item.status === "cancelled")).toBe(true);
+  });
+});
+
+describe("localFileName", () => {
+  it("leaves ordinary names untouched", () => {
+    expect(localFileName("Épisode 1.mkv")).toBe("Épisode 1.mkv");
+    expect(localFileName("film.2026.1080p.mkv")).toBe("film.2026.1080p.mkv");
+  });
+
+  it("rewrites what a local file system refuses, always the same way", () => {
+    expect(localFileName("Titre : Épisode 1.mkv")).toBe("Titre _ Épisode 1.mkv");
+    expect(localFileName('a<b>c"d|e?f*g')).toBe("a_b_c_d_e_f_g");
+    expect(localFileName("CON.txt")).toBe("_CON.txt");
+    expect(localFileName("nul")).toBe("_nul");
+    expect(localFileName("rapport.")).toBe("rapport_");
+    expect(localFileName("nom ")).toBe("nom_");
+    expect(localFileName("Titre : Épisode 1.mkv")).toBe(localFileName("Titre : Épisode 1.mkv"));
+  });
+
+  it("keeps the extension when a name exceeds 255 bytes", () => {
+    const long = `${"é".repeat(200)}.mkv`;
+    const result = localFileName(long);
+
+    expect(new TextEncoder().encode(result).length).toBeLessThanOrEqual(255);
+    expect(result.endsWith(".mkv")).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import productionHotfixUrl from "./production-hotfix.css?url";
 import premiumStylesheetUrl from "./wos-premium.css?url";
 import premiumTorrentStylesheetUrl from "./wos-premium-torrents.css?url";
@@ -40,6 +41,8 @@ if (root === null) {
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );

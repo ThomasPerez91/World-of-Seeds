@@ -194,6 +194,7 @@ const messages = {
     "admin.cleanupConfirmPurge": "Confirmer la purge",
     "admin.cleanupPurging": "Planification…",
     "admin.cleanupPurgeScheduled": "Purge planifiée pour {count} contenu(s).",
+    "admin.cleanupPurgePartial": "Purge planifiée pour {count} contenu(s) ; {skipped} ignoré(s) (modifiés entre-temps).",
     "admin.cleanupPurgeFailed": "La purge n’a pas pu être planifiée.",
     "admin.cleanupSummary": "Résumé des résultats filtrés",
     "admin.cleanupFilteredContent": "Contenus filtrés",
@@ -319,7 +320,7 @@ const messages = {
     "admin.lastCheck": "Dernière vérification : {date}",
     "admin.configuration": "Configuration",
     "admin.functionalSettings": "Paramètres fonctionnels",
-    "admin.settingsIntro": "Ajuste les limites et performances sans exposer de secret dans ce fichier.",
+    "admin.settingsIntro": "Ajuste les limites et performances du service.",
     "admin.restartWos": "Redémarrer WOS",
     "admin.restarting": "Redémarrage…",
     "admin.readingConfiguration": "Lecture de la configuration…",
@@ -330,7 +331,7 @@ const messages = {
     "admin.userQuota": "Quota par utilisateur",
     "admin.unlimited": "Sans plafond",
     "admin.restartRequired": "Redémarrage requis.",
-    "admin.secretsNote": "Les identifiants et jetons restent exclusivement dans les variables secrètes.",
+    "admin.secretsNote": "Les passkeys saisies ici ne sont jamais réaffichées : seul leur état (configurée ou non) est connu.",
     "admin.saving": "Enregistrement…",
     "admin.save": "Enregistrer",
     "admin.audit": "Dernières modifications auditées",
@@ -349,7 +350,8 @@ const messages = {
     "admin.noChanges": "Aucune modification à enregistrer.",
     "admin.restartNeeded": "Redémarrage nécessaire",
     "admin.configurationRestart": "Configuration enregistrée. Un redémarrage est nécessaire.",
-    "admin.configurationApplied": "Configuration appliquée.",
+    "admin.configurationApplied": "Configuration enregistrée. Les nouvelles valeurs s’appliquent aux prochaines opérations ; les transferts en cours gardent leurs limites.",
+    "admin.optionVersionConflict": "Une autre modification a été enregistrée entre-temps. La configuration a été rechargée : vérifie-la puis reprends ta saisie.",
     "admin.configurationSaveFailed": "La configuration n’a pas pu être enregistrée.",
     "admin.restartInProgress": "Redémarrage en cours",
     "admin.restartReconnect": "Le service se relance. Cette page se reconnectera automatiquement.",
@@ -373,7 +375,9 @@ const messages = {
     "admin.unit.bytes_per_second": "octets/s",
     "admin.unit.count": "éléments",
     "admin.unit.count_per_minute": "requêtes/min",
+    "admin.unit.credit": "crédits",
     "admin.unit.hours": "heures",
+    "admin.unit.percent": "%",
     "admin.unit.seconds": "secondes",
     "admin.activity": "Activité",
     "admin.qbTorrents": "Torrents qBittorrent",
@@ -546,6 +550,9 @@ const messages = {
     "downloads.trackingFailed": "Le suivi est indisponible.",
     "downloads.trackingUnavailable": "Suivi des téléchargements indisponible",
     "downloads.batchTooLarge": "Un lot peut contenir au maximum {count} fichiers .torrent.",
+    "downloads.batchStopped": "Lot interrompu : {count} fichier(s) non envoyé(s).",
+    "downloads.confirmDeleteHint": "Clique de nouveau pour confirmer : {name}.",
+    "downloads.sessionExpired": "Ta session a expiré. Reconnecte-toi puis relance la récupération.",
     "downloads.batchTitle": "Ajout des torrents",
     "downloads.batchProgress": "{completed}/{total} traités · {active} en cours · {errors} erreurs",
     "downloads.batchComplete": "Lot terminé",
@@ -656,6 +663,11 @@ const messages = {
     "admin.scopes": "Scopes",
     "admin.createApiKey": "Créer une clé API",
     "admin.revoke": "Révoquer",
+    "admin.revokeApiKeyTitle": "Révoquer cette clé API ?",
+    "admin.revokeApiKeyDescription": "La clé « {name} » ({prefix}) cessera immédiatement de fonctionner et ne pourra pas être réactivée.",
+    "admin.revokeApiKeyWarning": "Les intégrations qui l’utilisent, comme le bot Discord, seront interrompues jusqu’à l’installation d’une nouvelle clé.",
+    "admin.confirmRevokeApiKey": "Révoquer la clé",
+    "admin.hideKey": "Masquer la clé",
     "admin.revoked": "Révoqué",
     "admin.lastUsed": "Dernière utilisation",
     "admin.externalApiKeyOnce": "Copiez cette clé maintenant. Elle ne sera plus affichée.",
@@ -665,6 +677,10 @@ const messages = {
     "admin.c411Account": "Compte C411 {slot}",
     "admin.showPasskey": "Afficher la passkey",
     "admin.hidePasskey": "Masquer la passkey",
+    "admin.secretConfigured": "Configurée — laisser vide pour la conserver",
+    "admin.secretWillBeErased": "Sera effacée à l’enregistrement",
+    "admin.erasePasskey": "Effacer la passkey",
+    "admin.keepPasskey": "Conserver la passkey",
     "admin.desiredGeneration": "Configuration demandée",
     "admin.appliedGeneration": "Configuration appliquée",
     "admin.logicalSpace": "Espace logique",
@@ -864,6 +880,7 @@ const messages = {
     "admin.cleanupConfirmPurge": "Confirm purge",
     "admin.cleanupPurging": "Scheduling…",
     "admin.cleanupPurgeScheduled": "Purge scheduled for {count} item(s).",
+    "admin.cleanupPurgePartial": "Purge scheduled for {count} item(s); {skipped} skipped (changed in the meantime).",
     "admin.cleanupPurgeFailed": "The purge could not be scheduled.",
     "admin.cleanupSummary": "Filtered results summary",
     "admin.cleanupFilteredContent": "Filtered content",
@@ -989,7 +1006,7 @@ const messages = {
     "admin.lastCheck": "Last checked: {date}",
     "admin.configuration": "Configuration",
     "admin.functionalSettings": "Functional settings",
-    "admin.settingsIntro": "Adjust limits and performance without exposing secrets in this file.",
+    "admin.settingsIntro": "Adjust the service limits and performance.",
     "admin.restartWos": "Restart WOS",
     "admin.restarting": "Restarting…",
     "admin.readingConfiguration": "Loading configuration…",
@@ -1000,7 +1017,7 @@ const messages = {
     "admin.userQuota": "Per-user quota",
     "admin.unlimited": "Unlimited",
     "admin.restartRequired": "Restart required.",
-    "admin.secretsNote": "Credentials and tokens remain exclusively in secret environment variables.",
+    "admin.secretsNote": "Passkeys entered here are never shown again: only whether one is configured is known.",
     "admin.saving": "Saving…",
     "admin.save": "Save",
     "admin.audit": "Latest audited changes",
@@ -1019,7 +1036,8 @@ const messages = {
     "admin.noChanges": "There are no changes to save.",
     "admin.restartNeeded": "Restart required",
     "admin.configurationRestart": "Configuration saved. A restart is required.",
-    "admin.configurationApplied": "Configuration applied.",
+    "admin.configurationApplied": "Configuration saved. New values apply to upcoming operations; transfers already running keep their limits.",
+    "admin.optionVersionConflict": "Another change was saved in the meantime. The configuration was reloaded: review it, then enter your change again.",
     "admin.configurationSaveFailed": "Configuration could not be saved.",
     "admin.restartInProgress": "Restart in progress",
     "admin.restartReconnect": "The service is restarting. This page will reconnect automatically.",
@@ -1043,7 +1061,9 @@ const messages = {
     "admin.unit.bytes_per_second": "bytes/s",
     "admin.unit.count": "items",
     "admin.unit.count_per_minute": "requests/min",
+    "admin.unit.credit": "credits",
     "admin.unit.hours": "hours",
+    "admin.unit.percent": "%",
     "admin.unit.seconds": "seconds",
     "admin.activity": "Activity",
     "admin.qbTorrents": "qBittorrent torrents",
@@ -1214,6 +1234,9 @@ const messages = {
     "downloads.trackingFailed": "Download tracking is unavailable.",
     "downloads.trackingUnavailable": "Download tracking unavailable",
     "downloads.batchTooLarge": "A batch can contain at most {count} .torrent files.",
+    "downloads.batchStopped": "Batch stopped: {count} file(s) not sent.",
+    "downloads.confirmDeleteHint": "Click again to confirm: {name}.",
+    "downloads.sessionExpired": "Your session expired. Sign in again, then restart the download.",
     "downloads.batchTitle": "Adding torrents",
     "downloads.batchProgress": "{completed}/{total} processed · {active} active · {errors} errors",
     "downloads.batchComplete": "Batch complete",
@@ -1324,6 +1347,11 @@ const messages = {
     "admin.scopes": "Scopes",
     "admin.createApiKey": "Create API key",
     "admin.revoke": "Revoke",
+    "admin.revokeApiKeyTitle": "Revoke this API key?",
+    "admin.revokeApiKeyDescription": "The key “{name}” ({prefix}) will stop working immediately and cannot be reactivated.",
+    "admin.revokeApiKeyWarning": "Integrations that use it, such as the Discord bot, stay interrupted until a new key is installed.",
+    "admin.confirmRevokeApiKey": "Revoke key",
+    "admin.hideKey": "Hide key",
     "admin.revoked": "Revoked",
     "admin.lastUsed": "Last used",
     "admin.externalApiKeyOnce": "Copy this key now. It will not be shown again.",
@@ -1333,6 +1361,10 @@ const messages = {
     "admin.c411Account": "C411 account {slot}",
     "admin.showPasskey": "Show passkey",
     "admin.hidePasskey": "Hide passkey",
+    "admin.secretConfigured": "Configured — leave empty to keep it",
+    "admin.secretWillBeErased": "Will be erased when you save",
+    "admin.erasePasskey": "Erase passkey",
+    "admin.keepPasskey": "Keep passkey",
     "admin.desiredGeneration": "Requested configuration",
     "admin.appliedGeneration": "Applied configuration",
     "admin.logicalSpace": "Logical space",
@@ -1388,10 +1420,34 @@ interface I18nApi {
 const I18nContext = createContext<I18nApi | null>(null);
 const STORAGE_KEY = "wos.preferred-locale";
 
+// Storage can be blocked or throw (private modes, disabled cookies): never break rendering.
 function initialLocale(): Locale {
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (stored === "fr" || stored === "en") return stored;
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (stored === "fr" || stored === "en") return stored;
+  } catch {
+    // Fall back to the default language.
+  }
   return "fr";
+}
+
+function storeLocale(locale: Locale): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, locale);
+  } catch {
+    // The choice then only lasts for this session.
+  }
+}
+
+function formatDateValue(
+  languageTag: string,
+  value: string | Date,
+  options?: Intl.DateTimeFormatOptions,
+): string {
+  const date = typeof value === "string" ? new Date(value) : value;
+  // A malformed date from the API must not take the whole screen down.
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(languageTag, options).format(date);
 }
 
 function interpolate(template: string, params: Params = {}): string {
@@ -1431,10 +1487,7 @@ const fallbackI18n: I18nApi = {
   setLocale: () => undefined,
   t: (key, params) => interpolate(messages.fr[key], params),
   formatBytes: (value, nullLabel) => formatByteValue(value, nullLabel ?? "—", "fr-FR"),
-  formatDate: (value, options) =>
-    new Intl.DateTimeFormat("fr-FR", options).format(
-      typeof value === "string" ? new Date(value) : value,
-    ),
+  formatDate: (value, options) => formatDateValue("fr-FR", value, options),
   formatNumber: (value, options) => new Intl.NumberFormat("fr-FR", options).format(value),
   apiError: (_error, fallback) => interpolate(messages.fr[fallback]),
 };
@@ -1444,7 +1497,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const languageTag: I18nApi["languageTag"] = locale === "fr" ? "fr-FR" : "en-US";
 
   const setLocale = useCallback((nextLocale: Locale) => {
-    window.localStorage.setItem(STORAGE_KEY, nextLocale);
+    storeLocale(nextLocale);
     setLocaleState(nextLocale);
   }, []);
 
@@ -1463,9 +1516,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   );
   const formatDate = useCallback(
     (value: string | Date, options?: Intl.DateTimeFormatOptions) =>
-      new Intl.DateTimeFormat(languageTag, options).format(
-        typeof value === "string" ? new Date(value) : value,
-      ),
+      formatDateValue(languageTag, value, options),
     [languageTag],
   );
   const formatNumber = useCallback(

@@ -10,13 +10,11 @@ from typing import Annotated, Any, Literal, Never, cast
 from fastapi import (
     APIRouter,
     Depends,
-    File,
     Header,
     HTTPException,
     Query,
     Request,
     Response,
-    UploadFile,
     WebSocket,
     WebSocketDisconnect,
     status,
@@ -24,13 +22,16 @@ from fastapi import (
 from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+from sqlalchemy.sql.elements import ColumnElement
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile
 
 from app.auth.dependencies import (
     AuthContext,
     DbSession,
     RealtimeAuthContext,
-    get_realtime_auth_context,
+    get_realtime_connection,
+    realtime_session_is_valid,
     require_current_credentials,
     require_current_credentials_csrf,
 )
@@ -59,7 +60,7 @@ from app.models import (
     TorrentRequest,
     TorrentRequestState,
 )
-from app.options import DatabaseOptionsDriftError, PostgresOptionsRegistry
+from app.options import DatabaseOptionsDriftError, OptionsValidationError, PostgresOptionsRegistry
 from app.scheduler.queue_visibility import (
     TorrentQueueVisibility,
     load_torrent_queue_visibility,
@@ -118,6 +119,28 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 UPLOAD_READ_CHUNK = 64 * 1024
+# Multipart framing (boundaries, part headers) allowed around the file itself.
+UPLOAD_ENVELOPE_BYTES = 64 * 1024
+_TORRENT_UPLOAD_OPENAPI: dict[str, Any] = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "multipart/form-data": {
+                "schema": {
+                    "type": "object",
+                    "required": ["torrent"],
+                    "properties": {
+                        "torrent": {
+                            "type": "string",
+                            "format": "binary",
+                            "description": "Fichier BitTorrent C411",
+                        }
+                    },
+                }
+            }
+        },
+    }
+}
 MAX_PAGE_SIZE = 100
 MAX_MANIFEST_PAGE_SIZE = 500
 MAX_MANAGED_ARCHIVE_ENTRIES = 50_000
@@ -127,6 +150,16 @@ ACTIVE_REQUEST_STATES = (
     TorrentRequestState.ACTIVE,
     TorrentRequestState.READY,
 )
+
+
+def _visible_request(now: datetime) -> ColumnElement[bool]:
+    """Requests the user still sees: a READY one whose retention ended no longer counts."""
+    return TorrentRequest.state.in_(ACTIVE_REQUEST_STATES) & (
+        (TorrentRequest.state != TorrentRequestState.READY)
+        | (TorrentRequest.unsubscribe_at.is_not(None) & (TorrentRequest.unsubscribe_at > now))
+    )
+
+
 RequestState = Literal["requested", "active", "ready", "cancelled", "expired", "error"]
 PressureState = Literal["normal", "warning", "critical"]
 TorrentSort = Literal["name", "state", "queue", "size"]
@@ -203,13 +236,58 @@ async def _read_upload(upload: UploadFile, max_bytes: int) -> bytes:
             break
         content.extend(chunk)
         if len(content) > max_bytes:
+            _too_large()
+    return bytes(content)
+
+
+def _too_large() -> Never:
+    _fail(
+        status.HTTP_413_CONTENT_TOO_LARGE,
+        "torrent_too_large",
+        "Le fichier .torrent dépasse la taille autorisée.",
+        "torrent",
+    )
+
+
+async def _read_torrent_upload(request: Request, max_bytes: int) -> tuple[str | None, bytes]:
+    """Read the multipart body only once the caller is authenticated and the size is bounded.
+
+    FastAPI parses a declared ``File`` parameter before resolving the authentication
+    dependencies, so an anonymous request would be spooled to disk first. The route reads
+    the form itself instead, and rejects an oversized or undeclared body before any parsing.
+    """
+
+    declared = request.headers.get("content-length")
+    if declared is None:
+        _fail(
+            status.HTTP_411_LENGTH_REQUIRED,
+            "torrent_length_required",
+            "La taille de l’envoi doit être précisée.",
+            "torrent",
+        )
+    try:
+        length = int(declared)
+    except ValueError:
+        length = -1
+    if length < 0:
+        _fail(
+            status.HTTP_400_BAD_REQUEST,
+            "torrent_length_invalid",
+            "La taille de l’envoi est invalide.",
+            "torrent",
+        )
+    if length > max_bytes + UPLOAD_ENVELOPE_BYTES:
+        _too_large()
+    async with request.form(max_files=1, max_fields=1, max_part_size=UPLOAD_ENVELOPE_BYTES) as form:
+        upload = form.get("torrent")
+        if not isinstance(upload, UploadFile):
             _fail(
-                status.HTTP_413_CONTENT_TOO_LARGE,
-                "torrent_too_large",
-                "Le fichier .torrent dépasse la taille autorisée.",
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "torrent_missing",
+                "Sélectionne un fichier portant l’extension .torrent.",
                 "torrent",
             )
-    return bytes(content)
+        return upload.filename, await _read_upload(upload, max_bytes)
 
 
 def _integer_option(values: dict[str, bool | int | str], key: str) -> int:
@@ -270,7 +348,7 @@ def _response(
 async def stream_torrent_events(
     websocket: WebSocket,
     redis: RedisCoordinatorDependency,
-    context: Annotated[RealtimeAuthContext, Depends(get_realtime_auth_context)],
+    context: Annotated[RealtimeAuthContext, Depends(get_realtime_connection)],
 ) -> None:
     await websocket.accept()
     subscription = await redis.subscribe_torrent_events(context.user_id)
@@ -281,6 +359,10 @@ async def stream_torrent_events(
     try:
         while True:
             event = await subscription.next_event(timeout_seconds=REALTIME_HEARTBEAT_SECONDS)
+            if event is None and not await realtime_session_is_valid(context):
+                # Logout, suspension, password change or expiry: stop streaming.
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
             await websocket.send_json(event.payload() if event else {"type": "heartbeat"})
     except (RuntimeError, WebSocketDisconnect):
         return
@@ -353,7 +435,7 @@ async def get_torrent_download_manifest(
     try:
         options = await PostgresOptionsRegistry().snapshot(db)
         archive_max_bytes = _integer_option(options, "WOS_FOLDER_ARCHIVE_MAX_BYTES")
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -503,7 +585,7 @@ async def get_torrent_download_directories(
     try:
         options = await PostgresOptionsRegistry().snapshot(db)
         archive_max_bytes = _integer_option(options, "WOS_FOLDER_ARCHIVE_MAX_BYTES")
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -663,7 +745,7 @@ async def download_torrent_folder_archive(
             "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
         )
         global_rate = _integer_option(options, "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL")
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -854,7 +936,7 @@ async def download_torrent_archive(
             "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
         )
         global_rate = _integer_option(options, "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL")
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1031,7 +1113,7 @@ async def download_torrent_file(
             "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
         )
         global_rate = _integer_option(options, "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_GLOBAL")
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1077,18 +1159,28 @@ async def download_torrent_file(
             manifest_version=manifest_version,
             file_index=file_index,
         )
-    except (ManagedDownloadError, SharedContentStoreError):
+    except BaseException as error:
+        # Whatever stops the open (including a cancelled request), the lease must not linger.
         if lease_id is not None:
             await finish_download(partial(leases.release, lease_id))
-        _fail(
-            status.HTTP_409_CONFLICT,
-            "torrent_file_changed",
-            "Le fichier ne correspond plus au manifeste.",
-        )
+        if isinstance(error, ManagedDownloadError | SharedContentStoreError):
+            _fail(
+                status.HTTP_409_CONFLICT,
+                "torrent_file_changed",
+                "Le fichier ne correspond plus au manifeste.",
+            )
+        if isinstance(error, OSError):
+            logger.warning("download_open_failed", extra={"error_type": type(error).__name__})
+            _fail(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "download_storage_unavailable",
+                "Le stockage est momentanément indisponible.",
+            )
+        raise
 
     headers = {
         "Accept-Ranges": "bytes",
-        "Cache-Control": "private, no-cache",
+        "Cache-Control": "private, no-cache, no-transform",
         "Content-Disposition": download.content_disposition,
         "Content-Type": download.media_type,
         "ETag": download.etag,
@@ -1158,22 +1250,20 @@ async def download_torrent_file(
     )
 
 
-@router.post("", response_model=TorrentRequestV2CreateResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=TorrentRequestV2CreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    openapi_extra=_TORRENT_UPLOAD_OPENAPI,
+)
 async def create_torrent_request(
+    request: Request,
     db: DbSession,
     redis: RedisCoordinatorDependency,
     settings: Annotated[Settings, Depends(get_settings)],
     context: Annotated[AuthContext, Depends(require_current_credentials_csrf)],
-    torrent: Annotated[UploadFile, File(description="Fichier BitTorrent C411")],
 ) -> TorrentRequestV2CreateResponse:
     user_id = context.user.id
-    if torrent.filename is None or not torrent.filename.lower().endswith(".torrent"):
-        _fail(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "torrent_filename_invalid",
-            "Sélectionne un fichier portant l’extension .torrent.",
-            "torrent",
-        )
 
     registry = PostgresOptionsRegistry()
     try:
@@ -1181,12 +1271,13 @@ async def create_torrent_request(
         max_upload = _integer_option(values, "WOS_TORRENT_UPLOAD_MAX_FILE_BYTES")
         max_total = _integer_option(values, "WOS_TORRENT_MAX_SIZE_BYTES")
         max_active = _integer_option(values, "WOS_TORRENT_MAX_ACTIVE_PER_USER")
+        add_max_attempts = _integer_option(values, "WOS_TORRENT_MAX_RETRY_ATTEMPTS") + 1
         auto_unsubscribe_hours = _integer_option(
             values,
             "WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS",
         )
         policy = StorageAdmissionPolicy.from_options(values)
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1195,7 +1286,14 @@ async def create_torrent_request(
         )
     await db.rollback()
 
-    content = await _read_upload(torrent, max_upload)
+    filename, content = await _read_torrent_upload(request, max_upload)
+    if filename is None or not filename.lower().endswith(".torrent"):
+        _fail(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "torrent_filename_invalid",
+            "Sélectionne un fichier portant l’extension .torrent.",
+            "torrent",
+        )
     try:
         parsed = await torrent_validation_pool.run(
             partial(
@@ -1245,7 +1343,9 @@ async def create_torrent_request(
                     .select_from(TorrentRequest)
                     .where(
                         TorrentRequest.user_id == user_id,
-                        TorrentRequest.state.in_(ACTIVE_REQUEST_STATES),
+                        # An expired READY request is already hidden from the user and waits for
+                        # the hourly reaper: it must not count against the limit meanwhile.
+                        _visible_request(datetime.now(UTC)),
                     )
                 )
                 if active_count is None or active_count > max_active:
@@ -1277,6 +1377,7 @@ async def create_torrent_request(
                             )
                         ),
                         state=TorrentJobState.QUEUED,
+                        max_attempts=add_max_attempts,
                         available_at=datetime.now(UTC),
                     )
                 )
@@ -1393,11 +1494,7 @@ async def list_torrent_requests(
     retention_bucket: RetentionBucket | None = None,
 ) -> TorrentRequestV2ListingResponse:
     now = datetime.now(UTC)
-    visible_request = TorrentRequest.state.in_(ACTIVE_REQUEST_STATES) & (
-        (TorrentRequest.state != TorrentRequestState.READY)
-        | (TorrentRequest.unsubscribe_at.is_not(None) & (TorrentRequest.unsubscribe_at > now))
-    )
-    filters = [TorrentRequest.user_id == context.user.id, visible_request]
+    filters = [TorrentRequest.user_id == context.user.id, _visible_request(now)]
     if search and (normalized_search := search.strip()):
         filters.append(func.lower(ManagedTorrent.name).contains(normalized_search.casefold()))
 
@@ -1567,7 +1664,7 @@ async def cancel_torrent_request(
                 torrent_request_id=torrent_request_id,
                 retention_hours=retention_hours,
             )
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1614,8 +1711,9 @@ async def retry_torrent_request(
     try:
         values = await PostgresOptionsRegistry().snapshot(db)
         policy = StorageAdmissionPolicy.from_options(values)
+        retry_max_attempts = _integer_option(values, "WOS_TORRENT_MAX_RETRY_ATTEMPTS") + 1
         await db.rollback()
-    except (DatabaseOptionsDriftError, ValueError):
+    except (DatabaseOptionsDriftError, OptionsValidationError, ValueError):
         await db.rollback()
         _fail(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1682,26 +1780,33 @@ async def retry_torrent_request(
                 "torrent_retry_not_allowed",
                 "Ce téléchargement n’est pas dans un état relançable.",
             )
-        if latest_add_state is not TorrentJobState.FAILED:
+        # An ERROR raised by synchronization (the ADD job completed) has no payload to replay:
+        # the torrent is retried by observing it again in qBittorrent.
+        resync_only = latest_add_state is TorrentJobState.COMPLETED
+        if latest_add_state is not TorrentJobState.FAILED and not resync_only:
             _fail(
                 status.HTTP_409_CONFLICT,
                 "torrent_retry_not_allowed",
                 "Cette erreur ne peut pas être relancée automatiquement.",
             )
-        try:
-            parsed = await retry_reads.run(storage_key, partial(payload_store.read, storage_key))
-        except TorrentRetryBusyError:
-            _fail(
-                status.HTTP_409_CONFLICT,
-                "torrent_retry_in_progress",
-                "Une relance est déjà en cours.",
-            )
-        except TorrentPayloadStoreError:
-            _fail(
-                status.HTTP_409_CONFLICT,
-                "torrent_payload_unavailable",
-                "Le fichier torrent d’origine n’est plus disponible pour la relance.",
-            )
+        parsed = None
+        if not resync_only:
+            try:
+                parsed = await retry_reads.run(
+                    storage_key, partial(payload_store.read, storage_key)
+                )
+            except TorrentRetryBusyError:
+                _fail(
+                    status.HTTP_409_CONFLICT,
+                    "torrent_retry_in_progress",
+                    "Une relance est déjà en cours.",
+                )
+            except TorrentPayloadStoreError:
+                _fail(
+                    status.HTTP_409_CONFLICT,
+                    "torrent_payload_unavailable",
+                    "Le fichier torrent d’origine n’est plus disponible pour la relance.",
+                )
 
         async with db.begin():
             # Canonical order shared with upload/cancellation: torrent, then right.
@@ -1749,89 +1854,117 @@ async def retry_torrent_request(
                 .order_by(TorrentJob.created_at.desc(), TorrentJob.id.desc())
                 .limit(1)
             )
-            if latest_add is None or latest_add.state is not TorrentJobState.FAILED:
+            expected_add_state = (
+                TorrentJobState.COMPLETED if resync_only else TorrentJobState.FAILED
+            )
+            if latest_add is None or latest_add.state is not expected_add_state:
                 _fail(
                     status.HTTP_409_CONFLICT,
                     "torrent_retry_not_allowed",
                     "Cette erreur ne peut pas être relancée automatiquement.",
                 )
-            active_add = await db.scalar(
-                select(func.count())
-                .select_from(TorrentJob)
-                .where(
-                    TorrentJob.managed_torrent_id == managed.id,
-                    TorrentJob.job_type == ADD_TORRENT_JOB,
-                    TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
-                )
-            )
-            if active_add:
-                _fail(
-                    status.HTTP_409_CONFLICT,
-                    "torrent_retry_in_progress",
-                    "Une relance est déjà en cours.",
-                )
-
-            # Upload admissions, purge accounting and retries share this lock.
-            # Aggregate only after admission has been serialized.
-            await lock_storage_ledger(db, now=datetime.now(UTC))
-            committed_states = (
-                ManagedTorrentState.PENDING,
-                ManagedTorrentState.ADDING,
-                ManagedTorrentState.DOWNLOADING,
-                ManagedTorrentState.PAUSED,
-                ManagedTorrentState.RETRY_WAIT,
-                ManagedTorrentState.READY,
-            )
-            committed_bytes = int(
-                await db.scalar(
-                    select(func.coalesce(func.sum(ManagedTorrent.total_size), 0)).where(
-                        ManagedTorrent.state.in_(committed_states)
+            response: TorrentRequestV2Response | None = None
+            if resync_only:
+                now = datetime.now(UTC)
+                managed.state = ManagedTorrentState.PAUSED
+                managed.qb_state = None
+                managed.retry_at = None
+                managed.scheduler_retry_at = None
+                managed.stall_count = 0
+                managed.last_progress_at = None
+                managed.last_downloaded_bytes = None
+                managed.desired_active = False
+                managed.desired_priority = None
+                managed.desired_download_limit = 0
+                managed.admin_forced_active = False
+                managed.updated_at = now
+                await db.flush()
+                response = _response(owned, managed)
+            if response is None:
+                assert parsed is not None
+                active_add = await db.scalar(
+                    select(func.count())
+                    .select_from(TorrentJob)
+                    .where(
+                        TorrentJob.managed_torrent_id == managed.id,
+                        TorrentJob.job_type == ADD_TORRENT_JOB,
+                        TorrentJob.state.in_((TorrentJobState.QUEUED, TorrentJobState.RUNNING)),
                     )
                 )
-                or 0
-            )
-            if committed_bytes + managed.total_size > managed_reservation_capacity(
-                disk,
-                policy=policy,
-            ):
-                _fail(
-                    status.HTTP_507_INSUFFICIENT_STORAGE,
-                    "managed_capacity_exceeded",
-                    "La capacité réservée ne permet pas encore de relancer ce torrent.",
-                )
+                if active_add:
+                    _fail(
+                        status.HTTP_409_CONFLICT,
+                        "torrent_retry_in_progress",
+                        "Une relance est déjà en cours.",
+                    )
 
-            if (
-                parsed.info_hash != managed.info_hash
-                or parsed.name != managed.name
-                or parsed.total_size != managed.total_size
-            ):
-                _fail(
-                    status.HTTP_409_CONFLICT,
-                    "torrent_payload_mismatch",
-                    "Le fichier torrent conservé ne correspond plus à cette demande.",
+                # Upload admissions, purge accounting and retries share this lock.
+                # Aggregate only after admission has been serialized.
+                await lock_storage_ledger(db, now=datetime.now(UTC))
+                committed_states = (
+                    ManagedTorrentState.PENDING,
+                    ManagedTorrentState.ADDING,
+                    ManagedTorrentState.DOWNLOADING,
+                    ManagedTorrentState.PAUSED,
+                    ManagedTorrentState.RETRY_WAIT,
+                    ManagedTorrentState.READY,
                 )
+                committed_bytes = int(
+                    await db.scalar(
+                        select(func.coalesce(func.sum(ManagedTorrent.total_size), 0)).where(
+                            ManagedTorrent.state.in_(committed_states)
+                        )
+                    )
+                    or 0
+                )
+                if committed_bytes + managed.total_size > managed_reservation_capacity(
+                    disk,
+                    policy=policy,
+                ):
+                    _fail(
+                        status.HTTP_507_INSUFFICIENT_STORAGE,
+                        "managed_capacity_exceeded",
+                        "La capacité réservée ne permet pas encore de relancer ce torrent.",
+                    )
 
-            managed.lifecycle_generation += 1
-            managed.state = ManagedTorrentState.PENDING
-            managed.qb_state = None
-            managed.progress = 0
-            managed.retry_at = None
-            managed.scheduler_retry_at = None
-            managed.desired_active = False
-            managed.desired_priority = None
-            managed.desired_download_limit = 0
-            managed.updated_at = datetime.now(UTC)
-            retry_job = TorrentJob(
-                managed_torrent_id=managed.id,
-                torrent_request_id=owned.id,
-                job_type=ADD_TORRENT_JOB,
-                idempotency_key=(f"add:{managed.id}:retry:{managed.lifecycle_generation}"),
-                state=TorrentJobState.QUEUED,
-                available_at=datetime.now(UTC),
-            )
-            db.add(retry_job)
-            await db.flush()
-            response = _response(owned, managed)
+                if (
+                    parsed.info_hash != managed.info_hash
+                    or parsed.name != managed.name
+                    or parsed.total_size != managed.total_size
+                ):
+                    _fail(
+                        status.HTTP_409_CONFLICT,
+                        "torrent_payload_mismatch",
+                        "Le fichier torrent conservé ne correspond plus à cette demande.",
+                    )
+
+                managed.lifecycle_generation += 1
+                managed.state = ManagedTorrentState.PENDING
+                managed.qb_state = None
+                managed.progress = 0
+                managed.retry_at = None
+                managed.scheduler_retry_at = None
+                # A retry must not inherit the previous attempt stall cooldowns or forced slot.
+                managed.stall_count = 0
+                managed.last_progress_at = None
+                managed.last_downloaded_bytes = None
+                managed.admin_forced_active = False
+                managed.desired_active = False
+                managed.desired_priority = None
+                managed.desired_download_limit = 0
+                managed.updated_at = datetime.now(UTC)
+                retry_job = TorrentJob(
+                    managed_torrent_id=managed.id,
+                    torrent_request_id=owned.id,
+                    job_type=ADD_TORRENT_JOB,
+                    idempotency_key=(f"add:{managed.id}:retry:{managed.lifecycle_generation}"),
+                    state=TorrentJobState.QUEUED,
+                    max_attempts=retry_max_attempts,
+                    available_at=datetime.now(UTC),
+                )
+                db.add(retry_job)
+                await db.flush()
+                response = _response(owned, managed)
     except HTTPException:
         raise
     except (DatabaseUnavailableError, PoolTimeoutError):
@@ -1844,9 +1977,11 @@ async def retry_torrent_request(
             "La relance n’a pas pu être enregistrée.",
         )
 
-    await redis.signal_job_available()
+    if not resync_only:
+        await redis.signal_job_available()
     await redis.publish_torrent_event(
         user_id,
         TorrentRealtimeEvent(TorrentEventType.REQUESTED, torrent_request_id, datetime.now(UTC)),
     )
+    assert response is not None
     return response

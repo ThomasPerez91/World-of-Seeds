@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
@@ -7,7 +8,6 @@ from datetime import UTC, datetime
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -27,6 +27,7 @@ from app.core.database import engine
 from app.core.database_errors import DatabaseUnavailableError
 from app.core.drain import RequestDrain, RequestDrainMiddleware
 from app.core.http_security import SecurityHeadersMiddleware
+from app.core.static_files import DeploymentAwareStaticFiles
 from app.integrations import ExternalServicesMonitor
 from app.integrations.admin_runtime import AdminRuntimeMonitor
 from app.integrations.network_collection import NetworkThroughputCollector
@@ -36,6 +37,7 @@ from app.integrations.prometheus_network import PrometheusNetworkError
 from app.integrations.wos_restart import WosRestartStore
 from app.observability import MetricsRegistry, OperationalMetricsCache, RequestMetricsMiddleware
 from app.options import OptionsStore
+from app.options.registry import ignored_option_variables
 from app.torrents.downloads import DownloadRateLimiter
 from app.torrents.retry_reads import TorrentRetryReads
 from app.torrents.traffic import DownloadTrafficScheduler
@@ -63,6 +65,10 @@ async def monitor_http_upload(application: FastAPI) -> None:
                 )
         except PrometheusNetworkError:
             logger.warning("HTTP upload scheduler could not read network telemetry")
+        except Exception:
+            # An unexpected failure must not silently end the monitor: lane capacity would
+            # stay frozen until the next restart.
+            logger.exception("http_upload_monitor_iteration_failed")
         await asyncio.sleep(15)
 
 
@@ -105,6 +111,12 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = settings
+    if ignored := ignored_option_variables(os.environ):
+        logger.warning(
+            "environment_options_ignored: %s are administration options stored in the "
+            "database; the environment variables have no effect",
+            ",".join(ignored),
+        )
     application.state.reconciliation_disk_reads = ReconciliationDiskReads()
     application.state.torrent_retry_reads = TorrentRetryReads()
     application.state.network_throughput_collector = NetworkThroughputCollector(settings)
@@ -309,7 +321,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     if settings.static_root.is_dir():
         application.mount(
             "/",
-            StaticFiles(directory=settings.static_root, html=True),
+            DeploymentAwareStaticFiles(directory=settings.static_root, html=True),
             name="frontend",
         )
 

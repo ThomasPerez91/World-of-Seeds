@@ -22,7 +22,7 @@ from app.models import (
     User,
     UserStorageUsage,
 )
-from app.options import PostgresOptionsRegistry
+from app.options import INACTIVE_OPTION_KEYS, PostgresOptionsRegistry
 
 
 async def _admin(db: AsyncSession) -> User:
@@ -100,6 +100,10 @@ async def test_admin_overview_exposes_options_scheduler_storage_and_bounded_audi
     assert body["storage"]["managed_bytes"] == 100
     assert body["storage"]["logical_bytes"] == 150
     assert 0 < len(body["audit"]) <= 50
+    shown = {field["key"] for section in body["sections"] for field in section["fields"]}
+    # Options that no consumer reads are not offered for editing.
+    assert not shown.intersection(INACTIVE_OPTION_KEYS)
+    assert "WOS_TORRENT_MAX_ACTIVE_PER_USER" in shown
     c411 = next(section for section in body["sections"] if section["id"] == "c411_accounts")
     assert len(c411["fields"]) == 48
     assert sum(field["input_type"] == "secret" for field in c411["fields"]) == 16
@@ -160,8 +164,39 @@ async def test_admin_can_configure_c411_pair_without_exposing_passkey_in_audit(
     fields = {field["key"]: field for field in c411["fields"]}
     assert fields["WOS_C411_ACCOUNT_01_USERNAME"]["value"] == "Thomas"
     assert fields["WOS_C411_ACCOUNT_01_NUMBER"]["value"] == "1001"
-    assert fields["WOS_C411_ACCOUNT_01_PASSKEY"]["value"] == "admin-passkey-123"
+    # Secrets are write-only: the response never carries the value, only whether one is set.
+    assert fields["WOS_C411_ACCOUNT_01_PASSKEY"]["value"] == ""
+    assert fields["WOS_C411_ACCOUNT_01_PASSKEY"]["configured"] is True
+    assert fields["WOS_C411_ACCOUNT_02_PASSKEY"]["configured"] is False
+    assert "admin-passkey-123" not in response.text
     assert all("admin-passkey-123" not in repr(event) for event in body["audit"])
+
+    overview = await client.get("/api/v2/admin/overview", headers=headers)
+    assert overview.status_code == 200
+    assert "admin-passkey-123" not in overview.text
+    refreshed = next(
+        section for section in overview.json()["sections"] if section["id"] == "c411_accounts"
+    )
+    stored = {field["key"]: field for field in refreshed["fields"]}
+    assert stored["WOS_C411_ACCOUNT_01_PASSKEY"]["configured"] is True
+
+    cleared = await client.patch(
+        "/api/v2/admin/options",
+        json={
+            "changes": {
+                "WOS_C411_ACCOUNT_01_NUMBER": "",
+                "WOS_C411_ACCOUNT_01_PASSKEY": "",
+            }
+        },
+        headers=headers,
+    )
+    assert cleared.status_code == 200
+    after = next(
+        section for section in cleared.json()["sections"] if section["id"] == "c411_accounts"
+    )
+    assert {field["key"]: field for field in after["fields"]}["WOS_C411_ACCOUNT_01_PASSKEY"][
+        "configured"
+    ] is False
 
 
 class _RuntimeMonitor:
@@ -452,3 +487,84 @@ async def test_admin_cleanup_lists_downloads_and_purges_only_explicit_filtered_i
     assert reloaded_subscription is not None
     assert reloaded_subscription.state is TorrentRequestState.CANCELLED
     assert usage.logical_bytes == 900
+
+
+@pytest.mark.asyncio
+async def test_admin_options_patch_answers_409_on_a_stale_version(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await _admin(db_session)
+    headers = await _login(client)
+    key = "WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS"
+    overview = (await client.get("/api/v2/admin/overview")).json()
+    field = next(
+        item for section in overview["sections"] for item in section["fields"] if item["key"] == key
+    )
+
+    first = await client.patch(
+        "/api/v2/admin/options",
+        json={"changes": {key: 60}, "expected_versions": {key: field["version"]}},
+        headers=headers,
+    )
+    stale = await client.patch(
+        "/api/v2/admin/options",
+        json={"changes": {key: 80}, "expected_versions": {key: field["version"]}},
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "option_version_conflict"
+
+
+@pytest.mark.asyncio
+async def test_purge_skips_a_content_whose_subscribers_changed_since_the_list(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await _admin(db_session)
+    headers = await _login(client)
+    now = datetime.now(UTC)
+    owner = User(username="purge-owner", password_hash="test-password-hash")
+    torrent = ManagedTorrent(
+        info_hash="d" * 40,
+        name="Shown with one subscriber",
+        total_size=100,
+        state=ManagedTorrentState.READY,
+        progress=1,
+        ready_at=now - timedelta(hours=1),
+    )
+    db_session.add_all([owner, torrent])
+    await db_session.flush()
+    subscription = TorrentRequest(
+        user_id=owner.id,
+        managed_torrent_id=torrent.id,
+        state=TorrentRequestState.READY,
+        ready_at=now - timedelta(hours=1),
+        unsubscribe_at=now + timedelta(days=1),
+    )
+    db_session.add(subscription)
+    await db_session.commit()
+
+    stale = await client.post(
+        "/api/v2/admin/cleanup/purge",
+        json={"torrent_ids": [str(torrent.id)], "expected_subscribers": {str(torrent.id): 0}},
+        headers=headers,
+    )
+
+    assert stale.status_code == 200
+    assert stale.json()["scheduled"] == 0
+    assert stale.json()["skipped_ids"] == [str(torrent.id)]
+    await db_session.refresh(subscription)
+    assert subscription.state is TorrentRequestState.READY
+
+    current = await client.post(
+        "/api/v2/admin/cleanup/purge",
+        json={"torrent_ids": [str(torrent.id)], "expected_subscribers": {str(torrent.id): 1}},
+        headers=headers,
+    )
+
+    assert current.json()["scheduled_ids"] == [str(torrent.id)]
+    await db_session.refresh(subscription)
+    assert subscription.state.value == TorrentRequestState.CANCELLED.value

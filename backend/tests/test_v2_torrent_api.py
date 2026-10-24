@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Never
@@ -12,6 +13,7 @@ from app.auth.security import hash_password
 from app.coordination import TorrentEventType, TorrentRealtimeEvent
 from app.main import app
 from app.models import (
+    DatabaseOption,
     ManagedTorrent,
     ManagedTorrentState,
     TorrentJob,
@@ -470,6 +472,80 @@ async def test_v2_api_requires_authentication_csrf_and_valid_torrent(
     assert invalid.json()["detail"]["code"] == "torrent_invalid"
     assert wrong_name.status_code == 422
     assert wrong_name.json()["detail"]["code"] == "torrent_filename_invalid"
+
+
+@pytest.mark.asyncio
+async def test_v2_upload_body_is_not_parsed_before_authentication(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await prepare_user(db_session)
+
+    async def forbidden(self: object) -> Never:
+        raise AssertionError("an anonymous multipart body must not be parsed")
+
+    monkeypatch.setattr("starlette.formparsers.MultiPartParser.parse", forbidden)
+
+    anonymous = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+    )
+
+    assert anonymous.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_v2_upload_rejects_oversized_or_undeclared_bodies_before_parsing(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+
+    async def forbidden(self: object) -> Never:
+        raise AssertionError("an unbounded multipart body must not be parsed")
+
+    monkeypatch.setattr("starlette.formparsers.MultiPartParser.parse", forbidden)
+
+    oversized = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("big.torrent", b"0" * (5 * 1024 * 1024), "application/x-bittorrent")},
+        headers=headers,
+    )
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"--x\r\n"
+
+    undeclared = await client.post(
+        "/api/v2/torrents",
+        content=chunks(),
+        headers={**headers, "Content-Type": "multipart/form-data; boundary=x"},
+    )
+
+    assert oversized.status_code == 413
+    assert oversized.json()["detail"]["code"] == "torrent_too_large"
+    assert undeclared.status_code == 411
+    assert undeclared.json()["detail"]["code"] == "torrent_length_required"
+
+
+@pytest.mark.asyncio
+async def test_v2_upload_without_a_torrent_part_is_a_validation_error(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+
+    response = await client.post(
+        "/api/v2/torrents",
+        files={"other": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "torrent_missing"
 
 
 @pytest.mark.asyncio
@@ -1003,7 +1079,7 @@ async def test_precommit_outage_cleans_staged_payload_on_every_attempt(
 @pytest.mark.parametrize(
     "original_state", [TorrentJobState.COMPLETED, None, TorrentJobState.FAILED]
 )
-async def test_sync_error_is_refused_without_reading_a_removed_payload(
+async def test_sync_error_is_retried_by_observation_without_reading_a_removed_payload(
     client: AsyncClient,
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -1056,7 +1132,130 @@ async def test_sync_error_is_refused_without_reading_a_removed_payload(
         f"/api/v2/torrents/{uploaded.json()['id']}/retry",
         headers=headers,
     )
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "torrent_retry_not_allowed"
+    if original_state is None:
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "torrent_retry_not_allowed"
+        assert redis.signals == 0
+        assert redis.events == []
+        return
+    # The ADD job completed: the ERROR came from synchronization, so the torrent is observed
+    # again in qBittorrent instead of replaying a payload that no longer exists.
+    assert response.status_code == 200
+    assert response.json()["state"] != "error"
     assert redis.signals == 0
-    assert redis.events == []
+    assert len(redis.events) == 1
+    await db_session.refresh(managed)
+    assert managed.state is ManagedTorrentState.PAUSED
+    assert managed.desired_active is False
+
+
+@pytest.mark.asyncio
+async def test_add_job_attempt_budget_follows_the_retry_option(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+    uploaded = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+    assert uploaded.status_code == 201
+    job = await db_session.scalar(select(TorrentJob))
+    assert job is not None
+    # WOS_TORRENT_MAX_RETRY_ATTEMPTS defaults to 5 retries, so six attempts in total.
+    assert job.max_attempts == 6
+
+
+@pytest.mark.asyncio
+async def test_v2_upload_answers_503_when_the_stored_options_are_inconsistent(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await prepare_user(db_session)
+    headers = await login(client)
+    warning = await db_session.get(DatabaseOption, "WOS_STORAGE_PRESSURE_WARNING_PERCENT")
+    assert warning is not None
+    warning.integer_value = 95  # above the critical threshold
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "torrent_options_unavailable"
+
+
+async def _ready_request(
+    db: AsyncSession, owner: User, *, number: int, retention_left: timedelta
+) -> None:
+    now = datetime.now(UTC)
+    torrent = ManagedTorrent(
+        info_hash=f"{number:040x}",
+        name=f"ready-{number}",
+        total_size=1,
+        state=ManagedTorrentState.READY,
+        progress=1,
+        ready_at=now - timedelta(days=3),
+    )
+    db.add(torrent)
+    await db.flush()
+    db.add(
+        TorrentRequest(
+            user_id=owner.id,
+            managed_torrent_id=torrent.id,
+            state=TorrentRequestState.READY,
+            ready_at=now - timedelta(days=3),
+            unsubscribe_at=now + retention_left,
+        )
+    )
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_an_expired_ready_request_no_longer_counts_against_the_active_limit(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    limit = await db_session.get(DatabaseOption, "WOS_TORRENT_MAX_ACTIVE_PER_USER")
+    assert limit is not None
+    limit.integer_value = 1
+    await db_session.commit()
+    await _ready_request(db_session, owner, number=0xAA, retention_left=-timedelta(minutes=40))
+    headers = await login(client)
+
+    response = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+
+    assert response.status_code == 201, response.text
+
+
+@pytest.mark.asyncio
+async def test_a_live_ready_request_still_counts_against_the_active_limit(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    limit = await db_session.get(DatabaseOption, "WOS_TORRENT_MAX_ACTIVE_PER_USER")
+    assert limit is not None
+    limit.integer_value = 1
+    await db_session.commit()
+    await _ready_request(db_session, owner, number=0xBB, retention_left=timedelta(hours=10))
+    headers = await login(client)
+
+    response = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "torrent_limit_reached"

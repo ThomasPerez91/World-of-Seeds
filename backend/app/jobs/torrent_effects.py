@@ -3,13 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any, Literal, Protocol, cast
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
@@ -47,6 +47,7 @@ from app.jobs.worker import (
     TorrentJobSnapshot,
     TransientTorrentJobError,
 )
+from app.maintenance import PruneResult, prune_stale_rows
 from app.models import (
     DatabaseOption,
     DownloadLease,
@@ -79,9 +80,16 @@ from app.torrents.validation_work import TorrentValidationBusyError, torrent_val
 
 ADD_TORRENT_JOB = "ADD_TORRENT"
 SYNC_TORRENT_JOB = "SYNC_TORRENT"
+# A SYNC job observing a torrent that qBittorrent does not report (or reports in an error
+# state) retries with backoff for its whole attempt budget, about five minutes, before the
+# torrent is marked ERROR. A qBittorrent restart or a short disk hiccup must not lose torrents.
+SYNC_JOB_MAX_ATTEMPTS = 5
 MAX_SYNC_BATCH = 200
 MAX_RETENTION_BATCH = 200
 RETENTION_REAPER_INTERVAL_SECONDS = 3600
+# READY torrents only need a slow heartbeat: they are seeding, not progressing. Polling
+# them as often as downloads created most of the SYNC jobs for no scheduling benefit.
+READY_SYNC_INTERVAL_SECONDS = 60
 DATABASE_RETRY_SECONDS = 5.0
 SYNC_INTERVAL_OPTION = "WOS_QB_SYNC_INTERVAL_SECONDS"
 STALL_TIMEOUT = timedelta(seconds=60)
@@ -103,6 +111,20 @@ class _TorrentRouter(Protocol):
         managed_torrent_id: uuid.UUID,
         info_hash: str,
     ) -> TorrentEffectRoute: ...
+
+    async def resolve_inspector(
+        self,
+        managed_torrent_id: uuid.UUID,
+        info_hash: str,
+    ) -> _TorrentInspector: ...
+
+
+class _TorrentInspector(Protocol):
+    async def inspect_managed_torrents(
+        self, identities: Sequence[QBittorrentV2ManagedIdentity]
+    ) -> tuple[QBittorrentV2TorrentSnapshot, ...]: ...
+
+    async def remove_managed_torrent(self, identity: QBittorrentV2ManagedIdentity) -> None: ...
 
 
 class TorrentEffectHandlers:
@@ -153,8 +175,10 @@ class TorrentEffectHandlers:
                 raise PermanentTorrentJobError("recovery_snapshot_mismatch")
         identity = QBittorrentV2ManagedIdentity(expected.info_hash, expected.storage_key)
         try:
-            route = await self._router.resolve(expected.managed_torrent_id, expected.info_hash)
-            inspected = await route.inspector.inspect_managed_torrents((identity,))
+            inspector = await self._router.resolve_inspector(
+                expected.managed_torrent_id, expected.info_hash
+            )
+            inspected = await inspector.inspect_managed_torrents((identity,))
             qbittorrent_present = len(inspected) == 1
         except QBittorrentV2MissingError:
             qbittorrent_present = False
@@ -203,7 +227,9 @@ class TorrentEffectHandlers:
             )
         except TorrentValidationBusyError as exc:
             raise TransientTorrentJobError(
-                "torrent_validation_busy", torrent_state=ManagedTorrentState.RETRY_WAIT
+                "torrent_validation_busy",
+                torrent_state=ManagedTorrentState.RETRY_WAIT,
+                waiting=True,
             ) from exc
         except TorrentPayloadStoreError as exc:
             raise PermanentTorrentJobError(
@@ -245,17 +271,21 @@ class TorrentEffectHandlers:
             )
         except TorrentValidationBusyError as exc:
             raise TransientTorrentJobError(
-                "torrent_validation_busy", torrent_state=ManagedTorrentState.RETRY_WAIT
+                "torrent_validation_busy",
+                torrent_state=ManagedTorrentState.RETRY_WAIT,
+                waiting=True,
             ) from exc
         except (NewGreedyV2UnavailableError, QBittorrentV2TransientError) as exc:
             raise TransientTorrentJobError(
                 "torrent_integration_unavailable",
                 torrent_state=ManagedTorrentState.RETRY_WAIT,
+                waiting=True,
             ) from exc
         except IntegrationAuthenticationError as exc:
             raise TransientTorrentJobError(
                 "torrent_integration_authentication",
                 torrent_state=ManagedTorrentState.RETRY_WAIT,
+                waiting=True,
             ) from exc
         except TorrentValidationError as exc:
             raise PermanentTorrentJobError(
@@ -369,22 +399,25 @@ class TorrentEffectHandlers:
             identity = QBittorrentV2ManagedIdentity(torrent.info_hash, torrent.storage_key)
 
         try:
-            route = await self._router.resolve(torrent.id, torrent.info_hash)
+            inspector = await self._router.resolve_inspector(torrent.id, torrent.info_hash)
         except AccountRoutingError as exc:
             raise PermanentTorrentJobError(
                 "torrent_account_route_invalid",
                 torrent_state=ManagedTorrentState.ERROR,
             ) from exc
 
+        final_attempt = snapshot.attempt_count >= SYNC_JOB_MAX_ATTEMPTS
         try:
-            snapshots = await route.inspector.inspect_managed_torrents((identity,))
+            snapshots = await inspector.inspect_managed_torrents((identity,))
         except QBittorrentV2MissingError as exc:
+            if not final_attempt:
+                raise TransientTorrentJobError("qbittorrent_managed_torrent_missing") from exc
             raise PermanentTorrentJobError(
                 "qbittorrent_managed_torrent_missing",
                 torrent_state=ManagedTorrentState.ERROR,
             ) from exc
         except (QBittorrentV2TransientError, IntegrationAuthenticationError) as exc:
-            raise TransientTorrentJobError("qbittorrent_sync_unavailable") from exc
+            raise TransientTorrentJobError("qbittorrent_sync_unavailable", waiting=True) from exc
         except QBittorrentV2OwnershipError as exc:
             raise PermanentTorrentJobError(
                 "qbittorrent_ownership_conflict",
@@ -392,6 +425,10 @@ class TorrentEffectHandlers:
             ) from exc
         if len(snapshots) != 1:
             raise TransientTorrentJobError("qbittorrent_sync_incomplete")
+        if _domain_state(snapshots[0])[0] is ManagedTorrentState.ERROR and not final_attempt:
+            # error/missingFiles/unknown can be a transient observation (disk remount, qB
+            # still restoring). Observe again before condemning the torrent.
+            raise TransientTorrentJobError("qbittorrent_state_error_observed")
         await self._persist_snapshot(snapshot.managed_torrent_id, snapshots[0])
 
     async def purge_torrent(self, snapshot: TorrentJobSnapshot) -> None:
@@ -439,7 +476,7 @@ class TorrentEffectHandlers:
             if torrent.purge_after is None:
                 return
             if _as_utc(torrent.purge_after) > _as_utc(now):
-                raise TransientTorrentJobError("torrent_retention_active")
+                raise TransientTorrentJobError("torrent_retention_active", waiting=True)
             if torrent.state not in {
                 ManagedTorrentState.PURGE_PENDING,
                 ManagedTorrentState.PURGING,
@@ -475,7 +512,7 @@ class TorrentEffectHandlers:
                         job.finished_at = now
                 purge_activated = True
             elif torrent.purge_stop_pending:
-                raise TransientTorrentJobError("torrent_scheduler_stop_pending")
+                raise TransientTorrentJobError("torrent_scheduler_stop_pending", waiting=True)
             else:
                 active_leases = await session.scalar(
                     select(func.count())
@@ -486,7 +523,9 @@ class TorrentEffectHandlers:
                     )
                 )
                 if active_leases:
-                    raise TransientTorrentJobError("torrent_download_active")
+                    # A running download legitimately holds the content: wait without
+                    # consuming the attempt budget reserved for real failures.
+                    raise TransientTorrentJobError("torrent_download_active", waiting=True)
                 torrent.state = ManagedTorrentState.PURGING
                 torrent.updated_at = now
                 identity = QBittorrentV2ManagedIdentity(torrent.info_hash, torrent.storage_key)
@@ -494,16 +533,20 @@ class TorrentEffectHandlers:
                 total_size = torrent.total_size
 
         if purge_activated:
-            raise TransientTorrentJobError("torrent_scheduler_stop_pending")
+            raise TransientTorrentJobError("torrent_scheduler_stop_pending", waiting=True)
 
         try:
-            route = await self._router.resolve(snapshot.managed_torrent_id, identity.info_hash)
-            await route.inspector.remove_managed_torrent(identity)
+            inspector = await self._router.resolve_inspector(
+                snapshot.managed_torrent_id, identity.info_hash
+            )
+            await inspector.remove_managed_torrent(identity)
             await asyncio.to_thread(self._content.purge, storage_key)
         except AccountRoutingError as exc:
             raise PermanentTorrentJobError("torrent_account_route_invalid") from exc
         except (QBittorrentV2TransientError, IntegrationAuthenticationError) as exc:
-            raise TransientTorrentJobError("torrent_purge_integration_unavailable") from exc
+            raise TransientTorrentJobError(
+                "torrent_purge_integration_unavailable", waiting=True
+            ) from exc
         except QBittorrentV2OwnershipError as exc:
             raise PermanentTorrentJobError("qbittorrent_ownership_conflict") from exc
         except QBittorrentV2RejectedError as exc:
@@ -617,10 +660,14 @@ class TorrentEffectHandlers:
         async with self._session_factory() as session, session.begin():
             # SchedulerRuntime takes the singleton scheduler lock before any torrent rows.
             # READY transitions must follow the same order to avoid a PostgreSQL deadlock.
+            first_ready = False
+            if state is ManagedTorrentState.READY:
+                current_state = await session.scalar(
+                    select(ManagedTorrent.state).where(ManagedTorrent.id == managed_torrent_id)
+                )
+                first_ready = current_state is not ManagedTorrentState.READY
             scheduler_state = (
-                await session.get(SchedulerState, 1, with_for_update=True)
-                if state is ManagedTorrentState.READY
-                else None
+                await session.get(SchedulerState, 1, with_for_update=True) if first_ready else None
             )
             torrent = await session.get(
                 ManagedTorrent,
@@ -791,6 +838,7 @@ class TorrentSyncEnqueuer:
                 )
                 .exists()
             )
+            ready_cutoff = now - timedelta(seconds=max(READY_SYNC_INTERVAL_SECONDS, interval))
             torrent_ids = tuple(
                 (
                     await session.scalars(
@@ -804,8 +852,18 @@ class TorrentSyncEnqueuer:
                                 )
                             ),
                             ~active_sync_exists,
+                            or_(
+                                ManagedTorrent.state != ManagedTorrentState.READY,
+                                ManagedTorrent.updated_at <= ready_cutoff,
+                            ),
                         )
-                        .order_by(ManagedTorrent.updated_at, ManagedTorrent.id)
+                        # Downloads first: a large READY population must never delay the
+                        # detection of completions and stalls.
+                        .order_by(
+                            case((ManagedTorrent.state == ManagedTorrentState.READY, 1), else_=0),
+                            ManagedTorrent.updated_at,
+                            ManagedTorrent.id,
+                        )
                         .limit(MAX_SYNC_BATCH)
                     )
                 ).all()
@@ -821,7 +879,7 @@ class TorrentSyncEnqueuer:
                     "idempotency_key": f"sync:{managed_torrent_id.hex}:{uuid.uuid4().hex}",
                     "state": TorrentJobState.QUEUED,
                     "attempt_count": 0,
-                    "max_attempts": 5,
+                    "max_attempts": SYNC_JOB_MAX_ATTEMPTS,
                     "available_at": database_now,
                     "created_at": database_now,
                     "updated_at": database_now,
@@ -866,11 +924,22 @@ class TorrentRetentionReaper:
             except (SQLAlchemyError, OSError):
                 logger.warning("torrent_retention_reaper_database_unavailable")
                 interval = DATABASE_RETRY_SECONDS
+            else:
+                # Maintenance only runs while the database answers and nobody asked to stop.
+                if not self._stop.is_set():
+                    try:
+                        await self.prune_once()
+                    except (SQLAlchemyError, OSError):
+                        logger.warning("torrent_maintenance_database_unavailable")
             with suppress(TimeoutError):
                 await asyncio.wait_for(
                     self._stop.wait(),
                     timeout=interval,
                 )
+
+    async def prune_once(self) -> PruneResult:
+        """Bound the tables that grow with every sync, login attempt and session."""
+        return await prune_stale_rows(self._session_factory, now=self._clock())
 
     async def expire_once(self) -> int:
         async with self._session_factory() as session, session.begin():

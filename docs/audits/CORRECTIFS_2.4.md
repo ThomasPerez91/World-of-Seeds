@@ -561,3 +561,180 @@ attentes au-delà du TTL et ZIP finaux valides sont vérifiés dans les tests is
 et la CI, pas présentés comme un transfert privé réellement exécuté en production.
 ZIP1 est corrigé et déployé ; S4 reste le prochain sujet. L’ordonnanceur fichiers,
 les 429 sans Retry-After, le bot et l’infrastructure n’ont pas été modifiés.
+
+
+## 2.4.7 — correctifs par lots issus de l’audit complet
+
+Source : rapport `Rapport_audit_World_of_Seeds_2.4.6.pdf` (136 constats : 3 critiques,
+24 élevés, 76 moyens, 33 faibles). Les corrections sont livrées par lots, chacun sur sa
+propre branche depuis `develop`, fusionné puis supprimé. Aucune migration Alembic, aucun
+fichier de déploiement protégé (compose, configuration qBittorrent, preflight, scripts
+qB/NewGreedy) n’est modifié : la livraison reste éligible au déploiement automatique Rise2.
+Les corrections qui exigent une migration ou une action d’exploitation sont listées plus bas
+et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
+
+### Lot 1 — résilience du pipeline torrent
+
+- Contrôles qBittorrent isolés par torrent : un torrent absent ou en erreur ne fait plus
+  échouer le lot de contrôles du scheduler ; les arrêts préalables aux purges et les torrents
+  en erreur restés actifs côté qB sont repris dans le même cycle (SC-07).
+- Une limite globale qB plus petite que le nombre de torrents sélectionnés dégrade les parts
+  au lieu de lever (OP-01) ; une valeur écrite sous 1 Mio/s est refusée (erreur d’unité).
+- Les synchronisations tolèrent les incidents transitoires (qB injoignable, validation
+  saturée, torrent absent) jusqu’à la dernière tentative ; les attentes qui ne dépendent pas
+  du torrent (qB indisponible, lease active avant purge) ne consomment plus le budget d’essais
+  et ont un plafond de 10 minutes, budget total 7 jours (LS-03, partie b).
+- `WOS_TORRENT_MAX_RETRY_ATTEMPTS` et `WOS_TORRENT_RETRY_BASE_SECONDS` sont enfin lues : budget
+  du job ADD et base du backoff (OP-06). La relance d’un torrent déjà ajouté à qB ne relit plus
+  un payload supprimé : elle repasse par l’observation.
+- Les torrents READY ne sont resynchronisés qu’une fois par minute, après les téléchargements.
+
+### Lot 2 — croissance de la base
+
+- `torrent_jobs` (IN-02, critique) : purge bornée dans le reaper existant, par lots de 1000,
+  budget de 30 s par passe, verrous `SKIP LOCKED` ; synchronisations terminées après 1 h,
+  échouées après 7 jours, autres jobs après 180 jours ; les jobs ADD ne sont jamais purgés.
+- Sessions expirées/révoquées (7 jours) et verrous de connexion expirés (1 jour) purgés par
+  le même mécanisme (IN-12, SE-08).
+- `initialize` des options ne verrouille plus toutes les lignes quand rien n’est à écrire
+  (OP-10). Métriques : plus ancien job en file mesuré sur les jobs réellement prêts, retries
+  = tentatives au-delà de la première (IN-13, partie alerte permanente).
+
+### Lot 3 — secrets et périmètre C411
+
+- Les passkeys ne sont plus jamais renvoyées par l’API d’administration : valeur vide et
+  indicateur `configured` ; l’interface ne renvoie une passkey que si elle est saisie ou
+  explicitement effacée (SE-01, OP-02). Le chiffrement au repos reste à faire (voir plus bas).
+- Les métainfos normalisées retirent `url-list`, `httpseeds`, `nodes`, `comment`, `created by`,
+  `publisher*` hors de `info` ; l’infohash est inchangé (SE-02, partie métainfo).
+- `POST /api/v2/torrents` n’analyse plus le multipart avant l’authentification (comportement
+  confirmé dans FastAPI 0.141.1 : le corps est lu avant les dépendances) : authentification
+  d’abord, `Content-Length` obligatoire et borné par l’option, une seule partie fichier
+  (SE-05, partie applicative).
+
+### Lot 5 — transferts et leases
+
+- Un client qui ne lit plus libère sa voie, sa lease et son slot ZIP : un chunk accepté doit
+  se terminer en moins de 120 s (LS-01, LS-09).
+- Le heartbeat de lease retente une erreur SQL/timeout transitoire tant que la lease est
+  valide (LS-16). Une erreur inattendue à l’ouverture d’un fichier libère la lease et répond
+  503 (LS-14) ; un mtime absurde n’interdit plus le téléchargement et les dates ZIP sont
+  bornées (LS-20). `no-transform` sur les réponses de téléchargement (LS-23). Le moniteur de
+  débit sortant journalise et survit à une erreur inattendue (LS-24, partie a).
+- Vérifié sans changement : uvicorn annonce ASGI 2.3 et son `send` retourne silencieusement
+  après déconnexion ; la classification des déconnexions (LS-15) ne se pose donc pas dans la
+  configuration livrée.
+
+### Lot 6 — options et limites
+
+- Les options sans consommateur (limite de requêtes, caches, liste de fichiers, rafraîchissement
+  admin, budgets de dossiers hérités) sont masquées de l’écran d’administration et un test
+  échoue si une option visible n’est lue nulle part (OP-03, OP-07, OP-24).
+- Un PATCH correctif est accepté quand l’état stocké est déjà incohérent ; les routes torrent
+  répondent 503 et non 500 quand les options stockées sont invalides (OP-11).
+- Garde-fous à l’écriture seulement, jamais sur l’état stocké : débits HTTP de 64 Kio/s minimum,
+  flux ZIP simultanés ≤ admissions ZIP, réserve disque ≤ marge laissée par le seuil d’alerte
+  (OP-12, OP-13). Traductions manquantes, unités `%` et crédits, textes périmés (OP-20).
+
+### Lot 7 — robustesse frontend
+
+- WebSocket des torrents : backoff exponentiel plafonné à 30 s avec jitter (FE-01) ; recherche
+  avec anti-rebond de 300 ms (FE-02) ; dépôts : reprise sur 429/503 avec `Retry-After`, arrêt
+  du lot sur refus de compte avec un seul message (FE-03).
+- 401 pendant un transfert local = session expirée (FE-13, LS-06 partiel) ; avertissement avant
+  fermeture de l’onglet pendant un transfert ou un dépôt (FE-16, LS-05) ; progression des
+  octets échantillonnée à 4/s (FE-12, LS-07).
+- `ErrorBoundary` racine, stockage local et dates tolérants, `formatBytes` robuste, minuteur de
+  rétention borné, purge partielle signalée (FE-09, FE-20).
+- Fichiers statiques : `index.html` revalidé, bundles hachés `immutable` (FE-08).
+
+### Lot 8 — documentation et petits correctifs
+
+- Chemin de fichier torrent limité à 2048 octets (index unique PostgreSQL, IN-11) ; `env.py`
+  d’Alembic accepte un mot de passe contenant `%` (IN-09).
+- Documentation alignée sur le comportement réel (secrets, plafonds de flux, options).
+
+### Lots 9 à 17 et 19 — compléments
+
+- Lot 9 : le reaper de rétention n’exécute sa passe de maintenance que si la rétention a
+  réussi et qu’aucun arrêt n’est demandé.
+- Lot 10 (scheduler) : bail renouvelé avant l’application qB et rendu à l’arrêt, génération
+  appliquée même si l’application dépasse le TTL (SC-15) ; backoff 5 → 60 s des cycles en échec
+  (SC-09, partie cadence) ; attentes Redis sur une connexion dédiée sans timeout de socket de
+  1 s (SC-13) ; relance manuelle sans cooldown ni slot forcé hérités (SC-23) ; la réconciliation
+  ne signale plus un ajout en cours (SC-21).
+- Lot 11 (sécurité) : socket d’événements refusée depuis une origine autre que l’hôte de la page,
+  5 sockets par utilisateur et plafond global, session revérifiée à chaque heartbeat (SE-07) ;
+  tracker `http://` réécrit en `https://` quand la passkey est injectée (SE-11) ; journal
+  `admin_action` pour purge, actions qB, récupération, comptes et clés API (SE-09, partie
+  journal ; pas de table d’audit).
+- Lot 12 (frontend) : confirmation avant révocation d’une clé API et erreurs d’action qui ne
+  masquent plus la liste (FE-18) ; compteurs du Dashboard issus d’une seule requête (FE-19) ;
+  listings d’un ancien snapshot oubliés (FE-20, point 4) ; noms locaux compatibles avec les
+  systèmes de fichiers (FE-15).
+- Lot 13 : PATCH d’options versionné et rétrocompatible, 409 `option_version_conflict` et
+  rechargement côté interface (OP-08) ; un ZIP dont le droit est perdu pendant la file répond
+  404 avant tout en-tête (LS-11) ; tests HTTP du 429 de plafond ZIP (LS-25) ; texte du toast de
+  sauvegarde qui n’annonce plus une application immédiate (OP-09, partie message).
+
+- Lot 14 (SC-05) : les torrents en cours gardent leur slot entre deux rotations. L’intervalle
+  de contrôle (`WOS_SCHEDULER_CONTROL_INTERVAL_SECONDS`) devient le quantum de rotation ; le
+  cycle peut tourner plus vite (évaluation dynamique) mais l’ensemble actif ne change qu’une
+  fois par quantum, sauf qu’un slot libéré (complétion, stall, limite relevée) est toujours
+  refait immédiatement par la sélection équitable. Les torrents conservés ne sont pas
+  rechargés au registre d’équité, qui ne bouge qu’avec les nouvelles admissions. Le quantum est
+  mémorisé en mémoire du scheduler unique : un redémarrage provoque une rotation.
+
+- Lot 15 (durcissements divers) :
+  - la limite de torrents actifs ignore les demandes READY dont la rétention est terminée
+    (déjà masquées à l’utilisateur, en attente du reaper horaire) (OP-16) ;
+  - verrous de connexion indexés sur le /64 IPv6, `Retry-After` sur le 429 de verrou, hash
+    Argon2 rafraîchi au prochain login réussi quand les paramètres ont évolué (SE-04, SE-24) ;
+  - histogrammes de durée d’API réellement cumulatifs (IN-13) ;
+  - avertissement au démarrage quand une variable d’environnement porte le nom d’une option
+    d’administration (sans effet) (OP-19) ;
+  - lectures de l’interface bornées à 30 s et cookie CSRF malformé toléré (FE-11, SE-24) ;
+  - CI : durée maximale par job, annulation des exécutions de PR remplacées, Dependabot
+    (IN-18, hors épinglage par SHA) ;
+  - helper de déploiement : tous les scripts et unités exécutés en root rendent le
+    déploiement manuel obligatoire (SE-12) ; effectif après réinstallation du helper racine.
+
+- Lot 16 (FE-17) : la confirmation « en deux clics » de suppression/annulation n’est plus un
+  écouteur DOM posé par une icône. Le composant `ConfirmButton` garde l’état dans React : le
+  nom accessible ne change pas, un message d’état annonce « clique de nouveau pour confirmer »,
+  le bouton se désarme après 4 s et à la perte de focus, sans `aria-pressed` détourné.
+
+- Lot 17 (SE-10, partiel) : la purge administrateur accepte le nombre d’abonnés tel qu’affiché
+  et ignore (liste `skipped_ids`, signalée à l’écran) tout contenu dont ce nombre a changé
+  depuis, sans annuler aucun droit. L’interface l’envoie systématiquement ; un client qui ne
+  l’envoie pas garde l’ancien comportement. Le second facteur et le plafond par appel restent
+  à décider.
+
+- Lot 19 (revue du design et du responsive, aperçu réel de l’application sur SQLite à 320, 375,
+  768, 1024 et 1440 px) : la carte « Contenu » d’un téléchargement prêt écrasait son texte à
+  largeur nulle à côté du bouton pleine largeur et passe à la ligne ; la troisième carte du
+  tableau de bord occupe toute la ligne quand deux colonnes sont affichées (tablette) ; les
+  infobulles masquées ne sont plus rendues (`display: none` jusqu’au survol ou au focus), ce
+  qui supprime le défilement horizontal de la page « Nettoyage » sur téléphone (391 px pour
+  375) ; le lien « Voir tous » du tableau de bord passe de 16 à 40 px de haut sans bouger
+  visuellement ; un service injoignable affiche « — » au lieu de la version attendue comme si
+  elle avait été observée. Aucun autre débordement de page sur les onglets d’administration ni
+  sur la liste utilisateur ; les barres d’onglets et de filtres défilent à l’intérieur de leur
+  conteneur, ce qui est voulu. Le chantier de fond sur la cascade CSS (FE-05) reste à faire.
+
+### Non traité dans cette livraison (décision, migration ou exploitation requises)
+
+Politique à trancher : plafond de voies rapides par compte et exemption administrateur sur
+les fichiers (LS-02, OP-04 ; les tests actuels encadrent plusieurs voies par compte), quota de
+150 Go par défaut, lot de 50 fichiers côté serveur, exemption administrateur des quotas
+(OP-05), authentification renforcée des administrateurs (SE-13).
+Migration nécessaire : index de `torrent_jobs` et `download_leases` (IN-05), colonnes
+`timestamp` vers `timestamptz` (IN-08), suppression réelle des options mortes (OP-07),
+chiffrement des passkeys au repos (SE-01/IN-21), contrainte `CHECK` des valeurs d’options.
+Exploitation (voir le runbook) : sauvegardes hors hôte (IN-01), Alertmanager (IN-03), limites
+mémoire (IN-04), healthchecks (IN-06), rôles PostgreSQL (IN-07), limites Caddy et DHT/PeX/LSD
+côté qBittorrent (SE-02, OP-18), liste autorisée du helper de déploiement (SE-12, IN-16).
+Développement ultérieur : limiteur d’API authentifiée (SE-06), verrous de
+lecture manifeste/archives (LS-17, LS-18), consolidation CSS (FE-05), caractères
+bidirectionnels dans les noms (SE-21), table d’audit de sécurité (SE-09), authentification
+renforcée (SE-13), réveil du scheduler sur modification d’option (OP-09).

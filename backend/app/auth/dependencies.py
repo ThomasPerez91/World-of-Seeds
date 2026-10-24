@@ -1,7 +1,9 @@
 import uuid
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request, WebSocket, WebSocketException, status
 from sqlalchemy import select
@@ -27,6 +29,65 @@ class AuthContext:
 @dataclass(frozen=True, slots=True)
 class RealtimeAuthContext:
     user_id: uuid.UUID
+    session_id: uuid.UUID | None = None
+
+
+MAX_REALTIME_CONNECTIONS_PER_USER = 5
+MAX_REALTIME_CONNECTIONS = 1000
+
+
+class RealtimeConnectionLimiter:
+    """Process-local cap on open event sockets (one API process serves production)."""
+
+    def __init__(
+        self,
+        *,
+        per_user: int = MAX_REALTIME_CONNECTIONS_PER_USER,
+        total: int = MAX_REALTIME_CONNECTIONS,
+    ) -> None:
+        self._per_user_limit = per_user
+        self._total_limit = total
+        self._per_user: dict[uuid.UUID, int] = {}
+        self._total = 0
+
+    def acquire(self, user_id: uuid.UUID) -> bool:
+        if (
+            self._total >= self._total_limit
+            or self._per_user.get(user_id, 0) >= self._per_user_limit
+        ):
+            return False
+        self._per_user[user_id] = self._per_user.get(user_id, 0) + 1
+        self._total += 1
+        return True
+
+    def release(self, user_id: uuid.UUID) -> None:
+        remaining = self._per_user.get(user_id, 0) - 1
+        if remaining > 0:
+            self._per_user[user_id] = remaining
+        else:
+            self._per_user.pop(user_id, None)
+        self._total = max(0, self._total - 1)
+
+
+realtime_connections = RealtimeConnectionLimiter()
+
+
+def websocket_origin_allowed(websocket: WebSocket) -> bool:
+    """A browser always sends Origin: only the page's own host may open the socket.
+
+    SameSite already keeps cross-site pages out; this also refuses a sibling sub-domain that
+    shares the site (for instance the public Grafana). Clients without Origin are not browsers
+    and still need the session cookie.
+    """
+    origin = websocket.headers.get("origin")
+    if origin is None:
+        return True
+    try:
+        origin_host = urlsplit(origin).hostname
+        request_host = urlsplit(f"//{websocket.headers.get('host', '')}").hostname
+    except ValueError:
+        return False
+    return origin_host is not None and origin_host == request_host
 
 
 def _detail(code: str, message: str) -> dict[str, str | None]:
@@ -73,6 +134,8 @@ async def get_realtime_auth_context(
     websocket: WebSocket,
     settings: AppSettings,
 ) -> RealtimeAuthContext:
+    if not websocket_origin_allowed(websocket):
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
     token = websocket.cookies.get(settings.session_cookie_name)
     if token is None:
         raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
@@ -92,10 +155,45 @@ async def get_realtime_auth_context(
         ):
             raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
         user_id = user_session.user_id
+        session_id = user_session.id
         await db.rollback()
-    # Only the opaque user ID survives authentication. The SQL session is closed before
+    # Only opaque identifiers survive authentication. The SQL session is closed before
     # the WebSocket is accepted and before any Redis wait or network heartbeat begins.
-    return RealtimeAuthContext(user_id)
+    return RealtimeAuthContext(user_id, session_id)
+
+
+async def get_realtime_connection(
+    context: Annotated[RealtimeAuthContext, Depends(get_realtime_auth_context)],
+) -> AsyncGenerator[RealtimeAuthContext, None]:
+    """Authenticate, then hold one of the user's bounded event-socket slots."""
+    if not realtime_connections.acquire(context.user_id):
+        raise WebSocketException(code=status.WS_1013_TRY_AGAIN_LATER)
+    try:
+        yield context
+    finally:
+        realtime_connections.release(context.user_id)
+
+
+async def realtime_session_is_valid(context: RealtimeAuthContext) -> bool:
+    """Short read-only check: a socket must not outlive its logout, suspension or expiry."""
+    if context.session_id is None:
+        return True
+    async with session_factory() as db:
+        user_session = await db.scalar(
+            select(UserSession)
+            .options(selectinload(UserSession.user))
+            .where(UserSession.id == context.session_id)
+        )
+        now = datetime.now(UTC)
+        valid = (
+            user_session is not None
+            and user_session.revoked_at is None
+            and ensure_utc(user_session.expires_at) > now
+            and user_can_login(user_session.user, now)
+            and not user_session.user.must_change_credentials
+        )
+        await db.rollback()
+    return bool(valid)
 
 
 async def require_current_credentials(

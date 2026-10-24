@@ -623,44 +623,115 @@ async def test_gateway_treats_missing_stopped_purge_as_already_stopped() -> None
     ]
 
 
-@pytest.mark.asyncio
-async def test_gateway_validates_entire_batch_ownership_before_mutation() -> None:
-    requests: list[str] = []
-
+def _batch_handler(
+    requests: list[tuple[str, str]], records: list[dict[str, str | int]]
+) -> Callable[[httpx.Request], httpx.Response]:
     def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request.url.path)
+        requests.append((request.url.path, request.content.decode()))
         if request.url.path == "/api/v2/auth/login":
             return _login_response()
         if request.url.path == "/api/v2/torrents/info":
-            return httpx.Response(
-                200,
-                json=[
-                    _control_torrent(
-                        INFO_HASH,
-                        save_path=SAVE_PATH,
-                        identity_tag=IDENTITY_TAG,
-                        state="stoppedDL",
-                        limit=-1,
-                    ),
-                    _control_torrent(
-                        INFO_HASH_B,
-                        save_path=SAVE_PATH_B,
-                        identity_tag=IDENTITY_TAG_B,
-                        state="downloading",
-                        limit=99,
-                        category="external",
-                    ),
-                ],
-            )
+            return httpx.Response(200, json=records)
         if request.url.path == "/api/v2/auth/logout":
             return httpx.Response(200)
-        raise AssertionError("No torrent mutation is allowed before full ownership validation")
+        if request.url.path.startswith("/api/v2/torrents/"):
+            return httpx.Response(200)
+        raise AssertionError(request.url.path)
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(QBittorrentV2OwnershipError):
-            await _gateway(client).apply_managed_controls(_controls())
+    return handler
 
-    assert requests == [
+
+@pytest.mark.asyncio
+async def test_gateway_skips_external_torrent_without_blocking_the_rest_of_the_batch() -> None:
+    requests: list[tuple[str, str]] = []
+    records = [
+        _control_torrent(
+            INFO_HASH,
+            save_path=SAVE_PATH,
+            identity_tag=IDENTITY_TAG,
+            state="stoppedDL",
+            limit=-1,
+        ),
+        _control_torrent(
+            INFO_HASH_B,
+            save_path=SAVE_PATH_B,
+            identity_tag=IDENTITY_TAG_B,
+            state="downloading",
+            limit=99,
+            category="external",
+        ),
+    ]
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(_batch_handler(requests, records))
+    ) as client:
+        result = await _gateway(client).apply_managed_controls(_controls())
+
+    assert result.started == (INFO_HASH,)
+    assert result.skipped == (INFO_HASH_B,)
+    assert all(INFO_HASH_B not in body for _, body in requests[2:])
+    assert [path for path, _ in requests] == [
+        "/api/v2/auth/login",
+        "/api/v2/torrents/info",
+        "/api/v2/torrents/setDownloadLimit",
+        "/api/v2/torrents/topPrio",
+        "/api/v2/torrents/start",
+        "/api/v2/auth/logout",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gateway_skips_absent_torrent_instead_of_failing_the_whole_batch() -> None:
+    requests: list[tuple[str, str]] = []
+    records = [
+        _control_torrent(
+            INFO_HASH,
+            save_path=SAVE_PATH,
+            identity_tag=IDENTITY_TAG,
+            state="stoppedDL",
+            limit=-1,
+        )
+    ]
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(_batch_handler(requests, records))
+    ) as client:
+        result = await _gateway(client).apply_managed_controls(_controls())
+
+    assert result.started == (INFO_HASH,)
+    assert result.skipped == (INFO_HASH_B,)
+    assert result.stopped == ()
+
+
+@pytest.mark.asyncio
+async def test_gateway_never_starts_a_torrent_in_error_but_treats_its_stop_as_satisfied() -> None:
+    requests: list[tuple[str, str]] = []
+    records = [
+        _control_torrent(
+            INFO_HASH,
+            save_path=SAVE_PATH,
+            identity_tag=IDENTITY_TAG,
+            state="missingFiles",
+            limit=-1,
+        ),
+        _control_torrent(
+            INFO_HASH_B,
+            save_path=SAVE_PATH_B,
+            identity_tag=IDENTITY_TAG_B,
+            state="error",
+            limit=-1,
+        ),
+    ]
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(_batch_handler(requests, records))
+    ) as client:
+        result = await _gateway(client).apply_managed_controls(_controls())
+
+    assert result.started == ()
+    assert result.skipped == (INFO_HASH,)
+    assert result.stopped == (INFO_HASH_B,)
+    assert [path for path, _ in requests] == [
         "/api/v2/auth/login",
         "/api/v2/torrents/info",
         "/api/v2/auth/logout",

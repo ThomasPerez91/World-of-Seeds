@@ -1165,3 +1165,270 @@ async def test_dynamic_completion_cooldown_preserves_remaining_active_set(
     assert active is not None and active.desired_active is True
     assert queued is not None and queued.desired_active is False
     await engine.dispose()
+
+
+class PurgeFailingGateway(FakeGateway):
+    """Fails only the stop batch (allow_missing_stopped=True) used for purges and errors."""
+
+    async def apply_managed_controls(
+        self,
+        controls: Sequence[QBittorrentV2DesiredControl],
+        *,
+        allow_missing_stopped: bool = False,
+    ) -> QBittorrentV2ControlResult:
+        if allow_missing_stopped:
+            self.calls.append(tuple(controls))
+            self.allow_missing_stopped.append(allow_missing_stopped)
+            raise RuntimeError("qb_stop_failed")
+        return await super().apply_managed_controls(
+            controls, allow_missing_stopped=allow_missing_stopped
+        )
+
+
+@pytest.mark.asyncio
+async def test_errored_torrent_that_was_still_active_is_stopped_in_qb_and_released(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    errored = await _torrent(
+        sessions,
+        username="errored",
+        info_hash="e" * 40,
+        size=10,
+        state=ManagedTorrentState.ERROR,
+    )
+    healthy = await _torrent(sessions, username="healthy", info_hash="f" * 40, size=10)
+    async with sessions() as session, session.begin():
+        row = await session.get(ManagedTorrent, errored.id)
+        assert row is not None
+        row.desired_active = True
+        row.desired_priority = 0
+    gateway = FakeGateway()
+    runtime = SchedulerRuntime(sessions, gateway, scheduler_id="scheduler-a", clock=lambda: NOW)
+
+    result = await runtime.run_once()
+
+    assert result.selected_torrent_ids == (healthy.id,)
+    stop_batches = [
+        batch
+        for batch, allow in zip(gateway.calls, gateway.allow_missing_stopped, strict=True)
+        if allow
+    ]
+    assert [[control.info_hash for control in batch] for batch in stop_batches] == [["e" * 40]]
+    assert all(control.run_state == "stopped" for control in stop_batches[0])
+    async with sessions() as session:
+        row = await session.get(ManagedTorrent, errored.id)
+    assert row is not None
+    assert row.state is ManagedTorrentState.ERROR
+    assert row.desired_active is False
+    assert row.desired_priority is None
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_failed_stop_batch_does_not_prevent_the_schedule_and_keeps_the_stop_pending(
+    tmp_path: Path,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    errored = await _torrent(
+        sessions,
+        username="errored",
+        info_hash="e" * 40,
+        size=10,
+        state=ManagedTorrentState.ERROR,
+    )
+    healthy = await _torrent(sessions, username="healthy", info_hash="f" * 40, size=10)
+    async with sessions() as session, session.begin():
+        row = await session.get(ManagedTorrent, errored.id)
+        assert row is not None
+        row.desired_active = True
+        row.desired_priority = 0
+    gateway = PurgeFailingGateway()
+    runtime = SchedulerRuntime(sessions, gateway, scheduler_id="scheduler-a", clock=lambda: NOW)
+
+    with pytest.raises(RuntimeError, match="qb_stop_failed"):
+        await runtime.run_once()
+
+    scheduled = [
+        batch
+        for batch, allow in zip(gateway.calls, gateway.allow_missing_stopped, strict=True)
+        if not allow
+    ]
+    assert [[control.info_hash for control in batch] for batch in scheduled] == [["f" * 40]]
+    async with sessions() as session:
+        state = await session.get(SchedulerState, 1)
+        row = await session.get(ManagedTorrent, errored.id)
+        scheduled_row = await session.get(ManagedTorrent, healthy.id)
+    assert state is not None and state.applied_generation == state.desired_generation == 1
+    assert scheduled_row is not None and scheduled_row.desired_active is True
+    assert row is not None and row.desired_active is True
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_cycle_failure_is_logged_with_the_exception_class_only(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    await _torrent(sessions, username="first", info_hash="a" * 40, size=10)
+    runtime = SchedulerRuntime(
+        sessions, FakeGateway(fail=True), scheduler_id="scheduler-a", clock=lambda: NOW
+    )
+
+    with caplog.at_level("WARNING", logger="app.scheduler.runtime"):
+        interval = await runtime._run_guarded_cycle()
+
+    assert interval <= 5.0
+    record = next(r for r in caplog.records if r.message == "scheduler_cycle_failed")
+    assert record.__dict__["cause_type"] == "RuntimeError"
+    assert "qb_unavailable" not in caplog.text
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_failing_cycles_back_off_and_a_success_resets_the_delay(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    await _torrent(sessions, username="first", info_hash="a" * 40, size=10)
+    gateway = FakeGateway(fail=True)
+    runtime = SchedulerRuntime(sessions, gateway, scheduler_id="scheduler-a", clock=lambda: NOW)
+
+    delays = [await runtime._run_guarded_cycle() for _ in range(6)]
+
+    assert delays == [5.0, 10.0, 20.0, 40.0, 60.0, 60.0]
+    gateway.fail = False
+    await runtime._run_guarded_cycle()
+    gateway.fail = True
+    assert await runtime._run_guarded_cycle() == 5.0
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_slow_application_renews_the_lease_and_is_still_recorded(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    await _torrent(sessions, username="first", info_hash="a" * 40, size=10)
+    clock = [NOW]
+
+    class SlowGateway(FakeGateway):
+        async def apply_managed_controls(
+            self,
+            controls: Sequence[QBittorrentV2DesiredControl],
+            *,
+            allow_missing_stopped: bool = False,
+        ) -> QBittorrentV2ControlResult:
+            clock[0] += timedelta(seconds=120)  # far beyond the 30 s lease
+            return await super().apply_managed_controls(
+                controls, allow_missing_stopped=allow_missing_stopped
+            )
+
+    runtime = SchedulerRuntime(
+        sessions, SlowGateway(), scheduler_id="scheduler-a", clock=lambda: clock[0]
+    )
+
+    result = await runtime.run_once()
+
+    assert result.leader is True
+    async with sessions() as session:
+        state = await session.get(SchedulerState, 1)
+    assert state is not None and state.applied_generation == state.desired_generation == 1
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_lease_is_handed_back_when_the_scheduler_stops(tmp_path: Path) -> None:
+    engine, sessions = await _database(tmp_path)
+    runtime = SchedulerRuntime(
+        sessions, FakeGateway(), scheduler_id="scheduler-a", clock=lambda: NOW
+    )
+    await runtime.run_once()
+    async with sessions() as session:
+        held = await session.get(SchedulerState, 1)
+    assert held is not None and held.lease_owner == "scheduler-a"
+
+    runtime.request_stop()
+    await runtime.run()
+
+    async with sessions() as session, session.begin():
+        released = await session.get(SchedulerState, 1)
+        assert released is not None and released.lease_owner is None
+        successor = await acquire_scheduler_lease(
+            session, owner="scheduler-b", now=NOW, ttl=timedelta(seconds=30)
+        )
+    assert successor is not None
+    await engine.dispose()
+
+
+async def _stable_rotation_setup(
+    tmp_path: Path,
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession], list[ManagedTorrent]]:
+    engine, sessions = await _database(tmp_path)
+    torrents = [
+        await _torrent(
+            sessions,
+            username=f"rotating-{index}",
+            info_hash=f"{300 + index:040x}",
+            size=20 * 1024**3,
+            created_at=NOW + timedelta(seconds=index),
+        )
+        for index in range(5)
+    ]
+    async with sessions() as session, session.begin():
+        limit = await session.get(DatabaseOption, "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL")
+        dynamic = await session.get(DatabaseOption, "WOS_SCHEDULER_DYNAMIC_CONCURRENCY_ENABLED")
+        assert limit is not None and dynamic is not None
+        limit.integer_value = 2
+        dynamic.boolean_value = False
+    return engine, sessions, torrents
+
+
+@pytest.mark.asyncio
+async def test_running_set_is_stable_within_a_quantum_and_rotates_after_it(
+    tmp_path: Path,
+) -> None:
+    engine, sessions, _ = await _stable_rotation_setup(tmp_path)
+    clock = [NOW]
+    runtime = SchedulerRuntime(
+        sessions, FakeGateway(), scheduler_id="scheduler-rotation", clock=lambda: clock[0]
+    )
+
+    first = await runtime.run_once()
+    selections = []
+    for seconds in (30, 60, 90):  # faster than the 120 s quantum
+        clock[0] = NOW + timedelta(seconds=seconds)
+        selections.append((await runtime.run_once()).selected_torrent_ids)
+    clock[0] = NOW + timedelta(seconds=130)
+    rotated = await runtime.run_once()
+
+    assert len(first.selected_torrent_ids) == 2
+    assert selections == [first.selected_torrent_ids] * 3
+    assert set(rotated.selected_torrent_ids) != set(first.selected_torrent_ids)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_completed_torrent_frees_its_slot_without_waiting_for_the_quantum(
+    tmp_path: Path,
+) -> None:
+    engine, sessions, torrents = await _stable_rotation_setup(tmp_path)
+    clock = [NOW]
+    runtime = SchedulerRuntime(
+        sessions, FakeGateway(), scheduler_id="scheduler-refill", clock=lambda: clock[0]
+    )
+    first = await runtime.run_once()
+    finished, survivor = first.selected_torrent_ids
+    async with sessions() as session, session.begin():
+        row = await session.get(ManagedTorrent, finished)
+        assert row is not None
+        row.state = ManagedTorrentState.READY
+        row.progress = 1
+        row.desired_active = False
+        row.desired_priority = None
+
+    clock[0] = NOW + timedelta(seconds=30)
+    second = await runtime.run_once()
+
+    assert survivor in second.selected_torrent_ids
+    assert finished not in second.selected_torrent_ids
+    assert len(second.selected_torrent_ids) == 2
+    assert {torrent.id for torrent in torrents} >= set(second.selected_torrent_ids)
+    await engine.dispose()

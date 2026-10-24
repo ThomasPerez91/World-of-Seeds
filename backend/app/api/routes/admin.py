@@ -21,6 +21,7 @@ from app.auth.service import (
     set_managed_user_active,
 )
 from app.coordination.dependencies import RedisCoordinatorDependency
+from app.core.audit_log import log_admin_action
 from app.core.config import Settings, get_settings
 from app.integrations.dependencies import (
     ExternalServicesMonitorDependency,
@@ -533,6 +534,7 @@ async def generate_user(
         )
         await db.commit()
         await db.refresh(result.user)
+        log_admin_action("user_create", context.user.id, target=str(result.user.id))
     except UserAccountQuotaReachedError as exc:
         await db.rollback()
         raise HTTPException(
@@ -560,10 +562,13 @@ async def update_user_status(
     payload: UserStatusRequest,
     db: DbSession,
     redis: RedisCoordinatorDependency,
-    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> AdminUserResponse:
     try:
         result = await set_managed_user_active(db, user_id=user_id, is_active=payload.is_active)
+        log_admin_action(
+            "user_status", context.user.id, target=str(user_id), active=payload.is_active
+        )
     except ManagedUserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
     except ProtectedUserError as exc:
@@ -581,10 +586,11 @@ async def delete_user(
     user_id: UUID,
     db: DbSession,
     redis: RedisCoordinatorDependency,
-    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> Response:
     try:
         queue_membership_changed = await delete_managed_user(db, user_id=user_id)
+        log_admin_action("user_delete", context.user.id, target=str(user_id))
     except ManagedUserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
     except ProtectedUserError as exc:

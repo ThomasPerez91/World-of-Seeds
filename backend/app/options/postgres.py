@@ -21,6 +21,7 @@ from app.options.store import (
     normalize_option_value,
     validate_cross_options,
 )
+from app.options.write_guards import validate_written_options
 
 
 class DatabaseOptionsDriftError(RuntimeError):
@@ -40,6 +41,15 @@ class PostgresOptionsRegistry:
 
     async def initialize(self, session: AsyncSession, *, now: datetime | None = None) -> None:
         changed_at = now or datetime.now(UTC)
+        # Fast path: when every row already exists nothing is written, so no exclusive lock
+        # on the whole table is needed (the scheduler calls this every cycle).
+        rows = await self._load_rows(session)
+        if all(spec.key in rows for spec in DATABASE_OPTION_SPECS):
+            self._reject_unknown_rows(rows)
+            for spec in DATABASE_OPTION_SPECS:
+                self._validate_row_metadata(rows[spec.key], spec)
+            self._validated_values(rows)
+            return
         rows = await self._load_rows(session, lock=True)
         self._reject_unknown_rows(rows)
 
@@ -77,6 +87,7 @@ class PostgresOptionsRegistry:
         *,
         actor_user_id: uuid.UUID,
         now: datetime | None = None,
+        expected_versions: Mapping[str, int] | None = None,
     ) -> DatabaseOptionsUpdate:
         if not changes:
             raise OptionsValidationError("Au moins une option doit être modifiée.")
@@ -88,7 +99,22 @@ class PostgresOptionsRegistry:
             )
 
         rows = await self._load_rows(session, lock=True)
-        values = self._validated_values(rows)
+        try:
+            values = self._validated_values(rows)
+        except OptionsValidationError:
+            # The stored state is already inconsistent (manual SQL edit, tightened bounds,
+            # a newer rule): the corrective change must still be accepted. The state it
+            # produces is validated below.
+            values = self._stored_values(rows)
+        previous = dict(values)
+        for key, expected in (expected_versions or {}).items():
+            row = rows.get(key)
+            if key in changes and row is not None and row.version != expected:
+                raise OptionsValidationError(
+                    "Cette option a été modifiée par un autre administrateur : recharge la page.",
+                    code="option_version_conflict",
+                    field=key,
+                )
         normalized_changes: dict[str, OptionValue] = {}
         for key, candidate in changes.items():
             spec = DATABASE_OPTION_SPECS_BY_KEY.get(key)
@@ -112,6 +138,9 @@ class PostgresOptionsRegistry:
             values[key] = normalized
 
         validate_cross_options(values)
+        validate_written_options(
+            values, {key for key, value in normalized_changes.items() if previous.get(key) != value}
+        )
         changed_at = now or datetime.now(UTC)
         changed_keys: list[str] = []
         versions: dict[str, int] = {}
@@ -176,6 +205,20 @@ class PostgresOptionsRegistry:
             self._validate_row_metadata(row, spec)
             values[spec.key] = normalize_option_value(spec, row.value)
         validate_cross_options(values)
+        return values
+
+    def _stored_values(self, rows: Mapping[str, DatabaseOption]) -> dict[str, OptionValue]:
+        """Stored values as they are, without bounds or cross-option validation."""
+        self._reject_unknown_rows(rows)
+        values: dict[str, OptionValue] = {}
+        for spec in DATABASE_OPTION_SPECS:
+            row = rows.get(spec.key)
+            if row is None:
+                raise DatabaseOptionsDriftError(
+                    f"Database option registry is missing the entry {spec.key}"
+                )
+            self._validate_row_metadata(row, spec)
+            values[spec.key] = row.value
         return values
 
     @staticmethod

@@ -24,6 +24,7 @@ MAX_ADD_RESPONSE_BYTES = 16 * 1024
 MAX_LOOKUP_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_CONTROL_TORRENTS = 200
 _SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
+_NOT_RUNNING_ERROR_STATES = frozenset({"error", "missingfiles"})
 
 
 class QBittorrentV2AddState(StrEnum):
@@ -63,6 +64,10 @@ class QBittorrentV2ControlResult:
     stopped: tuple[str, ...]
     limits_updated: tuple[str, ...]
     priorities_applied: tuple[str, ...]
+    # Torrents deliberately left untouched: absent from qBittorrent, owned by someone
+    # else, or in a state that cannot be controlled safely. One defective torrent must
+    # never block the control of the rest of the batch.
+    skipped: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,58 +269,62 @@ class QBittorrentV2Gateway:
                 raise QBittorrentV2TransientError("qBittorrent control preflight failed") from exc
 
             by_hash = {record.info_hash: record for record in records}
-            controls_by_hash = {control.info_hash: control for control in validated}
-            missing = set(controls_by_hash) - set(by_hash)
-            if missing and (
-                not allow_missing_stopped
-                or any(
-                    controls_by_hash[info_hash].run_state != QBittorrentV2RunState.STOPPED
-                    for info_hash in missing
-                )
-            ):
-                raise QBittorrentV2TransientError("A managed torrent is not visible in qBittorrent")
-
-            # Ownership and snapshot validation are completed for the whole batch before
-            # the first mutation. This prevents a mixed batch from touching external torrents.
-            try:
-                for control in validated:
-                    if control.info_hash in missing:
-                        continue
-                    record = by_hash[control.info_hash]
+            skipped: list[str] = []
+            already_stopped: list[str] = []
+            applicable: list[QBittorrentV2DesiredControl] = []
+            # Every torrent is judged on its own. Ownership, absence and invalid snapshots
+            # exclude only the offending torrent, so a stale or external entry can no longer
+            # freeze the scheduler. External torrents are still never mutated.
+            for control in validated:
+                record = by_hash.get(control.info_hash)
+                if record is None:
+                    if allow_missing_stopped and control.run_state == QBittorrentV2RunState.STOPPED:
+                        already_stopped.append(control.info_hash)
+                    else:
+                        skipped.append(control.info_hash)
+                    continue
+                try:
                     self._require_owned(record, self._identity(control.storage_key))
+                except QBittorrentV2OwnershipError:
+                    skipped.append(control.info_hash)
+                    continue
+                try:
                     _require_control_snapshot(record)
-            except QBittorrentV2OwnershipError:
-                raise
-            except IntegrationRequestError as exc:
-                raise QBittorrentV2TransientError(
-                    "qBittorrent control snapshot is invalid"
-                ) from exc
+                except IntegrationRequestError:
+                    # qBittorrent reports error/missingFiles torrents as not running, so a
+                    # stop request is already satisfied; they can never be started safely.
+                    if (
+                        control.run_state == QBittorrentV2RunState.STOPPED
+                        and (record.state or "").lower() in _NOT_RUNNING_ERROR_STATES
+                    ):
+                        already_stopped.append(control.info_hash)
+                    else:
+                        skipped.append(control.info_hash)
+                    continue
+                applicable.append(control)
 
             stopped_existing = tuple(
                 control.info_hash
-                for control in validated
-                if control.info_hash not in missing
+                for control in applicable
                 if control.run_state == QBittorrentV2RunState.STOPPED
                 and not _is_stopped(by_hash[control.info_hash].state)
             )
-            stopped = (*stopped_existing, *sorted(missing))
+            stopped = (*stopped_existing, *sorted(already_stopped))
             started = tuple(
                 control.info_hash
-                for control in validated
-                if control.info_hash not in missing
+                for control in applicable
                 if control.run_state == QBittorrentV2RunState.RUNNING
                 and _is_stopped(by_hash[control.info_hash].state)
             )
             limits_updated = tuple(
                 control.info_hash
-                for control in validated
-                if control.info_hash not in missing
+                for control in applicable
                 if _normalized_download_limit(by_hash[control.info_hash].download_limit)
                 != control.download_limit_bytes_per_second
             )
             running = tuple(
                 control.info_hash
-                for control in validated
+                for control in applicable
                 if control.run_state == QBittorrentV2RunState.RUNNING
             )
 
@@ -323,11 +332,11 @@ class QBittorrentV2Gateway:
                 if stopped_existing:
                     await self._post_control("stop", {"hashes": "|".join(stopped_existing)})
                 for limit in sorted(
-                    {control.download_limit_bytes_per_second for control in validated}
+                    {control.download_limit_bytes_per_second for control in applicable}
                 ):
                     hashes = tuple(
                         control.info_hash
-                        for control in validated
+                        for control in applicable
                         if control.info_hash in limits_updated
                         and control.download_limit_bytes_per_second == limit
                     )
@@ -356,6 +365,7 @@ class QBittorrentV2Gateway:
                 stopped=stopped,
                 limits_updated=limits_updated,
                 priorities_applied=running,
+                skipped=tuple(skipped),
             )
         finally:
             if logged_in:
