@@ -160,16 +160,23 @@ function truncateUtf8(value: string, maxBytes: number): string {
  * reserved Windows name, a trailing dot, a very long name). Only such names are rewritten, and
  * always the same way, so a resumed transfer reopens the same local file.
  */
-export function localFileName(component: string): string {
+export async function localFileName(component: string): Promise<string> {
   // eslint-disable-next-line no-control-regex
   let name = component.replace(/[<>:"|?*\u0000-\u001f]/g, "_");
   name = name.replace(/[. ]+$/, (trailing) => "_".repeat(trailing.length));
   if (WINDOWS_RESERVED_NAME.test(name)) name = `_${name}`;
-  if (utf8Length(name) > MAX_LOCAL_NAME_BYTES) {
+  // Reserve the suffix namespace too: a literal mapped-looking name must not alias
+  // an escaped name. Hash the original component, including for directories/resume.
+  if (name !== component || utf8Length(name) > MAX_LOCAL_NAME_BYTES || /~wos-/i.test(name)) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(component));
+    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0"))
+      .join("").slice(0, 32);
+    const suffix = `~wos-${hash}`;
     const dot = name.lastIndexOf(".");
     const extension = dot > 0 && name.length - dot <= 16 ? name.slice(dot) : "";
     const base = name.slice(0, name.length - extension.length);
-    name = truncateUtf8(base, MAX_LOCAL_NAME_BYTES - utf8Length(extension)) + extension;
+    name = truncateUtf8(base, MAX_LOCAL_NAME_BYTES - utf8Length(suffix + extension))
+      + suffix + extension;
   }
   return name;
 }
@@ -626,9 +633,9 @@ export class RecursiveDownloadController {
     }
     let directory = this.directory;
     for (const component of components.slice(0, -1)) {
-      directory = await directory.getDirectoryHandle(localFileName(component), { create: true });
+      directory = await directory.getDirectoryHandle(await localFileName(component), { create: true });
     }
-    return directory.getFileHandle(localFileName(components.at(-1) as string), { create: true });
+    return directory.getFileHandle(await localFileName(components.at(-1) as string), { create: true });
   }
 
   private abortActive(): void {

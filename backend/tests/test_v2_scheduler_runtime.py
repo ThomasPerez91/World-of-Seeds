@@ -35,7 +35,7 @@ from app.models import (
 )
 from app.options import PostgresOptionsRegistry
 from app.scheduler.persistence import acquire_scheduler_lease
-from app.scheduler.runtime import SchedulerRuntime, _remaining_bytes
+from app.scheduler.runtime import SchedulerCycleResult, SchedulerRuntime, _remaining_bytes
 
 NOW = datetime(2026, 8, 21, 22, tzinfo=UTC)
 
@@ -1431,4 +1431,28 @@ async def test_a_completed_torrent_frees_its_slot_without_waiting_for_the_quantu
     assert finished not in second.selected_torrent_ids
     assert len(second.selected_torrent_ids) == 2
     assert {torrent.id for torrent in torrents} >= set(second.selected_torrent_ids)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_prolonged_scheduler_outage_keeps_backoff_bounded_and_recovers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, sessions = await _database(tmp_path)
+    gateway = FakeGateway()
+    runtime = SchedulerRuntime(sessions, gateway, scheduler_id="scheduler-long-outage")
+
+    async def fail() -> None:
+        raise RuntimeError("dependency unavailable")
+
+    async def succeed() -> SchedulerCycleResult:
+        return SchedulerCycleResult(False, None, (), None)
+
+    monkeypatch.setattr(runtime, "run_once", fail)
+    for _ in range(1100):
+        assert 5.0 <= await runtime._run_guarded_cycle() <= 60.0
+    monkeypatch.setattr(runtime, "run_once", succeed)
+    await runtime._run_guarded_cycle()
+    monkeypatch.setattr(runtime, "run_once", fail)
+    assert await runtime._run_guarded_cycle() == 5.0
     await engine.dispose()

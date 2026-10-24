@@ -738,3 +738,26 @@ Développement ultérieur : limiteur d’API authentifiée (SE-06), verrous de
 lecture manifeste/archives (LS-17, LS-18), consolidation CSS (FE-05), caractères
 bidirectionnels dans les noms (SE-21), table d’audit de sécurité (SE-09), authentification
 renforcée (SE-13), réveil du scheduler sur modification d’option (OP-09).
+
+### Revue avant promotion 2.4.7
+
+Les trois fils de revue #420 étaient marqués résolus mais les problèmes restaient dans
+le commit develop 7d523325. Corrections avant promotion, sans nouvelle version :
+
+- Les composants de chemins réécrits pour le disque local portent un suffixe dérivé
+  de SHA-256 (128 bits), y compris les dossiers et les noms trop longs ; l’espace des
+  noms portant ce suffixe est réservé. Des noms comme a:b.txt et a?b.txt, CON.txt et
+  _CON.txt ne désignent plus le même fichier. La transformation reste déterministe
+  pour une reprise, l’extension et la limite de 255 octets sont conservées.
+- La relance d’une erreur de synchronisation passe par le même verrou de réservation
+  et le même contrôle de capacité que la relance ADD, avant de rendre le torrent
+  à nouveau planifiable. Une capacité resserrée refuse 507 sans mutation ni événement.
+- L’exposant du backoff scheduler est borné avant calcul ; 1100 échecs consécutifs
+  restent plafonnés à 60 s et une réussite réinitialise le délai.
+
+Validation locale : 92 tests backend ciblés réussis / 19 ignorés (PostgreSQL absent),
+3 nouveaux cas de régression réussis séparément ; 25 tests de téléchargement récursif
+réussis ; Ruff, mypy strict (268 sources), typage TypeScript et build frontend verts.
+CI complète et promotion à vérifier sur les commits exacts. Aucun changement de migration
+ou du helper dans ces ajustements. Le helper modifié par #420 reste à réinstaller
+sur l’hôte pour que son durcissement soit effectif, comme indiqué dans le runbook.

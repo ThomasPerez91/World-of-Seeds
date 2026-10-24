@@ -428,7 +428,7 @@ class SchedulerRuntime:
             logger.warning("scheduler_cycle_failed", extra={"cause_type": type(exc).__name__})
             # Back off while a dependency stays down instead of recomputing every 5 seconds.
             self._consecutive_failures += 1
-            interval = min(60.0, 5.0 * 2 ** (self._consecutive_failures - 1))
+            interval = min(60.0, 5.0 * 2 ** min(self._consecutive_failures - 1, 4))
         return interval
 
     def _rotation_due(self, now: datetime, quantum_seconds: int) -> bool:
