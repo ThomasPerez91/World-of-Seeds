@@ -6,6 +6,7 @@ import {
   type CreatedExternalApiClient,
   type ExternalApiClient,
 } from "../../api/client";
+import { Dialog } from "../../components/Dialog";
 import { Badge, Button, Card, StateMessage } from "../../components/ui";
 import { useI18n } from "../../i18n";
 
@@ -23,19 +24,23 @@ export function ExternalApiClientsPanel({
   const [created, setCreated] = useState<CreatedExternalApiClient | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  // A failed load replaces the list; a failed action must never hide it.
+  const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [revokeTarget, setRevokeTarget] = useState<ExternalApiClient | null>(null);
+  const [revoking, setRevoking] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const result = await api.listExternalApiClients();
       setClients(Array.isArray(result) ? result : []);
-      setError("");
+      setLoadError("");
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         onSessionExpired();
         return;
       }
-      setError(t("admin.externalApiLoadFailed"));
+      setLoadError(t("admin.externalApiLoadFailed"));
     } finally {
       setLoading(false);
     }
@@ -56,6 +61,7 @@ export function ExternalApiClientsPanel({
   async function createClient() {
     if (name.trim() === "" || scopes.length === 0) return;
     setSubmitting(true);
+    setActionError("");
     try {
       const result = await api.createExternalApiClient(name.trim(), scopes);
       setCreated(result);
@@ -66,13 +72,15 @@ export function ExternalApiClientsPanel({
         onSessionExpired();
         return;
       }
-      setError(t("admin.externalApiCreateFailed"));
+      setActionError(t("admin.externalApiCreateFailed"));
     } finally {
       setSubmitting(false);
     }
   }
 
   async function revoke(client: ExternalApiClient) {
+    setRevoking(true);
+    setActionError("");
     try {
       await api.revokeExternalApiClient(client.id);
       setClients((current) =>
@@ -85,7 +93,10 @@ export function ExternalApiClientsPanel({
         onSessionExpired();
         return;
       }
-      setError(t("admin.externalApiRevokeFailed"));
+      setActionError(t("admin.externalApiRevokeFailed"));
+    } finally {
+      setRevoking(false);
+      setRevokeTarget(null);
     }
   }
 
@@ -94,7 +105,7 @@ export function ExternalApiClientsPanel({
     try {
       await navigator.clipboard.writeText(created.api_key);
     } catch {
-      setError(t("admin.copyFailed"));
+      setActionError(t("admin.copyFailed"));
     }
   }
 
@@ -108,12 +119,15 @@ export function ExternalApiClientsPanel({
         </div>
       </div>
       {created !== null && (
-        <Card className="credential-reveal" role="status">
+        <Card className="credential-reveal">
           <strong>{t("admin.externalApiKeyOnce")}</strong>
           <div className="credential-row">
             <code>{created.api_key}</code>
             <Button type="button" variant="secondary" onClick={() => void copyKey()}>
               {t("admin.copy")}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setCreated(null)}>
+              {t("admin.hideKey")}
             </Button>
           </div>
         </Card>
@@ -150,8 +164,9 @@ export function ExternalApiClientsPanel({
           {submitting ? t("common.processing") : t("admin.createApiKey")}
         </Button>
       </Card>
-      {error !== "" ? (
-        <StateMessage tone="error">{error}</StateMessage>
+      {actionError !== "" && <StateMessage tone="error">{actionError}</StateMessage>}
+      {loadError !== "" ? (
+        <StateMessage tone="error">{loadError}</StateMessage>
       ) : loading ? (
         <StateMessage tone="loading">{t("common.loading")}</StateMessage>
       ) : (
@@ -172,13 +187,40 @@ export function ExternalApiClientsPanel({
                   : formatDate(client.last_used_at)}
               </p>
               {client.is_active && (
-                <Button type="button" variant="danger" onClick={() => void revoke(client)}>
+                <Button type="button" variant="danger" onClick={() => setRevokeTarget(client)}>
                   {t("admin.revoke")}
                 </Button>
               )}
             </Card>
           ))}
         </div>
+      )}
+      {revokeTarget !== null && (
+        <Dialog
+          eyebrow={t("admin.externalApis")}
+          title={t("admin.revokeApiKeyTitle")}
+          description={t("admin.revokeApiKeyDescription", {
+            name: revokeTarget.name,
+            prefix: revokeTarget.key_prefix,
+          })}
+          closeDisabled={revoking}
+          onClose={() => setRevokeTarget(null)}
+        >
+          <p className="dialog-warning">{t("admin.revokeApiKeyWarning")}</p>
+          <div className="dialog-actions">
+            <Button
+              variant="secondary"
+              data-initial-focus
+              disabled={revoking}
+              onClick={() => setRevokeTarget(null)}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button variant="danger" disabled={revoking} onClick={() => void revoke(revokeTarget)}>
+              {revoking ? t("common.processing") : t("admin.confirmRevokeApiKey")}
+            </Button>
+          </div>
+        </Dialog>
       )}
     </section>
   );
