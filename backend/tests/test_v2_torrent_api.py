@@ -1188,3 +1188,74 @@ async def test_v2_upload_answers_503_when_the_stored_options_are_inconsistent(
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "torrent_options_unavailable"
+
+
+async def _ready_request(
+    db: AsyncSession, owner: User, *, number: int, retention_left: timedelta
+) -> None:
+    now = datetime.now(UTC)
+    torrent = ManagedTorrent(
+        info_hash=f"{number:040x}",
+        name=f"ready-{number}",
+        total_size=1,
+        state=ManagedTorrentState.READY,
+        progress=1,
+        ready_at=now - timedelta(days=3),
+    )
+    db.add(torrent)
+    await db.flush()
+    db.add(
+        TorrentRequest(
+            user_id=owner.id,
+            managed_torrent_id=torrent.id,
+            state=TorrentRequestState.READY,
+            ready_at=now - timedelta(days=3),
+            unsubscribe_at=now + retention_left,
+        )
+    )
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_an_expired_ready_request_no_longer_counts_against_the_active_limit(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    limit = await db_session.get(DatabaseOption, "WOS_TORRENT_MAX_ACTIVE_PER_USER")
+    assert limit is not None
+    limit.integer_value = 1
+    await db_session.commit()
+    await _ready_request(db_session, owner, number=0xAA, retention_left=-timedelta(minutes=40))
+    headers = await login(client)
+
+    response = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+
+    assert response.status_code == 201, response.text
+
+
+@pytest.mark.asyncio
+async def test_a_live_ready_request_still_counts_against_the_active_limit(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await prepare_user(db_session)
+    limit = await db_session.get(DatabaseOption, "WOS_TORRENT_MAX_ACTIVE_PER_USER")
+    assert limit is not None
+    limit.integer_value = 1
+    await db_session.commit()
+    await _ready_request(db_session, owner, number=0xBB, retention_left=timedelta(hours=10))
+    headers = await login(client)
+
+    response = await client.post(
+        "/api/v2/torrents",
+        files={"torrent": ("film.torrent", torrent_content(), "application/x-bittorrent")},
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "torrent_limit_reached"

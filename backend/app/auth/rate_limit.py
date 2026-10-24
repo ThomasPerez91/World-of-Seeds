@@ -1,7 +1,6 @@
 """Bounded pre-crypto budgets for the deliberately single-process API."""
 
 import hashlib
-import ipaddress
 import secrets
 from collections import OrderedDict
 from collections.abc import Callable
@@ -9,19 +8,7 @@ from dataclasses import dataclass
 from math import ceil
 from time import monotonic
 
-from app.auth.security import hash_token
-
-
-def _network_identity(peer: str) -> str:
-    try:
-        address = ipaddress.ip_address(peer.split("%", 1)[0])
-    except ValueError:
-        return "unknown"
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
-        address = address.ipv4_mapped
-    if isinstance(address, ipaddress.IPv6Address):
-        return str(ipaddress.IPv6Network((address, 64), strict=False))
-    return str(address)
+from app.auth.security import hash_token, network_identity
 
 
 @dataclass(slots=True)
@@ -96,7 +83,7 @@ class LoginIpRateLimiter:
                 break
             self._windows.popitem(last=False)
 
-        network = _network_identity(client_ip)
+        network = network_identity(client_ip)
         key = hash_token(network)
         ip_index = self._index("ip", network)
         identity_index = self._index("identity", identity) if identity is not None else None

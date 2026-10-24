@@ -6,7 +6,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Event, Lock
 from typing import TypeVar
 
-from app.auth.security import hash_password, verify_password
+from app.auth.security import hash_password, rehash_verified_password, verify_password
 
 T = TypeVar("T")
 
@@ -93,3 +93,7 @@ async def hash_password_async(value: str) -> str:
 
 async def verify_password_async(value: str, encoded_hash: str) -> bool:
     return await password_work_pool.run(lambda: verify_password(value, encoded_hash))
+
+
+async def rehash_verified_password_async(value: str) -> str:
+    return await password_work_pool.run(lambda: rehash_verified_password(value))

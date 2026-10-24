@@ -17,7 +17,7 @@ déploiement manuel documenté dans `docs/deployment-rise2-v2.md`.
 | IN-04 | `mem_limit`/`cpus` sur qBittorrent, Prometheus, Grafana, cAdvisor, API/workers ; `oom_score_adj` négatif sur PostgreSQL et Redis | compose |
 | IN-06 | Healthchecks (heartbeat fichier) pour worker/scheduler, sondes pour ingress/Prometheus/Grafana ; `docker compose up --wait` dans le helper | compose, helper |
 | IN-07 | Rôles PostgreSQL distincts (migrateur, application, exporter, sauvegarde) | init SQL, compose |
-| SE-12, IN-16 | Passer la liste de changements bloqués du helper en liste autorisée (`backend/`, `frontend/`, `docs/`, `Dockerfile`, `VERSION`) ; contrôler la propriété `root:root` du checkout ; revues obligatoires sur l’environnement `rise2-production` | helper root, GitHub |
+| SE-12, IN-16 | La liste de changements bloqués du dépôt couvre maintenant les scripts et unités exécutés en root ; **réinstaller le helper racine** (`scripts/rise2_v2_deploy_helper_install.sh`) pour qu’elle s’applique. Étape suivante : passer la liste de changements bloqués du helper en liste autorisée (`backend/`, `frontend/`, `docs/`, `Dockerfile`, `VERSION`) ; contrôler la propriété `root:root` du checkout ; revues obligatoires sur l’environnement `rise2-production` | helper root, GitHub |
 
 ## 2. Périmètre C411 et ingress
 

@@ -22,6 +22,7 @@ from fastapi import (
 from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+from sqlalchemy.sql.elements import ColumnElement
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
@@ -149,6 +150,16 @@ ACTIVE_REQUEST_STATES = (
     TorrentRequestState.ACTIVE,
     TorrentRequestState.READY,
 )
+
+
+def _visible_request(now: datetime) -> ColumnElement[bool]:
+    """Requests the user still sees: a READY one whose retention ended no longer counts."""
+    return TorrentRequest.state.in_(ACTIVE_REQUEST_STATES) & (
+        (TorrentRequest.state != TorrentRequestState.READY)
+        | (TorrentRequest.unsubscribe_at.is_not(None) & (TorrentRequest.unsubscribe_at > now))
+    )
+
+
 RequestState = Literal["requested", "active", "ready", "cancelled", "expired", "error"]
 PressureState = Literal["normal", "warning", "critical"]
 TorrentSort = Literal["name", "state", "queue", "size"]
@@ -1332,7 +1343,9 @@ async def create_torrent_request(
                     .select_from(TorrentRequest)
                     .where(
                         TorrentRequest.user_id == user_id,
-                        TorrentRequest.state.in_(ACTIVE_REQUEST_STATES),
+                        # An expired READY request is already hidden from the user and waits for
+                        # the hourly reaper: it must not count against the limit meanwhile.
+                        _visible_request(datetime.now(UTC)),
                     )
                 )
                 if active_count is None or active_count > max_active:
@@ -1481,11 +1494,7 @@ async def list_torrent_requests(
     retention_bucket: RetentionBucket | None = None,
 ) -> TorrentRequestV2ListingResponse:
     now = datetime.now(UTC)
-    visible_request = TorrentRequest.state.in_(ACTIVE_REQUEST_STATES) & (
-        (TorrentRequest.state != TorrentRequestState.READY)
-        | (TorrentRequest.unsubscribe_at.is_not(None) & (TorrentRequest.unsubscribe_at > now))
-    )
-    filters = [TorrentRequest.user_id == context.user.id, visible_request]
+    filters = [TorrentRequest.user_id == context.user.id, _visible_request(now)]
     if search and (normalized_search := search.strip()):
         filters.append(func.lower(ManagedTorrent.name).contains(normalized_search.casefold()))
 

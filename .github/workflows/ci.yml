@@ -11,12 +11,18 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request supersedes its previous run; branch builds always finish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   WOS_VERSION_CHANNEL: v2
 
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:17-alpine
@@ -78,6 +84,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -96,6 +103,7 @@ jobs:
   discord-bot:
     name: Discord bot
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: discord-bot
@@ -114,6 +122,7 @@ jobs:
   security:
     name: Dependency and image security
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
