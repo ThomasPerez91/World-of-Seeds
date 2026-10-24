@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -6,13 +7,18 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.passwords import hash_password_async, verify_password_async
+from app.auth.passwords import (
+    hash_password_async,
+    rehash_verified_password_async,
+    verify_password_async,
+)
 from app.auth.security import (
     DUMMY_PASSWORD_HASH,
     canonical_username,
     generate_token,
     hash_token,
     normalize_username,
+    password_needs_rehash,
     throttle_key,
 )
 from app.core.config import Settings
@@ -35,7 +41,9 @@ class AuthenticationFailedError(Exception):
 
 
 class AuthenticationLockedError(Exception):
-    pass
+    def __init__(self, retry_after_seconds: int = 1) -> None:
+        super().__init__("authentication locked")
+        self.retry_after_seconds = max(1, retry_after_seconds)
 
 
 class UsernameUnavailableError(Exception):
@@ -72,6 +80,10 @@ def ensure_utc(value: datetime) -> datetime:
 def user_can_login(user: User, now: datetime) -> bool:
     del now
     return user.is_active and user.deleted_at is None
+
+
+def _remaining_seconds(locked_until: datetime, now: datetime) -> int:
+    return max(1, math.ceil((ensure_utc(locked_until) - now).total_seconds()))
 
 
 async def _register_failure(
@@ -133,7 +145,7 @@ async def authenticate(
         and throttle.locked_until is not None
         and ensure_utc(throttle.locked_until) > now
     ):
-        raise AuthenticationLockedError
+        raise AuthenticationLockedError(_remaining_seconds(throttle.locked_until, now))
 
     user = await db.scalar(select(User).where(func.lower(User.username) == username_key))
     user_id = user.id if user is not None else None
@@ -141,6 +153,11 @@ async def authenticate(
     # Release the read transaction/connection before any crypto or queue wait.
     await db.commit()
     password_matches = await verify_password_async(password, encoded_hash)
+    upgraded_hash: str | None = None
+    if password_matches and user_id is not None and password_needs_rehash(encoded_hash):
+        # Parameters were strengthened since this password was stored: compute the new hash
+        # now, outside any transaction, while the clear password is known to be right.
+        upgraded_hash = await rehash_verified_password_async(password)
 
     now = datetime.now(UTC)
     throttle = await db.scalar(
@@ -154,7 +171,7 @@ async def authenticate(
         and throttle.locked_until is not None
         and ensure_utc(throttle.locked_until) > now
     ):
-        raise AuthenticationLockedError
+        raise AuthenticationLockedError(_remaining_seconds(throttle.locked_until, now))
 
     if user_id is None or not password_matches:
         await _register_failure(db, key, throttle, settings, now)
@@ -176,6 +193,8 @@ async def authenticate(
         raise AuthenticationFailedError
     if throttle is not None:
         await db.delete(throttle)
+    if upgraded_hash is not None:
+        locked_user.password_hash = upgraded_hash
     if locked_user.last_login_at is None or ensure_utc(locked_user.last_login_at) < now:
         locked_user.last_login_at = now
     tokens = issue_session(db, user=locked_user, settings=settings, now=now)

@@ -137,6 +137,7 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=_detail("authentication_throttled", "Too many authentication attempts"),
+            headers={"Retry-After": str(exc.retry_after_seconds), "Cache-Control": "no-store"},
         ) from exc
     except AuthenticationFailedError as exc:
         raise HTTPException(
