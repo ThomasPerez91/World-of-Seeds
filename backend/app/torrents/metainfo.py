@@ -162,9 +162,15 @@ def _tracker_url(raw: bytes, *, passkey: str | None, allowed_hosts: frozenset[st
         or port not in {None, 80, 443}
     ):
         raise TorrentValidationError("Ce torrent n’utilise pas un tracker C411 autorisé.")
+    scheme = parsed.scheme
+    if passkey is not None and scheme == "http":
+        # The shared account passkey is part of the URL: never send it in clear text.
+        scheme = "https"
+        if port == 80:
+            port = None
     netloc = hostname if port is None else f"{hostname}:{port}"
     path = "/announce" if passkey is None else f"/announce/{quote(passkey, safe='')}"
-    return urlunsplit((parsed.scheme, netloc, path, "", "")).encode("ascii")
+    return urlunsplit((scheme, netloc, path, "", "")).encode("ascii")
 
 
 def _normalize_trackers(

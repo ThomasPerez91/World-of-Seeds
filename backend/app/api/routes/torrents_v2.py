@@ -29,7 +29,8 @@ from app.auth.dependencies import (
     AuthContext,
     DbSession,
     RealtimeAuthContext,
-    get_realtime_auth_context,
+    get_realtime_connection,
+    realtime_session_is_valid,
     require_current_credentials,
     require_current_credentials_csrf,
 )
@@ -336,7 +337,7 @@ def _response(
 async def stream_torrent_events(
     websocket: WebSocket,
     redis: RedisCoordinatorDependency,
-    context: Annotated[RealtimeAuthContext, Depends(get_realtime_auth_context)],
+    context: Annotated[RealtimeAuthContext, Depends(get_realtime_connection)],
 ) -> None:
     await websocket.accept()
     subscription = await redis.subscribe_torrent_events(context.user_id)
@@ -347,6 +348,10 @@ async def stream_torrent_events(
     try:
         while True:
             event = await subscription.next_event(timeout_seconds=REALTIME_HEARTBEAT_SECONDS)
+            if event is None and not await realtime_session_is_valid(context):
+                # Logout, suspension, password change or expiry: stop streaming.
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
             await websocket.send_json(event.payload() if event else {"type": "heartbeat"})
     except (RuntimeError, WebSocketDisconnect):
         return

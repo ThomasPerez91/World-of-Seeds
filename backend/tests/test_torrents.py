@@ -133,3 +133,16 @@ def test_a_path_too_long_for_the_database_index_is_refused_at_validation() -> No
     assert normalize_torrent(multi_file(7), **kwargs, max_total_size=1_000)  # type: ignore[arg-type]
     with pytest.raises(TorrentValidationError):
         normalize_torrent(multi_file(9), **kwargs, max_total_size=1_000)  # type: ignore[arg-type]
+
+
+def test_a_plain_http_tracker_never_carries_the_passkey_in_clear_text() -> None:
+    plain = torrent_content(tracker=b"http://c411.org:80/announce/anyone")
+    kwargs = {"allowed_tracker_hosts": ["c411.org"], "max_total_size": 1_000}
+
+    with_passkey = normalize_torrent(plain, passkey="secret-passkey-123", **kwargs)  # type: ignore[arg-type]
+    without_passkey = normalize_torrent(plain, passkey=None, **kwargs)  # type: ignore[arg-type]
+
+    assert b"https://c411.org/announce/secret-passkey-123" in with_passkey.content
+    assert b"http://" not in with_passkey.content
+    # Without a passkey nothing sensitive is at stake: the declared scheme is kept.
+    assert b"http://c411.org:80/announce" in without_passkey.content

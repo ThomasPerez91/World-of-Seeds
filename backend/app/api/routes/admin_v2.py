@@ -31,6 +31,7 @@ from app.auth.dependencies import (
     require_current_admin,
 )
 from app.coordination.dependencies import RedisCoordinatorDependency
+from app.core.audit_log import log_admin_action
 from app.integrations.dependencies import AdminRuntimeMonitorDependency
 from app.integrations.http import IntegrationRequestError
 from app.integrations.qbittorrent_v2 import QBittorrentV2OwnershipError
@@ -120,7 +121,7 @@ async def purge_admin_cleanup(
     payload: AdminV2CleanupPurgeRequest,
     db: DbSession,
     redis: RedisCoordinatorDependency,
-    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> AdminV2CleanupPurgeResult:
     try:
         result = await schedule_admin_purge(db, tuple(payload.torrent_ids))
@@ -128,6 +129,13 @@ async def purge_admin_cleanup(
     except Exception:
         await db.rollback()
         raise
+    log_admin_action(
+        "cleanup_purge",
+        context.user.id,
+        requested=result.requested,
+        scheduled=len(result.scheduled_ids),
+        skipped=len(result.skipped_ids),
+    )
     if result.scheduled_ids:
         await redis.signal_job_available()
     return AdminV2CleanupPurgeResult(
@@ -207,8 +215,11 @@ async def act_on_admin_qbittorrent_torrent(
     db: DbSession,
     redis: RedisCoordinatorDependency,
     monitor: AdminRuntimeMonitorDependency,
-    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> AdminV2QBittorrentActionResult:
+    log_admin_action(
+        "qbittorrent_action", context.user.id, torrent=str(torrent_id), operation=payload.action
+    )
     if payload.action == "delete":
         try:
             result = await schedule_admin_purge(
@@ -901,8 +912,14 @@ async def recover_admin_managed_torrent(
     managed_torrent_id: uuid.UUID,
     payload: AdminV2RecoveryRequest,
     db: DbSession,
-    _: Annotated[AuthContext, Depends(require_admin_csrf)],
+    context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> AdminV2RecoveryResult:
+    log_admin_action(
+        "reconciliation_recover",
+        context.user.id,
+        torrent=str(managed_torrent_id),
+        operation=payload.action,
+    )
     try:
         expected = await recovery_snapshot(db, managed_torrent_id)
     except ReconciliationRecoveryError as exc:
