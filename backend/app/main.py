@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
@@ -36,6 +37,7 @@ from app.integrations.prometheus_network import PrometheusNetworkError
 from app.integrations.wos_restart import WosRestartStore
 from app.observability import MetricsRegistry, OperationalMetricsCache, RequestMetricsMiddleware
 from app.options import OptionsStore
+from app.options.registry import ignored_option_variables
 from app.torrents.downloads import DownloadRateLimiter
 from app.torrents.retry_reads import TorrentRetryReads
 from app.torrents.traffic import DownloadTrafficScheduler
@@ -109,6 +111,12 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = settings
+    if ignored := ignored_option_variables(os.environ):
+        logger.warning(
+            "environment_options_ignored: %s are administration options stored in the "
+            "database; the environment variables have no effect",
+            ",".join(ignored),
+        )
     application.state.reconciliation_disk_reads = ReconciliationDiskReads()
     application.state.torrent_retry_reads = TorrentRetryReads()
     application.state.network_throughput_collector = NetworkThroughputCollector(settings)

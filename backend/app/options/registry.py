@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -659,6 +660,17 @@ INACTIVE_OPTION_KEYS = frozenset(
 
 DATABASE_OPTION_SPECS = (*OPTION_SPECS, *C411_ACCOUNT_SPECS)
 DATABASE_OPTION_SPECS_BY_KEY = {spec.key: spec for spec in DATABASE_OPTION_SPECS}
+
+
+def ignored_option_variables(environ: Mapping[str, str]) -> tuple[str, ...]:
+    """Environment variables named like an administration option.
+
+    Functional options live in PostgreSQL and are changed from the administration screen:
+    setting one in the environment has no effect, which an operator should be told rather than
+    left to discover.
+    """
+    return tuple(sorted(name for name in environ if name.upper() in DATABASE_OPTION_SPECS_BY_KEY))
+
 
 if len(OPTION_SPECS_BY_KEY) != len(OPTION_SPECS):
     raise RuntimeError("Option registry contains duplicate keys")

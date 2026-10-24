@@ -544,7 +544,33 @@ function readCookie(name: string): string | null {
     .split(";")
     .map((part) => part.trim())
     .find((part) => part.startsWith(prefix));
-  return value === undefined ? null : decodeURIComponent(value.slice(prefix.length));
+  if (value === undefined) return null;
+  try {
+    return decodeURIComponent(value.slice(prefix.length));
+  } catch {
+    // A malformed cookie (set by a sibling sub-domain, for instance) must not break mutations.
+    return null;
+  }
+}
+
+export const READ_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Reads never wait forever: a half-dead connection (laptop waking up, network change) would
+ * otherwise freeze every refresh that queues behind the pending request. Mutations keep their
+ * own pace, an upload can legitimately be slow.
+ */
+export function withReadTimeout(
+  method: string,
+  signal: AbortSignal | null | undefined,
+  timeoutMs: number = READ_REQUEST_TIMEOUT_MS,
+): AbortSignal | undefined {
+  if (!["GET", "HEAD"].includes(method) || typeof AbortSignal.timeout !== "function") {
+    return signal ?? undefined;
+  }
+  const timeout = AbortSignal.timeout(timeoutMs);
+  if (signal === null || signal === undefined) return timeout;
+  return typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeout]) : signal;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -573,6 +599,7 @@ async function requestAt<T>(prefix: string, path: string, init: RequestInit = {}
     ...init,
     headers,
     credentials: "same-origin",
+    signal: withReadTimeout(method, init.signal),
   });
   if (!response.ok) {
     let message = "Une erreur est survenue.";

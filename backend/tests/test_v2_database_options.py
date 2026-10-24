@@ -496,3 +496,20 @@ async def test_a_stale_version_is_refused_instead_of_overwriting_another_change(
         expected_versions={"WOS_STORAGE_MIN_FREE_PERCENT": 99},
     )
     assert (await registry.snapshot(db_session))[key] == 100
+
+
+def test_environment_variables_named_like_options_are_reported_as_ignored() -> None:
+    from app.options.registry import ignored_option_variables
+
+    environ = {
+        "WOS_TORRENT_MAX_ACTIVE_PER_USER": "10",
+        "wos_storage_min_free_percent": "20",
+        "WOS_ENVIRONMENT": "production",
+        "WOS_V2_STORAGE_HOST_PATH": "/srv/storage",
+        "PATH": "/usr/bin",
+    }
+
+    assert ignored_option_variables(environ) == (
+        "WOS_TORRENT_MAX_ACTIVE_PER_USER",
+        "wos_storage_min_free_percent",
+    )

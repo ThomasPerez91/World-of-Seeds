@@ -654,7 +654,7 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
   d’Alembic accepte un mot de passe contenant `%` (IN-09).
 - Documentation alignée sur le comportement réel (secrets, plafonds de flux, options).
 
-### Lots 9 à 14 — compléments
+### Lots 9 à 15 — compléments
 
 - Lot 9 : le reaper de rétention n’exécute sa passe de maintenance que si la rétention a
   réussi et qu’aucun arrêt n’est demandé.
@@ -684,6 +684,20 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
   refait immédiatement par la sélection équitable. Les torrents conservés ne sont pas
   rechargés au registre d’équité, qui ne bouge qu’avec les nouvelles admissions. Le quantum est
   mémorisé en mémoire du scheduler unique : un redémarrage provoque une rotation.
+
+- Lot 15 (durcissements divers) :
+  - la limite de torrents actifs ignore les demandes READY dont la rétention est terminée
+    (déjà masquées à l’utilisateur, en attente du reaper horaire) (OP-16) ;
+  - verrous de connexion indexés sur le /64 IPv6, `Retry-After` sur le 429 de verrou, hash
+    Argon2 rafraîchi au prochain login réussi quand les paramètres ont évolué (SE-04, SE-24) ;
+  - histogrammes de durée d’API réellement cumulatifs (IN-13) ;
+  - avertissement au démarrage quand une variable d’environnement porte le nom d’une option
+    d’administration (sans effet) (OP-19) ;
+  - lectures de l’interface bornées à 30 s et cookie CSRF malformé toléré (FE-11, SE-24) ;
+  - CI : durée maximale par job, annulation des exécutions de PR remplacées, Dependabot
+    (IN-18, hors épinglage par SHA) ;
+  - helper de déploiement : tous les scripts et unités exécutés en root rendent le
+    déploiement manuel obligatoire (SE-12) ; effectif après réinstallation du helper racine.
 
 ### Non traité dans cette livraison (décision, migration ou exploitation requises)
 

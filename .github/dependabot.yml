@@ -1,0 +1,20 @@
+version: 2
+
+# Security and maintenance updates arrive as pull requests that run the full CI.
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: "/backend"
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
