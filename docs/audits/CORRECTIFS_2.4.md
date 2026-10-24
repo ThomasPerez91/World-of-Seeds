@@ -761,3 +761,37 @@ réussis ; Ruff, mypy strict (268 sources), typage TypeScript et build frontend 
 CI complète et promotion à vérifier sur les commits exacts. Aucun changement de migration
 ou du helper dans ces ajustements. Le helper modifié par #420 reste à réinstaller
 sur l’hôte pour que son durcissement soit effectif, comme indiqué dans le runbook.
+
+### Lot 20 — téléchargement de dossier : casse, normalisation et fichiers existants
+
+Deux risques restaient après la revue précédente, tous deux dans `recursiveDownload.ts` :
+
+- Deux fichiers ou dossiers frères qui ne diffèrent que par la casse (`README.md` et
+  `readme.md`) ou par la forme Unicode (`é` composé ou décomposé) désignent la même entrée
+  sous NTFS et APFS par défaut : le second écrasait le premier. Le premier nom rencontré dans
+  un dossier garde son nom ; tout frère dont la clé repliée (NFC, majuscules puis minuscules)
+  est déjà prise reçoit le suffixe `~wos-<SHA-256 tronqué>`. Le choix est fait une fois par
+  transfert et mémorisé, donc une reprise rouvre le même fichier ; il se fait sans attente
+  entre le test et la prise de la clé, car deux fichiers du même dossier sont écrits en
+  parallèle. Seules les clés repliées sont gardées par dossier (au plus 100 000 fichiers par
+  torrent) ; l’état par fichier est libéré à la fin de chaque fichier. Le préfixe `~wos-`
+  réservé est maintenant reconnu à travers la casse et l’Unicode (`~woſ-` compris).
+- `createWritable` tronque : un fichier non vide déjà présent dans le dossier choisi était
+  écrasé sans demande. Le transfert s’arrête maintenant sur l’erreur `local_file_exists`
+  (message traduit) tant que le fichier n’est pas retiré, puis `Reprendre` repart. Un fichier
+  vide, ou créé par ce transfert, reste réutilisable ; un fichier à la place d’un dossier (ou
+  l’inverse) donne la même erreur. Le téléchargement d’un fichier seul, dont le dialogue
+  « Enregistrer sous » du navigateur a déjà demandé confirmation, garde le remplacement
+  (`replaceExistingFiles`).
+
+Conséquence à connaître : annuler un dossier puis le relancer dans le même dossier local
+s’arrête sur le premier fichier partiel, qu’il faut supprimer ou changer de dossier ; avant, il
+était écrasé en silence. Nettoyer les fichiers partiels à l’annulation demanderait
+`removeEntry`, absent de l’interface locale, et n’est pas fait ici.
+
+Validation locale : 13 tests ajoutés (collisions de casse et d’Unicode avec un disque simulé
+insensible à la casse, dossiers frères, fichier existant puis reprise, détection à travers la
+casse, remplacement confirmé, dossier sur fichier, manager fichier contre dossier) ; chacune
+des deux protections désactivée à tour de rôle fait échouer trois tests, et le drapeau du
+manager forcé dans un sens ou l’autre fait échouer le sien. tsc, suite Vitest complète (253
+réussis) et build verts. Aucun changement backend, migration ni helper.

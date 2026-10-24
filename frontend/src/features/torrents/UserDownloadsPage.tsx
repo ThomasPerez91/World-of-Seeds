@@ -174,6 +174,7 @@ const transferErrorKeys: Record<RecursiveTransferErrorCode, MessageKey> = {
   received_file_incomplete: "downloads.receivedFileInvalid",
   local_file_size_invalid: "downloads.localFileInvalid",
   manifest_path_invalid: "downloads.manifestPathInvalid",
+  local_file_exists: "downloads.localFileExists",
   local_disk_full: "downloads.localDiskFull",
   local_write_denied: "downloads.localWriteDenied",
   local_destination_missing: "downloads.localDestinationMissing",

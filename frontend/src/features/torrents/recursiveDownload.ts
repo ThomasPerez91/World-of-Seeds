@@ -76,6 +76,7 @@ export type RecursiveTransferErrorCode =
   | "received_file_incomplete"
   | "local_file_size_invalid"
   | "manifest_path_invalid"
+  | "local_file_exists"
   | "local_disk_full"
   | "local_write_denied"
   | "local_destination_missing"
@@ -121,6 +122,12 @@ interface RecursiveDownloadOptions {
   loadManifestPage: ManifestPageLoader;
   concurrency?: number;
   fetcher?: typeof fetch;
+  /**
+   * A destination the user already confirmed (the browser Save dialog asks before replacing a
+   * file) may be overwritten. Without it, a non-empty file this transfer did not create stops
+   * the transfer instead of being truncated.
+   */
+  replaceExistingFiles?: boolean;
   onProgress: (progress: RecursiveTransferProgress) => void;
 }
 
@@ -156,18 +163,37 @@ function truncateUtf8(value: string, maxBytes: number): string {
 }
 
 /**
+ * Key under which two names are the same entry on a local file system: NTFS and the default
+ * APFS volume ignore case, APFS and HFS+ ignore Unicode normalization. Upper-casing first folds
+ * the letters whose lower-case forms differ although their upper-case form is shared.
+ */
+export function localNameKey(name: string): string {
+  return name.normalize("NFC").toUpperCase().toLowerCase();
+}
+
+/**
  * A torrent name valid on Linux can be refused by a local file system (`:` in a title, a
  * reserved Windows name, a trailing dot, a very long name). Only such names are rewritten, and
- * always the same way, so a resumed transfer reopens the same local file.
+ * always the same way, so a resumed transfer reopens the same local file. `disambiguate` forces
+ * the suffix for a name that would otherwise share its entry with a sibling.
  */
-export async function localFileName(component: string): Promise<string> {
+export async function localFileName(
+  component: string,
+  options: { disambiguate?: boolean } = {},
+): Promise<string> {
   // eslint-disable-next-line no-control-regex
   let name = component.replace(/[<>:"|?*\u0000-\u001f]/g, "_");
   name = name.replace(/[. ]+$/, (trailing) => "_".repeat(trailing.length));
   if (WINDOWS_RESERVED_NAME.test(name)) name = `_${name}`;
   // Reserve the suffix namespace too: a literal mapped-looking name must not alias
-  // an escaped name. Hash the original component, including for directories/resume.
-  if (name !== component || utf8Length(name) > MAX_LOCAL_NAME_BYTES || /~wos-/i.test(name)) {
+  // an escaped name, whatever its case or Unicode form. Hash the original component,
+  // including for directories/resume.
+  if (
+    options.disambiguate === true
+    || name !== component
+    || utf8Length(name) > MAX_LOCAL_NAME_BYTES
+    || localNameKey(name).includes("~wos-")
+  ) {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(component));
     const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0"))
       .join("").slice(0, 32);
@@ -218,7 +244,16 @@ export class RecursiveDownloadController {
   private readonly concurrency: number;
   private readonly fetcher: typeof fetch;
   private readonly onProgress: (progress: RecursiveTransferProgress) => void;
+  private readonly replaceExistingFiles: boolean;
   private readonly offsets = new Map<string, number>();
+  // Local names are decided once per transfer: a sibling whose name folds to an entry already
+  // taken in the same directory gets the suffix, and every retry or resume reopens that file.
+  // Only the fold keys are kept per directory and the per-file state is dropped at completion,
+  // so the memory follows the files still in flight plus one short key per file seen.
+  private readonly directoryNames = new Map<string, Promise<string>>();
+  private readonly fileNames = new Map<string, Promise<string>>();
+  private readonly claimedNames = new Map<string, Set<string>>();
+  private readonly ownedFiles = new Set<string>();
   private readonly activeRequests = new Set<AbortController>();
   private readonly pendingFiles: TorrentDownloadFileV2[];
   private readonly activeFiles = new Map<string, TorrentDownloadFileV2>();
@@ -260,6 +295,7 @@ export class RecursiveDownloadController {
     this.loadManifestPage = options.loadManifestPage;
     this.concurrency = concurrency;
     this.fetcher = options.fetcher ?? fetch;
+    this.replaceExistingFiles = options.replaceExistingFiles ?? false;
     this.onProgress = options.onProgress;
     this.pendingFiles = [...options.firstPage.items];
     this.maxBufferedFiles = options.firstPage.limit * MAX_BUFFERED_MANIFEST_PAGES;
@@ -313,6 +349,8 @@ export class RecursiveDownloadController {
           await this.downloadFile(file);
           this.completedFiles += 1;
           this.offsets.delete(file.id);
+          this.fileNames.delete(file.id);
+          this.ownedFiles.delete(file.id);
           this.recentlyCompleted.unshift(file);
           this.recentlyCompleted.splice(2);
         } catch (error) {
@@ -461,7 +499,7 @@ export class RecursiveDownloadController {
 
   private async downloadFileOnce(file: TorrentDownloadFileV2): Promise<void> {
     if (this.status !== "running") throw new DOMException("transfer stopped", "AbortError");
-    const localFile = await this.openLocalFile(file.relative_path);
+    const localFile = await this.openLocalFile(file);
     if (this.status !== "running") throw new DOMException("transfer stopped", "AbortError");
     const offset = await this.synchronizeLocalOffset(file, localFile);
     if (offset === file.size) return;
@@ -623,8 +661,8 @@ export class RecursiveDownloadController {
     else this.offsets.set(fileId, offset);
   }
 
-  private async openLocalFile(relativePath: string): Promise<LocalFileHandle> {
-    const components = relativePath.split("/");
+  private async openLocalFile(file: TorrentDownloadFileV2): Promise<LocalFileHandle> {
+    const components = file.relative_path.split("/");
     if (
       components.length === 0 ||
       components.some((component) => component === "" || component === "." || component === "..")
@@ -632,10 +670,73 @@ export class RecursiveDownloadController {
       throw new TransferFailure("manifest_path_invalid");
     }
     let directory = this.directory;
+    let parentPath = "";
     for (const component of components.slice(0, -1)) {
-      directory = await directory.getDirectoryHandle(await localFileName(component), { create: true });
+      const path = parentPath === "" ? component : `${parentPath}/${component}`;
+      const name = await this.localName(this.directoryNames, path, parentPath, component);
+      directory = await directory.getDirectoryHandle(name, { create: true });
+      parentPath = path;
     }
-    return directory.getFileHandle(await localFileName(components.at(-1) as string), { create: true });
+    const name = await this.localName(
+      this.fileNames,
+      file.id,
+      parentPath,
+      components.at(-1) as string,
+    );
+    const handle = await directory.getFileHandle(name, { create: true });
+    await this.claimLocalFile(file, handle);
+    return handle;
+  }
+
+  private localName(
+    names: Map<string, Promise<string>>,
+    key: string,
+    parentPath: string,
+    component: string,
+  ): Promise<string> {
+    let name = names.get(key);
+    if (name === undefined) {
+      const pending = this.claimLocalName(parentPath, component);
+      names.set(key, pending);
+      // A failed attempt must not be remembered: the next try decides again.
+      pending.catch(() => {
+        if (names.get(key) === pending) names.delete(key);
+      });
+      name = pending;
+    }
+    return name;
+  }
+
+  private async claimLocalName(parentPath: string, component: string): Promise<string> {
+    const plain = await localFileName(component);
+    const key = localNameKey(plain);
+    let claimed = this.claimedNames.get(parentPath);
+    if (claimed === undefined) {
+      claimed = new Set();
+      this.claimedNames.set(parentPath, claimed);
+    }
+    // Check and claim without awaiting in between: concurrent workers share this directory.
+    if (!claimed.has(key)) {
+      claimed.add(key);
+      return plain;
+    }
+    return localFileName(component, { disambiguate: true });
+  }
+
+  /**
+   * `createWritable` truncates: a non-empty file that this transfer did not create (and has not
+   * been told to replace) belongs to the user and stops the transfer instead.
+   */
+  private async claimLocalFile(file: TorrentDownloadFileV2, handle: LocalFileHandle): Promise<void> {
+    if (this.replaceExistingFiles || this.ownedFiles.has(file.id)) return;
+    if (handle.getFile !== undefined) {
+      const size = (await handle.getFile()).size;
+      if (!Number.isSafeInteger(size) || size < 0) {
+        throw new TransferFailure("local_file_size_invalid");
+      }
+      if (size > 0) throw new TransferFailure("local_file_exists");
+    }
+    this.ownedFiles.add(file.id);
   }
 
   private abortActive(): void {
@@ -658,6 +759,8 @@ export class RecursiveDownloadController {
         return "local_write_denied";
       }
       if (error.name === "NotFoundError") return "local_destination_missing";
+      // A file where a folder is needed, or a folder where a file is needed.
+      if (error.name === "TypeMismatchError") return "local_file_exists";
       if (error.name === "AbortError") return "download_interrupted";
     }
     return "local_transfer_failed";
