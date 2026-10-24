@@ -124,7 +124,11 @@ async def purge_admin_cleanup(
     context: Annotated[AuthContext, Depends(require_admin_csrf)],
 ) -> AdminV2CleanupPurgeResult:
     try:
-        result = await schedule_admin_purge(db, tuple(payload.torrent_ids))
+        result = await schedule_admin_purge(
+            db,
+            tuple(payload.torrent_ids),
+            expected_subscribers=payload.expected_subscribers,
+        )
         await db.commit()
     except Exception:
         await db.rollback()

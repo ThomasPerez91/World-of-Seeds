@@ -855,10 +855,17 @@ export const api = {
     return requestV2<AdminCleanupListing>("/admin/cleanup");
   },
 
-  purgeAdminCleanup(torrentIds: string[]): Promise<AdminCleanupPurgeResult> {
+  purgeAdminCleanup(
+    torrentIds: string[],
+    expectedSubscribers: Record<string, number> = {},
+  ): Promise<AdminCleanupPurgeResult> {
     return requestV2<AdminCleanupPurgeResult>("/admin/cleanup/purge", {
       method: "POST",
-      body: JSON.stringify({ torrent_ids: torrentIds }),
+      body: JSON.stringify(
+        Object.keys(expectedSubscribers).length === 0
+          ? { torrent_ids: torrentIds }
+          : { torrent_ids: torrentIds, expected_subscribers: expectedSubscribers },
+      ),
     });
   },
 

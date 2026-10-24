@@ -67,7 +67,10 @@ describe("AdminCleanupPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirmer la purge" }));
 
     await waitFor(() => expect(purgeBodies).toEqual([
-      { torrent_ids: ["22222222-2222-4222-8222-222222222222"] },
+      {
+        torrent_ids: ["22222222-2222-4222-8222-222222222222"],
+        expected_subscribers: { "22222222-2222-4222-8222-222222222222": 0 },
+      },
     ]));
     expect(await screen.findByText("Purge planifiée pour 1 contenu(s).")).toBeTruthy();
     expect(screen.getByText("Aucun contenu ne correspond aux filtres actuels.")).toBeTruthy();

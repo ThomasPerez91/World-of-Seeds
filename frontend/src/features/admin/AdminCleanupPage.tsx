@@ -98,7 +98,10 @@ export function AdminCleanupPage({ onBack, onNavigate, onSessionExpired }: {
     setError("");
     setMessage("");
     try {
-      const result = await api.purgeAdminCleanup(purgeSelection.map((item) => item.id));
+      const result = await api.purgeAdminCleanup(
+        purgeSelection.map((item) => item.id),
+        Object.fromEntries(purgeSelection.map((item) => [item.id, item.subscriber_count])),
+      );
       setPurgeSelection(null);
       setMessage(
         result.skipped_ids.length > 0

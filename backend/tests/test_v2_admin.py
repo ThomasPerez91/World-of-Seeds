@@ -516,3 +516,55 @@ async def test_admin_options_patch_answers_409_on_a_stale_version(
     assert first.status_code == 200
     assert stale.status_code == 409
     assert stale.json()["detail"]["code"] == "option_version_conflict"
+
+
+@pytest.mark.asyncio
+async def test_purge_skips_a_content_whose_subscribers_changed_since_the_list(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await _admin(db_session)
+    headers = await _login(client)
+    now = datetime.now(UTC)
+    owner = User(username="purge-owner", password_hash="test-password-hash")
+    torrent = ManagedTorrent(
+        info_hash="d" * 40,
+        name="Shown with one subscriber",
+        total_size=100,
+        state=ManagedTorrentState.READY,
+        progress=1,
+        ready_at=now - timedelta(hours=1),
+    )
+    db_session.add_all([owner, torrent])
+    await db_session.flush()
+    subscription = TorrentRequest(
+        user_id=owner.id,
+        managed_torrent_id=torrent.id,
+        state=TorrentRequestState.READY,
+        ready_at=now - timedelta(hours=1),
+        unsubscribe_at=now + timedelta(days=1),
+    )
+    db_session.add(subscription)
+    await db_session.commit()
+
+    stale = await client.post(
+        "/api/v2/admin/cleanup/purge",
+        json={"torrent_ids": [str(torrent.id)], "expected_subscribers": {str(torrent.id): 0}},
+        headers=headers,
+    )
+
+    assert stale.status_code == 200
+    assert stale.json()["scheduled"] == 0
+    assert stale.json()["skipped_ids"] == [str(torrent.id)]
+    await db_session.refresh(subscription)
+    assert subscription.state is TorrentRequestState.READY
+
+    current = await client.post(
+        "/api/v2/admin/cleanup/purge",
+        json={"torrent_ids": [str(torrent.id)], "expected_subscribers": {str(torrent.id): 1}},
+        headers=headers,
+    )
+
+    assert current.json()["scheduled_ids"] == [str(torrent.id)]
+    await db_session.refresh(subscription)
+    assert subscription.state.value == TorrentRequestState.CANCELLED.value
