@@ -136,6 +136,44 @@ class InterruptedTransfer extends TransferFailure {
   }
 }
 
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+const MAX_LOCAL_NAME_BYTES = 255;
+
+function utf8Length(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  let result = "";
+  let bytes = 0;
+  for (const character of value) {
+    const size = utf8Length(character);
+    if (bytes + size > maxBytes) break;
+    result += character;
+    bytes += size;
+  }
+  return result;
+}
+
+/**
+ * A torrent name valid on Linux can be refused by a local file system (`:` in a title, a
+ * reserved Windows name, a trailing dot, a very long name). Only such names are rewritten, and
+ * always the same way, so a resumed transfer reopens the same local file.
+ */
+export function localFileName(component: string): string {
+  // eslint-disable-next-line no-control-regex
+  let name = component.replace(/[<>:"|?*\u0000-\u001f]/g, "_");
+  name = name.replace(/[. ]+$/, (trailing) => "_".repeat(trailing.length));
+  if (WINDOWS_RESERVED_NAME.test(name)) name = `_${name}`;
+  if (utf8Length(name) > MAX_LOCAL_NAME_BYTES) {
+    const dot = name.lastIndexOf(".");
+    const extension = dot > 0 && name.length - dot <= 16 ? name.slice(dot) : "";
+    const base = name.slice(0, name.length - extension.length);
+    name = truncateUtf8(base, MAX_LOCAL_NAME_BYTES - utf8Length(extension)) + extension;
+  }
+  return name;
+}
+
 function isNetworkFailure(error: unknown): boolean {
   return error instanceof TypeError
     || (error instanceof DOMException && error.name === "NetworkError");
@@ -588,9 +626,9 @@ export class RecursiveDownloadController {
     }
     let directory = this.directory;
     for (const component of components.slice(0, -1)) {
-      directory = await directory.getDirectoryHandle(component, { create: true });
+      directory = await directory.getDirectoryHandle(localFileName(component), { create: true });
     }
-    return directory.getFileHandle(components.at(-1) as string, { create: true });
+    return directory.getFileHandle(localFileName(components.at(-1) as string), { create: true });
   }
 
   private abortActive(): void {

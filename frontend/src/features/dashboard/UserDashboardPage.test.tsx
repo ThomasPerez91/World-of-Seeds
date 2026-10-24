@@ -107,6 +107,25 @@ describe("UserDashboardPage", () => {
     expect(summary).toEqual({ active: 0, ready: 1, waiting: 0 });
   });
 
+  it("se contente d’une requête quand le serveur fournit les compteurs", async () => {
+    const listing = vi.spyOn(api, "listTorrentRequestsV2").mockImplementation(
+      async (offset, limit) => ({
+        items: [torrent()],
+        offset,
+        limit,
+        total: 500,
+        status_counts: { all: 500, downloading: 12, ready: 300, waiting: 185, blocked: 3 },
+      }),
+    );
+
+    await expect(loadTorrentActivity(new AbortController().signal)).resolves.toEqual({
+      active: 12,
+      ready: 300,
+      waiting: 185,
+    });
+    expect(listing).toHaveBeenCalledTimes(1);
+  });
+
   it("affiche les trois synthèses avec les contrats existants", async () => {
     vi.spyOn(api, "listTorrentRequestsV2").mockImplementation(async (offset, limit) => ({
       items: limit === 100 ? [

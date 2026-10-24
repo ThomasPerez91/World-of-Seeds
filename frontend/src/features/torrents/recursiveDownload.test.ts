@@ -4,6 +4,7 @@ import { ApiError, type TorrentDownloadSnapshotV2 } from "../../api/client";
 import {
   type LocalDirectoryHandle,
   type LocalFileHandle,
+  localFileName,
   pickDownloadDirectory,
   recursiveDirectoryDownloadCapability,
   RecursiveDownloadController,
@@ -814,5 +815,30 @@ describe("RecursiveDownloadController", () => {
       error: null,
     });
     expect(updates.at(-1)?.queue.every((item) => item.status === "cancelled")).toBe(true);
+  });
+});
+
+describe("localFileName", () => {
+  it("leaves ordinary names untouched", () => {
+    expect(localFileName("Épisode 1.mkv")).toBe("Épisode 1.mkv");
+    expect(localFileName("film.2026.1080p.mkv")).toBe("film.2026.1080p.mkv");
+  });
+
+  it("rewrites what a local file system refuses, always the same way", () => {
+    expect(localFileName("Titre : Épisode 1.mkv")).toBe("Titre _ Épisode 1.mkv");
+    expect(localFileName('a<b>c"d|e?f*g')).toBe("a_b_c_d_e_f_g");
+    expect(localFileName("CON.txt")).toBe("_CON.txt");
+    expect(localFileName("nul")).toBe("_nul");
+    expect(localFileName("rapport.")).toBe("rapport_");
+    expect(localFileName("nom ")).toBe("nom_");
+    expect(localFileName("Titre : Épisode 1.mkv")).toBe(localFileName("Titre : Épisode 1.mkv"));
+  });
+
+  it("keeps the extension when a name exceeds 255 bytes", () => {
+    const long = `${"é".repeat(200)}.mkv`;
+    const result = localFileName(long);
+
+    expect(new TextEncoder().encode(result).length).toBeLessThanOrEqual(255);
+    expect(result.endsWith(".mkv")).toBe(true);
   });
 });

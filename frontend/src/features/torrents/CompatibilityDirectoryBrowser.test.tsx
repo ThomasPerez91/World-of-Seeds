@@ -112,6 +112,59 @@ describe("CompatibilityDirectoryBrowser", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   });
 
+  it("oublie les listings de l’ancien snapshot quand le manifeste change", async () => {
+    const nextSnapshot = { ...snapshot, snapshot_id: "e".repeat(64) };
+    let releaseSecond: () => void = () => undefined;
+    const secondPending = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      calls += 1;
+      if (calls > 1) await secondPending;
+      return response({
+        snapshot_id: calls > 1 ? nextSnapshot.snapshot_id : snapshot.snapshot_id,
+        path: "",
+        directories: [
+          {
+            name: calls > 1 ? "Nouveau dossier" : "Ancien dossier",
+            relative_path: calls > 1 ? "Nouveau dossier" : "Ancien dossier",
+            file_count: 1,
+            total_size: 10,
+            archive_available: true,
+          },
+        ],
+        direct_file_count: 0,
+        offset: 0,
+        limit: 500,
+        files: [],
+      });
+    }));
+    const props = {
+      fallbackLoading: false,
+      onDownloadFile: vi.fn(),
+      onDownloadFolder: vi.fn(),
+      onLoadFallbackPage: vi.fn(),
+      torrentId: "d86528f5-bc01-4a8b-86a1-74fe3404864b",
+    };
+    const view = render(
+      <I18nProvider>
+        <CompatibilityDirectoryBrowser {...props} snapshot={snapshot} />
+      </I18nProvider>,
+    );
+    expect(await screen.findByText("Ancien dossier")).toBeTruthy();
+
+    view.rerender(
+      <I18nProvider>
+        <CompatibilityDirectoryBrowser {...props} snapshot={nextSnapshot} />
+      </I18nProvider>,
+    );
+
+    await waitFor(() => expect(screen.queryByText("Ancien dossier")).toBeNull());
+    releaseSecond();
+    expect(await screen.findByText("Nouveau dossier")).toBeTruthy();
+  });
+
   it("permet de récupérer un sous-dossier avec le sélecteur natif", async () => {
     const onDownloadFolder = vi.fn();
     vi.stubGlobal("showDirectoryPicker", vi.fn());
