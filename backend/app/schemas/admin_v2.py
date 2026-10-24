@@ -185,6 +185,12 @@ class AdminV2CleanupPurgeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     torrent_ids: Annotated[list[UUID], Field(min_length=1, max_length=5000)]
+    # Subscriber count of each content as the administrator saw it. A content whose number
+    # changed since is skipped, so a stale list or a replayed request cannot cancel rights that
+    # were never shown.
+    expected_subscribers: Annotated[dict[UUID, int], Field(max_length=5000)] = Field(
+        default_factory=dict
+    )
 
 
 class AdminV2CleanupPurgeResult(BaseModel):

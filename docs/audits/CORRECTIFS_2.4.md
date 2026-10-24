@@ -654,7 +654,7 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
   d’Alembic accepte un mot de passe contenant `%` (IN-09).
 - Documentation alignée sur le comportement réel (secrets, plafonds de flux, options).
 
-### Lots 9 à 16 — compléments
+### Lots 9 à 17 — compléments
 
 - Lot 9 : le reaper de rétention n’exécute sa passe de maintenance que si la rétention a
   réussi et qu’aucun arrêt n’est demandé.
@@ -703,6 +703,12 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
   écouteur DOM posé par une icône. Le composant `ConfirmButton` garde l’état dans React : le
   nom accessible ne change pas, un message d’état annonce « clique de nouveau pour confirmer »,
   le bouton se désarme après 4 s et à la perte de focus, sans `aria-pressed` détourné.
+
+- Lot 17 (SE-10, partiel) : la purge administrateur accepte le nombre d’abonnés tel qu’affiché
+  et ignore (liste `skipped_ids`, signalée à l’écran) tout contenu dont ce nombre a changé
+  depuis, sans annuler aucun droit. L’interface l’envoie systématiquement ; un client qui ne
+  l’envoie pas garde l’ancien comportement. Le second facteur et le plafond par appel restent
+  à décider.
 
 ### Non traité dans cette livraison (décision, migration ou exploitation requises)
 

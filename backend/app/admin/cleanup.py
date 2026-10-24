@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -127,6 +128,7 @@ async def schedule_admin_purge(
     *,
     now: datetime | None = None,
     eligible_states: tuple[ManagedTorrentState, ...] = DOWNLOADED_TORRENT_STATES,
+    expected_subscribers: Mapping[uuid.UUID, int] | None = None,
 ) -> AdminCleanupPurgeResult:
     timestamp = now or datetime.now(UTC)
     if timestamp.utcoffset() is None:
@@ -168,6 +170,11 @@ async def schedule_admin_purge(
                 )
             ).all()
         )
+        expected = (expected_subscribers or {}).get(torrent_id)
+        if expected is not None and expected != len(requests):
+            # The subscribers changed since the list was displayed: nothing is cancelled.
+            skipped.append(torrent_id)
+            continue
         user_ids = tuple(dict.fromkeys(request.user_id for request in requests))
         usages = {
             usage.user_id: usage
