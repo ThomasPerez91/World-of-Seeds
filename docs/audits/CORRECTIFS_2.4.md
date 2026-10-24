@@ -654,7 +654,7 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
   d’Alembic accepte un mot de passe contenant `%` (IN-09).
 - Documentation alignée sur le comportement réel (secrets, plafonds de flux, options).
 
-### Lots 9 à 13 — compléments
+### Lots 9 à 14 — compléments
 
 - Lot 9 : le reaper de rétention n’exécute sa passe de maintenance que si la rétention a
   réussi et qu’aucun arrêt n’est demandé.
@@ -677,6 +677,14 @@ et dans `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`.
   404 avant tout en-tête (LS-11) ; tests HTTP du 429 de plafond ZIP (LS-25) ; texte du toast de
   sauvegarde qui n’annonce plus une application immédiate (OP-09, partie message).
 
+- Lot 14 (SC-05) : les torrents en cours gardent leur slot entre deux rotations. L’intervalle
+  de contrôle (`WOS_SCHEDULER_CONTROL_INTERVAL_SECONDS`) devient le quantum de rotation ; le
+  cycle peut tourner plus vite (évaluation dynamique) mais l’ensemble actif ne change qu’une
+  fois par quantum, sauf qu’un slot libéré (complétion, stall, limite relevée) est toujours
+  refait immédiatement par la sélection équitable. Les torrents conservés ne sont pas
+  rechargés au registre d’équité, qui ne bouge qu’avec les nouvelles admissions. Le quantum est
+  mémorisé en mémoire du scheduler unique : un redémarrage provoque une rotation.
+
 ### Non traité dans cette livraison (décision, migration ou exploitation requises)
 
 Politique à trancher : plafond de voies rapides par compte et exemption administrateur sur
@@ -689,8 +697,7 @@ chiffrement des passkeys au repos (SE-01/IN-21), contrainte `CHECK` des valeurs 
 Exploitation (voir le runbook) : sauvegardes hors hôte (IN-01), Alertmanager (IN-03), limites
 mémoire (IN-04), healthchecks (IN-06), rôles PostgreSQL (IN-07), limites Caddy et DHT/PeX/LSD
 côté qBittorrent (SE-02, OP-18), liste autorisée du helper de déploiement (SE-12, IN-16).
-Développement ultérieur : rotation d’ensemble actif du scheduler (SC-05, l’algorithme
-d’équité demande une conception dédiée), limiteur d’API authentifiée (SE-06), verrous de
+Développement ultérieur : limiteur d’API authentifiée (SE-06), verrous de
 lecture manifeste/archives (LS-17, LS-18), consolidation CSS (FE-05), caractères
 bidirectionnels dans les noms (SE-21), table d’audit de sécurité (SE-09), authentification
 renforcée (SE-13), réveil du scheduler sur modification d’option (OP-09).

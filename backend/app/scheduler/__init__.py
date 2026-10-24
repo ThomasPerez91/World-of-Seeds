@@ -6,6 +6,7 @@ from app.scheduler.weighted_fair import (
     SchedulerResult,
     TorrentSizeClass,
     select_torrents,
+    select_with_continuity,
 )
 
 __all__ = [
@@ -18,5 +19,6 @@ __all__ = [
     "SchedulerRuntime",
     "TorrentSizeClass",
     "select_torrents",
+    "select_with_continuity",
 ]
 from app.scheduler.runtime import SchedulerCycleResult, SchedulerRuntime
