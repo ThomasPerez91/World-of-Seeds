@@ -192,7 +192,7 @@ jobs:
             world-of-seeds:security
       - name: Upload security reports
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: security-reports
           path: ${{ runner.temp }}/security-reports
