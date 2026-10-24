@@ -19,8 +19,10 @@ import {
   type TorrentRequestV2,
   type TorrentRequestV2State,
 } from "../../api/client";
+import { ConfirmButton } from "../../components/ConfirmButton";
 import { useFeedback } from "../../components/Feedback";
 import {
+  ConfirmIcon,
   DeleteIcon,
   DownloadIcon,
   InfoIcon,
@@ -591,15 +593,17 @@ function TorrentItem({
                     </Button>
                   ) : null}
                   {!(["cancelled", "expired"] as TorrentRequestV2State[]).includes(torrent.state) && (
-                    <Button
+                    <ConfirmButton
                       type="button"
                       variant="danger"
                       disabled={cancelBusy}
-                      onClick={onCancel}
+                      onConfirm={onCancel}
+                      armedChildren={<ConfirmIcon />}
+                      hint={t("downloads.confirmDeleteHint", { name: torrent.name })}
                       aria-label={t(torrent.state === "ready" ? "downloads.deleteNamed" : "downloads.cancelNamed", { name: torrent.name })}
                     >
                       <DeleteIcon />
-                    </Button>
+                    </ConfirmButton>
                   )}
                 </div>
               </div>
