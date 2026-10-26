@@ -62,3 +62,25 @@ isolée décrites dans `docs/deployment-rise2-v2.md`.
 - Taille de `torrent_jobs` après la première heure : décroissante (purge des synchronisations).
 - Dépôt d’un lot de `.torrent` pendant qu’un second compte en dépose un autre : les erreurs
   « validation occupée » se résorbent par reprise automatique.
+
+### Lots 20 et 21 (#437, #438, #439)
+
+- Téléchargement de dossier sous Chrome ou Edge, Windows : un dossier dont deux fichiers se
+  nomment `a:b.txt` et `a?b.txt` donne deux fichiers locaux distincts (`a_b~wos-<hash>.txt`). Le
+  dépôt d’un torrent dont deux chemins ne diffèrent que par la casse reste refusé par le
+  serveur : c’est le contrôle côté navigateur qui est testé ici, avec des disques simulés.
+- Même dossier téléchargé deux fois dans le même dossier local : la page affiche « Un fichier du
+  même nom existe déjà dans ce dossier et n’a pas été écrasé », le fichier existant est intact ;
+  après sa suppression, « Reprendre » termine le transfert. Annuler un dossier puis le relancer
+  au même endroit s’arrête de la même façon sur le premier fichier partiel.
+- Téléchargement d’un fichier seul (« Enregistrer sous ») : le remplacement d’un fichier
+  existant reste possible après la confirmation du navigateur.
+- Dépôt d’un `.torrent` dont le nom ou un chemin contient une marque de réordonnancement
+  bidirectionnel (U+202E par exemple) : refusé. Dépôt d’un nom avec emoji composé (jointure
+  U+200D) ou persan (U+200C) : accepté.
+- Scheduler : pendant que des torrents sont en file, modifier `WOS_SCHEDULER_MAX_ACTIVE_GLOBAL`
+  dans l’administration ; le nombre de torrents actifs dans qBittorrent change en une dizaine de
+  secondes (un tiers du bail), sans attendre l’intervalle de contrôle, et les torrents déjà en
+  cours ne tournent pas. Le journal du scheduler ne répète pas `scheduler_options_check_failed`.
+- Un torrent déjà stocké qui contenait une marque bidirectionnelle échouerait à l’ajout ou à la
+  relance : chercher des torrents en erreur à ce sujet dans les journaux des workers.

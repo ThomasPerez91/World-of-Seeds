@@ -7,9 +7,17 @@
 - Cycle : tests isolés → PR develop → CI → merge → PR master → CI → merge/déploiement → contrôles réels → mise à jour du journal → livraison suivante.
 - Tests : comportementaux, PostgreSQL/Redis/Docker en CI selon disponibilité ; aucun test destructif sur production. Limites métier users, protections techniques pour tous, exemptions admin vérifiées côté serveur.
 - Audit lu intégralement (15 pages) : les constats [V], [S] et les preuves runtime manquantes restent distingués.
-- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.5 déployée et vérifiée le 23 octobre ; S1, S2 et S3 livrés ; ZIP1 livré en 2.4.6 ; S4 reste le prochain correctif.
+- État vérifié : 2.4.1 déployée sur Rise2 ; 2.4.5 déployée et vérifiée le 23 octobre ; S1, S2 et S3 livrés ; ZIP1 livré en 2.4.6.
+- Livraison 2.4.7 : le rapport complémentaire 2.4.6 (136 constats, identifiants SE-, OP-, LS-, IN-, FE-, SC-) a été traité par lots 1 à 21 (#420, #421, #422, #437, #438, #439). `master` est au commit `4c3888b` : CI verte et workflow de déploiement Rise2 réussi le 24 octobre 2026. Les contrôles réels après déploiement (`ACTIONS_OPERATEUR_2.4.7.md`, section 5) restent à faire. Ce qui reste ouvert exige une décision, une migration ou une action d’exploitation.
 
 ## Matrice de suivi
+
+Mise à jour du 26 octobre 2026. Les lignes S4 à D1 suivaient l’audit 2.3.28 ; la livraison 2.4.7
+corrige le rapport 2.4.6, qui a d’autres identifiants. Le rapprochement est fait par sujet et
+indique pour chaque ligne le lot et le constat 2.4.6 concernés. « Partiel » nomme ce qui reste ;
+« À confirmer sur master » signale qu’aucun lot 2.4.7 ne vise explicitement le sujet et qu’il
+faut le relire dans le code avant de le déclarer corrigé ou ouvert. Les lots sont décrits dans
+la section 2.4.7 plus bas.
 
 | Référence | Problème | Priorité | Statut | Version | PR | Tests |
 |---|---|---|---|---|---|---|
@@ -17,49 +25,49 @@
 | S2 | Limiteur externe non borné | P0 | Corrigé, testé et déployé | 2.4.4 | #408 / #410 / #409 | 100k IPv6, expiration, non-éviction, budgets/concurrence/HTTP |
 | S3 | Saturation login/reset | P0 | Corrigé, testé et déployé | 2.4.5 | #412 / #414 / #413 | Connexion/reset avec table pleine, budgets IP/identité/global, IPv6, mémoire, expiration |
 | ZIP1 | Lease ZIP expirée en FIFO et nettoyage MissingGreenlet | P0 | Corrigé, testé et déployé ; ZIP privé production à confirmer | 2.4.6 | #416 / #418 / #417 | Attente > TTL, send bloqué, purge, UUID expiré, annulation, 8/9 leases et PostgreSQL |
-| S4 | Métadonnées réseau et périmètre C411 | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| S5 | Passkeys exposées en clair | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| S6 | Limite authentifiée et cache santé | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| B1 | 150 Go users et exemptions administrateur | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| B2 | Isolation des contrôles scheduler défectueux | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| B3 | Rétention SYNC et snapshots inchangés | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| B4 | Découplage slots C411 et identité qB | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| B5 | Durée sans progression et libération des quotas | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| B6 | Jobs FAILED, relances et options de retry | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| B7 | Longs téléchargements, 429, session et Range | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| B8 | Plafonds serveur par user et exemption admin | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| B9 | Navigation/archives SQL et verrous de lecture | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| B10 | I/O disque hors verrou global | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| B11 | Rétention sessions/throttles et réconciliation | P2 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| B12 | URL Alembic, dates et downgrade peuplé | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
+| S4 | Métadonnées réseau et périmètre C411 | P0 | Partiel : métainfos normalisées (lot 3, SE-02) et tracker en https (lot 11, SE-11) ; DHT, PeX et LSD de qBittorrent à désactiver (exploitation) | 2.4.7 | #420 / #421 / #422 | Lots 3 et 11 |
+| S5 | Passkeys exposées en clair | P0 | Partiel : passkeys jamais renvoyées par l’API (lot 3, SE-01, OP-02) ; chiffrement au repos à faire (migration) | 2.4.7 | #420 / #421 / #422 | Lot 3 |
+| S6 | Limite authentifiée et cache santé | P1 | Partiel : option de limite jamais branchée et options de cache masquées (lot 6, OP-03, OP-24) ; limiteur de l’API authentifiée à développer (SE-06) | 2.4.7 | #420 / #421 / #422 | Lot 6 |
+| B1 | 150 Go users et exemptions administrateur | P0 | Non traité : décision (OP-05) ; valeur réelle de `WOS_STORAGE_USER_MAX_BYTES` à vérifier en base | — | — | — |
+| B2 | Isolation des contrôles scheduler défectueux | P0 | Corrigé, testé et déployé (lots 1 et 10, SC-07, SC-15) | 2.4.7 | #420 / #421 / #422 | Lots 1 et 10 : contrôles isolés par torrent, arrêts de purge repris dans le cycle, bail renouvelé |
+| B3 | Rétention SYNC et snapshots inchangés | P0 | Partiel : purge bornée des jobs de synchronisation (lot 2, IN-02) ; volet snapshots inchangés à confirmer | 2.4.7 | #420 / #421 / #422 | Lot 2 |
+| B4 | Découplage slots C411 et identité qB | P0 | À confirmer sur master : aucun lot 2.4.7 ne le vise explicitement | — | — | — |
+| B5 | Durée sans progression et libération des quotas | P1 | Partiel : la limite de torrents actifs ignore les demandes READY dont la rétention est finie (lot 15, OP-16) ; durée sans progression à confirmer | 2.4.7 | #420 / #421 / #422 | Lot 15 |
+| B6 | Jobs FAILED, relances et options de retry | P1 | Corrigé, testé et déployé (lots 1 et 10, #421) | 2.4.7 | #420 / #421 / #422 | Options de retry lues (OP-06), relance sans cooldown hérité (SC-23), contrôle de capacité à la relance d’une erreur de synchronisation |
+| B7 | Longs téléchargements, 429, session et Range | P1 | Corrigé, testé et déployé (lots 5, 7 et 15) ; le débit d’un flux déjà ouvert garde sa valeur d’ouverture (OP-09, point 2) | 2.4.7 | #420 / #421 / #422 | Voie libérée si le client ne lit plus (LS-01, LS-09), reprise sur 429/503 (FE-03), 401 = session expirée (FE-13) |
+| B8 | Plafonds serveur par user et exemption admin | P0 | Non traité : décision (LS-02, OP-04, OP-05) | — | — | — |
+| B9 | Navigation/archives SQL et verrous de lecture | P1 | Partiel : initialisation des options sans verrou global (lot 2, OP-10) ; verrous de lecture manifeste et archives non traités (LS-17, LS-18) | 2.4.7 | #420 / #421 / #422 | Lot 2 |
+| B10 | I/O disque hors verrou global | P1 | À confirmer sur master : aucun lot 2.4.7 ne le vise explicitement | — | — | — |
+| B11 | Rétention sessions/throttles et réconciliation | P2 | Corrigé, testé et déployé (lots 2 et 10) | 2.4.7 | #420 / #421 / #422 | Sessions et verrous de connexion expirés purgés (IN-12, SE-08), réconciliation (SC-21) |
+| B12 | URL Alembic, dates et downgrade peuplé | P1 | Partiel : `env.py` accepte `%` (lot 8, IN-09) ; colonnes `timestamptz` et `alembic check` en migration (IN-08) | 2.4.7 | #420 / #421 / #422 | Lot 8 |
 | C1 | Déploiement interrompu après stop/migration | P0 | Corrigé, testé et déployé | 2.4.1 | #396 / #397 / #398 / #399 | 21 tests exécutables de déploiement |
 | C2 | Sauvegarde préalable et rollback non destructif | P0 | Corrigé, testé et déployé | 2.4.1 | #396 / #397 / #398 / #399 | 21 tests exécutables de déploiement |
-| C3 | Sauvegardes configuration et hors hôte | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| C4 | Alertmanager, routage et réception prouvée | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| C5 | Durcissement infrastructure et workflows | P2 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| A1 | Purge admin, confirmation, préconditions et audit | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| F1 | Confirmation React en deux clics | P2 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| F2 | WebSocket, backoff et session inter-onglets | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| F3 | Dashboard, formatBytes, refresh admin | P2 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| R1 | Options effectives production | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| R2 | DHT/PeX/LSD et web seeds qB réel isolé | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| R3 | Timers backup et copie hors hôte | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| R4 | Protections GitHub rise2-production | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| R5 | Propriétaires checkout/hôte et RAID réel | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| R6 | Absence ponctuelle qB et ERROR définitif | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| R7 | 100k fichiers SQL et profil navigateur | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| R8 | createWritable sur fichier partiel volumineux | P2 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| R9 | Chemins longs et index PostgreSQL | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| R10 | Ordre des verrous, retard quota et secrets au repos | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
+| C3 | Sauvegardes configuration et hors hôte | P0 | Non traité : exploitation (IN-01, seul constat critique encore ouvert) | — | — | — |
+| C4 | Alertmanager, routage et réception prouvée | P0 | Non traité : exploitation (IN-03) | — | — | — |
+| C5 | Durcissement infrastructure et workflows | P2 | Partiel : durée maximale des jobs, annulation des exécutions remplacées, Dependabot (lot 15, IN-18) ; épinglage par SHA, helper en liste autorisée et revues obligatoires à faire | 2.4.7 | #420 / #421 / #422 | Lot 15 |
+| A1 | Purge admin, confirmation, préconditions et audit | P1 | Partiel : confirmation (lot 16), précondition sur le nombre d’abonnés (lot 17, SE-10) et journal `admin_action` (lot 11, SE-09) ; table d’audit, second facteur et plafond par appel à décider | 2.4.7 | #420 / #421 / #422 | Lots 11, 16 et 17 |
+| F1 | Confirmation React en deux clics | P2 | Corrigé, testé et déployé (lot 16, FE-17) | 2.4.7 | #420 / #421 / #422 | `ConfirmButton` : état React, message d’état, désarmement à 4 s |
+| F2 | WebSocket, backoff et session inter-onglets | P1 | Partiel : backoff des WebSocket (lot 7, FE-01), origine et plafonds des sockets (lot 11, SE-07) ; session inter-onglets à confirmer | 2.4.7 | #420 / #421 / #422 | Lots 7 et 11 |
+| F3 | Dashboard, formatBytes, refresh admin | P2 | Corrigé, testé et déployé (lots 6, 7, 12 et 19) | 2.4.7 | #420 / #421 / #422 | Rafraîchissement admin masqué (OP-24), `formatBytes` robuste (FE-09), compteurs en une requête (FE-19), responsive vérifié sur un aperçu réel |
+| R1 | Options effectives production | P0 | À vérifier sur l’hôte : avertissement au démarrage pour les variables d’environnement ignorées (lot 15, OP-19) ; valeurs réelles en base non contrôlées | 2.4.7 | #420 / #421 / #422 | Lot 15 |
+| R2 | DHT/PeX/LSD et web seeds qB réel isolé | P0 | Partiel : web seeds et nœuds retirés des métainfos (lot 3, SE-02) ; DHT, PeX et LSD à désactiver dans qBittorrent (exploitation) | 2.4.7 | #420 / #421 / #422 | Lot 3 |
+| R3 | Timers backup et copie hors hôte | P0 | Non traité : exploitation (IN-01) | — | — | — |
+| R4 | Protections GitHub rise2-production | P1 | Non traité : exploitation (revues obligatoires de l’environnement `rise2-production`, SE-12, IN-16) | — | — | — |
+| R5 | Propriétaires checkout/hôte et RAID réel | P1 | Non traité : exploitation | — | — | — |
+| R6 | Absence ponctuelle qB et ERROR définitif | P1 | Corrigé, testé et déployé (lot 1, LS-03 partie b, SC-07) | 2.4.7 | #420 / #421 / #422 | qBittorrent injoignable ou torrent absent tolérés jusqu’à la dernière tentative |
+| R7 | 100k fichiers SQL et profil navigateur | P1 | Partiel : chemin de fichier limité à 2048 octets avec index unique (lot 8, IN-11) ; profil d’un vrai navigateur à 100 000 fichiers non mesuré | 2.4.7 | #420 / #421 / #422 | Lot 8 |
+| R8 | createWritable sur fichier partiel volumineux | P2 | À confirmer sur master : le lot 20 protège un fichier déjà présent, pas le coût de `createWritable` sur un gros fichier partiel | — | — | — |
+| R9 | Chemins longs et index PostgreSQL | P1 | Partiel : chemins limités à 2048 octets (lot 8, IN-11), noms locaux de 255 octets au plus (lots 12 et 20) ; index PostgreSQL en migration (IN-05) | 2.4.7 | #420 / #422 / #437 / #439 | Lots 8, 12 et 20 |
+| R10 | Ordre des verrous, retard quota et secrets au repos | P1 | Partiel : relance d’une erreur de synchronisation sous le verrou de réservation (#421) ; secrets au repos en migration (SE-01, IN-21) | 2.4.7 | #421 / #422 | Test de capacité à la relance |
 | T1 | Mutations M5 : révocation seconde session | P0 | Corrigé, testé et déployé | 2.4.2 | #400 / #401 | Deux appareils et reset sans cookies |
 | T2 | Mutations M9/M11 : rôles et compte supprimé | P0 | Corrigé, testé et déployé | 2.4.2 | #400 / #401 | 14 mutations admin × 7 états, seed supprimée active |
-| T3 | Derniers désabonnements et claims PostgreSQL | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| T4 | Isolation manifestes/archives/fichiers/WebSocket | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| T5 | Lease renouvelée et limites temporelles exactes | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| T6 | Migrations peuplées et alembic check | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| T7 | Client API, CSRF, 401/409/429 et reprise | P1 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| T8 | Bot/API scopes, révocation et confidentialité | P0 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
-| D1 | Documentation et écarts versions/règles | P2 | À traiter (confirmation sur branche actuelle requise) | — | — | — |
+| T3 | Derniers désabonnements et claims PostgreSQL | P0 | À confirmer sur master : seul le lot 17 (précondition sur les abonnés de la purge) s’en approche ; pas de test PostgreSQL de claims dédié | — | — | — |
+| T4 | Isolation manifestes/archives/fichiers/WebSocket | P0 | Partiel : sockets d’événements (lot 11, SE-07) ; un ZIP dont le droit est perdu en file répond 404 (lot 13, LS-11) | 2.4.7 | #420 / #421 / #422 | Lots 11 et 13 |
+| T5 | Lease renouvelée et limites temporelles exactes | P1 | Corrigé, testé et déployé (lots 5 et 10, LS-16, LS-20, SC-15) | 2.4.7 | #420 / #421 / #422 | Lots 5 et 10 |
+| T6 | Migrations peuplées et alembic check | P1 | Non traité : migration (`alembic check`, IN-08) | — | — | — |
+| T7 | Client API, CSRF, 401/409/429 et reprise | P1 | Corrigé, testé et déployé (lots 7, 13 et 15) | 2.4.7 | #420 / #421 / #422 | Reprise sur 429/503, 401, 409 `option_version_conflict`, cookie CSRF malformé toléré, lectures bornées à 30 s |
+| T8 | Bot/API scopes, révocation et confidentialité | P0 | Partiel : journal des actions sur les clés API (lot 11), confirmation de révocation (lot 12, FE-18) ; séparation des clés du bot à décider | 2.4.7 | #420 / #421 / #422 | Lots 11 et 12 |
+| D1 | Documentation et écarts versions/règles | P2 | Partiel : documentation alignée sur le comportement réel (lot 8) ; matrice rapprochée de 2.4.7 le 26 octobre 2026 | 2.4.7 | #420 / #421 / #422 | Lot 8 |
 
 ## 2.4.1 — sécurisation du déploiement (déployée)
 
