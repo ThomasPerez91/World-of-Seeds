@@ -61,6 +61,8 @@ PINNED_IMAGES = {
     "cadvisor": "ghcr.io/google/cadvisor:v0.60.5",
 }
 DIGEST_IMAGE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+LOG_MAX_SIZE = re.compile(r"^[1-9][0-9]*[kmg]$")
+PROTECTED_DATASTORES = ("postgres", "redis")
 
 
 class ComposeRise2PolicyError(RuntimeError):
@@ -96,6 +98,40 @@ def _mounts_by_target(service: Mapping[str, Any], name: str) -> dict[str, Mappin
             raise ComposeRise2PolicyError(f"{name} volumes must have unique targets")
         result[target] = mount
     return result
+
+
+def _require_bounded_logs(services: Mapping[str, Any]) -> None:
+    """Every container keeps a bounded json-file history instead of growing until disk-full."""
+    for name, raw in services.items():
+        logging = _mapping(_mapping(raw, name).get("logging"), f"{name}.logging")
+        options = _mapping(logging.get("options"), f"{name}.logging.options")
+        max_size = options.get("max-size")
+        max_file = options.get("max-file")
+        if (
+            logging.get("driver") != "json-file"
+            or not isinstance(max_size, str)
+            or LOG_MAX_SIZE.fullmatch(max_size) is None
+            or not isinstance(max_file, str)
+            or not max_file.isascii()
+            or not max_file.isdecimal()
+            or int(max_file) < 2
+        ):
+            raise ComposeRise2PolicyError(f"{name} must rotate bounded json-file logs")
+
+
+def _require_protected_datastores(services: Mapping[str, Any]) -> None:
+    """The kernel OOM killer and a short stop timeout must not hit the datastores first."""
+    for name in PROTECTED_DATASTORES:
+        service = _mapping(services[name], name)
+        oom_score_adj = service.get("oom_score_adj")
+        if (
+            isinstance(oom_score_adj, bool)
+            or not isinstance(oom_score_adj, int)
+            or oom_score_adj >= 0
+        ):
+            raise ComposeRise2PolicyError(f"{name} must lower its OOM kill priority")
+        if not service.get("stop_grace_period"):
+            raise ComposeRise2PolicyError(f"{name} must declare an explicit stop grace period")
 
 
 def validate_config(config: Mapping[str, Any]) -> None:
@@ -522,6 +558,9 @@ def validate_config(config: Mapping[str, Any]) -> None:
     )
     if newgreedy_dependency.get("condition") != "service_healthy":
         raise ComposeRise2PolicyError("CA export must wait for healthy NewGreedy")
+
+    _require_bounded_logs(services)
+    _require_protected_datastores(services)
 
     payload = json.dumps(config, sort_keys=True)
     for forbidden in (
