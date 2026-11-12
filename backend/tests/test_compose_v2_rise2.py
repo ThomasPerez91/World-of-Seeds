@@ -1,4 +1,5 @@
 import copy
+import re
 import runpy
 from collections.abc import Callable
 from pathlib import Path
@@ -241,6 +242,13 @@ def _valid_config() -> dict[str, Any]:
         for m in services["qbittorrent"]["volumes"]
         if m["target"] not in {"/data", "/wos-ca"}
     ]
+    for service in services.values():
+        service["logging"] = {
+            "driver": "json-file",
+            "options": {"max-size": "20m", "max-file": "5"},
+        }
+    services["postgres"].update({"oom_score_adj": -500, "stop_grace_period": "2m0s"})
+    services["redis"].update({"oom_score_adj": -500, "stop_grace_period": "30s"})
     return {
         "name": "world-of-seeds-v2-rise2",
         "services": services,
@@ -282,6 +290,127 @@ def test_rise2_policy_accepts_disposable_storage_below_the_dedicated_root() -> N
     )
 
     validate(config)
+
+
+@pytest.mark.parametrize(
+    "logging",
+    [
+        None,
+        {"driver": "json-file"},
+        {"driver": "json-file", "options": {"max-file": "5"}},
+        {"driver": "json-file", "options": {"max-size": "20m"}},
+        {"driver": "json-file", "options": {"max-size": "0", "max-file": "5"}},
+        {"driver": "json-file", "options": {"max-size": "-1", "max-file": "5"}},
+        {"driver": "json-file", "options": {"max-size": "20m", "max-file": "1"}},
+        {"driver": "json-file", "options": {"max-size": "20m", "max-file": "many"}},
+        {"driver": "local", "options": {"max-size": "20m", "max-file": "5"}},
+        {"driver": "none"},
+    ],
+)
+@pytest.mark.parametrize("service", ["api", "qbittorrent", "newgreedy-init", "cadvisor"])
+def test_rise2_policy_rejects_a_service_without_bounded_json_file_logs(
+    service: str,
+    logging: dict[str, Any] | None,
+) -> None:
+    error, validate = _validator()
+    config = _valid_config()
+    if logging is None:
+        del config["services"][service]["logging"]
+    else:
+        config["services"][service]["logging"] = logging
+
+    expected = (
+        rf"^{re.escape(service)}"
+        r"(\.logging(\.options)? must be an object| must rotate bounded json-file logs)$"
+    )
+    with pytest.raises(error, match=expected):
+        validate(config)
+
+
+@pytest.mark.parametrize("datastore", ["postgres", "redis"])
+@pytest.mark.parametrize("oom_score_adj", [None, 0, 500, "-500", True])
+def test_rise2_policy_rejects_a_datastore_the_oom_killer_may_pick_first(
+    datastore: str,
+    oom_score_adj: object,
+) -> None:
+    error, validate = _validator()
+    config = _valid_config()
+    if oom_score_adj is None:
+        del config["services"][datastore]["oom_score_adj"]
+    else:
+        config["services"][datastore]["oom_score_adj"] = oom_score_adj
+
+    with pytest.raises(error, match=f"{datastore} must lower its OOM kill priority"):
+        validate(config)
+
+
+@pytest.mark.parametrize("datastore", ["postgres", "redis"])
+def test_rise2_policy_rejects_a_datastore_stopped_on_the_default_timeout(datastore: str) -> None:
+    error, validate = _validator()
+    config = _valid_config()
+    del config["services"][datastore]["stop_grace_period"]
+
+    with pytest.raises(error, match=f"{datastore} must declare an explicit stop grace period"):
+        validate(config)
+
+
+def _service_blocks(compose: str) -> dict[str, str]:
+    """Split the top-level ``services:`` section of a Compose file into raw service blocks."""
+    blocks: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    in_services = False
+    for line in compose.splitlines():
+        if line and not line.startswith((" ", "#")):
+            in_services = line == "services:"
+            current = None
+            continue
+        if not in_services:
+            continue
+        if line.startswith("  ") and not line.startswith("   ") and line.endswith(":"):
+            current = blocks.setdefault(line.strip()[:-1], [])
+        elif current is not None:
+            current.append(line)
+    return {name: "\n".join(lines) for name, lines in blocks.items()}
+
+
+def test_rise2_compose_files_bound_the_logs_of_every_service() -> None:
+    repository = Path(__file__).resolve().parents[2]
+    anchor = (
+        "x-wos-logging: &wos-logging\n"
+        "  driver: json-file\n"
+        "  options:\n"
+        '    max-size: "20m"\n'
+        '    max-file: "5"\n'
+    )
+    base = (repository / "deploy/compose.rise2.v2.yaml").read_text(encoding="utf-8")
+    overlay = (repository / "deploy/compose.rise2.observability.v2.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert anchor in base
+    assert anchor in overlay
+
+    base_services = _service_blocks(base)
+    runtime = base.split("x-wos-runtime: &wos-runtime\n", 1)[1].split("\n\n", 1)[0]
+    assert "  logging: *wos-logging" in runtime.splitlines()
+    unbounded = {
+        name
+        for name, block in base_services.items()
+        if "    logging: *wos-logging" not in block.splitlines()
+        and "    <<: *wos-runtime" not in block.splitlines()
+    }
+    assert unbounded == set()
+
+    # The overlay only patches these services, which keep the base file's setting.
+    inherited = {"node-exporter", "prometheus"}
+    overlay_services = _service_blocks(overlay)
+    assert inherited <= set(base_services)
+    assert inherited <= set(overlay_services)
+    assert len(overlay_services) > len(inherited)
+    assert {
+        name
+        for name, block in overlay_services.items()
+        if name not in inherited and "    logging: *wos-logging" not in block.splitlines()
+    } == set()
 
 
 def test_newgreedy_smoke_uses_an_isolated_compose_project() -> None:
