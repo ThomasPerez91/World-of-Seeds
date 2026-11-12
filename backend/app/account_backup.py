@@ -16,7 +16,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
-from app.models import DiscordAccountLink, ExternalApiClient, User
+from app.models import Base
 
 
 class BackupError(Exception):
@@ -59,8 +59,8 @@ class Snapshot(BaseModel):
 
 async def export_accounts(conn: AsyncConnection) -> Snapshot:
     await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
-    users = User.__table__
-    links = DiscordAccountLink.__table__
+    users = Base.metadata.tables["users"]
+    links = Base.metadata.tables["discord_account_links"]
     account_rows = await conn.execute(
         select(*(users.c[name] for name in Account.model_fields)).order_by(users.c.id)
     )
@@ -79,9 +79,9 @@ async def restore_accounts(
 ) -> None:
     if snapshot.version != 1:
         raise BackupError("Unsupported account backup version")
-    users = User.__table__
-    links = DiscordAccountLink.__table__
-    clients = ExternalApiClient.__table__
+    users = Base.metadata.tables["users"]
+    links = Base.metadata.tables["discord_account_links"]
+    clients = Base.metadata.tables["external_api_clients"]
     if set(client_map) != {link.client_id for link in snapshot.discord_links}:
         raise BackupError("Provide exactly one destination client for each source Discord client")
     await conn.execute(text("SET LOCAL lock_timeout = '5s'"))
@@ -123,7 +123,8 @@ def client_mapping(values: list[str]) -> dict[UUID, UUID]:
 
 async def run(args: argparse.Namespace) -> None:
     if args.operation != "export":
-        decrypted = subprocess.run(
+        decrypted = await asyncio.to_thread(
+            subprocess.run,
             ["age", "--decrypt", "-i", str(args.identity), "--", str(args.archive)],
             stdout=subprocess.PIPE,
             check=True,
@@ -132,7 +133,9 @@ async def run(args: argparse.Namespace) -> None:
         if snapshot.version != 1:
             raise BackupError("Unsupported account backup version")
         if args.operation == "inspect":
-            print(f"Accounts: {len(snapshot.accounts)}; Discord links: {len(snapshot.discord_links)}")
+            print(
+                f"Accounts: {len(snapshot.accounts)}; Discord links: {len(snapshot.discord_links)}"
+            )
             for source in sorted({link.client_id for link in snapshot.discord_links}):
                 print(f"Source Discord client: {source}")
             return
@@ -147,7 +150,8 @@ async def run(args: argparse.Namespace) -> None:
                 raise BackupError("Redirect the encrypted archive to a file")
             async with engine.begin() as conn:
                 snapshot = await export_accounts(conn)
-            subprocess.run(
+            await asyncio.to_thread(
+                subprocess.run,
                 ["age", "--encrypt", "--recipient", args.recipient],
                 input=snapshot.model_dump_json().encode(),
                 check=True,
@@ -155,7 +159,10 @@ async def run(args: argparse.Namespace) -> None:
         else:
             async with engine.begin() as conn:
                 await restore_accounts(conn, snapshot, client_mapping(args.client))
-            print(f"Restored {len(snapshot.accounts)} accounts and {len(snapshot.discord_links)} links")
+            print(
+                f"Restored {len(snapshot.accounts)} accounts and "
+                f"{len(snapshot.discord_links)} links"
+            )
     finally:
         await engine.dispose()
 

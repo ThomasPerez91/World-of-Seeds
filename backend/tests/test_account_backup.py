@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.account_backup import BackupError, Snapshot, export_accounts, restore_accounts
 from app.auth.security import hash_password, verify_password
-from app.models import DiscordAccountLink, ExternalApiClient, User
+from app.models import Base
 
 
 @pytest.mark.asyncio
@@ -18,7 +18,9 @@ async def test_accounts_round_trip_into_fresh_postgres_schema() -> None:
         pytest.skip("Requires isolated PostgreSQL CI service")
     engine = create_async_engine(url)
     source, target = (f"account_backup_{uuid4().hex}" for _ in range(2))
-    users, links, clients = User.__table__, DiscordAccountLink.__table__, ExternalApiClient.__table__
+    users = Base.metadata.tables["users"]
+    links = Base.metadata.tables["discord_account_links"]
+    clients = Base.metadata.tables["external_api_clients"]
     user_id, old_client, new_client = uuid4(), uuid4(), uuid4()
     password = "test-account-backup-password"
     try:
