@@ -58,7 +58,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           working-directory: backend
@@ -90,7 +90,7 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -128,8 +128,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v6
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -304,11 +304,10 @@ jobs:
           test "$(docker compose port app 8000)" = "127.0.0.1:18081"
       - name: Verify PostgreSQL is not published
         run: |
-          if docker compose port postgres 5432 >/tmp/postgres-port 2>/dev/null; then
-            echo "PostgreSQL must not publish a host port."
-            cat /tmp/postgres-port
-            exit 1
-          fi
+          postgres_id="$(docker compose ps --quiet postgres)"
+          docker inspect "$postgres_id" | jq -e '
+            .[0].HostConfig | .PublishAllPorts == false and ((.PortBindings // {}) | length == 0)
+          '
       - name: Stop production stack
         if: always()
         run: docker compose down --volumes
@@ -355,16 +354,12 @@ jobs:
             docker inspect "$api_id" | jq '.[0].HostConfig.PortBindings'
             exit 1
           fi
-          if "${compose[@]}" port postgres 5432 >/tmp/v2-postgres-port 2>/dev/null; then
-            echo "V2 PostgreSQL must not publish a host port."
-            cat /tmp/v2-postgres-port
-            exit 1
-          fi
-          if "${compose[@]}" port redis 6379 >/tmp/v2-redis-port 2>/dev/null; then
-            echo "V2 Redis must not publish a host port."
-            cat /tmp/v2-redis-port
-            exit 1
-          fi
+          for service in postgres redis; do
+            service_id="$("${compose[@]}" ps --quiet "$service")"
+            docker inspect "$service_id" | jq -e '
+              .[0].HostConfig | .PublishAllPorts == false and ((.PortBindings // {}) | length == 0)
+            '
+          done
           redis_status=$("${compose[@]}" exec -T redis redis-cli ping)
           if test "$redis_status" != "PONG"; then
             echo "V2 Redis health probe returned: ${redis_status:-<empty>}."
