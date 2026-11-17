@@ -5,69 +5,11 @@
   gap: 0.75rem;
 }
 
-.admin-back-button {
-  width: fit-content;
-  margin: 0;
-  padding-inline: 0.5rem;
-}
-
-.admin-back-button svg,
 .admin-page .refresh-button svg,
 .admin-page .ui-button svg {
   width: 1.1rem;
   height: 1.1rem;
   flex: 0 0 auto;
-}
-
-.admin-page-header {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.85rem;
-  margin: 0;
-  padding: 1rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-card);
-}
-
-.admin-page-heading-copy .eyebrow {
-  margin-bottom: 0.35rem;
-}
-
-.admin-page-header h1 {
-  margin: 0;
-  font-size: clamp(1.45rem, 5vw, 1.9rem);
-  line-height: 1.2;
-}
-
-.admin-navigation {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.35rem;
-  padding: 0.3rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-background-secondary);
-  overflow: visible;
-}
-
-.admin-navigation .ui-button {
-  width: 100%;
-  min-width: 0;
-  min-height: 2.75rem;
-  margin: 0;
-  padding: 0.6rem 0.7rem;
-  border-radius: var(--radius-sm);
-  text-align: center;
-  font-size: 0.85rem;
-}
-
-.admin-navigation .ui-button[aria-current="page"] {
-  color: var(--color-text);
-  background: var(--color-surface-elevated);
-  box-shadow: 0 1px 4px var(--color-shadow);
 }
 
 .admin-section {
@@ -397,13 +339,6 @@
   background: var(--color-surface-elevated);
 }
 
-.admin-runtime-summary {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-
 .admin-runtime-table-wrap {
   max-width: 100%;
   overflow-x: auto;
@@ -521,8 +456,7 @@
 }
 
 .admin-cleanup-purge-filtered svg,
-.admin-cleanup-row-purge svg,
-.admin-cleanup-sort svg {
+.admin-cleanup-row-purge svg {
   width: 1rem;
   height: 1rem;
   flex: 0 0 auto;
@@ -544,35 +478,6 @@
 
 .admin-cleanup-table tbody tr:hover {
   background: rgba(102, 234, 157, 0.04);
-}
-
-.admin-page .admin-cleanup-table thead .admin-cleanup-sort {
-  display: inline-flex;
-  width: auto;
-  min-width: 0;
-  min-height: 0;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0.4rem;
-  margin: 0 !important;
-  padding: 0 !important;
-  color: inherit !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  font: inherit;
-  letter-spacing: inherit;
-  text-align: left;
-  text-transform: inherit;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.admin-page .admin-cleanup-table thead .admin-cleanup-sort:hover:not(:disabled) {
-  color: var(--color-text) !important;
-  background: transparent !important;
-  transform: none !important;
 }
 
 .admin-cleanup-actions {
@@ -647,7 +552,6 @@
 
 .admin-storage-usage.ui-card,
 .admin-metric-card.ui-card,
-.reconciliation-panel.ui-card,
 .integration-card.ui-card {
   box-shadow: none;
 }
@@ -657,25 +561,12 @@
   gap: 0.8rem;
 }
 
-.admin-storage-usage-heading {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.admin-storage-usage-heading > div {
-  min-width: 8rem;
-}
-
-.admin-storage-usage-heading span,
 .admin-metric-card span {
   display: block;
   color: var(--color-text-muted);
   font-size: 0.8rem;
 }
 
-.admin-storage-usage-heading strong,
 .admin-metric-card strong {
   display: block;
   margin-top: 0.2rem;
@@ -701,11 +592,6 @@
 
 .admin-metric-card strong {
   font-size: 1.35rem;
-}
-
-.reconciliation-panel.ui-card {
-  margin-top: 0.9rem;
-  padding: 1rem;
 }
 
 .integration-grid {
@@ -773,13 +659,8 @@
 }
 
 @media (min-width: 600px) {
-  .admin-page-header,
   .admin-section {
     padding: 1.25rem;
-  }
-
-  .admin-navigation {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .credential-row {
@@ -911,15 +792,6 @@
 }
 
 @media (min-width: 900px) {
-  .admin-page-header {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .admin-navigation {
-    flex: 0 1 38rem;
-  }
 
   .admin-section .section-heading {
     flex-direction: row;
@@ -976,10 +848,5 @@
 @media (max-width: 430px) {
   .admin-section {
     padding-inline: 0.75rem;
-  }
-
-  .admin-navigation .ui-button {
-    padding-inline: 0.45rem;
-    font-size: 0.78rem;
   }
 }
