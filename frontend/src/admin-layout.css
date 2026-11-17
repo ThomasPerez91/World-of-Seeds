@@ -158,7 +158,6 @@
   .user-downloads .torrent-summary-queue[data-empty="true"] { visibility: hidden; }
   .user-downloads .torrent-summary-progress { grid-template-columns: minmax(0, 1fr) auto !important; }
   .user-downloads .torrent-accordion-content { min-width: 0; margin: 0.6rem 0.65rem 0.65rem !important; padding: 0.75rem !important; }
-  .user-downloads .torrent-detail-grid { grid-template-columns: minmax(0, 1fr); }
   .user-downloads .torrent-ready-overview { grid-template-columns: minmax(0, 1fr); }
   .user-downloads .torrent-meta-item { min-width: 0; }
   .user-downloads .torrent-meta-item > * { min-width: 0; overflow-wrap: anywhere; }

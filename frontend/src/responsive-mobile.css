@@ -434,8 +434,7 @@
     display: block;
   }
 
-  .admin-runtime-table thead .admin-table-sort,
-  .admin-runtime-table thead .admin-cleanup-sort {
+  .admin-runtime-table thead .admin-table-sort {
     min-height: 2.5rem !important;
     padding: 0.45rem 0.65rem !important;
     border: 1px solid var(--color-border) !important;

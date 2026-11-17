@@ -359,34 +359,8 @@
   animation: torrent-details-enter 160ms ease-out both;
 }
 
-.torrent-detail-grid {
-  display: grid !important;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.55rem !important;
-  margin: 0;
-}
-
 .torrent-meta-card {
   min-width: 0;
-}
-
-.torrent-detail-grid > div {
-  min-width: 0;
-  padding: 0.65rem;
-  border: 1px solid rgba(157, 220, 184, 0.08);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.torrent-detail-grid dt {
-  color: var(--wos-muted-2);
-  font-size: 0.68rem;
-}
-
-.torrent-detail-grid dd {
-  margin: 0.2rem 0 0 !important;
-  color: var(--wos-text);
-  font-size: 0.78rem;
 }
 
 .ready-content {
@@ -394,16 +368,6 @@
   margin-top: 0.8rem;
   padding-top: 0.8rem;
   border-top: 1px solid rgba(157, 220, 184, 0.1);
-}
-
-.ready-content-heading {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-}
-
-.ready-content-heading h3 {
-  color: var(--wos-text);
-  font-size: 0.86rem;
 }
 
 .download-fallback-archive {
@@ -777,11 +741,6 @@
     top: 5.25rem;
     right: 0.8rem;
     width: calc(100% - 1.6rem);
-  }
-
-  .torrent-detail-grid,
-  .ready-content-heading {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .download-fallback-archive { justify-self: start; }
