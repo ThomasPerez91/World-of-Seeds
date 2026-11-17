@@ -38,7 +38,7 @@ class User(Base):
     must_change_credentials: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     preferred_locale: Mapped[str] = mapped_column(String(2), default="fr", nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    last_login_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
 
