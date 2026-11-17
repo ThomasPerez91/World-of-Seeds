@@ -45,11 +45,26 @@ STABILISE_CSS = (
 NOISE_PIXELS = 20
 
 
+# The version number shows in the header and footer: every release would otherwise change every
+# authenticated screen. It is replaced by a fixed label of the same shape before capture.
+FIXED_VERSION = """() => {
+for (const element of document.querySelectorAll('.version-badge, .app-footer > span')) {
+  for (const node of element.childNodes) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      node.textContent = node.textContent.replace(/\\d+\\.\\d+\\.\\d+/, '0.0.0');
+    }
+  }
+}
+}"""
+
+
 @dataclass(frozen=True)
 class Screen:
     name: str
     scenario: str
     steps: Callable[[Page], None]
+    # Clear focus before capture. Off for menus that close when they lose focus.
+    blur: bool = True
 
 
 def _open_legal(page: Page) -> None:
@@ -65,12 +80,58 @@ def _open_nav(label: str) -> Callable[[Page], None]:
     return step
 
 
+def _then(*steps: Callable[[Page], None]) -> Callable[[Page], None]:
+    def step(page: Page) -> None:
+        for each in steps:
+            each(page)
+            page.wait_for_load_state("networkidle")
+
+    return step
+
+
+def _open_section(navigation: str, label: str) -> Callable[[Page], None]:
+    def step(page: Page) -> None:
+        page.get_by_role("navigation", name=navigation).get_by_role(
+            "button", name=label, exact=True
+        ).click()
+
+    return step
+
+
+def _settings(label: str) -> Callable[[Page], None]:
+    return _then(_open_nav("Paramètres"), _open_section("Sections des paramètres", label))
+
+
+def _admin(label: str) -> Callable[[Page], None]:
+    return _then(_open_nav("Administration"), _open_section("Sections d’administration", label))
+
+
+def _open_details(page: Page) -> None:
+    page.get_by_role(
+        "button", name="Afficher les détails de Cours.Video.Programmation.Python"
+    ).click()
+    page.locator(".ready-compatibility-note, .ready-file-list").first.wait_for()
+
+
+def _open_account_menu(page: Page) -> None:
+    page.get_by_role("button", name="Ouvrir le menu du compte").click()
+    page.locator("#account-dropdown").wait_for()
+
+
 SCREENS = [
     Screen("login", "login", lambda page: page.locator(".login-card").wait_for()),
     Screen("legal", "legal", _open_legal),
     Screen("dashboard", "dashboard", lambda page: page.locator(".app-shell").wait_for()),
+    Screen("dashboard-details", "dashboard", _open_details),
+    Screen("account-menu", "dashboard", _open_account_menu, blur=False),
     Screen("settings", "dashboard", _open_nav("Paramètres")),
+    Screen("settings-security", "dashboard", _settings("Sécurité")),
+    Screen("settings-secrets", "dashboard", _settings("Secrets")),
     Screen("admin-users", "dashboard", _open_nav("Administration")),
+    Screen("admin-qbittorrent", "dashboard", _admin("qBittorrent")),
+    Screen("admin-cleanup", "dashboard", _admin("Nettoyage")),
+    Screen("admin-settings", "dashboard", _admin("Paramètres")),
+    Screen("admin-storage", "dashboard", _admin("Stockage")),
 ]
 
 
@@ -146,8 +207,9 @@ def capture(
                 page.wait_for_load_state("networkidle")
                 page.evaluate("document.fonts.ready")
                 page.add_style_tag(content=STABILISE_CSS)
+                page.evaluate(FIXED_VERSION)
                 path = out / f"{screen.name}-{viewport}.png"
-                image, stable = _settled_screenshot(page)
+                image, stable = _settled_screenshot(page, blur=screen.blur)
                 path.write_bytes(image)
                 shots[path.name] = path
                 if not stable:
@@ -156,19 +218,22 @@ def capture(
     return shots
 
 
-def _neutral_screenshot(page: Page) -> bytes:
+def _neutral_screenshot(page: Page, blur: bool) -> bytes:
     # The page may move focus once its data loads: clear focus and hover right before capture.
     page.mouse.move(0, 0)
-    page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()")
+    if blur:
+        page.evaluate(
+            "document.activeElement instanceof HTMLElement && document.activeElement.blur()"
+        )
     return page.screenshot(full_page=True, animations="disabled")
 
 
-def _settled_screenshot(page: Page, attempts: int = 10) -> tuple[bytes, bool]:
+def _settled_screenshot(page: Page, blur: bool, attempts: int = 10) -> tuple[bytes, bool]:
     """Screenshot once two consecutive captures are identical (polling, late images, toasts)."""
-    previous = _neutral_screenshot(page)
+    previous = _neutral_screenshot(page, blur)
     for _ in range(attempts):
         page.wait_for_timeout(400)
-        current = _neutral_screenshot(page)
+        current = _neutral_screenshot(page, blur)
         if current == previous:
             return current, True
         previous = current
