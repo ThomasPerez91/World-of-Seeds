@@ -21,7 +21,8 @@ jobs:
           set -Eeuo pipefail
           bash -n \
             deploy/deploy-world-of-seeds-v2-rise2 \
-            deploy/world-of-seeds-v2-deploy-command
+            deploy/world-of-seeds-v2-deploy-command \
+            scripts/rise2_accounts_gcs.sh
 
           grep -F "la revision demandée n'est pas le HEAD actuel de master." \
             deploy/deploy-world-of-seeds-v2-rise2 >/dev/null
@@ -33,6 +34,15 @@ jobs:
             deploy/deploy-world-of-seeds-v2-rise2 >/dev/null
           grep -F 'PostgreSQL a été recréé' \
             deploy/deploy-world-of-seeds-v2-rise2 >/dev/null
+          # Root-run units and scripts stay out of unattended deployment.
+          for protected in \
+            scripts/rise2_v2_database_backup.py \
+            scripts/rise2_accounts_gcs.sh \
+            deploy/world-of-seeds-v2-database-backup.service \
+            deploy/world-of-seeds-v2-accounts-backup.service \
+            deploy/world-of-seeds-v2-accounts-backup.timer; do
+            grep -F "  ${protected} \\" deploy/deploy-world-of-seeds-v2-rise2 >/dev/null
+          done
 
           if grep -F 'down --volumes' deploy/deploy-world-of-seeds-v2-rise2; then
             echo 'Rise2 deploy helper must never destroy volumes.' >&2

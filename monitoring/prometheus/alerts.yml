@@ -37,6 +37,24 @@ groups:
         labels: {severity: critical}
         annotations:
           summary: La dernière sauvegarde ou son exercice de restauration a échoué
+      - alert: WOSAccountsBackupMissing
+        expr: absent(wos_accounts_backup_last_success_timestamp_seconds)
+        for: 30m
+        labels: {severity: critical}
+        annotations:
+          summary: L'export chiffré des comptes vers GCS n'est pas installé ou n'émet plus de métriques
+      - alert: WOSAccountsBackupStale
+        expr: time() - wos_accounts_backup_last_success_timestamp_seconds > 93600
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: Aucun export chiffré des comptes envoyé vers GCS depuis 26 heures
+      - alert: WOSAccountsBackupFailed
+        expr: wos_accounts_backup_last_attempt_success == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: Le dernier export chiffré des comptes vers GCS a échoué
       - alert: WOSMetricsTargetDown
         expr: up == 0
         for: 2m

@@ -1,0 +1,20 @@
+[Unit]
+Description=World of Seeds V2 encrypted account export to Google Cloud Storage
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+# Dedicated gcloud configuration holding only the Storage Object Creator identity.
+Environment=CLOUDSDK_CONFIG=/etc/world-of-seeds-v2/gcloud-accounts-backup
+ExecStart=/opt/world-of-seeds-v2/scripts/rise2_accounts_gcs.sh
+TimeoutStartSec=15min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
