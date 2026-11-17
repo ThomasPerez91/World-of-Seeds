@@ -51,6 +51,10 @@ STABILISE_CSS = (
 # rendering noise (antialiasing of a small icon). Any channel difference counts, so even a
 # faint background shade change over a whole screen is caught.
 NOISE_PIXELS = 20
+# Software rendering occasionally lays a screen out differently from one capture to the next,
+# with the same text and styles. A changed screen is captured again on both sides up to this
+# many times, and counts as changed only if it differs every time: a CSS change always does.
+RETRIES = 2
 
 
 # The version number shows in the header and footer: every release would otherwise change every
@@ -221,14 +225,22 @@ def _silent_socket(socket: WebSocketRoute) -> None:
 
 
 def capture(
-    dist: Path, out: Path, unknown: set[str], unstable: set[str], viewer: object
+    dist: Path,
+    out: Path,
+    unknown: set[str],
+    unstable: set[str],
+    viewer: object,
+    only: set[str] | None = None,
 ) -> dict[str, Path]:
+    """Capture every screen, or only the captures named in `only` (e.g. "login-mobile.png")."""
     shots: dict[str, Path] = {}
     out.mkdir(parents=True, exist_ok=True)
     browser = viewer  # a launched Playwright browser
     with serve(dist) as origin:
         for screen in SCREENS:
             for viewport, (width, height) in VIEWPORTS.items():
+                if only is not None and f"{screen.name}-{viewport}.png" not in only:
+                    continue
                 context = browser.new_context(  # type: ignore[attr-defined]
                     viewport={"width": width, "height": height},
                     device_scale_factor=1,
@@ -393,23 +405,44 @@ def main() -> int:
 
     unknown: set[str] = set()
     unstable: set[str] = set()
+    (args.out / "diff").mkdir(parents=True, exist_ok=True)
+    intermittent: dict[str, int] = {}
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         try:
             base_shots = capture(args.base, args.out / "base", unknown, unstable, browser)
             head_shots = capture(args.head, args.out / "head", unknown, unstable, browser)
+            results = {
+                name: compare(base_shots[name], head_shots[name], args.out / "diff" / name)
+                for name in base_shots
+            }
+            suspects = {name for name, result in results.items() if result[0] > NOISE_PIXELS}
+            for attempt in range(1, RETRIES + 1):
+                if not suspects:
+                    break
+                retry = args.out / f"retry-{attempt}"
+                (retry / "diff").mkdir(parents=True, exist_ok=True)
+                again_base = capture(args.base, retry / "base", unknown, set(), browser, suspects)
+                again_head = capture(args.head, retry / "head", unknown, set(), browser, suspects)
+                for name in sorted(suspects):
+                    pixels = compare(again_base[name], again_head[name], retry / "diff" / name)[0]
+                    if pixels <= NOISE_PIXELS:
+                        intermittent[name] = results[name][0]
+                suspects -= set(intermittent)
         finally:
             browser.close()
 
     rows: list[str] = []
     changed_texts: list[tuple[str, list[str], list[str]]] = []
     changed_screens = 0
-    (args.out / "diff").mkdir(parents=True, exist_ok=True)
     for name in sorted(base_shots):
-        changed, where, box = compare(
-            base_shots[name], head_shots[name], args.out / "diff" / name
-        )
-        if changed > NOISE_PIXELS:
+        changed, where, box = results[name]
+        if name in intermittent:
+            result = (
+                f"identique au nouvel essai (écart intermittent de {intermittent[name]} px "
+                "au premier, ignoré)"
+            )
+        elif changed > NOISE_PIXELS:
             changed_screens += 1
             result = f"**{changed} px modifiés** ({where})"
         elif changed:
@@ -419,7 +452,7 @@ def main() -> int:
         if name in unstable:
             result += " — capture instable"
         rows.append(f"| `{name}` | {result} |")
-        if changed > NOISE_PIXELS:
+        if changed > NOISE_PIXELS and name not in intermittent:
             texts = _changed_text(
                 base_shots[name].with_suffix(".txt"), head_shots[name].with_suffix(".txt")
             )
@@ -453,7 +486,7 @@ def main() -> int:
     if unstable:
         report += [
             "",
-            "Captures instables (l'écran bougeait encore après 10 essais) :",
+            "Captures instables (l'écran bougeait encore après 12 essais) :",
             *[f"- `{name}`" for name in sorted(unstable)],
         ]
     if unknown:

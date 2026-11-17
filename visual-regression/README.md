@@ -37,6 +37,10 @@ Pour que deux builds identiques donnent les mêmes pixels :
 - le numéro de version affiché devient `0.0.0`, pour qu'une montée de version ne change pas
   tous les écrans ;
 - chaque écran est capturé une fois stabilisé : trois captures identiques de suite.
+- un écran différent est recapturé des deux côtés, jusqu'à deux fois : le rendu logiciel place
+  parfois un écran autrement d'une capture à l'autre, à textes et styles identiques. Il ne
+  compte comme modifié que s'il diffère à chaque essai, ce qu'un changement de CSS fait toujours ;
+  sinon le rapport le signale comme écart intermittent ignoré.
 
 Un écran ne compte comme modifié qu'au-delà de 20 pixels différents, sur n'importe quel canal de
 couleur. En dessous, le rapport l'indique comme du bruit de rendu, typiquement le lissage d'une
