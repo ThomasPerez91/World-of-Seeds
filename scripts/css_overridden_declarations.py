@@ -5,8 +5,9 @@ Usage: scripts/css_overridden_declarations.py [--write]
 
 The stylesheets are read in the order the page applies them (CASCADE). A declaration can never
 win when, for every selector of its rule, a later rule with the identical selector sets the same
-property in a context at least as broad (top level, or the same @media) and with at least the
-same importance: same selector means same elements and same specificity, and later wins ties.
+property under conditions at least as broad (the same or a subset of its enclosing @media and
+other conditional rules, outermost first) and with at least the same importance: same selector
+means same elements and same specificity, and later wins ties.
 Later values that an older engine may reject (dvh, clamp(), vendor prefixes...) are not trusted
 to override, so deliberate fallbacks stay. Rules and @media blocks left empty disappear.
 
@@ -76,22 +77,28 @@ def declarations(block: str) -> list[Declaration]:
     return out
 
 
-Entry = tuple[int, int, str | None, tuple[str, ...], str, str, bool, int]
+Context = tuple[str, ...]  # enclosing conditional preludes, outermost first; () is top level
+Entry = tuple[int, int, Context, tuple[str, ...], str, str, bool, int]
 # order, file index, context, selectors, property, value, important, declaration index in rule
 
 
-def _rules(text: str) -> list[tuple[Rule, str | None]]:
-    found: list[tuple[Rule, str | None]] = []
+def _rules(text: str) -> list[tuple[Rule, Context]]:
+    found: list[tuple[Rule, Context]] = []
 
-    def walk(rules: list[Rule], context: str | None) -> None:
+    def walk(rules: list[Rule], context: Context) -> None:
         for rule in rules:
             if rule.at in CONDITIONAL:
-                walk(rule.children, " ".join(rule.prelude.split()))
+                walk(rule.children, (*context, " ".join(rule.prelude.split())))
             elif rule.at is None:
                 found.append((rule, context))
 
-    walk(parse(text), None)
+    walk(parse(text), ())
     return found
+
+
+def _covers(outer: Context, inner: Context) -> bool:
+    """Whenever `inner` applies, `outer` applies too: its conditions are a prefix of inner's."""
+    return inner[: len(outer)] == outer
 
 
 def entries(texts: list[str]) -> list[tuple[Entry, Rule]]:
@@ -120,7 +127,7 @@ def overridden(all_entries: list[tuple[Entry, Rule]]) -> set[tuple[int, int, int
         order, _, context, _, name, _, important, _ = entry
         return any(
             other[0] > order
-            and (other[2] is None or other[2] == context)
+            and _covers(other[2], context)
             and (other[6] or not important)
             and FALLBACK.search(other[5]) is None
             for other in by_key[(selector, name)]
@@ -133,18 +140,18 @@ def overridden(all_entries: list[tuple[Entry, Rule]]) -> set[tuple[int, int, int
     }
 
 
-def contexts(texts: list[str]) -> set[str | None]:
-    return {entry[2] for entry, _ in entries(texts)} | {None}
+def contexts(texts: list[str]) -> set[Context]:
+    return {entry[2] for entry, _ in entries(texts)} | {()}
 
 
 def winners(
-    texts: list[str], every_context: set[str | None]
-) -> dict[tuple[str | None, str, str], tuple[str, bool]]:
+    texts: list[str], every_context: set[Context]
+) -> dict[tuple[Context, str, str], tuple[str, bool]]:
     """Winning (value, important) per (context, selector, property), per-selector cascade."""
     all_entries = [entry for entry, _ in entries(texts)]
-    result: dict[tuple[str | None, str, str], tuple[str, bool]] = {}
+    result: dict[tuple[Context, str, str], tuple[str, bool]] = {}
     for context in every_context:
-        applicable = [e for e in all_entries if e[2] is None or e[2] == context]
+        applicable = [e for e in all_entries if _covers(e[2], context)]
         for entry in applicable:
             for selector in entry[3]:
                 key = (context, selector, entry[4])
