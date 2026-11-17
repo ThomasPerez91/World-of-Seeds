@@ -35,10 +35,13 @@ VIEWPORTS = {"desktop": (1440, 900), "mobile": (390, 844)}
 # Hide the text caret and stop every animation or transition, spinners included. Backdrop
 # blurs are switched off too: software rendering blurs them tile by tile, slightly differently
 # from one browser session to the next. A change limited to a backdrop blur goes unnoticed.
+# Nothing can be hovered either: a full-page screenshot resizes the viewport, which can move a
+# different element under the pointer while the capture is taken. Applied after the clicks.
 STABILISE_CSS = (
     "*, *::before, *::after { caret-color: transparent !important; "
     "animation: none !important; transition: none !important; "
-    "backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }"
+    "backdrop-filter: none !important; -webkit-backdrop-filter: none !important; "
+    "pointer-events: none !important; }"
 )
 # A screen counts as changed above this many differing pixels; below, it is reported as
 # rendering noise (antialiasing of a small icon). Any channel difference counts, so even a

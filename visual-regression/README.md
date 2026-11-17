@@ -26,7 +26,7 @@ le WebSocket d'événements est accepté sans jamais rien émettre. L'horloge du
 figée sur `NOW`, les animations, transitions et flous d'arrière-plan (`backdrop-filter`, rendus
 de façon légèrement variable par le moteur logiciel) sont coupés, le numéro de version affiché
 est remplacé par `0.0.0` pour qu'une montée de version ne change pas tous les écrans, et chaque écran est capturé une
-fois stabilisé (trois captures identiques de suite), sans survol ni focus laissés par les clics. Un écran ne compte comme modifié
+fois stabilisé (trois captures identiques de suite), sans survol possible ni focus laissé par les clics. Un écran ne compte comme modifié
 qu'au-delà de 20 pixels différents, sur n'importe quel canal de couleur : en dessous, le
 rapport l'indique comme du bruit de rendu, typiquement le lissage d'une petite icône. Un appel non simulé reçoit une 404 et apparaît dans le rapport : complétez
 alors `fixtures.py`.
