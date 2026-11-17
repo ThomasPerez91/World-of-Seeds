@@ -39,10 +39,10 @@ STABILISE_CSS = (
     "animation: none !important; transition: none !important; "
     "backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }"
 )
-# A screen counts as changed above this many clearly different pixels; below, it is reported
-# as rendering noise (antialiasing of a small icon). A real style change touches far more.
+# A screen counts as changed above this many differing pixels; below, it is reported as
+# rendering noise (antialiasing of a small icon). Any channel difference counts, so even a
+# faint background shade change over a whole screen is caught.
 NOISE_PIXELS = 20
-CHANNEL_DELTA = 8
 
 
 @dataclass(frozen=True)
@@ -189,7 +189,7 @@ def compare(base: Path, head: Path, diff_path: Path) -> tuple[int, str]:
             before_rgb, after_rgb = canvas_before, canvas_after
         red, green, blue = ImageChops.difference(before_rgb, after_rgb).split()
         strongest = ImageChops.lighter(ImageChops.lighter(red, green), blue)
-        mask = strongest.point(lambda v: 255 if v > CHANNEL_DELTA else 0)
+        mask = strongest.point(lambda v: 255 if v else 0)
         changed = mask.histogram()[255]
         box = mask.getbbox()
         where = f"x {box[0]}–{box[2]}, y {box[1]}–{box[3]}" if box else ""
