@@ -153,7 +153,8 @@ def _open_details(page: Page) -> None:
     )
     panel = button.get_attribute("aria-controls")
     button.click()
-    page.locator(f"#{panel}").wait_for()
+    # A multi-file torrent opens on its directory browser once the manifest has loaded.
+    page.locator(f"#{panel} .ready-directory-item").first.wait_for()
 
 
 def _open_account_menu(page: Page) -> None:
