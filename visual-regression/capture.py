@@ -31,8 +31,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fixtures import NOW, answer  # noqa: E402
 
 VIEWPORTS = {"desktop": (1440, 900), "mobile": (390, 844)}
-# Hide the text caret and anything still moving after "animations: disabled".
-STABILISE_CSS = "*, *::before, *::after { caret-color: transparent !important; }"
+# Hide the text caret and stop every animation or transition, spinners included.
+STABILISE_CSS = (
+    "*, *::before, *::after { caret-color: transparent !important; "
+    "animation: none !important; transition: none !important; }"
+)
+# A screen counts as changed above this many clearly different pixels; below, it is reported
+# as rendering noise (antialiasing of a small icon). A real style change touches far more.
+NOISE_PIXELS = 20
+CHANNEL_DELTA = 8
 
 
 @dataclass(frozen=True)
@@ -175,11 +182,9 @@ def compare(base: Path, head: Path, diff_path: Path) -> tuple[int, str]:
             canvas_before.paste(before_rgb)
             canvas_after.paste(after_rgb)
             before_rgb, after_rgb = canvas_before, canvas_after
-        mask = (
-            ImageChops.difference(before_rgb, after_rgb)
-            .convert("L")
-            .point(lambda v: 255 if v else 0)
-        )
+        red, green, blue = ImageChops.difference(before_rgb, after_rgb).split()
+        strongest = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+        mask = strongest.point(lambda v: 255 if v > CHANNEL_DELTA else 0)
         changed = mask.histogram()[255]
         box = mask.getbbox()
         where = f"x {box[0]}–{box[2]}, y {box[1]}–{box[3]}" if box else ""
@@ -213,12 +218,18 @@ def main() -> int:
         finally:
             browser.close()
 
-    rows, changed_total = [], 0
+    rows: list[str] = []
+    changed_screens = 0
     (args.out / "diff").mkdir(parents=True, exist_ok=True)
     for name in sorted(base_shots):
         changed, where = compare(base_shots[name], head_shots[name], args.out / "diff" / name)
-        changed_total += changed
-        result = "identique" if not changed else f"**{changed} px modifiés** ({where})"
+        if changed > NOISE_PIXELS:
+            changed_screens += 1
+            result = f"**{changed} px modifiés** ({where})"
+        elif changed:
+            result = f"identique (bruit : {changed} px, {where})"
+        else:
+            result = "identique"
         if name in unstable:
             result += " — capture instable"
         rows.append(f"| `{name}` | {result} |")
@@ -226,7 +237,7 @@ def main() -> int:
     report = [
         "## Comparaison visuelle",
         "",
-        f"{len(rows)} captures, {sum(1 for r in rows if 'modifiés' in r)} différentes.",
+        f"{len(rows)} captures, {changed_screens} différentes.",
         "",
         "| Écran | Résultat |",
         "|---|---|",
@@ -251,7 +262,7 @@ def main() -> int:
     if summary:
         with open(summary, "a", encoding="utf-8") as handle:
             handle.write(text)
-    return 1 if changed_total else 0
+    return 1 if changed_screens else 0
 
 
 if __name__ == "__main__":

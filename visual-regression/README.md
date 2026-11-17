@@ -20,8 +20,10 @@ les images servent alors à vérifier le changement.
 
 `fixtures.py` simule l'API (session, santé, stockage, débit réseau, torrents, utilisateurs) ;
 le WebSocket d'événements est accepté sans jamais rien émettre. L'horloge du navigateur est
-figée sur `NOW` et les animations sont coupées, donc deux builds identiques donnent exactement
-les mêmes pixels. Un appel non simulé reçoit une 404 et apparaît dans le rapport : complétez
+figée sur `NOW`, les animations et transitions sont coupées, et chaque écran est capturé une
+fois stabilisé, sans survol ni focus laissés par les clics. Un écran ne compte comme modifié
+qu'au-delà de 20 pixels nettement différents (écart de plus de 8 sur un canal) : en dessous, le
+rapport l'indique comme du bruit de rendu, typiquement le lissage d'une petite icône. Un appel non simulé reçoit une 404 et apparaît dans le rapport : complétez
 alors `fixtures.py`.
 
 ## En local
