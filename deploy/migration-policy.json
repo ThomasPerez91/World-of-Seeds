@@ -1,4 +1,9 @@
 {
   "schema": 1,
-  "upgrades": {}
+  "upgrades": {
+    "20261022_37->20261117_38": {
+      "transactional": true,
+      "backward_compatible": true
+    }
+  }
 }

@@ -21,6 +21,7 @@ from app.api.external.rate_limit import ExternalApiRateLimiter
 from app.api.router import api_v2_router, build_api_router, external_v1_router
 from app.auth.passwords import PasswordWorkUnavailableError, password_work_pool
 from app.auth.rate_limit import LoginIpRateLimiter
+from app.auth.request_rate_limit import AccountRequestRateLimiter
 from app.coordination import RedisCoordinator
 from app.core.config import Settings, get_settings
 from app.core.database import engine
@@ -136,6 +137,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
         uplink_bytes_per_second=settings.http_uplink_capacity_bytes_per_second
     )
     application.state.external_api_rate_limiter = ExternalApiRateLimiter()
+    application.state.account_request_rate_limiter = AccountRequestRateLimiter()
     application.state.login_ip_rate_limiter = LoginIpRateLimiter(
         maximum=settings.auth_ip_max_attempts,
         window_seconds=settings.auth_ip_window_seconds,

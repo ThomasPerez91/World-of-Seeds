@@ -552,7 +552,7 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         "WOS_REQUEST_RATE_LIMIT_PER_MINUTE",
         "Requêtes métier par minute",
         "Limite fonctionnelle appliquée à un compte authentifié.",
-        60,
+        300,
         "security",
         minimum=10,
         maximum=1000,
@@ -647,7 +647,6 @@ C411_ACCOUNT_SPECS: tuple[OptionSpec, ...] = tuple(
 # setting that does nothing. Wire one to a real consumer before removing it from this set.
 INACTIVE_OPTION_KEYS = frozenset(
     {
-        "WOS_REQUEST_RATE_LIMIT_PER_MINUTE",
         "WOS_CACHE_DEFAULT_TTL_SECONDS",
         "WOS_CACHE_PROGRESS_TTL_SECONDS",
         "WOS_CACHE_CONNECTION_POOL_SIZE",
