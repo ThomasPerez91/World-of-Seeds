@@ -110,7 +110,9 @@ def _silent_socket(socket: WebSocketRoute) -> None:
     return None
 
 
-def capture(dist: Path, out: Path, unknown: set[str], viewer: object) -> dict[str, Path]:
+def capture(
+    dist: Path, out: Path, unknown: set[str], unstable: set[str], viewer: object
+) -> dict[str, Path]:
     shots: dict[str, Path] = {}
     out.mkdir(parents=True, exist_ok=True)
     browser = viewer  # a launched Playwright browser
@@ -135,14 +137,29 @@ def capture(dist: Path, out: Path, unknown: set[str], viewer: object) -> dict[st
                 page.evaluate("document.fonts.ready")
                 page.add_style_tag(content=STABILISE_CSS)
                 path = out / f"{screen.name}-{viewport}.png"
-                page.screenshot(path=str(path), full_page=True, animations="disabled")
+                image, stable = _settled_screenshot(page)
+                path.write_bytes(image)
                 shots[path.name] = path
+                if not stable:
+                    unstable.add(path.name)
                 context.close()
     return shots
 
 
-def compare(base: Path, head: Path, diff_path: Path) -> int:
-    """Number of differing pixels; writes a highlighted diff image when there are some."""
+def _settled_screenshot(page: Page, attempts: int = 10) -> tuple[bytes, bool]:
+    """Screenshot once two consecutive captures are identical (polling, late images, toasts)."""
+    previous = page.screenshot(full_page=True, animations="disabled")
+    for _ in range(attempts):
+        page.wait_for_timeout(400)
+        current = page.screenshot(full_page=True, animations="disabled")
+        if current == previous:
+            return current, True
+        previous = current
+    return previous, False
+
+
+def compare(base: Path, head: Path, diff_path: Path) -> tuple[int, str]:
+    """Differing pixels and their bounding box; writes a highlighted diff image if any."""
     with Image.open(base) as before, Image.open(head) as after:
         before_rgb, after_rgb = before.convert("RGB"), after.convert("RGB")
         if before_rgb.size != after_rgb.size:
@@ -159,11 +176,16 @@ def compare(base: Path, head: Path, diff_path: Path) -> int:
             .point(lambda v: 255 if v else 0)
         )
         changed = mask.histogram()[255]
+        box = mask.getbbox()
+        where = f"x {box[0]}–{box[2]}, y {box[1]}–{box[3]}" if box else ""
+        if before.size != after.size:
+            sizes = f"{before.size[0]}×{before.size[1]} → {after.size[0]}×{after.size[1]}"
+            where = f"taille {sizes}; {where}"
         if changed:
             highlight = Image.blend(after_rgb, Image.new("RGB", after_rgb.size, (0, 0, 0)), 0.6)
             highlight.paste(Image.new("RGB", after_rgb.size, (255, 0, 64)), mask=mask)
             highlight.save(diff_path)
-        return changed
+        return changed, where
 
 
 def main() -> int:
@@ -177,22 +199,24 @@ def main() -> int:
             parser.error(f"{dist} is not a built frontend (index.html missing)")
 
     unknown: set[str] = set()
+    unstable: set[str] = set()
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         try:
-            base_shots = capture(args.base, args.out / "base", unknown, browser)
-            head_shots = capture(args.head, args.out / "head", unknown, browser)
+            base_shots = capture(args.base, args.out / "base", unknown, unstable, browser)
+            head_shots = capture(args.head, args.out / "head", unknown, unstable, browser)
         finally:
             browser.close()
 
     rows, changed_total = [], 0
     (args.out / "diff").mkdir(parents=True, exist_ok=True)
     for name in sorted(base_shots):
-        changed = compare(base_shots[name], head_shots[name], args.out / "diff" / name)
+        changed, where = compare(base_shots[name], head_shots[name], args.out / "diff" / name)
         changed_total += changed
-        rows.append(
-            f"| `{name}` | {'identique' if not changed else f'**{changed} px modifiés**'} |"
-        )
+        result = "identique" if not changed else f"**{changed} px modifiés** ({where})"
+        if name in unstable:
+            result += " — capture instable"
+        rows.append(f"| `{name}` | {result} |")
 
     report = [
         "## Comparaison visuelle",
@@ -203,6 +227,12 @@ def main() -> int:
         "|---|---|",
         *rows,
     ]
+    if unstable:
+        report += [
+            "",
+            "Captures instables (l'écran bougeait encore après 10 essais) :",
+            *[f"- `{name}`" for name in sorted(unstable)],
+        ]
     if unknown:
         report += [
             "",
