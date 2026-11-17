@@ -62,6 +62,35 @@ for (const element of document.querySelectorAll('.version-badge, .app-footer > s
 }"""
 
 
+# For each visible element that paints text or graphics, its page box and the computed styles
+# most likely to change its pixels. Used to name what changed inside a modified area.
+DESCRIBE_ELEMENTS = """() => {
+  const properties = ['color', 'background-color', 'opacity', 'font-family', 'font-size',
+    'font-weight', 'letter-spacing', 'line-height', 'text-decoration-line', 'text-shadow',
+    'box-shadow', 'border-color', 'transform', 'filter', 'visibility', 'fill', 'stroke'];
+  const out = [];
+  for (const element of document.body.querySelectorAll('*')) {
+    const rect = element.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
+    const ownText = [...element.childNodes].some(
+      (node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '');
+    if (!ownText && !(element instanceof SVGElement) && !(element instanceof HTMLImageElement)) {
+      continue;
+    }
+    const style = getComputedStyle(element);
+    const classes = [...element.classList].map((c) => '.' + c).join('');
+    const name = element.tagName.toLowerCase() + classes;
+    out.push({
+      name,
+      text: ownText ? element.textContent.trim().slice(0, 60) : '',
+      box: [rect.left + scrollX, rect.top + scrollY, rect.right + scrollX, rect.bottom + scrollY],
+      style: Object.fromEntries(properties.map((p) => [p, style.getPropertyValue(p)])),
+    });
+  }
+  return out;
+}"""
+
+
 @dataclass(frozen=True)
 class Screen:
     name: str
@@ -219,6 +248,8 @@ def capture(
                 path.write_bytes(image)
                 text = page.locator("body").inner_text()
                 path.with_suffix(".txt").write_text(text, encoding="utf-8")
+                elements = page.evaluate(DESCRIBE_ELEMENTS)
+                path.with_suffix(".json").write_text(json.dumps(elements), encoding="utf-8")
                 shots[path.name] = path
                 if not stable:
                     unstable.add(path.name)
@@ -267,7 +298,58 @@ def _changed_text(base: Path, head: Path, limit: int = 6) -> list[str]:
     return lines[:limit]
 
 
-def compare(base: Path, head: Path, diff_path: Path) -> tuple[int, str]:
+def _elements_in(path: Path, box: tuple[int, int, int, int]) -> list[dict[str, object]]:
+    if not path.is_file():
+        return []
+    left, top, right, bottom = box
+    return [
+        element
+        for element in json.loads(path.read_text(encoding="utf-8"))
+        if element["box"][0] < right
+        and element["box"][2] > left
+        and element["box"][1] < bottom
+        and element["box"][3] > top
+    ]
+
+
+def _describe_area(
+    base: Path, head: Path, box: tuple[int, int, int, int], limit: int = 8
+) -> list[str]:
+    """Elements overlapping a changed area, with the computed styles that differ."""
+    before = _elements_in(base, box)
+    after = _elements_in(head, box)
+    lines: list[str] = []
+    for index, element in enumerate(after[:limit]):
+        label = f"`{element['name']}`" + (f" « {element['text']} »" if element["text"] else "")
+        match = next(
+            (
+                other
+                for other in before
+                if other["name"] == element["name"] and other["text"] == element["text"]
+            ),
+            None,
+        )
+        if match is None:
+            lines.append(f"- {label} : absent avant")
+            continue
+        changes = [
+            f"{prop} `{match['style'][prop]}` → `{value}`"
+            for prop, value in element["style"].items()
+            if match["style"].get(prop) != value
+        ]
+        if match["box"] != element["box"]:
+            changes.append(f"boîte {match['box']} → {element['box']}")
+        lines.append(f"- {label} : " + ("; ".join(changes) if changes else "styles identiques"))
+    if len(after) > limit:
+        lines.append(f"- … et {len(after) - limit} autres éléments")
+    if not after and before:
+        lines.append(f"- {len(before)} élément(s) présents avant seulement")
+    return lines
+
+
+def compare(
+    base: Path, head: Path, diff_path: Path
+) -> tuple[int, str, tuple[int, int, int, int] | None]:
     """Differing pixels and their bounding box; writes a highlighted diff image if any."""
     with Image.open(base) as before, Image.open(head) as after:
         before_rgb, after_rgb = before.convert("RGB"), after.convert("RGB")
@@ -292,7 +374,7 @@ def compare(base: Path, head: Path, diff_path: Path) -> tuple[int, str]:
             highlight = Image.blend(after_rgb, Image.new("RGB", after_rgb.size, (0, 0, 0)), 0.6)
             highlight.paste(Image.new("RGB", after_rgb.size, (255, 0, 64)), mask=mask)
             highlight.save(diff_path)
-        return changed, where
+        return changed, where, box
 
 
 def main() -> int:
@@ -316,11 +398,13 @@ def main() -> int:
             browser.close()
 
     rows: list[str] = []
-    changed_texts: list[tuple[str, list[str]]] = []
+    changed_texts: list[tuple[str, list[str], list[str]]] = []
     changed_screens = 0
     (args.out / "diff").mkdir(parents=True, exist_ok=True)
     for name in sorted(base_shots):
-        changed, where = compare(base_shots[name], head_shots[name], args.out / "diff" / name)
+        changed, where, box = compare(
+            base_shots[name], head_shots[name], args.out / "diff" / name
+        )
         if changed > NOISE_PIXELS:
             changed_screens += 1
             result = f"**{changed} px modifiés** ({where})"
@@ -335,8 +419,17 @@ def main() -> int:
             texts = _changed_text(
                 base_shots[name].with_suffix(".txt"), head_shots[name].with_suffix(".txt")
             )
-            if texts:
-                changed_texts.append((name, texts))
+            area = (
+                _describe_area(
+                    base_shots[name].with_suffix(".json"),
+                    head_shots[name].with_suffix(".json"),
+                    box,
+                )
+                if box
+                else []
+            )
+            if texts or area:
+                changed_texts.append((name, texts, area))
 
     report = [
         "## Comparaison visuelle",
@@ -347,8 +440,12 @@ def main() -> int:
         "|---|---|",
         *rows,
     ]
-    for name, texts in changed_texts:
-        report += ["", f"Texte modifié dans `{name}` :", "", "```diff", *texts, "```"]
+    for name, texts, area in changed_texts:
+        report += ["", f"### `{name}`"]
+        if texts:
+            report += ["", "Texte modifié :", "", "```diff", *texts, "```"]
+        if area:
+            report += ["", "Éléments dans la zone modifiée :", "", *area]
     if unstable:
         report += [
             "",

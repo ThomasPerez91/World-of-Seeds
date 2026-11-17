@@ -11,8 +11,9 @@
 
 Le rapport s'affiche dans le résumé du job. L'artefact `visual-regression` contient les
 captures `base/`, `head/` et, pour chaque écran modifié, une image `diff/` où les pixels changés
-sont en rouge. Quand le texte visible d'un écran modifié change aussi, le rapport cite les lignes
-concernées, ce qui suffit souvent sans ouvrir les images.
+sont en rouge. Pour chaque écran modifié, le rapport cite aussi les lignes de texte visible qui
+ont changé et les éléments situés dans la zone modifiée, avec leurs styles calculés qui diffèrent
+(couleur, police, ombre, transformation…), ce qui suffit souvent sans ouvrir les images.
 
 Le job est **indicatif** : il échoue quand un écran change, mais il ne fait pas partie des
 contrôles requis, donc il ne bloque jamais une fusion. Une PR qui ne devait rien changer
