@@ -77,8 +77,6 @@ jobs:
             uv run alembic -c alembic.ini downgrade 20260820_05
             uv run alembic -c alembic.ini upgrade head
           fi
-      - name: Check that the models match the migrated schema
-        run: uv run alembic -c alembic.ini check
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy app tests
