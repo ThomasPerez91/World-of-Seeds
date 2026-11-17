@@ -28,6 +28,7 @@ from app.jobs.torrent_effects import (
 from app.jobs.torrent_payloads import MAX_MANAGED_TORRENT_BYTES, TorrentPayloadStore
 from app.jobs.worker import TorrentWorker, TorrentWorkerConfig
 from app.options import PostgresOptionsRegistry
+from app.runtime_heartbeat import runtime_heartbeat
 from app.storage import SharedContentStore
 from app.torrents.validation_work import torrent_validation_pool
 
@@ -113,7 +114,8 @@ async def main() -> None:
     try:
         worker_config = await _load_worker_config(stop)
         if worker_config is not None and not stop.is_set():
-            await _run_worker(settings, redis, worker_config, stop)
+            async with runtime_heartbeat():
+                await _run_worker(settings, redis, worker_config, stop)
     finally:
         for signal_number in (signal.SIGINT, signal.SIGTERM):
             loop.remove_signal_handler(signal_number)

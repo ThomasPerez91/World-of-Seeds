@@ -21,6 +21,7 @@ from app.integrations.account_routing import (
 from app.integrations.observability_v2 import V2IntegrationObservabilityPublisher
 from app.integrations.qbittorrent_v2 import QBittorrentV2Gateway
 from app.jobs.torrent_payloads import MAX_MANAGED_TORRENT_BYTES
+from app.runtime_heartbeat import runtime_heartbeat
 from app.scheduler.runtime import ManagedControlGateway, SchedulerRuntime
 
 
@@ -101,12 +102,13 @@ async def main() -> None:
         for signal_number in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(signal_number, request_stop)
         try:
-            if observability is None:
-                await scheduler.run()
-            else:
-                async with asyncio.TaskGroup() as tasks:
-                    tasks.create_task(scheduler.run())
-                    tasks.create_task(observability.run())
+            async with runtime_heartbeat():
+                if observability is None:
+                    await scheduler.run()
+                else:
+                    async with asyncio.TaskGroup() as tasks:
+                        tasks.create_task(scheduler.run())
+                        tasks.create_task(observability.run())
         finally:
             await redis.aclose()
             await engine.dispose()
