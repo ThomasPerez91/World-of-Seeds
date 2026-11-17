@@ -140,11 +140,6 @@ def capture(
                 page.route_web_socket("**/api/v2/torrents/events", _silent_socket)
                 page.goto(origin + "/", wait_until="networkidle")
                 screen.steps(page)
-                # Leave no hover or focus state behind the click that opened the screen.
-                page.mouse.move(0, 0)
-                page.evaluate(
-                    "document.activeElement instanceof HTMLElement && document.activeElement.blur()"
-                )
                 page.wait_for_load_state("networkidle")
                 page.evaluate("document.fonts.ready")
                 page.add_style_tag(content=STABILISE_CSS)
@@ -158,12 +153,19 @@ def capture(
     return shots
 
 
+def _neutral_screenshot(page: Page) -> bytes:
+    # The page may move focus once its data loads: clear focus and hover right before capture.
+    page.mouse.move(0, 0)
+    page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()")
+    return page.screenshot(full_page=True, animations="disabled")
+
+
 def _settled_screenshot(page: Page, attempts: int = 10) -> tuple[bytes, bool]:
     """Screenshot once two consecutive captures are identical (polling, late images, toasts)."""
-    previous = page.screenshot(full_page=True, animations="disabled")
+    previous = _neutral_screenshot(page)
     for _ in range(attempts):
         page.wait_for_timeout(400)
-        current = page.screenshot(full_page=True, animations="disabled")
+        current = _neutral_screenshot(page)
         if current == previous:
             return current, True
         previous = current
