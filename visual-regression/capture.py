@@ -107,10 +107,12 @@ def _admin(label: str) -> Callable[[Page], None]:
 
 
 def _open_details(page: Page) -> None:
-    page.get_by_role(
+    button = page.get_by_role(
         "button", name="Afficher les détails de Cours.Video.Programmation.Python"
-    ).click()
-    page.locator(".ready-compatibility-note, .ready-file-list").first.wait_for()
+    )
+    panel = button.get_attribute("aria-controls")
+    button.click()
+    page.locator(f"#{panel}").wait_for()
 
 
 def _open_account_menu(page: Page) -> None:
