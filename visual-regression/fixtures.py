@@ -143,6 +143,241 @@ def _listing() -> dict[str, Any]:
     }
 
 
+READY_WITH_FOLDERS = TORRENTS[3]["id"]
+SNAPSHOT = "00000000-0000-4000-a000-000000000001"
+
+
+def _file(index: int, relative_path: str, size_gib: float) -> dict[str, Any]:
+    return {
+        "id": f"00000000-0000-4000-b000-{index:012d}",
+        "file_index": index,
+        "relative_path": relative_path,
+        "size": int(size_gib * GIB),
+    }
+
+
+FILES = [
+    _file(0, "Lisez-moi.txt", 0.001),
+    _file(1, "Chapitre 01 - Bases/01 - Variables.mp4", 1.2),
+    _file(2, "Chapitre 01 - Bases/02 - Fonctions.mp4", 1.4),
+    _file(3, "Chapitre 02 - Projets/01 - API web.mp4", 3.6),
+    _file(4, "Chapitre 02 - Projets/02 - Tests.mp4", 3.5),
+]
+
+
+def _manifest() -> dict[str, Any]:
+    return {
+        "snapshot_id": SNAPSHOT,
+        "manifest_version": 1,
+        "file_count": len(FILES),
+        "total_size": sum(f["size"] for f in FILES),
+        "archive_available": True,
+        "retention_expires_at": _at(days=2),
+        "offset": 0,
+        "limit": 50,
+        "items": FILES,
+    }
+
+
+def _directories() -> dict[str, Any]:
+    def folder(name: str) -> dict[str, Any]:
+        inside = [f for f in FILES if f["relative_path"].startswith(name + "/")]
+        return {
+            "name": name,
+            "relative_path": name,
+            "file_count": len(inside),
+            "total_size": sum(f["size"] for f in inside),
+            "archive_available": True,
+        }
+
+    return {
+        "snapshot_id": SNAPSHOT,
+        "path": "",
+        "directories": [folder("Chapitre 01 - Bases"), folder("Chapitre 02 - Projets")],
+        "direct_file_count": 1,
+        "offset": 0,
+        "limit": 500,
+        "files": [FILES[0]],
+    }
+
+
+def _option(
+    key: str, label: str, input_type: str, value: Any, *, unit: str | None = None, **extra: Any
+) -> dict[str, Any]:
+    return {
+        "key": key,
+        "label": label,
+        "description": f"Description de {label.lower()}.",
+        "input_type": input_type,
+        "value": value,
+        "default": value,
+        "unit": unit,
+        "minimum": 0 if input_type == "integer" else None,
+        "maximum": None,
+        "choices": [],
+        "editable": True,
+        "restart_required": False,
+        "version": 1,
+        **extra,
+    }
+
+
+def _admin_overview() -> dict[str, Any]:
+    return {
+        "sections": [
+            {
+                "id": "downloads",
+                "label": "Téléchargements",
+                "fields": [
+                    _option(
+                        "WOS_DOWNLOAD_MAX_BYTES_PER_SECOND_PER_USER",
+                        "Débit",
+                        "integer",
+                        0,
+                        unit="bytes_per_second",
+                    ),
+                    _option(
+                        "WOS_DOWNLOAD_MAX_CONCURRENT_PER_USER",
+                        "Archives",
+                        "integer",
+                        2,
+                        unit="count",
+                    ),
+                    _option(
+                        "WOS_TORRENT_AUTO_UNSUBSCRIBE_HOURS",
+                        "Désabonnement",
+                        "integer",
+                        336,
+                        unit="hours",
+                        restart_required=True,
+                    ),
+                ],
+            },
+            {
+                "id": "torrents",
+                "label": "Torrents",
+                "fields": [
+                    _option(
+                        "WOS_SCHEDULER_DYNAMIC_CONCURRENCY_ENABLED", "Régulation", "boolean", True
+                    ),
+                    _option(
+                        "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL", "Actifs", "integer", 12, unit="count"
+                    ),
+                ],
+            },
+            {
+                "id": "security",
+                "label": "Sécurité",
+                "fields": [
+                    _option(
+                        "WOS_REQUEST_RATE_LIMIT_PER_MINUTE",
+                        "Limiteur",
+                        "integer",
+                        300,
+                        unit="count_per_minute",
+                    ),
+                ],
+            },
+        ],
+        "changed_keys": [],
+        "restart_required": False,
+        "service_controls_available": True,
+        "scheduler": {
+            "desired_generation": 42,
+            "applied_generation": 42,
+            "synchronized": True,
+            "rounds": 1840,
+            "lease_active": True,
+            "dynamic_enabled": True,
+            "static_active_limit": 12,
+            "dynamic_current_active": 5,
+            "active_downloads": 2,
+            "waiting_candidates": 1,
+            "observed_bytes_per_second": 48_300_000,
+            "minimum_bytes_per_second": 20_000_000,
+            "target_bytes_per_second": 90_000_000,
+            "next_evaluation_at": _at(minutes=3),
+            "completion_cooldown_until": None,
+            "last_decision": "hold",
+        },
+        "storage": {
+            "managed_bytes": 2600 * GIB,
+            "logical_bytes": 2750 * GIB,
+            "disk_total_bytes": 4000 * GIB,
+            "disk_free_bytes": 1130 * GIB,
+            "pressure": "normal",
+            "managed_quota_bytes": 3500 * GIB,
+            "user_quota_bytes": 0,
+        },
+        "audit": [
+            {
+                "key": "WOS_REQUEST_RATE_LIMIT_PER_MINUTE",
+                "version": 2,
+                "old_value": 60,
+                "new_value": 300,
+                "actor": None,
+                "source": "migration",
+                "changed_at": _at(hours=-6),
+            },
+            {
+                "key": "WOS_SCHEDULER_MAX_ACTIVE_GLOBAL",
+                "version": 3,
+                "old_value": 10,
+                "new_value": 12,
+                "actor": "thomas",
+                "source": "admin",
+                "changed_at": _at(days=-3),
+            },
+        ],
+    }
+
+
+def _qbittorrent_runtime() -> dict[str, Any]:
+    return {
+        "checked_at": _at(seconds=-10),
+        "download_speed_bytes": 48_300_000,
+        "upload_speed_bytes": 12_700_000,
+        "truncated": False,
+        "torrents": [
+            {
+                "hash": f"{index:040x}",
+                "name": torrent["name"],
+                "size_bytes": torrent["total_size"],
+                "state": {"active": "downloading", "ready": "uploading", "error": "error"}.get(
+                    torrent["state"], "queuedDL"
+                ),
+                "progress": torrent["progress"],
+                "managed_torrent_id": torrent["id"],
+                "can_resume": torrent["state"] == "error",
+                "can_delete": True,
+            }
+            for index, torrent in enumerate(TORRENTS, start=1)
+        ],
+    }
+
+
+def _cleanup() -> dict[str, Any]:
+    return {
+        "checked_at": _at(seconds=-30),
+        "items": [
+            {
+                "id": TORRENTS[3]["id"],
+                "name": TORRENTS[3]["name"],
+                "size_bytes": TORRENTS[3]["total_size"],
+                "subscriber_count": 1,
+                "deletion_at": _at(days=2),
+            },
+            {
+                "id": TORRENTS[2]["id"],
+                "name": TORRENTS[2]["name"],
+                "size_bytes": TORRENTS[2]["total_size"],
+                "subscriber_count": 0,
+                "deletion_at": None,
+            },
+        ],
+    }
+
+
 def answer(scenario: str, method: str, path: str) -> tuple[int, Any] | None:
     """(status, JSON body) for an API call, or None when the endpoint is not simulated."""
     authenticated = scenario != "login" and scenario != "legal"
@@ -186,5 +421,27 @@ def answer(scenario: str, method: str, path: str) -> tuple[int, Any] | None:
             },
         ),
         ("GET", "/api/v2/torrents"): (200, _listing()),
+        ("GET", "/api/v1/admin/storage"): (
+            200,
+            {
+                "total": 4000 * GIB,
+                "used": 2870 * GIB,
+                "available": 1130 * GIB,
+                "active_users": 2,
+                "suspended_users": 1,
+            },
+        ),
+        ("GET", "/api/v2/admin/overview"): (200, _admin_overview()),
+        ("GET", "/api/v1/admin/services/wos/restart"): (
+            200,
+            {"state": "idle", "request_id": None, "updated_at": None, "message_code": "idle"},
+        ),
+        ("GET", "/api/v2/admin/runtime/qbittorrent"): (200, _qbittorrent_runtime()),
+        ("GET", "/api/v2/admin/cleanup"): (200, _cleanup()),
+        ("GET", f"/api/v2/torrents/{READY_WITH_FOLDERS}/download-manifest"): (200, _manifest()),
+        ("GET", f"/api/v2/torrents/{READY_WITH_FOLDERS}/download-directories"): (
+            200,
+            _directories(),
+        ),
     }
     return routes.get((method, path))

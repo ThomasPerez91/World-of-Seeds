@@ -12,6 +12,7 @@ is 1 when a screen differs, and REPORT_DIR holds base, head and highlighted diff
 from __future__ import annotations
 
 import argparse
+import difflib
 import functools
 import http.server
 import json
@@ -34,15 +35,68 @@ VIEWPORTS = {"desktop": (1440, 900), "mobile": (390, 844)}
 # Hide the text caret and stop every animation or transition, spinners included. Backdrop
 # blurs are switched off too: software rendering blurs them tile by tile, slightly differently
 # from one browser session to the next. A change limited to a backdrop blur goes unnoticed.
+# Nothing can be hovered either: a full-page screenshot resizes the viewport, which can move a
+# different element under the pointer while the capture is taken. Applied after the clicks.
+# Scrollbars are hidden and take no space: the same resize makes the page scrollbar come and go,
+# and the 15 px it takes can reflow a responsive grid differently from one capture to the next.
 STABILISE_CSS = (
     "*, *::before, *::after { caret-color: transparent !important; "
     "animation: none !important; transition: none !important; "
-    "backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }"
+    "backdrop-filter: none !important; -webkit-backdrop-filter: none !important; "
+    "pointer-events: none !important; } "
+    "html, body { scrollbar-width: none !important; } "
+    "::-webkit-scrollbar { display: none !important; }"
 )
 # A screen counts as changed above this many differing pixels; below, it is reported as
 # rendering noise (antialiasing of a small icon). Any channel difference counts, so even a
 # faint background shade change over a whole screen is caught.
 NOISE_PIXELS = 20
+# Software rendering occasionally lays a screen out differently from one capture to the next,
+# with the same text and styles. A changed screen is captured again on both sides up to this
+# many times, and counts as changed only if it differs every time: a CSS change always does.
+RETRIES = 2
+
+
+# The version number shows in the header and footer: every release would otherwise change every
+# authenticated screen. It is replaced by a fixed label of the same shape before capture.
+FIXED_VERSION = """() => {
+for (const element of document.querySelectorAll('.version-badge, .app-footer > span')) {
+  for (const node of element.childNodes) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      node.textContent = node.textContent.replace(/\\d+\\.\\d+\\.\\d+/, '0.0.0');
+    }
+  }
+}
+}"""
+
+
+# For each visible element that paints text or graphics, its page box and the computed styles
+# most likely to change its pixels. Used to name what changed inside a modified area.
+DESCRIBE_ELEMENTS = """() => {
+  const properties = ['color', 'background-color', 'opacity', 'font-family', 'font-size',
+    'font-weight', 'letter-spacing', 'line-height', 'text-decoration-line', 'text-shadow',
+    'box-shadow', 'border-color', 'transform', 'filter', 'visibility', 'fill', 'stroke'];
+  const out = [];
+  for (const element of document.body.querySelectorAll('*')) {
+    const rect = element.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
+    const ownText = [...element.childNodes].some(
+      (node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '');
+    if (!ownText && !(element instanceof SVGElement) && !(element instanceof HTMLImageElement)) {
+      continue;
+    }
+    const style = getComputedStyle(element);
+    const classes = [...element.classList].map((c) => '.' + c).join('');
+    const name = element.tagName.toLowerCase() + classes;
+    out.push({
+      name,
+      text: ownText ? element.textContent.trim().slice(0, 60) : '',
+      box: [rect.left + scrollX, rect.top + scrollY, rect.right + scrollX, rect.bottom + scrollY],
+      style: Object.fromEntries(properties.map((p) => [p, style.getPropertyValue(p)])),
+    });
+  }
+  return out;
+}"""
 
 
 @dataclass(frozen=True)
@@ -50,6 +104,8 @@ class Screen:
     name: str
     scenario: str
     steps: Callable[[Page], None]
+    # Clear focus before capture. Off for menus that close when they lose focus.
+    blur: bool = True
 
 
 def _open_legal(page: Page) -> None:
@@ -65,12 +121,61 @@ def _open_nav(label: str) -> Callable[[Page], None]:
     return step
 
 
+def _then(*steps: Callable[[Page], None]) -> Callable[[Page], None]:
+    def step(page: Page) -> None:
+        for each in steps:
+            each(page)
+            page.wait_for_load_state("networkidle")
+
+    return step
+
+
+def _open_section(navigation: str, label: str) -> Callable[[Page], None]:
+    def step(page: Page) -> None:
+        page.get_by_role("navigation", name=navigation).get_by_role(
+            "button", name=label, exact=True
+        ).click()
+
+    return step
+
+
+def _settings(label: str) -> Callable[[Page], None]:
+    return _then(_open_nav("Paramètres"), _open_section("Sections des paramètres", label))
+
+
+def _admin(label: str) -> Callable[[Page], None]:
+    return _then(_open_nav("Administration"), _open_section("Sections d’administration", label))
+
+
+def _open_details(page: Page) -> None:
+    button = page.get_by_role(
+        "button", name="Afficher les détails de Cours.Video.Programmation.Python"
+    )
+    panel = button.get_attribute("aria-controls")
+    button.click()
+    # A multi-file torrent opens on its directory browser once the manifest has loaded.
+    page.locator(f"#{panel} .ready-directory-item").first.wait_for()
+
+
+def _open_account_menu(page: Page) -> None:
+    page.get_by_role("button", name="Ouvrir le menu du compte").click()
+    page.locator("#account-dropdown").wait_for()
+
+
 SCREENS = [
     Screen("login", "login", lambda page: page.locator(".login-card").wait_for()),
     Screen("legal", "legal", _open_legal),
     Screen("dashboard", "dashboard", lambda page: page.locator(".app-shell").wait_for()),
+    Screen("dashboard-details", "dashboard", _open_details),
+    Screen("account-menu", "dashboard", _open_account_menu, blur=False),
     Screen("settings", "dashboard", _open_nav("Paramètres")),
+    Screen("settings-security", "dashboard", _settings("Sécurité")),
+    Screen("settings-secrets", "dashboard", _settings("Secrets")),
     Screen("admin-users", "dashboard", _open_nav("Administration")),
+    Screen("admin-qbittorrent", "dashboard", _admin("qBittorrent")),
+    Screen("admin-cleanup", "dashboard", _admin("Nettoyage")),
+    Screen("admin-settings", "dashboard", _admin("Paramètres")),
+    Screen("admin-storage", "dashboard", _admin("Stockage")),
 ]
 
 
@@ -121,14 +226,22 @@ def _silent_socket(socket: WebSocketRoute) -> None:
 
 
 def capture(
-    dist: Path, out: Path, unknown: set[str], unstable: set[str], viewer: object
+    dist: Path,
+    out: Path,
+    unknown: set[str],
+    unstable: set[str],
+    viewer: object,
+    only: set[str] | None = None,
 ) -> dict[str, Path]:
+    """Capture every screen, or only the captures named in `only` (e.g. "login-mobile.png")."""
     shots: dict[str, Path] = {}
     out.mkdir(parents=True, exist_ok=True)
     browser = viewer  # a launched Playwright browser
     with serve(dist) as origin:
         for screen in SCREENS:
             for viewport, (width, height) in VIEWPORTS.items():
+                if only is not None and f"{screen.name}-{viewport}.png" not in only:
+                    continue
                 context = browser.new_context(  # type: ignore[attr-defined]
                     viewport={"width": width, "height": height},
                     device_scale_factor=1,
@@ -146,9 +259,14 @@ def capture(
                 page.wait_for_load_state("networkidle")
                 page.evaluate("document.fonts.ready")
                 page.add_style_tag(content=STABILISE_CSS)
+                page.evaluate(FIXED_VERSION)
                 path = out / f"{screen.name}-{viewport}.png"
-                image, stable = _settled_screenshot(page)
+                image, stable = _settled_screenshot(page, blur=screen.blur)
                 path.write_bytes(image)
+                text = page.locator("body").inner_text()
+                path.with_suffix(".txt").write_text(text, encoding="utf-8")
+                elements = page.evaluate(DESCRIBE_ELEMENTS)
+                path.with_suffix(".json").write_text(json.dumps(elements), encoding="utf-8")
                 shots[path.name] = path
                 if not stable:
                     unstable.add(path.name)
@@ -156,26 +274,99 @@ def capture(
     return shots
 
 
-def _neutral_screenshot(page: Page) -> bytes:
+def _neutral_screenshot(page: Page, blur: bool) -> bytes:
     # The page may move focus once its data loads: clear focus and hover right before capture.
     page.mouse.move(0, 0)
-    page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()")
+    if blur:
+        page.evaluate(
+            "document.activeElement instanceof HTMLElement && document.activeElement.blur()"
+        )
     return page.screenshot(full_page=True, animations="disabled")
 
 
-def _settled_screenshot(page: Page, attempts: int = 10) -> tuple[bytes, bool]:
-    """Screenshot once two consecutive captures are identical (polling, late images, toasts)."""
-    previous = _neutral_screenshot(page)
+def _settled_screenshot(page: Page, blur: bool, attempts: int = 12) -> tuple[bytes, bool]:
+    """Screenshot once three consecutive captures, 400 ms apart, are identical.
+
+    Polling, late images and late layout can change a screen after a first quiet moment.
+    """
+    previous = _neutral_screenshot(page, blur)
+    identical = 0
     for _ in range(attempts):
         page.wait_for_timeout(400)
-        current = _neutral_screenshot(page)
-        if current == previous:
+        current = _neutral_screenshot(page, blur)
+        identical = identical + 1 if current == previous else 0
+        if identical == 2:
             return current, True
         previous = current
     return previous, False
 
 
-def compare(base: Path, head: Path, diff_path: Path) -> tuple[int, str]:
+def _changed_text(base: Path, head: Path, limit: int = 6) -> list[str]:
+    """Visible text lines that differ between the two captures of a screen."""
+    if not base.is_file() or not head.is_file():
+        return []
+    before = base.read_text(encoding="utf-8").splitlines()
+    after = head.read_text(encoding="utf-8").splitlines()
+    lines = [
+        line
+        for line in difflib.unified_diff(before, after, lineterm="", n=0)
+        if line[:1] in "+-" and not line.startswith(("+++", "---"))
+    ]
+    return lines[:limit]
+
+
+def _elements_in(path: Path, box: tuple[int, int, int, int]) -> list[dict[str, object]]:
+    if not path.is_file():
+        return []
+    left, top, right, bottom = box
+    return [
+        element
+        for element in json.loads(path.read_text(encoding="utf-8"))
+        if element["box"][0] < right
+        and element["box"][2] > left
+        and element["box"][1] < bottom
+        and element["box"][3] > top
+    ]
+
+
+def _describe_area(
+    base: Path, head: Path, box: tuple[int, int, int, int], limit: int = 8
+) -> list[str]:
+    """Elements overlapping a changed area, with the computed styles that differ."""
+    before = _elements_in(base, box)
+    after = _elements_in(head, box)
+    lines: list[str] = []
+    for index, element in enumerate(after[:limit]):
+        label = f"`{element['name']}`" + (f" « {element['text']} »" if element["text"] else "")
+        match = next(
+            (
+                other
+                for other in before
+                if other["name"] == element["name"] and other["text"] == element["text"]
+            ),
+            None,
+        )
+        if match is None:
+            lines.append(f"- {label} : absent avant")
+            continue
+        changes = [
+            f"{prop} `{match['style'][prop]}` → `{value}`"
+            for prop, value in element["style"].items()
+            if match["style"].get(prop) != value
+        ]
+        if match["box"] != element["box"]:
+            changes.append(f"boîte {match['box']} → {element['box']}")
+        lines.append(f"- {label} : " + ("; ".join(changes) if changes else "styles identiques"))
+    if len(after) > limit:
+        lines.append(f"- … et {len(after) - limit} autres éléments")
+    if not after and before:
+        lines.append(f"- {len(before)} élément(s) présents avant seulement")
+    return lines
+
+
+def compare(
+    base: Path, head: Path, diff_path: Path
+) -> tuple[int, str, tuple[int, int, int, int] | None]:
     """Differing pixels and their bounding box; writes a highlighted diff image if any."""
     with Image.open(base) as before, Image.open(head) as after:
         before_rgb, after_rgb = before.convert("RGB"), after.convert("RGB")
@@ -200,7 +391,7 @@ def compare(base: Path, head: Path, diff_path: Path) -> tuple[int, str]:
             highlight = Image.blend(after_rgb, Image.new("RGB", after_rgb.size, (0, 0, 0)), 0.6)
             highlight.paste(Image.new("RGB", after_rgb.size, (255, 0, 64)), mask=mask)
             highlight.save(diff_path)
-        return changed, where
+        return changed, where, box
 
 
 def main() -> int:
@@ -215,20 +406,44 @@ def main() -> int:
 
     unknown: set[str] = set()
     unstable: set[str] = set()
+    (args.out / "diff").mkdir(parents=True, exist_ok=True)
+    intermittent: dict[str, int] = {}
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         try:
             base_shots = capture(args.base, args.out / "base", unknown, unstable, browser)
             head_shots = capture(args.head, args.out / "head", unknown, unstable, browser)
+            results = {
+                name: compare(base_shots[name], head_shots[name], args.out / "diff" / name)
+                for name in base_shots
+            }
+            suspects = {name for name, result in results.items() if result[0] > NOISE_PIXELS}
+            for attempt in range(1, RETRIES + 1):
+                if not suspects:
+                    break
+                retry = args.out / f"retry-{attempt}"
+                (retry / "diff").mkdir(parents=True, exist_ok=True)
+                again_base = capture(args.base, retry / "base", unknown, set(), browser, suspects)
+                again_head = capture(args.head, retry / "head", unknown, set(), browser, suspects)
+                for name in sorted(suspects):
+                    pixels = compare(again_base[name], again_head[name], retry / "diff" / name)[0]
+                    if pixels <= NOISE_PIXELS:
+                        intermittent[name] = results[name][0]
+                suspects -= set(intermittent)
         finally:
             browser.close()
 
     rows: list[str] = []
+    changed_texts: list[tuple[str, list[str], list[str]]] = []
     changed_screens = 0
-    (args.out / "diff").mkdir(parents=True, exist_ok=True)
     for name in sorted(base_shots):
-        changed, where = compare(base_shots[name], head_shots[name], args.out / "diff" / name)
-        if changed > NOISE_PIXELS:
+        changed, where, box = results[name]
+        if name in intermittent:
+            result = (
+                f"identique au nouvel essai (écart intermittent de {intermittent[name]} px "
+                "au premier, ignoré)"
+            )
+        elif changed > NOISE_PIXELS:
             changed_screens += 1
             result = f"**{changed} px modifiés** ({where})"
         elif changed:
@@ -238,6 +453,21 @@ def main() -> int:
         if name in unstable:
             result += " — capture instable"
         rows.append(f"| `{name}` | {result} |")
+        if changed > NOISE_PIXELS and name not in intermittent:
+            texts = _changed_text(
+                base_shots[name].with_suffix(".txt"), head_shots[name].with_suffix(".txt")
+            )
+            area = (
+                _describe_area(
+                    base_shots[name].with_suffix(".json"),
+                    head_shots[name].with_suffix(".json"),
+                    box,
+                )
+                if box
+                else []
+            )
+            if texts or area:
+                changed_texts.append((name, texts, area))
 
     report = [
         "## Comparaison visuelle",
@@ -248,10 +478,16 @@ def main() -> int:
         "|---|---|",
         *rows,
     ]
+    for name, texts, area in changed_texts:
+        report += ["", f"### `{name}`"]
+        if texts:
+            report += ["", "Texte modifié :", "", "```diff", *texts, "```"]
+        if area:
+            report += ["", "Éléments dans la zone modifiée :", "", *area]
     if unstable:
         report += [
             "",
-            "Captures instables (l'écran bougeait encore après 10 essais) :",
+            "Captures instables (l'écran bougeait encore après 12 essais) :",
             *[f"- `{name}`" for name in sorted(unstable)],
         ]
     if unknown:
