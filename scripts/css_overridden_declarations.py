@@ -25,8 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from css_dead_selectors import CONDITIONAL, Rule, _skip, parse, split_selectors  # noqa: E402
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-# Document order: index.html links branding-lock.css; main.tsx bundles styles.css then admin.css,
-# then appends the other sheets in this order.
+# Document order: index.html links branding-lock.css, then main.tsx imports the other sheets in
+# this order into one bundle.
 CASCADE = [
     "frontend/public/branding-lock.css",
     "frontend/src/styles.css",

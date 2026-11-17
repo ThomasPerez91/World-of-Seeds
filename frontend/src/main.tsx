@@ -3,35 +3,19 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import productionHotfixUrl from "./production-hotfix.css?url";
-import premiumStylesheetUrl from "./wos-premium.css?url";
-import premiumTorrentStylesheetUrl from "./wos-premium-torrents.css?url";
-import wos21StylesheetUrl from "./wos-2-1.css?url";
-import wos21FinalStylesheetUrl from "./wos-2-1-final.css?url";
-import adminSettingsParityStylesheetUrl from "./admin-settings-parity.css?url";
+// Cascade order matters: each stylesheet refines the ones imported before it. Vite bundles them
+// into one CSS file in this order, which the page loads before rendering.
 import "./styles.css";
 import "./features/admin/admin.css";
-import toastSystemStylesheetUrl from "./toast-system.css?url";
-import responsiveMobileStylesheetUrl from "./responsive-mobile.css?url";
-import adminLayoutStylesheetUrl from "./admin-layout.css?url";
-
-function appendStylesheet(href: string, marker: string) {
-  const stylesheet = document.createElement("link");
-  stylesheet.rel = "stylesheet";
-  stylesheet.href = href;
-  stylesheet.dataset.wosStylesheet = marker;
-  document.head.appendChild(stylesheet);
-}
-
-appendStylesheet(productionHotfixUrl, "desktop-ux-recovery");
-appendStylesheet(premiumStylesheetUrl, "premium-seedbox-ui");
-appendStylesheet(premiumTorrentStylesheetUrl, "premium-torrent-layout");
-appendStylesheet(wos21StylesheetUrl, "wos-2-1-branding");
-appendStylesheet(wos21FinalStylesheetUrl, "wos-2-1-final-polish");
-appendStylesheet(adminSettingsParityStylesheetUrl, "admin-settings-parity");
-appendStylesheet(toastSystemStylesheetUrl, "toast-system");
-appendStylesheet(responsiveMobileStylesheetUrl, "responsive-mobile");
-appendStylesheet(adminLayoutStylesheetUrl, "admin-layout");
+import "./production-hotfix.css";
+import "./wos-premium.css";
+import "./wos-premium-torrents.css";
+import "./wos-2-1.css";
+import "./wos-2-1-final.css";
+import "./admin-settings-parity.css";
+import "./toast-system.css";
+import "./responsive-mobile.css";
+import "./admin-layout.css";
 
 const root = document.getElementById("root");
 
