@@ -33,6 +33,10 @@ updates:
     target-branch: develop
     schedule:
       interval: weekly
+    ignore:
+      # The frontend build stays on even-numbered Node LTS releases.
+      - dependency-name: node
+        versions: [">= 25, < 26", ">= 27, < 28"]
   - package-ecosystem: docker
     directory: "/discord-bot"
     target-branch: develop
