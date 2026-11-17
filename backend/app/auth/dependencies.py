@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth.request_rate_limit import AccountRequestRateLimiter, is_business_rate_limit_exempt
 from app.auth.security import hash_token, tokens_match
 from app.auth.service import ensure_utc, user_can_login
 from app.core.config import CSRF_COOKIE_NAME, Settings, get_settings
@@ -123,6 +124,19 @@ async def get_auth_context(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=_detail("not_authenticated", "Not authenticated"),
         )
+
+    limiter: AccountRequestRateLimiter | None = getattr(
+        request.app.state, "account_request_rate_limiter", None
+    )
+    if limiter is not None and not is_business_rate_limit_exempt(request.scope.get("endpoint")):
+        retry_after = await limiter.consume(user_session.user_id, await limiter.maximum(db))
+        if retry_after is not None:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=_detail("request_rate_limited", "Too many requests"),
+                headers={"Retry-After": str(retry_after), "Cache-Control": "no-store"},
+            )
 
     # Authentication is read-only. End its transaction before entering the route so
     # long filesystem streams never retain a PostgreSQL pool connection.

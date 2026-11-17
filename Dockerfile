@@ -15,6 +15,7 @@ LABEL org.opencontainers.image.title="World of Seeds" \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    TZ=UTC \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app/backend \
     WOS_STATIC_ROOT=/app/static

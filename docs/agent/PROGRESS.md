@@ -5,9 +5,20 @@
 World of Seeds V2 est désormais la ligne de production active.
 
 - Version de production vérifiée : `2.4.6`. ZIP1 corrigé et déployé ; ZIP privé authentifié en production à confirmer.
-- `2.4.7` (en cours de livraison) : correctifs par lots issus de l’audit complet, voir
-  `docs/audits/CORRECTIFS_2.4.md` et `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`. `3.0.0` sera la
-  version de clôture de l’audit.
+- `2.4.7` : correctifs par lots issus de l’audit complet, voir `docs/audits/CORRECTIFS_2.4.md`
+  et `docs/audits/ACTIONS_OPERATEUR_2.4.7.md`. `3.0.0` sera la version de clôture de l’audit.
+- `2.4.8` (promotion du 17 novembre 2026) :
+  - limite de 300 requêtes par minute et par compte sur l’API authentifiée, transferts de
+    fichiers exemptés (#446, migration `20261117_38`) ;
+  - 14 colonnes de date en `timestamptz`, `alembic check` en CI, `TZ=UTC` dans l’image (#448,
+    migration `20261117_39`) ;
+  - Alertmanager prêt dans l’overlay d’observabilité, à activer manuellement (#445) ;
+  - CSS : 12 647 → 9 379 lignes et 988 → 787 `!important` sans changement visuel, un seul bundle
+    ordonné, contrôles de CSS mort ou écrasé en CI (#449, #450, #453) ;
+  - comparaison visuelle indicative des écrans principaux en CI (#451) ; actions GitHub épinglées
+    par commit, Dependabot vers `develop` (#444, #447).
+  - En attente du serveur : #442 (journaux bornés, datastores, healthchecks) et #443 (export des
+    comptes vers GCS), qui exigent un déploiement manuel.
 
 ## Campagne audit 2.4.x — 2.4.6 déployée, ZIP1 corrigé
 

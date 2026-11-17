@@ -111,3 +111,38 @@ services:
         source: ../monitoring/prometheus/prometheus.rise2.yml
         target: /etc/prometheus/prometheus.yml
         read_only: true
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.2
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/private/alertmanager.yml
+      - --storage.path=/alertmanager
+      # Single instance: no gossip port, no peers to discover.
+      - --cluster.listen-address=
+    volumes:
+      # Rendered by scripts/rise2_v2_alertmanager_render.py; holds the webhook and SMTP secrets.
+      - type: bind
+        source: /etc/world-of-seeds-v2/alertmanager
+        target: /etc/alertmanager/private
+        read_only: true
+        bind: {create_host_path: false}
+      - alertmanager_v2_data:/alertmanager
+    # monitoring receives alerts from Prometheus; alerting-egress reaches Discord and SMTP only.
+    networks: [monitoring, alerting-egress]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:9093/-/ready]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  alerting-egress: {}
+
+volumes:
+  alertmanager_v2_data:

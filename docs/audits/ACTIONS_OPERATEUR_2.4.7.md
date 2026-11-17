@@ -49,8 +49,9 @@ isolée décrites dans `docs/deployment-rise2-v2.md`.
 - Quota de stockage par utilisateur : `WOS_STORAGE_USER_MAX_BYTES` vaut 0 par défaut et aucun
   seed n’installe 150 Go ; vérifier la valeur réelle en base (OP-05).
 - Exemption administrateur du nombre de torrents actifs et du quota ; lot maximal côté serveur.
-- Limite de requêtes pour l’API authentifiée : l’option `WOS_REQUEST_RATE_LIMIT_PER_MINUTE`
-  n’a jamais été branchée et est masquée ; choisir les seuils avant de l’implémenter (SE-06).
+- ~~Limite de requêtes pour l’API authentifiée (SE-06)~~ : branchée à 300 requêtes par minute
+  et par compte, réglable dans l’administration ; les transferts de fichiers en sont exemptés.
+  La migration `20261117_38` relève la valeur 60 jamais utilisée à 300.
 - Authentification renforcée des administrateurs (SE-13).
 
 ## 5. Vérifications après déploiement de 2.4.7

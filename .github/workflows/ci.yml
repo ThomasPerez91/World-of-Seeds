@@ -54,11 +54,11 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           enable-cache: true
           working-directory: backend
@@ -77,6 +77,8 @@ jobs:
             uv run alembic -c alembic.ini downgrade 20260820_05
             uv run alembic -c alembic.ini upgrade head
           fi
+      - name: Check that the models match the migrated schema
+        run: uv run alembic -c alembic.ini check
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy app tests
@@ -89,13 +91,17 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - name: Reject CSS selectors that no source can produce
+        run: python3 ../scripts/css_dead_selectors.py
+      - name: Reject CSS declarations that a later identical selector always overrides
+        run: python3 ../scripts/css_overridden_declarations.py
       - run: npm run check
       - run: npm run test
       - run: npm run build
@@ -108,8 +114,8 @@ jobs:
       run:
         working-directory: discord-bot
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - run: python -m pip install --require-hashes -r requirements.txt
@@ -124,12 +130,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v6
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -192,7 +198,7 @@ jobs:
             world-of-seeds:security
       - name: Upload security reports
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: security-reports
           path: ${{ runner.temp }}/security-reports
@@ -203,7 +209,7 @@ jobs:
     name: Container image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate deployment artifacts
         run: |
           bash -n \
@@ -304,11 +310,10 @@ jobs:
           test "$(docker compose port app 8000)" = "127.0.0.1:18081"
       - name: Verify PostgreSQL is not published
         run: |
-          if docker compose port postgres 5432 >/tmp/postgres-port 2>/dev/null; then
-            echo "PostgreSQL must not publish a host port."
-            cat /tmp/postgres-port
-            exit 1
-          fi
+          postgres_id="$(docker compose ps --quiet postgres)"
+          docker inspect "$postgres_id" | jq -e '
+            .[0].HostConfig | .PublishAllPorts == false and ((.PortBindings // {}) | length == 0)
+          '
       - name: Stop production stack
         if: always()
         run: docker compose down --volumes
@@ -355,16 +360,12 @@ jobs:
             docker inspect "$api_id" | jq '.[0].HostConfig.PortBindings'
             exit 1
           fi
-          if "${compose[@]}" port postgres 5432 >/tmp/v2-postgres-port 2>/dev/null; then
-            echo "V2 PostgreSQL must not publish a host port."
-            cat /tmp/v2-postgres-port
-            exit 1
-          fi
-          if "${compose[@]}" port redis 6379 >/tmp/v2-redis-port 2>/dev/null; then
-            echo "V2 Redis must not publish a host port."
-            cat /tmp/v2-redis-port
-            exit 1
-          fi
+          for service in postgres redis; do
+            service_id="$("${compose[@]}" ps --quiet "$service")"
+            docker inspect "$service_id" | jq -e '
+              .[0].HostConfig | .PublishAllPorts == false and ((.PortBindings // {}) | length == 0)
+            '
+          done
           redis_status=$("${compose[@]}" exec -T redis redis-cli ping)
           if test "$redis_status" != "PONG"; then
             echo "V2 Redis health probe returned: ${redis_status:-<empty>}."
@@ -399,6 +400,8 @@ jobs:
           docker run --rm --network none --entrypoint promtool
           --workdir /rules --volume "$PWD/monitoring/prometheus:/rules:ro"
           prom/prometheus:v3.14.0 test rules http-download-alerts.test.yml
+      - name: Check Alertmanager configuration and routing
+        run: scripts/check_alertmanager_config.sh
       - name: Run V2 monitoring smoke
         if: env.WOS_VERSION_CHANNEL == 'v2'
         run: scripts/local_v2.sh monitoring-smoke

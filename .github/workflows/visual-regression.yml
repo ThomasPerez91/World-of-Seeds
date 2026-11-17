@@ -1,0 +1,65 @@
+name: Visual regression
+
+# Advisory: compares screenshots of the pull request frontend with its base branch. It is not a
+# required check, so a deliberate visual change never blocks a merge; the report and images
+# land in the job summary and the "visual-regression" artifact. Self-contained: removing this
+# file and visual-regression/ removes the feature.
+on:
+  pull_request:
+    branches: [develop, master]
+    paths:
+      - "frontend/**"
+      - "visual-regression/**"
+      - ".github/workflows/visual-regression.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Visual regression (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: head
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || 'develop' }}
+          path: base
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            head/frontend/package-lock.json
+            base/frontend/package-lock.json
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Build the base and pull request frontends
+        run: |
+          set -euo pipefail
+          for side in base head; do
+            (cd "$side/frontend" && npm ci --no-audit --no-fund && npx --no-install vite build)
+          done
+      - name: Install Playwright and Pillow
+        run: |
+          python -m pip install --disable-pip-version-check playwright==1.63.0 pillow==12.3.0
+          python -m playwright install --with-deps chromium
+      - name: Capture and compare the main screens
+        run: >-
+          python head/visual-regression/capture.py
+          --base base/frontend/dist --head head/frontend/dist --out visual-report
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: always()
+        with:
+          name: visual-regression
+          path: visual-report
+          retention-days: 14
