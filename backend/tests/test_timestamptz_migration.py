@@ -9,7 +9,7 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
-from sqlalchemy import text
+from sqlalchemy import make_url, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
@@ -53,7 +53,10 @@ async def test_naive_utc_columns_become_timestamptz_without_moving_instants() ->
     columns: dict[str, tuple[str, ...]] = _revision_module().COLUMNS  # type: ignore[attr-defined]
     assert sum(len(names) for names in columns.values()) == 14
 
-    engine = create_async_engine(database_url)
+    # The same SELECT runs before and after the column types change: no cached plan may survive.
+    engine = create_async_engine(
+        make_url(database_url).update_query_dict({"prepared_statement_cache_size": "0"})
+    )
     try:
         async with engine.connect() as connection:
             transaction = await connection.begin()
