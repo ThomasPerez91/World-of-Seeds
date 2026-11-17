@@ -1,0 +1,66 @@
+rule_files:
+- alerts.yml
+evaluation_interval: 1m
+tests:
+- name: a failed export alerts after five minutes, a fresh one does not
+  interval: 1m
+  input_series:
+  - series: wos_accounts_backup_last_success_timestamp_seconds{job="node",instance="rise2"}
+    values: 0+60x20
+  - series: wos_accounts_backup_last_attempt_success{job="node",instance="rise2"}
+    values: 1 0+0x19
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: WOSAccountsBackupFailed
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: WOSAccountsBackupFailed
+    exp_alerts:
+    - exp_labels:
+        job: node
+        instance: rise2
+        severity: critical
+      exp_annotations:
+        summary: Le dernier export chiffré des comptes vers GCS a échoué
+  - eval_time: 10m
+    alertname: WOSAccountsBackupStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: WOSAccountsBackupMissing
+    exp_alerts: []
+- name: no successful export for more than 26 hours
+  interval: 1m
+  input_series:
+  - series: wos_accounts_backup_last_success_timestamp_seconds{job="node",instance="rise2"}
+    values: 0+0x1700
+  - series: wos_accounts_backup_last_attempt_success{job="node",instance="rise2"}
+    values: 1+0x1700
+  alert_rule_test:
+  - eval_time: 1560m
+    alertname: WOSAccountsBackupStale
+    exp_alerts: []
+  - eval_time: 1570m
+    alertname: WOSAccountsBackupStale
+    exp_alerts:
+    - exp_labels:
+        job: node
+        instance: rise2
+        severity: critical
+      exp_annotations:
+        summary: Aucun export chiffré des comptes envoyé vers GCS depuis 26 heures
+- name: an uninstalled export alerts after thirty minutes
+  interval: 1m
+  input_series:
+  - series: up{job="node",instance="rise2"}
+    values: 1+0x60
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: WOSAccountsBackupMissing
+    exp_alerts: []
+  - eval_time: 40m
+    alertname: WOSAccountsBackupMissing
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+      exp_annotations:
+        summary: L'export chiffré des comptes vers GCS n'est pas installé ou n'émet plus de métriques

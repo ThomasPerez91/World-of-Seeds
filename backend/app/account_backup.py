@@ -1,4 +1,7 @@
-"""Portable WoS account backup. Run from an operator shell, never from an API route."""
+"""Portable WoS account backup.
+
+Run from an operator shell or scripts/rise2_accounts_gcs.sh, never from an API route.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
+from app.core.config import get_settings
 from app.models import Base
 
 
@@ -121,8 +125,27 @@ def client_mapping(values: list[str]) -> dict[UUID, UUID]:
     return result
 
 
+async def dump_accounts(url: str) -> bytes:
+    engine = create_async_engine(url, hide_parameters=True)
+    try:
+        async with engine.begin() as conn:
+            snapshot = await export_accounts(conn)
+    finally:
+        await engine.dispose()
+    return snapshot.model_dump_json().encode()
+
+
 async def run(args: argparse.Namespace) -> None:
-    if args.operation != "export":
+    if args.operation == "dump":
+        # Plaintext leaves only through a pipe: rise2_accounts_gcs.sh encrypts it on the host.
+        if sys.stdout.isatty():
+            raise BackupError("Pipe the account snapshot into age; never print it to a terminal")
+        payload = await dump_accounts(get_settings().sqlalchemy_database_url)
+        sys.stdout.buffer.write(payload)
+        sys.stdout.buffer.flush()
+        return
+
+    if args.operation in ("inspect", "restore"):
         decrypted = await asyncio.to_thread(
             subprocess.run,
             ["age", "--decrypt", "-i", str(args.identity), "--", str(args.archive)],
@@ -145,24 +168,9 @@ async def run(args: argparse.Namespace) -> None:
         raise BackupError("Set WOS_DATABASE_URL explicitly to a PostgreSQL asyncpg URL")
     engine = create_async_engine(url, hide_parameters=True)
     try:
-        if args.operation == "export":
-            if sys.stdout.isatty():
-                raise BackupError("Redirect the encrypted archive to a file")
-            async with engine.begin() as conn:
-                snapshot = await export_accounts(conn)
-            await asyncio.to_thread(
-                subprocess.run,
-                ["age", "--encrypt", "--recipient", args.recipient],
-                input=snapshot.model_dump_json().encode(),
-                check=True,
-            )
-        else:
-            async with engine.begin() as conn:
-                await restore_accounts(conn, snapshot, client_mapping(args.client))
-            print(
-                f"Restored {len(snapshot.accounts)} accounts and "
-                f"{len(snapshot.discord_links)} links"
-            )
+        async with engine.begin() as conn:
+            await restore_accounts(conn, snapshot, client_mapping(args.client))
+        print(f"Restored {len(snapshot.accounts)} accounts and {len(snapshot.discord_links)} links")
     finally:
         await engine.dispose()
 
@@ -170,7 +178,9 @@ async def run(args: argparse.Namespace) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="operation", required=True)
-    sub.add_parser("export").add_argument("--recipient", required=True)
+    sub.add_parser(
+        "dump", help="write the plaintext snapshot to a pipe, using the application database"
+    )
     for operation in ("inspect", "restore"):
         command = sub.add_parser(operation)
         command.add_argument("--identity", type=Path, required=True)

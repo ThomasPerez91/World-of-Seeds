@@ -278,9 +278,12 @@ readonly BLOCKED_CHANGES="$(repo_git diff --name-only "${PREVIOUS_REVISION}..${T
   scripts/validate_compose_v2_rise2.py \
   scripts/rise2_v2_storage_smoke.sh \
   scripts/rise2_v2_database_backup.py \
+  scripts/rise2_accounts_gcs.sh \
   deploy/deploy-world-of-seeds-v2-rise2 \
   deploy/world-of-seeds-v2-database-backup.service \
   deploy/world-of-seeds-v2-database-backup.timer \
+  deploy/world-of-seeds-v2-accounts-backup.service \
+  deploy/world-of-seeds-v2-accounts-backup.timer \
   deploy/world-of-seeds-v2-smart-metrics.service \
   deploy/world-of-seeds-v2-smart-metrics.timer \
   deploy/compose.rise2.v2.yaml \

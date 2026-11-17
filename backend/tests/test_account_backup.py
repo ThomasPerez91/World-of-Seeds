@@ -68,3 +68,21 @@ async def test_accounts_round_trip_into_fresh_postgres_schema() -> None:
             for schema in (source, target):
                 await conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
         await engine.dispose()
+
+
+def test_dump_never_writes_the_plaintext_snapshot_to_a_terminal(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import sys
+
+    from app import account_backup
+
+    async def unexpected_dump(url: str) -> bytes:
+        raise AssertionError("the database must not be read for a terminal")
+
+    monkeypatch.setattr(account_backup, "dump_accounts", unexpected_dump)
+    monkeypatch.setattr(sys, "argv", ["account_backup", "dump"])
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    assert account_backup.main() == 1
+    assert "never print it to a terminal" in capsys.readouterr().err

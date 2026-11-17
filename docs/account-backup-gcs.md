@@ -16,24 +16,71 @@ une identité distincte. Les objets sont créés sous `wos-accounts/v1/` sans é
 Une suppression avant 365 jours peut entraîner une facturation anticipée. Ne pas appliquer
 de règle de suppression au bucket entier s'il accueille d'autres données.
 
-## Première sauvegarde
+## Fonctionnement sur Rise2
 
-Préparer un environnement Python avec les dépendances verrouillées du backend, `age`
-et le CLI `gcloud`. Lancer le script depuis le dossier backend avec un utilisateur
-dédié, dans un répertoire de travail privé, avec les variables suivantes exportées :
+`scripts/rise2_accounts_gcs.sh` tourne en root, comme la sauvegarde PostgreSQL, via
+`world-of-seeds-v2-accounts-backup.service` et son timer quotidien (04:30 UTC, après la
+sauvegarde PostgreSQL de 03:30). PostgreSQL n'est joignable que sur le réseau Docker interne :
+le script lance donc l'export dans le conteneur `api` déjà en service
+(`docker compose exec -T api python -m app.account_backup dump`), qui utilise les identifiants
+de l'application dans une transaction en lecture seule. Le JSON en clair passe uniquement par
+le pipe ; `age` le chiffre sur l'hôte avant toute écriture sur disque. Aucun port PostgreSQL
+n'est publié et aucun environnement Python n'est installé sur l'hôte.
 
-- `WOS_BACKUP_PYTHON` : chemin absolu du Python du backend.
-- `WOS_BACKUP_WORKDIR` : répertoire absolu, privé et accessible à cet utilisateur.
-- `WOS_BACKUP_RECIPIENT` : destinataire public.
-- `WOS_DATABASE_URL` : connexion PostgreSQL interne avec un rôle dédié ayant SELECT
-  sur users et discord_account_links ; ne pas publier de port PostgreSQL pour cet usage.
-- `WOS_BACKUP_BUCKET` : facultatif, par défaut `gs://world_of_seeds_bucket`.
+Chaque exécution met à jour `wos_accounts_backup.prom` dans le textfile collector de
+node-exporter. Les alertes `WOSAccountsBackupMissing`, `WOSAccountsBackupStale` (26 heures) et
+`WOSAccountsBackupFailed` s'appuient sur ces métriques ; elles ne préviennent personne tant
+qu'Alertmanager n'est pas en place (IN-03). Garder en plus une supervision indépendante de
+Rise2 qui alerte si aucun objet récent n'est visible dans le bucket depuis 26 heures.
 
-Exécuter `bash ../scripts/rise2_accounts_gcs.sh`. Le fichier `last-success` n'avance
-qu'après l'envoi. Après l'essai de restauration, planifier une exécution quotidienne.
-Configurer une supervision indépendante de Rise2 avec une alerte si aucun objet récent
-n'est visible depuis 26 heures. Tester la réception Discord et e-mail séparément ;
-ce dépôt ne provisionne pas ces destinataires.
+Le script et les deux unités font partie des fichiers protégés du helper de déploiement : toute
+révision qui les modifie exige un déploiement manuel. Après la fusion de cette révision,
+réinstaller le helper racine avec `scripts/rise2_v2_deploy_helper_install.sh` pour que la
+nouvelle liste s'applique.
+
+## Installation sur Rise2
+
+En root, une fois la révision déployée dans `/opt/world-of-seeds-v2` :
+
+1. Installer `age` (déjà présent pour la sauvegarde PostgreSQL) et le CLI `gcloud`.
+2. Créer une configuration `gcloud` dédiée et y activer le compte de service qui n'a que le
+   rôle Storage Object Creator sur le bucket, puis supprimer la clé téléchargée :
+
+   ```bash
+   install -d -m 0700 /etc/world-of-seeds-v2/gcloud-accounts-backup
+   CLOUDSDK_CONFIG=/etc/world-of-seeds-v2/gcloud-accounts-backup \
+     gcloud auth activate-service-account --key-file=/root/cle-compte-de-service.json
+   shred -u /root/cle-compte-de-service.json
+   ```
+
+3. Déposer le destinataire public `age` (une seule ligne `age1…`) :
+
+   ```bash
+   install -m 0600 /dev/null /etc/world-of-seeds-v2/accounts-backup-recipient
+   printf '%s\n' 'age1…' > /etc/world-of-seeds-v2/accounts-backup-recipient
+   ```
+
+4. Installer les unités et lancer une première exécution, sans activer le timer :
+
+   ```bash
+   install -m 0644 /opt/world-of-seeds-v2/deploy/world-of-seeds-v2-accounts-backup.service \
+     /opt/world-of-seeds-v2/deploy/world-of-seeds-v2-accounts-backup.timer /etc/systemd/system/
+   systemctl daemon-reload
+   systemctl start world-of-seeds-v2-accounts-backup.service
+   journalctl -u world-of-seeds-v2-accounts-backup.service -n 20 --no-pager
+   ```
+
+5. Vérifier l'objet dans `wos-accounts/v1/` avec l'identité opérateur, faire l'essai de
+   restauration ci-dessous, puis seulement activer le timer :
+
+   ```bash
+   systemctl enable --now world-of-seeds-v2-accounts-backup.timer
+   ```
+
+Variables facultatives du script, pour un essai hors des chemins par défaut :
+`WOS_V2_ENV_FILE`, `WOS_V2_REPOSITORY`, `WOS_BACKUP_RECIPIENT_FILE`, `WOS_BACKUP_WORKDIR`
+(par défaut `/var/lib/world-of-seeds-v2/accounts-backup`, qui contient `last-success`),
+`WOS_BACKUP_METRICS` et `WOS_BACKUP_BUCKET` (par défaut `gs://world_of_seeds_bucket`).
 
 ## Essai de restauration
 
