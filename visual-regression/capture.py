@@ -133,6 +133,11 @@ def capture(
                 page.route_web_socket("**/api/v2/torrents/events", _silent_socket)
                 page.goto(origin + "/", wait_until="networkidle")
                 screen.steps(page)
+                # Leave no hover or focus state behind the click that opened the screen.
+                page.mouse.move(0, 0)
+                page.evaluate(
+                    "document.activeElement instanceof HTMLElement && document.activeElement.blur()"
+                )
                 page.wait_for_load_state("networkidle")
                 page.evaluate("document.fonts.ready")
                 page.add_style_tag(content=STABILISE_CSS)
