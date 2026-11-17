@@ -63,6 +63,8 @@ PINNED_IMAGES = {
 DIGEST_IMAGE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
 LOG_MAX_SIZE = re.compile(r"^[1-9][0-9]*[kmg]$")
 PROTECTED_DATASTORES = ("postgres", "redis")
+HEARTBEAT_SERVICES = ("worker", "scheduler")
+HEARTBEAT_FILE = "/tmp/wos-heartbeat"
 
 
 class ComposeRise2PolicyError(RuntimeError):
@@ -117,6 +119,20 @@ def _require_bounded_logs(services: Mapping[str, Any]) -> None:
             or int(max_file) < 2
         ):
             raise ComposeRise2PolicyError(f"{name} must rotate bounded json-file logs")
+
+
+def _require_heartbeat_healthchecks(services: Mapping[str, Any]) -> None:
+    """Worker and scheduler expose no port: only their heartbeat file proves they still run."""
+    for name in HEARTBEAT_SERVICES:
+        healthcheck = _mapping(services[name], name).get("healthcheck")
+        test = healthcheck.get("test") if isinstance(healthcheck, dict) else None
+        if (
+            not isinstance(test, list)
+            or test[:1] != ["CMD"]
+            or not any(HEARTBEAT_FILE in str(part) for part in test)
+            or healthcheck.get("disable") is True
+        ):
+            raise ComposeRise2PolicyError(f"{name} must check its runtime heartbeat")
 
 
 def _require_protected_datastores(services: Mapping[str, Any]) -> None:
@@ -561,6 +577,7 @@ def validate_config(config: Mapping[str, Any]) -> None:
 
     _require_bounded_logs(services)
     _require_protected_datastores(services)
+    _require_heartbeat_healthchecks(services)
 
     payload = json.dumps(config, sort_keys=True)
     for forbidden in (

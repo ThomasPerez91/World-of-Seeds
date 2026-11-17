@@ -249,6 +249,11 @@ def _valid_config() -> dict[str, Any]:
         }
     services["postgres"].update({"oom_score_adj": -500, "stop_grace_period": "2m0s"})
     services["redis"].update({"oom_score_adj": -500, "stop_grace_period": "30s"})
+    for name in ("worker", "scheduler"):
+        services[name]["healthcheck"] = {
+            "test": ["CMD", "python", "-c", "check('/tmp/wos-heartbeat')"],
+            "interval": "30s",
+        }
     return {
         "name": "world-of-seeds-v2-rise2",
         "services": services,
@@ -351,6 +356,31 @@ def test_rise2_policy_rejects_a_datastore_stopped_on_the_default_timeout(datasto
     del config["services"][datastore]["stop_grace_period"]
 
     with pytest.raises(error, match=f"{datastore} must declare an explicit stop grace period"):
+        validate(config)
+
+
+@pytest.mark.parametrize("service", ["worker", "scheduler"])
+@pytest.mark.parametrize(
+    "healthcheck",
+    [
+        None,
+        {"disable": True, "test": ["CMD", "python", "-c", "check('/tmp/wos-heartbeat')"]},
+        {"test": ["NONE"]},
+        {"test": ["CMD", "true"]},
+        {"test": "python -c check('/tmp/wos-heartbeat')"},
+    ],
+)
+def test_rise2_policy_requires_worker_and_scheduler_heartbeat_checks(
+    service: str, healthcheck: dict[str, Any] | None
+) -> None:
+    error, validate = _validator()
+    config = _valid_config()
+    if healthcheck is None:
+        del config["services"][service]["healthcheck"]
+    else:
+        config["services"][service]["healthcheck"] = healthcheck
+
+    with pytest.raises(error, match=f"{service} must check its runtime heartbeat"):
         validate(config)
 
 

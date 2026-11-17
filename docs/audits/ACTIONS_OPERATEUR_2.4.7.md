@@ -65,7 +65,7 @@ isolée décrites dans `docs/deployment-rise2-v2.md`.
 
 ## 6. Préparé dans le dépôt, à appliquer manuellement
 
-La branche `ops/rise2-log-rotation-datastore-safety` traite la partie compose de trois constats
+La branche `ops/rise2-log-rotation-datastore-safety` traite la partie compose de quatre constats
 qui ne demandent ni secret ni dimensionnement de l’hôte. Rien n’est appliqué sur Rise2 tant que
 le déploiement manuel n’a pas eu lieu.
 
@@ -74,6 +74,7 @@ le déploiement manuel n’a pas eu lieu.
 | IN-20 | Journaux `json-file` bornés à 5 × 20 Mo par conteneur, sur les 16 services de `deploy/compose.rise2.v2.yaml` et les 4 exporters de l’overlay d’observabilité (environ 2 Go au plus pour la pile complète) | Journal d’accès Caddy |
 | IN-04 | `oom_score_adj: -500` sur PostgreSQL et Redis | `mem_limit`/`cpus` : dépendent de la mémoire réelle de l’hôte |
 | IN-25 | `stop_grace_period` de 2 min pour PostgreSQL et 30 s pour Redis (10 s par défaut auparavant) | `maxmemory` Redis, taille de pool SQL, certificat CA qBittorrent |
+| IN-06 | Healthcheck de `worker` et `scheduler` : `app.runtime_heartbeat` rafraîchit `/tmp/wos-heartbeat` toutes les 15 s depuis la boucle du service ; le conteneur passe *unhealthy* après 2 min sans rafraîchissement | Sondes ingress/Prometheus/Grafana, `docker compose up --wait` dans le helper |
 
 `scripts/validate_compose_v2_rise2.py` refuse maintenant une pile dont un service n’a pas de
 journaux bornés ou dont un datastore n’a ni priorité OOM abaissée ni délai d’arrêt explicite.
@@ -96,5 +97,6 @@ Vérifications après application :
 - `docker inspect --format '{{.HostConfig.LogConfig}}' <conteneur>` : `json-file` avec
   `max-file:5 max-size:20m` sur chaque conteneur ;
 - `docker inspect --format '{{.HostConfig.OomScoreAdj}}' <postgres> <redis>` : `-500` ;
+- `docker compose ps worker scheduler` : `healthy` après au plus deux minutes ;
 - `/api/v1/health/ready` en HTTP 200 et reprise des torrents en cours après le redémarrage de
   qBittorrent.

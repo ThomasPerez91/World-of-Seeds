@@ -143,6 +143,13 @@ services:
         target: /data
     networks: [backend, torrent]
     pids_limit: 128
+    healthcheck:
+      # app.runtime_heartbeat refreshes this file every 15 s from the service's event loop.
+      test: [CMD, python, -c, "import os, sys, time; sys.exit(time.time() - os.stat('/tmp/wos-heartbeat').st_mtime > 120)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 2m
     deploy:
       replicas: ${WOS_V2_WORKER_REPLICAS:-2}
 
@@ -173,6 +180,13 @@ services:
         target: /data
     networks: [backend, torrent]
     pids_limit: 128
+    healthcheck:
+      # app.runtime_heartbeat refreshes this file every 15 s from the service's event loop.
+      test: [CMD, python, -c, "import os, sys, time; sys.exit(time.time() - os.stat('/tmp/wos-heartbeat').st_mtime > 120)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 2m
 
   postgres:
     logging: *wos-logging
