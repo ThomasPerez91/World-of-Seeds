@@ -37,10 +37,6 @@ body {
   z-index: -2;
   inset: 0;
   pointer-events: none;
-  background:
-    linear-gradient(180deg, rgba(2, 18, 12, 0.24), rgba(2, 15, 10, 0.73)),
-    linear-gradient(90deg, rgba(1, 16, 11, 0.54), rgba(2, 20, 13, 0.12) 48%, rgba(1, 15, 10, 0.42)),
-    url("/background.webp?rev=a9c84cc") center / cover no-repeat;
   transform: translateZ(0);
 }
 
@@ -50,9 +46,6 @@ body {
   z-index: -1;
   inset: 0;
   pointer-events: none;
-  background:
-    radial-gradient(circle at 50% 8%, rgba(85, 232, 150, 0.08), transparent 36rem),
-    linear-gradient(180deg, transparent 55%, rgba(1, 12, 8, 0.23));
 }
 
 .app-shell,
@@ -68,9 +61,7 @@ body {
 .app-header {
   min-height: 72px !important;
   border-bottom: 1px solid rgba(150, 227, 184, 0.19) !important;
-  background: rgba(3, 24, 16, 0.77) !important;
   box-shadow: 0 10px 34px rgba(0, 0, 0, 0.16) !important;
-  backdrop-filter: blur(22px) saturate(126%) !important;
 }
 
 .user-navigation .ui-button {
@@ -279,11 +270,6 @@ body {
   color: var(--wos21-text);
   border: 1px solid var(--wos21-line-strong);
   border-radius: 22px;
-  background:
-    linear-gradient(145deg, rgba(103, 239, 162, 0.055), transparent 48%),
-    var(--wos21-glass-strong);
-  box-shadow: var(--wos21-shadow), 0 0 42px rgba(53, 223, 135, 0.07);
-  backdrop-filter: blur(27px) saturate(132%);
 }
 
 .login-title-image {
@@ -303,15 +289,6 @@ body {
   clip: rect(0 0 0 0) !important;
   clip-path: inset(50%) !important;
   white-space: nowrap !important;
-}
-
-.login-card > .brand-copy {
-  max-width: 25rem;
-  margin: 0 auto 0.7rem !important;
-  color: #c7d6ce !important;
-  font-size: 0.9rem !important;
-  line-height: 1.45 !important;
-  text-align: center;
 }
 
 .login-divider {
@@ -397,13 +374,11 @@ body {
   align-items: center;
   border: 1px solid rgba(130, 211, 165, 0.24);
   border-radius: 10px;
-  background: rgba(3, 25, 17, 0.47);
   transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
 }
 
 .login-input:focus-within {
   border-color: rgba(104, 244, 167, 0.64);
-  background: rgba(4, 31, 21, 0.7);
   box-shadow: 0 0 0 3px rgba(72, 232, 145, 0.095);
 }
 
@@ -420,7 +395,6 @@ body {
   padding: 0 0.7rem 0 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
-  background: transparent !important;
   box-shadow: none !important;
   outline: none !important;
 }
@@ -681,14 +655,7 @@ body {
 }
 
 .language-flag {
-  display: inline-flex;
-  width: 21px;
-  height: 14px;
-  flex: 0 0 21px;
-  overflow: hidden;
   align-items: center;
-  border-radius: 3px;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
 .language-flag svg {
@@ -698,7 +665,6 @@ body {
 }
 
 .language-select-control {
-  display: inline-flex;
   min-width: 0;
   align-items: center;
   gap: 0.55rem;
@@ -736,14 +702,7 @@ body {
 .login-card form .login-input input:-webkit-autofill:active {
   -webkit-text-fill-color: #f3f8f5 !important;
   caret-color: #f3f8f5 !important;
-  -webkit-box-shadow: 0 0 0 1000px #08281d inset !important;
-  box-shadow: 0 0 0 1000px #08281d inset !important;
   transition: background-color 9999s ease-out 0s !important;
-}
-
-.login-card form .login-input input:autofill {
-  color: #f3f8f5 !important;
-  box-shadow: 0 0 0 1000px #08281d inset !important;
 }
 
 @media (max-width: 680px) {
