@@ -35,6 +35,7 @@ from app.auth.dependencies import (
     require_current_credentials,
     require_current_credentials_csrf,
 )
+from app.auth.request_rate_limit import business_rate_limit_exempt
 from app.coordination import RedisSubscriptionUnavailable, TorrentEventType, TorrentRealtimeEvent
 from app.coordination.dependencies import RedisCoordinatorDependency
 from app.core.config import Settings, get_settings
@@ -674,6 +675,7 @@ async def get_torrent_download_directories(
     response_model=None,
     operation_id="download_v2_torrent_folder_archive",
 )
+@business_rate_limit_exempt
 async def download_torrent_folder_archive(
     request: Request,
     db: DbSession,
@@ -869,6 +871,7 @@ async def download_torrent_folder_archive(
     response_model=None,
     operation_id="download_v2_torrent_archive",
 )
+@business_rate_limit_exempt
 async def download_torrent_archive(
     request: Request,
     db: DbSession,
@@ -1037,6 +1040,7 @@ async def download_torrent_archive(
     response_model=None,
     operation_id="head_v2_torrent_file",
 )
+@business_rate_limit_exempt
 async def download_torrent_file(
     request: Request,
     db: DbSession,
