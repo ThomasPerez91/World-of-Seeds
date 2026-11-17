@@ -394,6 +394,8 @@ jobs:
           docker run --rm --network none --entrypoint promtool
           --workdir /rules --volume "$PWD/monitoring/prometheus:/rules:ro"
           prom/prometheus:v3.14.0 test rules http-download-alerts.test.yml
+      - name: Check Alertmanager configuration and routing
+        run: scripts/check_alertmanager_config.sh
       - name: Run V2 monitoring smoke
         if: env.WOS_VERSION_CHANNEL == 'v2'
         run: scripts/local_v2.sh monitoring-smoke

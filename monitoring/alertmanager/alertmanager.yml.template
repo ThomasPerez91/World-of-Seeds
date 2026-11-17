@@ -1,0 +1,44 @@
+# World of Seeds V2 Alertmanager routing, versioned without any personal value.
+#
+# scripts/rise2_v2_alertmanager_render.py renders this file on Rise2 into the private
+# /etc/world-of-seeds-v2/alertmanager/alertmanager.yml. Each placeholder below comes from the
+# private settings.json, JSON-quoted. The Discord webhook URL and the SMTP password are never
+# copied here: Alertmanager reads them from their own private files at send time.
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: ${smtp_smarthost}
+  smtp_from: ${smtp_from}
+  smtp_auth_username: ${smtp_auth_username}
+  smtp_auth_password_file: /etc/alertmanager/private/smtp_password
+  smtp_require_tls: true
+
+route:
+  # Warnings go to Discord only; critical alerts go to Discord and e-mail.
+  receiver: discord
+  group_by: [alertname, instance]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+  routes:
+    # Always-firing dead man's switch: kept silent until an external heartbeat is wired.
+    - receiver: blackhole
+      matchers:
+        - 'alertname = "Watchdog"'
+    - receiver: discord-and-email
+      matchers:
+        - 'severity = "critical"'
+      repeat_interval: 4h
+
+receivers:
+  - name: blackhole
+  - name: discord
+    discord_configs:
+      - webhook_url_file: /etc/alertmanager/private/discord_webhook_url
+        send_resolved: true
+  - name: discord-and-email
+    discord_configs:
+      - webhook_url_file: /etc/alertmanager/private/discord_webhook_url
+        send_resolved: true
+    email_configs:
+      - to: ${email_to}
+        send_resolved: true

@@ -13,12 +13,17 @@ overlay_file="$repository/deploy/compose.rise2.observability.v2.yaml"
 textfile_dir="/var/lib/world-of-seeds-v2/node-exporter-textfile"
 collector_dir="/usr/local/lib/world-of-seeds-v2"
 collector="$collector_dir/rise2_v2_smart_metrics.py"
+alertmanager_dir="/etc/world-of-seeds-v2/alertmanager"
 
 [ -f "$environment" ] || { echo "Environment file not found." >&2; exit 1; }
 [ -f "$compose_file" ] || { echo "Rise2 compose file not found." >&2; exit 1; }
 [ -f "$overlay_file" ] || { echo "Observability overlay not found." >&2; exit 1; }
 command -v docker >/dev/null 2>&1 || { echo "docker is required." >&2; exit 1; }
 command -v smartctl >/dev/null 2>&1 || { echo "smartctl is required." >&2; exit 1; }
+[ -d "$alertmanager_dir" ] || {
+  echo "Alertmanager settings missing: see docs/alerting-rise2.md before applying." >&2
+  exit 1
+}
 
 install -d -m 0755 "$textfile_dir" "$collector_dir"
 install -m 0755 "$repository/scripts/rise2_v2_smart_metrics.py" "$collector"
@@ -44,13 +49,22 @@ compose() {
 }
 
 compose config --quiet
+
+# Render the private Alertmanager configuration, then let the pinned image validate it.
+python3 "$repository/scripts/rise2_v2_alertmanager_render.py" \
+  --directory "$alertmanager_dir" \
+  --template "$repository/monitoring/alertmanager/alertmanager.yml.template"
+compose run --rm --no-deps --entrypoint amtool alertmanager \
+  check-config /etc/alertmanager/private/alertmanager.yml
+
 compose up -d --force-recreate --no-deps \
   node-exporter \
   postgres-exporter \
   redis-exporter \
   blackbox-exporter \
   torrent-metrics \
+  alertmanager \
   prometheus \
   grafana
 
-echo "Rise2 V2 observability exporters and torrent metrics applied."
+echo "Rise2 V2 observability exporters, torrent metrics and Alertmanager applied."

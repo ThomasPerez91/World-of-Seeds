@@ -49,8 +49,11 @@ Le profil Rise2 recommande 30 jours via `WOS_V2_PROMETHEUS_RETENTION=30d`. La va
 Les règles Prometheus couvrent notamment : indisponibilité de cible, queue de jobs bloquée, erreurs/retries, dérive scheduler, pression stockage, qBittorrent/Redis, erreurs HTTP 5xx, latences anormales, CPU/RAM/swap, remplissage disques/inodes, I/O, processus bloqués, RAID `md10`, erreurs réseau, redémarrages répétés, disparition du conteneur NewGreedy, disponibilité PostgreSQL/Redis exporters, deadlocks PostgreSQL, évictions Redis, échec des probes HTTP internes et anomalies SMART.
 
 Les sauvegardes PostgreSQL quotidiennes ajoutent un textfile et des alertes absence/échec/âge.
-Activation explicite et limites dans `docs/database-backups-rise2.md`. Les règles Prometheus
-ne constituent pas un routage de notifications : aucun Alertmanager ou destinataire externe
-n'est provisionné par ce dépôt ; sa configuration et la réception d'un test restent requises.
+Activation explicite et limites dans `docs/database-backups-rise2.md`.
 
-La supervision HTTP READY et ses alertes d’investigation sont décrites dans `docs/http-download-supervision.md`. Les nouvelles règles nécessitent un chargement Prometheus confirmé ; aucune notification externe n’est annoncée.
+Sur Rise2, Alertmanager notifie les alertes critiques sur Discord et par e-mail, les
+avertissements sur Discord. Le routage est versionné dans `monitoring/alertmanager/` ; les
+destinataires et les secrets restent dans `/etc/world-of-seeds-v2/alertmanager`. Mise en
+place et test de réception : `docs/alerting-rise2.md`. Le profil local n'a pas d'Alertmanager.
+
+La supervision HTTP READY et ses alertes d’investigation sont décrites dans `docs/http-download-supervision.md`. Les nouvelles règles nécessitent un chargement Prometheus confirmé.
