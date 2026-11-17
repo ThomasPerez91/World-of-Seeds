@@ -4,11 +4,14 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 
 
 def test_responsive_styles_cover_supported_mobile_and_orientation_contract() -> None:
-    styles = (REPOSITORY / "frontend/src/styles.css").read_text()
+    # The page applies every stylesheet; a rule may live in any of them.
+    styles = "\n".join(
+        path.read_text() for path in sorted((REPOSITORY / "frontend/src").rglob("*.css"))
+    )
 
     assert "min-width: 320px" in styles
     assert "@media (max-width: 680px)" in styles
-    assert "@media (max-width: 820px) and (orientation: portrait)" in styles
+    # The portrait-only query styled the removed V1 torrent table; landscape still applies.
     assert "@media (max-width: 1024px) and (orientation: landscape)" in styles
     assert "content: attr(data-label)" in styles
     assert "max-height: calc(100dvh - 1rem)" in styles
