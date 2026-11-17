@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,7 +20,6 @@ from app.auth.request_rate_limit import (
     is_business_rate_limit_exempt,
 )
 from app.auth.security import hash_password
-from app.main import app
 from app.models import DatabaseOption, User
 from app.options import INACTIVE_OPTION_KEYS, PostgresOptionsRegistry
 from app.options.registry import DATABASE_OPTION_SPECS
@@ -125,21 +126,28 @@ def test_only_marked_endpoints_are_exempt() -> None:
     assert not is_business_rate_limit_exempt(None)
 
 
-def test_file_transfer_routes_are_exempt_and_business_routes_are_not() -> None:
-    endpoints = {
-        route.path: route.endpoint  # type: ignore[attr-defined]
-        for route in app.routes
-        if hasattr(route, "endpoint")
+def test_exactly_the_file_transfer_endpoints_are_marked_exempt() -> None:
+    app_root = Path(__file__).resolve().parents[1] / "app"
+    marked = {
+        (path.name, match.group(1))
+        for path in app_root.rglob("*.py")
+        for match in re.finditer(
+            r"^@business_rate_limit_exempt\n(?:async )?def (\w+)\(",
+            path.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
     }
-    exempt = {
-        path for path, endpoint in endpoints.items() if is_business_rate_limit_exempt(endpoint)
-    }
+    occurrences = sum(
+        path.read_text(encoding="utf-8").count("\n@business_rate_limit_exempt\n")
+        for path in app_root.rglob("*.py")
+    )
 
-    assert exempt == {
-        "/api/v2/torrents/{torrent_request_id}/download-folder-archive",
-        "/api/v2/torrents/{torrent_request_id}/download-archive",
-        "/api/v2/torrents/{torrent_request_id}/files/{torrent_file_id}/download",
+    assert marked == {
+        ("torrents_v2.py", "download_torrent_folder_archive"),
+        ("torrents_v2.py", "download_torrent_archive"),
+        ("torrents_v2.py", "download_torrent_file"),
     }
+    assert occurrences == len(marked)
 
 
 async def _login(client: AsyncClient, db: AsyncSession, username: str) -> None:
@@ -178,8 +186,16 @@ async def test_authenticated_requests_beyond_the_budget_get_429_with_retry_after
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v2/torrents/{request}/files/{file}/download",
+        "/api/v2/torrents/{request}/download-archive",
+        "/api/v2/torrents/{request}/download-folder-archive",
+    ],
+)
 async def test_file_transfers_stay_available_when_the_business_budget_is_spent(
-    client: AsyncClient, db_session: AsyncSession
+    client: AsyncClient, db_session: AsyncSession, path: str
 ) -> None:
     await _set_budget(db_session, 10)
     await _login(client, db_session, "folder-downloader")
@@ -187,9 +203,9 @@ async def test_file_transfers_stay_available_when_the_business_budget_is_spent(
         assert (await client.get("/api/v1/auth/me")).status_code == 200
     assert (await client.get("/api/v1/auth/me")).status_code == 429
 
-    response = await client.get(f"/api/v2/torrents/{uuid.uuid4()}/files/{uuid.uuid4()}/download")
+    response = await client.get(path.format(request=uuid.uuid4(), file=uuid.uuid4()))
 
-    assert response.status_code != 429
+    assert response.status_code not in {401, 429}
 
 
 @pytest.mark.asyncio
