@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.auth.passwords import password_work_pool
 from app.auth.rate_limit import LoginIpRateLimiter
+from app.auth.request_rate_limit import AccountRequestRateLimiter
 from app.coordination import RedisCoordinator
 from app.core.config import Settings, get_settings
 from app.core.database import get_db_session
@@ -67,6 +68,7 @@ async def client(db_session: AsyncSession, data_root: Path) -> AsyncIterator[Asy
     test_settings = Settings(data_root=data_root)
     app.state.login_ip_rate_limiter = LoginIpRateLimiter()
     app.state.password_reset_ip_rate_limiter = LoginIpRateLimiter()
+    app.state.account_request_rate_limiter = AccountRequestRateLimiter()
 
     def override_settings() -> Settings:
         return test_settings
