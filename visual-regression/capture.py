@@ -31,10 +31,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fixtures import NOW, answer  # noqa: E402
 
 VIEWPORTS = {"desktop": (1440, 900), "mobile": (390, 844)}
-# Hide the text caret and stop every animation or transition, spinners included.
+# Hide the text caret and stop every animation or transition, spinners included. Backdrop
+# blurs are switched off too: software rendering blurs them tile by tile, slightly differently
+# from one browser session to the next. A change limited to a backdrop blur goes unnoticed.
 STABILISE_CSS = (
     "*, *::before, *::after { caret-color: transparent !important; "
-    "animation: none !important; transition: none !important; }"
+    "animation: none !important; transition: none !important; "
+    "backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }"
 )
 # A screen counts as changed above this many clearly different pixels; below, it is reported
 # as rendering noise (antialiasing of a small icon). A real style change touches far more.
