@@ -12,6 +12,7 @@ is 1 when a screen differs, and REPORT_DIR holds base, head and highlighted diff
 from __future__ import annotations
 
 import argparse
+import difflib
 import functools
 import http.server
 import json
@@ -213,6 +214,8 @@ def capture(
                 path = out / f"{screen.name}-{viewport}.png"
                 image, stable = _settled_screenshot(page, blur=screen.blur)
                 path.write_bytes(image)
+                text = page.locator("body").inner_text()
+                path.with_suffix(".txt").write_text(text, encoding="utf-8")
                 shots[path.name] = path
                 if not stable:
                     unstable.add(path.name)
@@ -230,16 +233,35 @@ def _neutral_screenshot(page: Page, blur: bool) -> bytes:
     return page.screenshot(full_page=True, animations="disabled")
 
 
-def _settled_screenshot(page: Page, blur: bool, attempts: int = 10) -> tuple[bytes, bool]:
-    """Screenshot once two consecutive captures are identical (polling, late images, toasts)."""
+def _settled_screenshot(page: Page, blur: bool, attempts: int = 12) -> tuple[bytes, bool]:
+    """Screenshot once three consecutive captures, 400 ms apart, are identical.
+
+    Polling, late images and late layout can change a screen after a first quiet moment.
+    """
     previous = _neutral_screenshot(page, blur)
+    identical = 0
     for _ in range(attempts):
         page.wait_for_timeout(400)
         current = _neutral_screenshot(page, blur)
-        if current == previous:
+        identical = identical + 1 if current == previous else 0
+        if identical == 2:
             return current, True
         previous = current
     return previous, False
+
+
+def _changed_text(base: Path, head: Path, limit: int = 6) -> list[str]:
+    """Visible text lines that differ between the two captures of a screen."""
+    if not base.is_file() or not head.is_file():
+        return []
+    before = base.read_text(encoding="utf-8").splitlines()
+    after = head.read_text(encoding="utf-8").splitlines()
+    lines = [
+        line
+        for line in difflib.unified_diff(before, after, lineterm="", n=0)
+        if line[:1] in "+-" and not line.startswith(("+++", "---"))
+    ]
+    return lines[:limit]
 
 
 def compare(base: Path, head: Path, diff_path: Path) -> tuple[int, str]:
@@ -291,6 +313,7 @@ def main() -> int:
             browser.close()
 
     rows: list[str] = []
+    changed_texts: list[tuple[str, list[str]]] = []
     changed_screens = 0
     (args.out / "diff").mkdir(parents=True, exist_ok=True)
     for name in sorted(base_shots):
@@ -305,6 +328,12 @@ def main() -> int:
         if name in unstable:
             result += " — capture instable"
         rows.append(f"| `{name}` | {result} |")
+        if changed > NOISE_PIXELS:
+            texts = _changed_text(
+                base_shots[name].with_suffix(".txt"), head_shots[name].with_suffix(".txt")
+            )
+            if texts:
+                changed_texts.append((name, texts))
 
     report = [
         "## Comparaison visuelle",
@@ -315,6 +344,8 @@ def main() -> int:
         "|---|---|",
         *rows,
     ]
+    for name, texts in changed_texts:
+        report += ["", f"Texte modifié dans `{name}` :", "", "```diff", *texts, "```"]
     if unstable:
         report += [
             "",

@@ -11,7 +11,8 @@
 
 Le rapport s'affiche dans le résumé du job. L'artefact `visual-regression` contient les
 captures `base/`, `head/` et, pour chaque écran modifié, une image `diff/` où les pixels changés
-sont en rouge.
+sont en rouge. Quand le texte visible d'un écran modifié change aussi, le rapport cite les lignes
+concernées, ce qui suffit souvent sans ouvrir les images.
 
 Le job est **indicatif** : il échoue quand un écran change, mais il ne fait pas partie des
 contrôles requis, donc il ne bloque jamais une fusion. Une PR qui ne devait rien changer
@@ -25,7 +26,7 @@ le WebSocket d'événements est accepté sans jamais rien émettre. L'horloge du
 figée sur `NOW`, les animations, transitions et flous d'arrière-plan (`backdrop-filter`, rendus
 de façon légèrement variable par le moteur logiciel) sont coupés, le numéro de version affiché
 est remplacé par `0.0.0` pour qu'une montée de version ne change pas tous les écrans, et chaque écran est capturé une
-fois stabilisé, sans survol ni focus laissés par les clics. Un écran ne compte comme modifié
+fois stabilisé (trois captures identiques de suite), sans survol ni focus laissés par les clics. Un écran ne compte comme modifié
 qu'au-delà de 20 pixels différents, sur n'importe quel canal de couleur : en dessous, le
 rapport l'indique comme du bruit de rendu, typiquement le lissage d'une petite icône. Un appel non simulé reçoit une 404 et apparaît dans le rapport : complétez
 alors `fixtures.py`.
