@@ -16,6 +16,10 @@ if config.config_file_name is not None:
 # ConfigParser interpolates "%": a URL-encoded password (%40, %2F...) must be escaped.
 config.set_main_option("sqlalchemy.url", get_settings().sqlalchemy_database_url.replace("%", "%%"))
 target_metadata = Base.metadata
+# Alembic 1.19.1 compares CHECK constraints by name, but cannot see the ones that Enum columns
+# generate (create_constraint=True): every such constraint would be reported as removed. Later
+# Alembic releases disable this comparison by default.
+AUTOGENERATE_PLUGINS = ["alembic.autogenerate.*", "~alembic.autogenerate.checkconstraint_byname"]
 
 
 def run_migrations_offline() -> None:
@@ -25,13 +29,19 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        autogenerate_plugins=AUTOGENERATE_PLUGINS,
     )
     with context.begin_transaction():
         context.run_migrations()
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        autogenerate_plugins=AUTOGENERATE_PLUGINS,
+    )
     with context.begin_transaction():
         context.run_migrations()
 
